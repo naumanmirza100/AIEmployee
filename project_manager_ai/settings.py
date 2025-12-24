@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'core',
     'project_manager_agent',
     'recruitment_agent',
+    'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
 ]
 
 MIDDLEWARE = [
@@ -173,9 +174,16 @@ LOGIN_REDIRECT_URL = '/dashboard/'  # After login, go to dashboard
 LOGOUT_REDIRECT_URL = '/'  # After logout, go to home
 LOGIN_URL = '/login/'  # Redirect unauth users here
 
-# Groq API Settings
+# Groq API Settings (for project manager agents and marketing Q&A agent)
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')  # Default model
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')  # Default model (used for Q&A)
+
+# OpenAI API Settings (for Marketing Agents - for document writing and advanced tasks)
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4.1')  # Default model (or gpt-4.1 if available)
+OPENAI_REASONING_MODEL = os.getenv('OPENAI_REASONING_MODEL', 'gpt-4.1')  # For advanced reasoning
+OPENAI_WRITING_MODEL = os.getenv('OPENAI_WRITING_MODEL', 'gpt-4.1')  # For document writing
+OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')  # For RAG/embeddings
 
 # Email Settings (for Interview Scheduling Agent)
 # For development/testing: emails will be printed to console
