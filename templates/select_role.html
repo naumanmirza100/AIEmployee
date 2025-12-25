@@ -13,7 +13,7 @@
                 <label for="role">Select Role</label>
                 <select name="role" id="role" class="form-group input" required>
                     {% for value, label in roles %}
-                        {% if value == 'project_manager' or value == 'recruitment_agent' %}
+                        {% if value == 'project_manager' or value == 'recruitment_agent' or value == 'marketing_agent' %}
                             <option value="{{ value }}" {% if current_role == value or not current_role and value == 'project_manager' %}selected{% endif %}>
                                 {{ label }}
                             </option>

@@ -92,7 +92,11 @@ class TaskForm(forms.ModelForm):
 class CustomUserCreationForm(UserCreationForm):
     """Custom signup form with role selection"""
     role = forms.ChoiceField(
-        choices=[('project_manager', 'Project Manager'), ('recruitment_agent', 'Recruitment Agent')],
+        choices=[
+            ('project_manager', 'Project Manager'), 
+            ('recruitment_agent', 'Recruitment Agent'),
+            ('marketing_agent', 'Marketing Agent')
+        ],
         required=True,
         widget=forms.Select(attrs={
             'class': 'form-group input',
