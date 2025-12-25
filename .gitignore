@@ -3,7 +3,7 @@
 .env.local
 .env.*.local
 
-# Python
+# Python - Byte-compiled / optimized / DLL files
 __pycache__/
 */__pycache__/
 **/__pycache__/
@@ -13,6 +13,8 @@ __pycache__/
 *.pyd
 *$py.class
 *.so
+
+# Python - Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -37,6 +39,48 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Python - Cache and temporary files
+.cache/
+*.cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+
+# Python - Testing and coverage
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.dmypy.json
+dmypy.json
+
+# Python - Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# Python - Other
+.python-version
+celerybeat-schedule
+celerybeat.pid
+*.sage.py
+.spyderproject
+.spyproject
+.ropeproject
+/site
+cython_debug/
+
 # Django
 *.log
 local_settings.py
@@ -46,14 +90,6 @@ db.sqlite3-journal
 /media/
 /mediafiles/
 /static/
-
-# Virtual Environment
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.venv/
 
 # IDE
 .vscode/
@@ -69,17 +105,6 @@ venv.bak/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-
-# pytest
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
 
 # OS
 .DS_Store
