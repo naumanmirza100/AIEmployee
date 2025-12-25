@@ -4,7 +4,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib import messages
 from core.models import UserProfile
-from core.ai_agents.agents_registry import AgentRegistry
+from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 import json
 
 from .models import Campaign, MarketResearch, CampaignPerformance

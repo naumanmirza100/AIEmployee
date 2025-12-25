@@ -1,0 +1,509 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}My Tasks - Project Manager AI{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-filter {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+    .status-filter button {
+        padding: 0.5rem 1rem;
+        border: 2px solid var(--border-color);
+        background: white;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .status-filter button.active {
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+    }
+    .status-filter button:hover {
+        border-color: var(--primary-color);
+    }
+    .task-card {
+        background: white;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        transition: all 0.2s;
+    }
+    .task-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .task-card.overdue {
+        border-left: 4px solid var(--error-color);
+    }
+    .task-card.due-soon {
+        border-left: 4px solid var(--warning-color);
+    }
+    .task-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        margin-bottom: 1rem;
+    }
+    .task-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0;
+    }
+    .status-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+    .status-select {
+        padding: 0.4rem 0.8rem;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: white;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    .progress-bar-container {
+        margin: 1rem 0;
+        background: var(--bg-secondary);
+        height: 8px;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+        transition: width 0.3s;
+    }
+    .task-meta {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        margin-top: 1rem;
+    }
+    .ai-suggestions {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: var(--radius-md);
+        margin-bottom: 2rem;
+    }
+    .ai-suggestions h3 {
+        margin-top: 0;
+        color: white;
+    }
+    .suggestion-item {
+        background: rgba(255,255,255,0.2);
+        padding: 1rem;
+        border-radius: var(--radius-sm);
+        margin-bottom: 0.5rem;
+    }
+    .priority-badge {
+        padding: 0.2rem 0.6rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .priority-high { background: var(--error-color); color: white; }
+    .priority-medium { background: var(--warning-color); color: white; }
+    .priority-low { background: var(--success-color); color: white; }
+    input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        background: var(--primary-color);
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        background: var(--primary-color);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    .stat-card {
+        background: white;
+        padding: 1rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-color);
+        text-align: center;
+    }
+    .stat-number {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--primary-color);
+    }
+    .stat-label {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1200px; margin: 2rem auto; padding: 2rem;">
+    <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <div>
+            <h2>My Tasks</h2>
+            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Manage and track all your assigned tasks</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary" style="text-decoration: none;">
+            ← Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Statistics -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.total }}</div>
+            <div class="stat-label">Total Tasks</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.todo }}</div>
+            <div class="stat-label">To Do</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.in_progress }}</div>
+            <div class="stat-label">In Progress</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.done }}</div>
+            <div class="stat-label">Completed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" style="color: var(--error-color);">{{ stats.overdue }}</div>
+            <div class="stat-label">Overdue</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" style="color: var(--warning-color);">{{ stats.due_soon }}</div>
+            <div class="stat-label">Due Soon</div>
+        </div>
+    </div>
+
+    <!-- AI Suggestions -->
+    {% if ai_suggestions and ai_suggestions.suggestions %}
+    <div class="ai-suggestions">
+        <h3>🤖 AI Task Prioritization Suggestions</h3>
+        <p style="opacity: 0.9; margin-bottom: 1rem;">Based on deadlines, dependencies, and project priorities</p>
+        <div>
+            {% for suggestion in ai_suggestions.suggestions|slice:":5" %}
+            <div class="suggestion-item">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div style="flex: 1;">
+                        <strong>{{ suggestion.task_title }}</strong>
+                        <div style="margin-top: 0.5rem; opacity: 0.9; font-size: 0.9rem;">
+                            {{ suggestion.reasoning|default:"Recommended for priority execution" }}
+                        </div>
+                        {% if suggestion.recommended_order %}
+                        <div style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.8;">
+                            Suggested order: #{{ suggestion.recommended_order }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <span class="priority-badge priority-{{ suggestion.recommended_priority|default:'medium' }}">
+                        {{ suggestion.recommended_priority|upper|default:"MEDIUM" }}
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if ai_suggestions.summary %}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.3); font-size: 0.9rem; opacity: 0.9;">
+            <strong>Summary:</strong> {{ ai_suggestions.summary }}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Status Filter -->
+    <div class="status-filter">
+        <button class="filter-btn active" data-status="all">All ({{ stats.total }})</button>
+        <button class="filter-btn" data-status="todo">To Do ({{ stats.todo }})</button>
+        <button class="filter-btn" data-status="in_progress">In Progress ({{ stats.in_progress }})</button>
+        <button class="filter-btn" data-status="review">Review ({{ stats.review }})</button>
+        <button class="filter-btn" data-status="done">Done ({{ stats.done }})</button>
+        <button class="filter-btn" data-status="blocked">Blocked ({{ stats.blocked }})</button>
+    </div>
+
+    <!-- Tasks List -->
+    <div id="tasks-container">
+        {% for task_data in tasks %}
+        {% with task=task_data.task %}
+        <div class="task-card {% if task_data.days_info.is_overdue %}overdue{% elif task_data.days_info.is_due_soon %}due-soon{% endif %}" data-status="{{ task.status }}">
+            <div class="task-header">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                        <h3 class="task-title" style="margin: 0;">{{ task.title }}</h3>
+                        <span style="background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white; padding: 0.25rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; white-space: nowrap;">
+                            📁 {{ task.project.name }}
+                        </span>
+                    </div>
+                    <p style="color: var(--text-secondary); margin: 0.5rem 0;">{{ task.description|truncatewords:30|default:"No description" }}</p>
+                    <div style="display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap;">
+                        <span class="priority-badge priority-{{ task.priority }}">
+                            {{ task.get_priority_display|upper }}
+                        </span>
+                        {% if task_data.days_info %}
+                        <span style="color: {% if task_data.days_info.is_overdue %}var(--error-color){% elif task_data.days_info.is_due_soon %}var(--warning-color){% else %}var(--text-secondary){% endif %}; font-size: 0.85rem; font-weight: 600;">
+                            {% if task_data.days_info.is_overdue %}
+                                Overdue by {{ task_data.days_info.days|stringformat:"+d"|slice:"1:" }} days
+                            {% elif task_data.days_info.is_due_soon %}
+                                Due in {{ task_data.days_info.days }} days
+                            {% else %}
+                                Due in {{ task_data.days_info.days }} days
+                            {% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+                <select class="status-select" data-task-id="{{ task.id }}" onchange="updateTaskStatus({{ task.id }}, this.value)">
+                    <option value="todo" {% if task.status == 'todo' %}selected{% endif %}>To Do</option>
+                    <option value="in_progress" {% if task.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                    <option value="review" {% if task.status == 'review' %}selected{% endif %}>Review</option>
+                    <option value="done" {% if task.status == 'done' %}selected{% endif %}>Done</option>
+                    <option value="blocked" {% if task.status == 'blocked' %}selected{% endif %}>Blocked</option>
+                </select>
+            </div>
+
+            <!-- Progress Bar -->
+            {% if task.status != 'done' %}
+            <div style="margin: 1rem 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <label for="progress-slider-{{ task.id }}" style="font-weight: 600; color: var(--text-primary);">
+                        Progress: <span id="progress-value-{{ task.id }}">{{ task_data.progress }}</span>%
+                    </label>
+                    {% if task_data.manual_progress %}
+                    <span style="font-size: 0.75rem; color: var(--primary-color); font-weight: 600;">(Manual)</span>
+                    {% else %}
+                    <span style="font-size: 0.75rem; color: var(--text-secondary);">(Auto)</span>
+                    {% endif %}
+                </div>
+                <input type="range" 
+                       id="progress-slider-{{ task.id }}" 
+                       min="0" 
+                       max="100" 
+                       value="{{ task_data.progress }}" 
+                       step="1"
+                       style="width: 100%; height: 8px; border-radius: 4px; background: var(--bg-secondary); outline: none; cursor: pointer;"
+                       oninput="updateProgressSlider({{ task.id }}, this.value)"
+                       onchange="updateTaskProgress({{ task.id }}, this.value)">
+                <div class="progress-bar-container" style="margin-top: 0.5rem;">
+                    <div class="progress-bar" style="width: {{ task_data.progress }}%;"></div>
+                </div>
+                {% if task_data.subtasks_count > 0 %}
+                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                    Subtasks: {{ task_data.completed_subtasks_count }}/{{ task_data.subtasks_count }} completed
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div style="margin: 1rem 0;">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: 100%;"></div>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--success-color); font-weight: 600; margin-top: 0.5rem;">
+                    Progress: 100% (Completed)
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Task Metadata -->
+            <div class="task-meta">
+                {% if task.due_date %}
+                <div>
+                    <strong>Due Date:</strong> {{ task.due_date|date:"M d, Y H:i" }}
+                </div>
+                {% endif %}
+                {% if task.estimated_hours %}
+                <div>
+                    <strong>Est. Hours:</strong> {{ task.estimated_hours }}h
+                    {% if task.actual_hours %}
+                    / {{ task.actual_hours|floatformat:1 }}h actual
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% if task_data.subtasks_count > 0 %}
+                <div>
+                    <a href="{% url 'view_task_subtasks' task.id %}" style="color: var(--primary-color); text-decoration: none;">
+                        View Subtasks ({{ task_data.subtasks_count }}) →
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endwith %}
+        {% empty %}
+        <div class="empty-state" style="padding: 3rem; text-align: center;">
+            <div style="font-size: 3rem; color: var(--text-light); margin-bottom: 1rem;">📋</div>
+            <h3>No tasks assigned</h3>
+            <p style="color: var(--text-secondary);">You don't have any tasks assigned to you yet.</p>
+            <a href="{% url 'dashboard' %}" class="btn btn-primary" style="text-decoration: none; margin-top: 1rem;">
+                Go to Dashboard
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+function updateTaskStatus(taskId, newStatus) {
+    fetch(`/tasks/${taskId}/update-status/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({
+            status: newStatus
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the task card's status attribute
+            const taskCard = document.querySelector(`select[data-task-id="${taskId}"]`).closest('.task-card');
+            if (taskCard) {
+                taskCard.setAttribute('data-status', newStatus);
+            }
+            
+            // Show success message
+            showMessage(data.message, 'success');
+            
+            // Reload page after a short delay to update statistics
+            setTimeout(() => {
+                window.location.reload();
+            }, 500);
+        } else {
+            alert('Error updating task status: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error updating task status. Please try again.');
+    });
+}
+
+function updateProgressSlider(taskId, value) {
+    // Update the displayed value immediately for smooth UX
+    const valueElement = document.getElementById(`progress-value-${taskId}`);
+    if (valueElement) {
+        valueElement.textContent = value;
+    }
+    
+    // Update progress bar width
+    const slider = document.getElementById(`progress-slider-${taskId}`);
+    const taskCard = slider.closest('.task-card');
+    if (taskCard) {
+        const progressBar = taskCard.querySelector('.progress-bar');
+        if (progressBar) {
+            progressBar.style.width = value + '%';
+        }
+    }
+}
+
+function updateTaskProgress(taskId, progress) {
+    fetch(`/tasks/${taskId}/update-status/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({
+            progress: parseInt(progress)
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showMessage('Progress updated to ' + progress + '%', 'success');
+            
+            // Update status if progress is 100%
+            if (progress == 100) {
+                const statusSelect = document.querySelector(`select[data-task-id="${taskId}"]`);
+                if (statusSelect) {
+                    statusSelect.value = 'done';
+                    const taskCard = statusSelect.closest('.task-card');
+                    if (taskCard) {
+                        taskCard.setAttribute('data-status', 'done');
+                    }
+                }
+            }
+            
+            // Reload page after a short delay to update statistics
+            setTimeout(() => {
+                window.location.reload();
+            }, 800);
+        } else {
+            alert('Error updating task progress: ' + (data.error || 'Unknown error'));
+            // Revert slider to original value on error
+            window.location.reload();
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error updating task progress. Please try again.');
+        // Revert slider to original value on error
+        window.location.reload();
+    });
+}
+
+function showMessage(message, type) {
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = 'position: fixed; top: 20px; right: 20px; background: ' + 
+        (type === 'success' ? 'var(--success-color)' : 'var(--error-color)') + 
+        '; color: white; padding: 1rem; border-radius: var(--radius-md); z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
+    messageDiv.textContent = message;
+    document.body.appendChild(messageDiv);
+    
+    setTimeout(() => {
+        messageDiv.remove();
+    }, 3000);
+}
+
+// Filter functionality
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        // Update active state
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        
+        // Filter tasks
+        const status = this.getAttribute('data-status');
+        const tasks = document.querySelectorAll('.task-card');
+        
+        tasks.forEach(task => {
+            if (status === 'all' || task.getAttribute('data-status') === status) {
+                task.style.display = 'block';
+            } else {
+                task.style.display = 'none';
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
+

@@ -13,6 +13,7 @@ from .timeline_gantt_agent import TimelineGanttAgent
 from .calendar_planner_agent import CalendarPlannerAgent
 from .meeting_notetaker_agent import MeetingNotetakerAgent
 from .workflow_sop_agent import WorkflowSOPAgent
+from .subtask_generation_agent import SubtaskGenerationAgent
 
 # Register all agents
 AgentRegistry.register("task_prioritization", TaskPrioritizationAgent)
@@ -23,6 +24,7 @@ AgentRegistry.register("timeline_gantt", TimelineGanttAgent)
 AgentRegistry.register("calendar_planner", CalendarPlannerAgent)
 AgentRegistry.register("meeting_notetaker", MeetingNotetakerAgent)
 AgentRegistry.register("workflow_sop", WorkflowSOPAgent)
+AgentRegistry.register("subtask_generation", SubtaskGenerationAgent)
 
 __all__ = [
     'BaseAgent',
@@ -35,5 +37,6 @@ __all__ = [
     'CalendarPlannerAgent',
     'MeetingNotetakerAgent',
     'WorkflowSOPAgent',
+    'SubtaskGenerationAgent',
 ]
 

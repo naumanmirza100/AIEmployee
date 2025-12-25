@@ -15,6 +15,7 @@
             <ul class="nav-links">
                 {% if user.is_authenticated %}
                     <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+                    <li><a href="{% url 'my_tasks' %}">My Tasks</a></li>
                     {% if user.profile.is_project_manager %}
                         <li><a href="{% url 'project_list' %}">Projects</a></li>
                     {% endif %}

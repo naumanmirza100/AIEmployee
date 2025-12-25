@@ -41,10 +41,13 @@
             <p>Manage and organize all your projects in one place. Create new projects, track progress, and collaborate with your team.</p>
         </div>
         
-        <div class="dashboard-card">
+        <div class="dashboard-card" onclick="window.location='{% url 'my_tasks' %}';" style="cursor: pointer;">
             <div class="icon" style="font-size: 2.5rem; color: var(--success-color); margin-bottom: 1rem; font-weight: 300;">TASKS</div>
-            <h3>Tasks</h3>
-            <p>Stay on top of your tasks and deadlines. Create, assign, and track tasks across all your projects.</p>
+            <h3>My Tasks</h3>
+            <p>View and manage all your assigned tasks. Update status, track progress, and get AI-powered prioritization suggestions.</p>
+            <a href="{% url 'my_tasks' %}" class="btn btn-primary" style="text-decoration: none; margin-top: 1rem; display: inline-block;">
+                View My Tasks →
+            </a>
         </div>
         
         <div class="dashboard-card">
