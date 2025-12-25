@@ -11,8 +11,15 @@ urlpatterns = [
     # Follow-up reminders are sent automatically via management command
     # path('api/interviews/<int:interview_id>/reminder/', views.send_followup_reminder, name='send_followup_reminder'),
     path('api/interviews/', views.list_interviews, name='list_interviews'),
+    # Job Description endpoints
+    path('api/job-descriptions/', views.list_job_descriptions, name='list_job_descriptions'),
+    path('api/job-descriptions/create/', views.create_job_description, name='create_job_description'),
+    path('api/job-descriptions/<int:job_description_id>/update/', views.update_job_description, name='update_job_description'),
+    path('api/job-descriptions/<int:job_description_id>/delete/', views.delete_job_description, name='delete_job_description'),
     # Public candidate slot selection page (no auth required)
     path('interview/select/<str:token>/', views.candidate_select_slot, name='candidate_select_slot'),
+    # Debug: View parsed CV data
+    path('debug/parsed/<int:cv_id>/', views.view_parsed_cv, name='view_parsed_cv'),
 ]
 
 

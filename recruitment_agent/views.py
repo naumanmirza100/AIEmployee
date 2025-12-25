@@ -20,7 +20,7 @@ from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAge
 from recruitment_agent.core import GroqClient
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
-from recruitment_agent.models import Interview, CVRecord
+from recruitment_agent.models import Interview, CVRecord, JobDescription
 
 # Initialize agents (singleton pattern for efficiency)
 _log_service = None
@@ -99,7 +99,86 @@ def recruitment_dashboard(request):
         messages.error(request, "You must be a Recruitment Agent to access this dashboard.")
         return redirect('dashboard')
     
-    return render(request, 'recruitment_agent/dashboard.html')
+    # Get job descriptions
+    job_descriptions = JobDescription.objects.all().order_by('-created_at')[:20]
+    
+    # Get recent CV records (for display)
+    recent_cvs = CVRecord.objects.all().order_by('-created_at')[:10]
+    
+    # Get filter job description ID from request
+    filter_job_id = request.GET.get('filter_job_id', '').strip()
+    filter_job = None
+    if filter_job_id:
+        try:
+            filter_job = JobDescription.objects.get(id=filter_job_id)
+        except (JobDescription.DoesNotExist, ValueError):
+            filter_job = None
+    
+    # Get candidates by status
+    # Selected for Interview = CV records with qualification_decision = 'INTERVIEW'
+    selected_for_interview_qs = CVRecord.objects.filter(
+        qualification_decision='INTERVIEW'
+    )
+    
+    # Apply job filter if selected
+    if filter_job:
+        selected_for_interview_qs = selected_for_interview_qs.filter(job_description=filter_job)
+    
+    selected_for_interview_qs = selected_for_interview_qs.order_by('-created_at')[:50]
+    
+    # Parse candidate info from JSON for each CV
+    selected_for_interview = []
+    for cv in selected_for_interview_qs:
+        candidate_info = {'cv_record': cv, 'name': cv.file_name, 'email': None}
+        if cv.parsed_json:
+            try:
+                parsed_data = json.loads(cv.parsed_json)
+                candidate_info['name'] = parsed_data.get('name') or cv.file_name
+                candidate_info['email'] = parsed_data.get('email')
+            except (json.JSONDecodeError, TypeError):
+                pass
+        selected_for_interview.append(candidate_info)
+    
+    # Interview Email Sent = Interviews with invitation_sent_at not null
+    interview_email_sent_qs = Interview.objects.filter(
+        invitation_sent_at__isnull=False
+    )
+    
+    # Apply job filter - filter through cv_record__job_description for accurate filtering
+    if filter_job:
+        # Filter interviews through CVRecord's job_description foreign key
+        interview_email_sent_qs = interview_email_sent_qs.filter(
+            cv_record__job_description=filter_job
+        )
+    
+    interview_email_sent = interview_email_sent_qs.order_by('-invitation_sent_at')[:50]
+    
+    # Get all interviews grouped by status
+    interviews_qs_pending = Interview.objects.filter(status='PENDING')
+    interviews_qs_scheduled = Interview.objects.filter(status='SCHEDULED')
+    interviews_qs_completed = Interview.objects.filter(status='COMPLETED')
+    
+    # Apply job filter to interviews through cv_record__job_description
+    if filter_job:
+        interviews_qs_pending = interviews_qs_pending.filter(cv_record__job_description=filter_job)
+        interviews_qs_scheduled = interviews_qs_scheduled.filter(cv_record__job_description=filter_job)
+        interviews_qs_completed = interviews_qs_completed.filter(cv_record__job_description=filter_job)
+    
+    interviews_by_status = {
+        'PENDING': interviews_qs_pending.order_by('-created_at')[:50],
+        'SCHEDULED': interviews_qs_scheduled.order_by('-scheduled_datetime')[:50],
+        'COMPLETED': interviews_qs_completed.order_by('-updated_at')[:20],
+    }
+    
+    return render(request, 'recruitment_agent/dashboard.html', {
+        'job_descriptions': job_descriptions,
+        'recent_cvs': recent_cvs,
+        'selected_for_interview': selected_for_interview,
+        'interview_email_sent': interview_email_sent,
+        'interviews_by_status': interviews_by_status,
+        'filter_job': filter_job,
+        'filter_job_id': filter_job_id,
+    })
 
 
 @login_required
@@ -138,18 +217,45 @@ def process_cvs(request):
             return JsonResponse({"error": "No files uploaded. Please upload at least one CV."}, status=400)
         
         # Get job description and keywords
+        job_description_id = request.POST.get('job_description_id')
         job_description_file = request.FILES.get('job_description')
         job_description_text = request.POST.get('job_description_text', '').strip()
         job_keywords = request.POST.get('job_keywords', '').strip()
+        
+        # Initialize job_kw_list - will be set from stored keywords or parsed
+        job_kw_list = None
+        
+        # If job description ID is provided, fetch the job description text and keywords
+        if job_description_id and not job_description_text:
+            try:
+                job_desc = JobDescription.objects.get(id=job_description_id)
+                job_description_text = job_desc.description
+                
+                # Use stored keywords if available (from when job was saved)
+                if job_desc.keywords_json:
+                    try:
+                        stored_keywords = json.loads(job_desc.keywords_json)
+                        extracted_keywords = stored_keywords.get("keywords", [])
+                        if extracted_keywords:
+                            job_kw_list = extracted_keywords
+                            log_service.log_event("using_stored_keywords", {
+                                "job_description_id": job_description_id,
+                                "keywords_count": len(extracted_keywords)
+                            })
+                    except (json.JSONDecodeError, TypeError):
+                        # If stored keywords are invalid, will parse again below
+                        pass
+            except JobDescription.DoesNotExist:
+                pass
         top_n = request.POST.get('top_n')
         top_n = int(top_n) if top_n else None
         parse_only = request.POST.get('parse_only', 'false').lower() == 'true'
         
         # Extract keywords from job description if provided
-        job_kw_list = None
+        # Note: job_kw_list may already be set from stored keywords above
         
-        # Priority 1: Parse from uploaded file
-        if job_description_file:
+        # Priority 1: Parse from uploaded file (only if keywords not already loaded)
+        if not job_kw_list and job_description_file:
             try:
                 suffix = Path(job_description_file.name).suffix
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -173,7 +279,7 @@ def process_cvs(request):
             except Exception as exc:
                 log_service.log_error("job_description_parsing_failed", {"path": job_description_file.name, "error": str(exc)})
         
-        # Priority 2: Parse from text input
+        # Priority 2: Parse from text input (only if keywords not already loaded from stored data)
         if not job_kw_list and job_description_text:
             try:
                 job_desc_parsed = job_desc_agent.parse_text(job_description_text)
@@ -181,6 +287,10 @@ def process_cvs(request):
                 
                 if extracted_keywords:
                     job_kw_list = extracted_keywords
+                    log_service.log_event("keywords_parsed_from_text", {
+                        "keywords_count": len(extracted_keywords),
+                        "source": "text_input"
+                    })
                 else:
                     log_service.log_error("job_description_text_parsing_failed", {"error": "No keywords extracted from text"})
             except Exception as exc:
@@ -204,7 +314,24 @@ def process_cvs(request):
                     temp_paths.append(temp_path)
                 
                 parsed = cv_agent.parse_file(str(temp_path))
+                
+                # Debug: Print parsing result (can be removed in production)
+                print("\n" + "="*60)
+                print(f"📄 PARSING RESULT for: {uploaded_file.name}")
+                print("="*60)
+                print(json.dumps(parsed, indent=2, ensure_ascii=False))
+                print("="*60 + "\n")
+                
                 record_id = django_repo.store_parsed(uploaded_file.name, parsed) if django_repo else None
+                # Link to job description if provided
+                if job_description_id and record_id:
+                    try:
+                        job_desc = JobDescription.objects.get(id=job_description_id)
+                        cv_record = CVRecord.objects.get(id=record_id)
+                        cv_record.job_description = job_desc
+                        cv_record.save()
+                    except (JobDescription.DoesNotExist, CVRecord.DoesNotExist):
+                        pass
                 parsed_results.append({"file": uploaded_file.name, "data": parsed, "record_id": record_id})
             
             if parse_only:
@@ -616,3 +743,197 @@ def candidate_select_slot(request, token):
         'interview': interview,
         'available_slots': available_slots,
     })
+
+
+# Job Description CRUD views
+@login_required
+@require_http_methods(["GET"])
+def list_job_descriptions(request):
+    """List all job descriptions"""
+    is_recruitment_agent = request.user.profile.is_recruitment_agent()
+    if (request.user.is_superuser or request.user.is_staff):
+        selected_role = request.session.get('selected_role')
+        if selected_role == 'recruitment_agent':
+            is_recruitment_agent = True
+    
+    if not is_recruitment_agent:
+        return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
+    
+    job_descriptions = JobDescription.objects.all().order_by('-created_at')
+    job_list = []
+    for jd in job_descriptions:
+        job_list.append({
+            'id': jd.id,
+            'title': jd.title,
+            'description': jd.description,
+            'is_active': jd.is_active,
+            'created_by': jd.created_by.username if jd.created_by else None,
+            'created_at': jd.created_at.isoformat(),
+            'updated_at': jd.updated_at.isoformat(),
+        })
+    
+    return JsonResponse({'job_descriptions': job_list}, safe=False)
+
+
+@login_required
+@require_http_methods(["POST"])
+def create_job_description(request):
+    """Create a new job description"""
+    is_recruitment_agent = request.user.profile.is_recruitment_agent()
+    if (request.user.is_superuser or request.user.is_staff):
+        selected_role = request.session.get('selected_role')
+        if selected_role == 'recruitment_agent':
+            is_recruitment_agent = True
+    
+    if not is_recruitment_agent:
+        return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
+    
+    agents = get_agents()
+    job_desc_agent = agents['job_desc_agent']
+    log_service = agents['log_service']
+    
+    try:
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        parse_keywords = request.POST.get('parse_keywords', 'true').lower() == 'true'
+        
+        if not title or not description:
+            return JsonResponse({"error": "Missing required fields: title, description"}, status=400)
+        
+        # Parse keywords if requested
+        keywords_json = None
+        if parse_keywords:
+            try:
+                parsed = job_desc_agent.parse_text(description)
+                import json
+                keywords_json = json.dumps(parsed)
+            except Exception as exc:
+                log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc)})
+                # Continue without keywords if parsing fails
+        
+        job_desc = JobDescription.objects.create(
+            title=title,
+            description=description,
+            keywords_json=keywords_json,
+            created_by=request.user,
+            is_active=True,
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'job_description': {
+                'id': job_desc.id,
+                'title': job_desc.title,
+                'description': job_desc.description,
+                'is_active': job_desc.is_active,
+                'created_at': job_desc.created_at.isoformat(),
+            }
+        })
+        
+    except Exception as e:
+        log_service.log_error("job_description_creation_error", {"error": str(e)})
+        return JsonResponse({"error": f"Creation failed: {str(e)}"}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_job_description(request, job_description_id):
+    """Update an existing job description"""
+    is_recruitment_agent = request.user.profile.is_recruitment_agent()
+    if (request.user.is_superuser or request.user.is_staff):
+        selected_role = request.session.get('selected_role')
+        if selected_role == 'recruitment_agent':
+            is_recruitment_agent = True
+    
+    if not is_recruitment_agent:
+        return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
+    
+    agents = get_agents()
+    job_desc_agent = agents['job_desc_agent']
+    log_service = agents['log_service']
+    
+    try:
+        job_desc = JobDescription.objects.get(id=job_description_id)
+        
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        is_active = request.POST.get('is_active', '').lower() == 'true'
+        parse_keywords = request.POST.get('parse_keywords', 'false').lower() == 'true'
+        
+        if title:
+            job_desc.title = title
+        if description:
+            job_desc.description = description
+        
+        job_desc.is_active = is_active
+        
+        # Parse keywords if requested
+        if parse_keywords and description:
+            try:
+                parsed = job_desc_agent.parse_text(description)
+                import json
+                job_desc.keywords_json = json.dumps(parsed)
+            except Exception as exc:
+                log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc)})
+        
+        job_desc.save()
+        
+        return JsonResponse({
+            'success': True,
+            'job_description': {
+                'id': job_desc.id,
+                'title': job_desc.title,
+                'description': job_desc.description,
+                'is_active': job_desc.is_active,
+                'updated_at': job_desc.updated_at.isoformat(),
+            }
+        })
+        
+    except JobDescription.DoesNotExist:
+        return JsonResponse({"error": "Job description not found"}, status=404)
+    except Exception as e:
+        log_service.log_error("job_description_update_error", {"error": str(e)})
+        return JsonResponse({"error": f"Update failed: {str(e)}"}, status=500)
+
+
+@login_required
+@require_http_methods(["DELETE", "POST"])
+def delete_job_description(request, job_description_id):
+    """Delete a job description"""
+    is_recruitment_agent = request.user.profile.is_recruitment_agent()
+    if (request.user.is_superuser or request.user.is_staff):
+        selected_role = request.session.get('selected_role')
+        if selected_role == 'recruitment_agent':
+            is_recruitment_agent = True
+    
+    if not is_recruitment_agent:
+        return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
+    
+    try:
+        job_desc = JobDescription.objects.get(id=job_description_id)
+        job_desc.delete()
+        
+        return JsonResponse({'success': True})
+        
+    except JobDescription.DoesNotExist:
+        return JsonResponse({"error": "Job description not found"}, status=404)
+    except Exception as e:
+        return JsonResponse({"error": f"Delete failed: {str(e)}"}, status=500)
+
+
+@login_required
+def view_parsed_cv(request, cv_id):
+    """Debug view to see parsed CV data in formatted JSON"""
+    try:
+        cv_record = CVRecord.objects.get(id=cv_id)
+        parsed_data = json.loads(cv_record.parsed_json) if cv_record.parsed_json else None
+        
+        # Return JSON response for easy viewing
+        return JsonResponse({
+            'cv_record_id': cv_record.id,
+            'file_name': cv_record.file_name,
+            'parsed_data': parsed_data,
+            'created_at': cv_record.created_at.isoformat() if cv_record.created_at else None,
+        }, json_dumps_params={'indent': 2, 'ensure_ascii': False})
+    except CVRecord.DoesNotExist:
+        return JsonResponse({"error": "CV record not found"}, status=404)
