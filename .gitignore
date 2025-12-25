@@ -1,2 +1,22 @@
-
+# Environment variables
 .env
+.evn
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+
+# Logs
+logs/
+
+# Database
+db.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
