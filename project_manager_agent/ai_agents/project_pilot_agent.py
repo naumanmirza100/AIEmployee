@@ -47,11 +47,13 @@ class ProjectPilotAgent(BaseAgent):
         assignment_keywords = ['assign', 'reassign', 'delegate']
         creation_keywords = ['create', 'add', 'make', 'new task', 'add task', 'new project', 'make project']
         deletion_keywords = ['delete', 'remove', 'destroy', 'drop']
+        update_keywords = ['update', 'change', 'modify', 'edit', 'set', 'adjust', 'alter']
         
         is_assignment_request = any(keyword in question_lower for keyword in assignment_keywords)
         is_creation_request = any(keyword in question_lower for keyword in creation_keywords)
         is_deletion_request = any(keyword in question_lower for keyword in deletion_keywords)
-        is_action_request = is_assignment_request or is_creation_request or is_deletion_request
+        is_update_request = any(keyword in question_lower for keyword in update_keywords)
+        is_action_request = is_assignment_request or is_creation_request or is_deletion_request or is_update_request
         
         # Check for things the agent CANNOT do
         cannot_do = None
@@ -112,11 +114,27 @@ class ProjectPilotAgent(BaseAgent):
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
-                for task in context['tasks'][:10]:
-                    task_line = f"- {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                for task in context['tasks'][:20]:  # Show more tasks
+                    task_id = task.get('id', 'N/A')
+                    task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                    if task.get('assignee_username'):
+                        task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
                         task_line += f" [Project: {task.get('project_name')}]"
                     context_str += task_line + "\n"
+        
+        # Add user-task assignments if available
+        if 'user_assignments' in context:
+            context_str += f"\n\n📋 USER-TASK ASSIGNMENTS:\n"
+            context_str += f"Total Users with Assignments: {len([u for u in context['user_assignments'] if u.get('total_tasks', 0) > 0])}\n\n"
+            
+            for assignment in context['user_assignments']:
+                if assignment.get('total_tasks', 0) > 0:
+                    context_str += f"\n👤 {assignment.get('name', assignment.get('username', 'Unknown'))} (Username: {assignment.get('username', 'Unknown')}) - {assignment.get('total_tasks', 0)} task(s) assigned:\n"
+                    for project_info in assignment.get('projects', []):
+                        context_str += f"  📁 Project: {project_info.get('project_name', 'Unknown')}\n"
+                        for task in project_info.get('tasks', []):
+                            context_str += f"    - Task: \"{task.get('title', 'Unknown')}\" (Status: {task.get('status', 'N/A')}, Priority: {task.get('priority', 'N/A')})\n"
         
         # Add available users information
         users_str = ""
@@ -245,6 +263,105 @@ Return a helpful text response (NOT JSON) asking for clarification:
 - Or which task(s) do you want to delete? (e.g., 'delete task Y' or 'delete all tasks in Project X')
 
 Do NOT return JSON. Do NOT delete anything."""
+            # Handle update requests
+            elif is_update_request:
+                # Check if it's an update request for tasks or projects
+                priority_keywords = ['priority', 'priorities', 'prioritize']
+                status_keywords = ['status', 'state']
+                task_keywords = ['task', 'tasks']
+                project_keywords = ['project', 'projects']
+                
+                is_priority_update = any(keyword in question_lower for keyword in priority_keywords)
+                is_status_update = any(keyword in question_lower for keyword in status_keywords)
+                is_task_update = any(keyword in question_lower for keyword in task_keywords)
+                is_project_update = any(keyword in question_lower for keyword in project_keywords)
+                
+                # Determine target project
+                target_project_id = None
+                if context.get('project'):
+                    target_project_id = context['project']['id']
+                elif context.get('all_projects'):
+                    # Try to find project by name in the request
+                    for proj in context['all_projects']:
+                        proj_name = proj.get('name', '').lower()
+                        if proj_name and proj_name in question_lower:
+                            target_project_id = proj.get('id')
+                            break
+                    # If no project found by name, use first project
+                    if not target_project_id and len(context['all_projects']) > 0:
+                        target_project_id = context['all_projects'][0]['id']
+                
+                # Build detailed task list for context
+                tasks_detail = ""
+                if context.get('tasks'):
+                    tasks_detail = "\nCurrent Tasks with IDs:\n"
+                    for task in context['tasks']:
+                        tasks_detail += f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', 'Unknown')}, "
+                        tasks_detail += f"Status: {task.get('status', 'N/A')}, Priority: {task.get('priority', 'N/A')}\n"
+                        if task.get('description'):
+                            tasks_detail += f"  Description: {task.get('description', '')[:100]}...\n"
+                elif target_project_id and context.get('all_projects'):
+                    # Get tasks from project context if available
+                    for proj in context['all_projects']:
+                        if proj.get('id') == target_project_id:
+                            tasks_detail = f"\nProject has {proj.get('tasks_count', 0)} tasks.\n"
+                            break
+                
+                from datetime import datetime
+                current_date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                prompt = f"""You are an AI assistant that extracts UPDATE actions from user requests. Analyze the request and return ONLY valid JSON.
+
+{context_str}
+{tasks_detail}
+{users_str}
+
+User Request: {question}
+
+The user wants to UPDATE existing tasks. You MUST:
+1. Identify which tasks to update (by title or all tasks in project)
+2. Determine what fields to update (priority, status, assignee, due_date, description, title, etc.)
+3. Provide NEW values with DETAILED reasoning
+4. For priority updates: analyze each task carefully considering dependencies, deadlines, importance, and project context
+
+Available update fields:
+- priority: "high", "medium", or "low"
+- status: "todo", "in_progress", "review", "done", "blocked"
+- assignee_id: user ID from available users list (or null to unassign)
+- due_date: "YYYY-MM-DD" format
+- title: new task title
+- description: new task description
+
+Return ONLY this JSON format (no other text):
+[
+    {{
+        "action": "update_task",
+        "task_id": task_id_number,
+        "task_title": "current task title",
+        "updates": {{
+            "priority": "high|medium|low" (optional),
+            "status": "todo|in_progress|review|done|blocked" (optional),
+            "assignee_id": user_id_or_null (optional),
+            "due_date": "YYYY-MM-DD" (optional),
+            "title": "new title" (optional),
+            "description": "new description" (optional)
+        }},
+        "reasoning": "DETAILED reasoning (3-5 sentences) explaining: (1) Why this update is needed, (2) How you analyzed the task context (dependencies, deadlines, project goals), (3) Why these specific values were chosen, (4) How this change affects the overall project/task priority, (5) Consideration of task relationships and critical path"
+    }}
+]
+
+CRITICAL RULES:
+- Return ONLY the JSON array, no explanations
+- You MUST provide reasoning for EACH update (especially priority changes)
+- For priority updates: analyze each task individually with careful thought
+- Consider task dependencies, deadlines, project goals, and task relationships
+- Use task IDs from the context above (match by title if ID not visible)
+- If updating all tasks in a project: create one update_task action per task
+- Include only fields that need to be changed in the "updates" object
+- If priority is mentioned: analyze each task carefully and set appropriate priority with detailed reasoning
+- Match task titles from user request to tasks in context (case-insensitive partial match OK)
+- If user says "update priorities" or "update priority", update the priority field for relevant tasks
+- Think carefully about each priority level: high for urgent/critical tasks, medium for normal tasks, low for nice-to-have tasks"""
             # Handle requests for things we can't do - PRIORITY CHECK
             elif cannot_do:
                 prompt = f"""STOP. The user is asking you to do something you CANNOT and MUST NOT do.
@@ -447,8 +564,10 @@ Return a helpful text response (NOT JSON) saying:
 I can help you:
 - Create new projects (when you explicitly ask for a 'new project')
 - Create tasks in existing projects
+- Update existing tasks (priority, status, assignee, due_date, etc.)
+- Delete projects and tasks
 
-Note: I cannot assign existing tasks or manage tasks - only create new ones."
+Note: I can now update existing tasks including their priorities, statuses, and other fields."
 
 Do NOT return JSON. Do NOT create any projects or tasks."""
         else:

@@ -83,6 +83,38 @@ class Task(models.Model):
         self.save()
 
 
+class Subtask(models.Model):
+    """Subtask model for breaking down tasks into smaller actionable items"""
+    STATUS_CHOICES = [
+        ('todo', 'To Do'),
+        ('in_progress', 'In Progress'),
+        ('done', 'Done'),
+    ]
+    
+    title = models.CharField(max_length=300)
+    description = models.TextField(blank=True, help_text="Detailed explanation of what needs to be done")
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='subtasks')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='todo')
+    order = models.IntegerField(default=0, help_text="Order/sequence of subtask within the task")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['order', 'created_at']
+        verbose_name = 'Subtask'
+        verbose_name_plural = 'Subtasks'
+    
+    def __str__(self):
+        return f"{self.title} - {self.task.title}"
+    
+    def mark_complete(self):
+        """Mark subtask as complete"""
+        self.status = 'done'
+        self.completed_at = timezone.now()
+        self.save()
+
+
 class TeamMember(models.Model):
     """Team member model for project teams"""
     ROLE_CHOICES = [

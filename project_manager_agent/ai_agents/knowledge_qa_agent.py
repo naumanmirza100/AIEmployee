@@ -74,8 +74,10 @@ class KnowledgeQAAgent(BaseAgent):
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
-                for task in context['tasks'][:10]:
-                    task_line = f"- {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                for task in context['tasks'][:20]:  # Show more tasks
+                    task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                    if task.get('assignee_username'):
+                        task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
                         task_line += f" [Project: {task.get('project_name')}]"
                     context_str += task_line + "\n"
@@ -83,15 +85,33 @@ class KnowledgeQAAgent(BaseAgent):
         # Add available users information
         users_str = ""
         if available_users:
-            users_str = "\nAvailable Users/Team Members:\n"
+            users_str = f"\nAvailable Users/Team Members ({len(available_users)} total):\n"
             for user in available_users:
                 users_str += f"- ID: {user.get('id', 'N/A')}, Username: {user.get('username', 'Unknown')}, Name: {user.get('name', user.get('username', 'Unknown'))}\n"
                 if 'role' in user:
                     users_str += f"  Role: {user.get('role')}\n"
         
-        # Check if user is asking for an action (create, add, etc.)
+        # Add user-task assignments if available
+        assignments_str = ""
+        if 'user_assignments' in context:
+            assignments_str = "\n\n📋 USER-TASK ASSIGNMENTS:\n"
+            assignments_str += f"Total Users with Assignments: {len([u for u in context['user_assignments'] if u.get('total_tasks', 0) > 0])}\n\n"
+            
+            for assignment in context['user_assignments']:
+                if assignment.get('total_tasks', 0) > 0:
+                    assignments_str += f"\n👤 {assignment.get('name', assignment.get('username', 'Unknown'))} (Username: {assignment.get('username', 'Unknown')}) - {assignment.get('total_tasks', 0)} task(s) assigned:\n"
+                    for project_info in assignment.get('projects', []):
+                        assignments_str += f"  📁 Project: {project_info.get('project_name', 'Unknown')}\n"
+                        for task in project_info.get('tasks', []):
+                            assignments_str += f"    - Task: \"{task.get('title', 'Unknown')}\" (Status: {task.get('status', 'N/A')}, Priority: {task.get('priority', 'N/A')})\n"
+                else:
+                    assignments_str += f"\n👤 {assignment.get('name', assignment.get('username', 'Unknown'))} (Username: {assignment.get('username', 'Unknown')}) - No tasks assigned\n"
+        
+        context_str += assignments_str
+        
+        # Check if user is asking for an action (create, add, update, etc.)
         question_lower = question.lower()
-        action_keywords = ['create', 'add', 'make', 'assign', 'new task', 'new project']
+        action_keywords = ['create', 'add', 'make', 'assign', 'update', 'change', 'modify', 'edit', 'set', 'adjust', 'new task', 'new project']
         is_action_request = any(keyword in question_lower for keyword in action_keywords)
         
         if is_action_request:
@@ -124,8 +144,15 @@ Return a helpful text response (NOT JSON)."""
 
 Question: {question}
 
+IMPORTANT INSTRUCTIONS:
+- If the question asks about users and their task assignments, use the "USER-TASK ASSIGNMENTS" section above to provide detailed information
+- List all users and clearly show which tasks each user is assigned to, grouped by project
+- Be specific: include task titles, status, priority, and which project each task belongs to
+- If a user has no tasks assigned, mention that clearly
+- Provide a clear, organized answer that's easy to read
+
 Provide a helpful, accurate answer. If the question is about specific data that isn't in the context, mention that.
-Be conversational and clear. If asked about available users, list them from the context above."""
+Be conversational and clear. If asked about available users and their assignments, provide detailed information from the assignments section above."""
         
         try:
             max_tokens = 800

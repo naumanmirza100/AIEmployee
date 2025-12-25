@@ -46,9 +46,12 @@
                         <span>Due: {{ task.due_date|date:"M d, Y" }}</span>
                         {% endif %}
                     </div>
-                    <div style="margin-top: 0.5rem;">
+                    <div style="margin-top: 0.5rem; display: flex; gap: 1rem;">
                         <a href="{% url 'task_edit' task.id %}" style="color: var(--primary-color); text-decoration: none; font-size: 0.9rem;">
                             Edit Task →
+                        </a>
+                        <a href="{% url 'view_task_subtasks' task.id %}" style="color: var(--success-color); text-decoration: none; font-size: 0.9rem;">
+                            View Subtasks {% if task.subtasks.exists %}({{ task.subtasks.count }}){% endif %} →
                         </a>
                     </div>
                 </div>

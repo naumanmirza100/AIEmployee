@@ -6,7 +6,8 @@ from core.views import (
     task_create, task_edit
 )
 from project_manager_agent.views import (
-    ai_agents_test, test_task_prioritization, test_knowledge_qa, test_project_pilot, test_timeline_gantt
+    ai_agents_test, test_task_prioritization, test_knowledge_qa, test_project_pilot, test_timeline_gantt,
+    generate_subtasks, view_task_subtasks
 )
 
 urlpatterns = [
@@ -35,6 +36,10 @@ urlpatterns = [
     path('api/ai/knowledge-qa/', test_knowledge_qa, name='test_knowledge_qa'),
     path('api/ai/project-pilot/', test_project_pilot, name='test_project_pilot'),
     path('api/ai/timeline-gantt/', test_timeline_gantt, name='test_timeline_gantt'),
+    path('api/ai/generate-subtasks/', generate_subtasks, name='generate_subtasks'),
+    
+    # Subtasks
+    path('tasks/<int:task_id>/subtasks/', view_task_subtasks, name='view_task_subtasks'),
     
     # Recruitment Agent
     path('recruitment/', include('recruitment_agent.urls')),
