@@ -1,5 +1,26 @@
 from django.contrib import admin
-from .models import CVRecord, Interview
+from .models import CVRecord, Interview, JobDescription
+
+
+@admin.register(JobDescription)
+class JobDescriptionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'title', 'is_active', 'created_by', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['title', 'description']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('title', 'description', 'is_active')
+        }),
+        ('Parsed Data', {
+            'fields': ('keywords_json',)
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at')
+        }),
+    )
 
 
 @admin.register(CVRecord)
@@ -25,6 +46,9 @@ class CVRecordAdmin(admin.ModelAdmin):
         }),
         ('Qualification', {
             'fields': ('qualification_json', 'qualification_decision', 'qualification_confidence', 'qualification_priority')
+        }),
+        ('Relations', {
+            'fields': ('job_description',)
         }),
     )
 

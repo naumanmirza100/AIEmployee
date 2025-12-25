@@ -63,6 +63,7 @@ class Task(models.Model):
     due_date = models.DateTimeField(null=True, blank=True)
     estimated_hours = models.FloatField(null=True, blank=True)
     actual_hours = models.FloatField(null=True, blank=True)
+    progress_percentage = models.IntegerField(null=True, blank=True, default=None, help_text="Manual progress percentage (0-100)")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -78,6 +79,38 @@ class Task(models.Model):
     
     def mark_complete(self):
         """Mark task as complete"""
+        self.status = 'done'
+        self.completed_at = timezone.now()
+        self.save()
+
+
+class Subtask(models.Model):
+    """Subtask model for breaking down tasks into smaller actionable items"""
+    STATUS_CHOICES = [
+        ('todo', 'To Do'),
+        ('in_progress', 'In Progress'),
+        ('done', 'Done'),
+    ]
+    
+    title = models.CharField(max_length=300)
+    description = models.TextField(blank=True, help_text="Detailed explanation of what needs to be done")
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='subtasks')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='todo')
+    order = models.IntegerField(default=0, help_text="Order/sequence of subtask within the task")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['order', 'created_at']
+        verbose_name = 'Subtask'
+        verbose_name_plural = 'Subtasks'
+    
+    def __str__(self):
+        return f"{self.title} - {self.task.title}"
+    
+    def mark_complete(self):
+        """Mark subtask as complete"""
         self.status = 'done'
         self.completed_at = timezone.now()
         self.save()
@@ -218,6 +251,7 @@ class UserProfile(models.Model):
     ROLE_CHOICES = [
         ('project_manager', 'Project Manager'),
         ('team_member', 'Team Member'),
+        ('developer', 'Developer'),
         ('viewer', 'Viewer'),
         ('recruitment_agent', 'Recruitment Agent'),
         ('marketing_agent', 'Marketing Agent'),
@@ -242,6 +276,10 @@ class UserProfile(models.Model):
     def is_marketing_agent(self):
         """Check if user is a marketing agent"""
         return self.role == 'marketing_agent'
+    
+    def is_developer(self):
+        """Check if user is a developer"""
+        return self.role == 'developer'
 
 
 @receiver(post_save, sender=User)

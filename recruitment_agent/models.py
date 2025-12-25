@@ -3,6 +3,33 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 
 
+class JobDescription(models.Model):
+    """
+    Model to store job descriptions for recruitment positions.
+    Recruiters can manage multiple job descriptions for different positions.
+    """
+    title = models.CharField(max_length=255, help_text="Job title/position name")
+    description = models.TextField(help_text="Full job description text")
+    keywords_json = models.TextField(null=True, blank=True, help_text="Parsed keywords and requirements from JobDescriptionParserAgent (JSON)")
+    
+    # Metadata
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_job_descriptions')
+    is_active = models.BooleanField(default=True, help_text="Whether this job description is currently active/being used")
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Job Description'
+        verbose_name_plural = 'Job Descriptions'
+        indexes = [
+            models.Index(fields=['is_active', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.title} (ID: {self.id})"
+
+
 class CVRecord(models.Model):
     """
     Django model equivalent to dbo.ppp_cv_records table from RecruitmentAI.
@@ -18,6 +45,10 @@ class CVRecord(models.Model):
     qualification_decision = models.CharField(max_length=32, null=True, blank=True, help_text="INTERVIEW/HOLD/REJECT")
     qualification_confidence = models.IntegerField(null=True, blank=True, help_text="Confidence score 0-100")
     qualification_priority = models.CharField(max_length=16, null=True, blank=True, help_text="HIGH/MEDIUM/LOW")
+    
+    # Link to job description (optional)
+    job_description = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='cv_records')
+    
     created_at = models.DateTimeField(default=timezone.now)
     
     class Meta:

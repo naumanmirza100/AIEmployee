@@ -7,7 +7,7 @@ class MarketingAgentConfig(AppConfig):
     
     def ready(self):
         """Register marketing agents when app is ready"""
-        from core.ai_agents.agents_registry import AgentRegistry
+        from project_manager_agent.ai_agents.agents_registry import AgentRegistry
         
         try:
             from .agents.marketing_qa_agent import MarketingQAAgent

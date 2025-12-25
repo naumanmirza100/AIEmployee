@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Subtasks - {{ task.title }} - Project Manager AI{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1200px; margin: 2rem auto; padding: 2rem;">
+    <div style="margin-bottom: 2rem;">
+        <a href="{% url 'project_detail' project.id %}" style="color: var(--primary-color); text-decoration: none; font-size: 0.9rem;">
+            ← Back to Project
+        </a>
+        <h2 style="margin-top: 1rem; margin-bottom: 0.5rem;">Subtasks for: {{ task.title }}</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 0;">
+            Project: <a href="{% url 'project_detail' project.id %}" style="color: var(--primary-color); text-decoration: none;">{{ project.name }}</a>
+        </p>
+    </div>
+
+    <div class="dashboard-card" style="margin-bottom: 2rem; padding: 1.5rem;">
+        <h3 style="margin-bottom: 1rem;">Task Information</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <div>
+                <strong style="color: var(--text-secondary); font-size: 0.9rem;">Status:</strong>
+                <span style="padding: 0.25rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.85rem; 
+                    background: {% if task.status == 'done' %}var(--success-color){% elif task.status == 'in_progress' %}var(--primary-color){% else %}var(--text-light){% endif %};
+                    color: white; margin-left: 0.5rem;">
+                    {{ task.get_status_display }}
+                </span>
+            </div>
+            <div>
+                <strong style="color: var(--text-secondary); font-size: 0.9rem;">Priority:</strong>
+                <span style="margin-left: 0.5rem;">{{ task.get_priority_display }}</span>
+            </div>
+        </div>
+        {% if task.description %}
+        <div style="margin-top: 1rem;">
+            <strong style="color: var(--text-secondary); font-size: 0.9rem;">Description:</strong>
+            <p style="margin-top: 0.5rem; color: var(--text-primary);">{{ task.description }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div>
+        <h3 style="margin-bottom: 1rem;">Subtasks ({{ subtasks.count }})</h3>
+        
+        {% if subtasks %}
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+            {% for subtask in subtasks %}
+            <div class="dashboard-card" style="padding: 1.5rem; border-left: 4px solid {% if subtask.status == 'done' %}var(--success-color){% elif subtask.status == 'in_progress' %}var(--primary-color){% else %}var(--border-color){% endif %};">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                            <span style="background: var(--bg-secondary); color: var(--text-secondary); width: 30px; height: 30px; 
+                                border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                font-weight: 600; font-size: 0.9rem; flex-shrink: 0;">
+                                {{ subtask.order }}
+                            </span>
+                            <h4 style="margin: 0; font-size: 1.1rem;">{{ subtask.title }}</h4>
+                        </div>
+                        {% if subtask.description %}
+                        <p style="color: var(--text-secondary); font-size: 0.95rem; margin-left: 2.5rem; line-height: 1.6;">
+                            {{ subtask.description }}
+                        </p>
+                        {% endif %}
+                    </div>
+                    <span style="padding: 0.25rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.85rem; 
+                        background: {% if subtask.status == 'done' %}var(--success-color){% elif subtask.status == 'in_progress' %}var(--primary-color){% else %}var(--text-light){% endif %};
+                        color: white; margin-left: 1rem; flex-shrink: 0;">
+                        {{ subtask.get_status_display }}
+                    </span>
+                </div>
+                <div style="margin-top: 0.75rem; margin-left: 2.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+                    Created: {{ subtask.created_at|date:"M d, Y H:i" }}
+                    {% if subtask.completed_at %}
+                    | Completed: {{ subtask.completed_at|date:"M d, Y H:i" }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: 2rem;">
+            <p>No subtasks have been generated for this task yet.</p>
+            <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+                Go to the AI Agents page and use the "Generate Subtasks" button to create subtasks for all tasks in this project.
+            </p>
+            <a href="{% url 'ai_agents_test' %}" class="btn btn-primary" style="text-decoration: none; margin-top: 1rem; display: inline-block;">
+                Go to AI Agents →
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+

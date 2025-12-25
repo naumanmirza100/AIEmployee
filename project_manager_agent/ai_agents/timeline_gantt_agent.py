@@ -4,10 +4,11 @@ Manages project timelines, creates Gantt charts, and tracks project schedules.
 """
 
 from .base_agent import BaseAgent
-from typing import Dict, List, Optional
-from datetime import datetime, timedelta, timezone as dt_timezone
+from typing import Dict, List, Optional, Set, Tuple
+from datetime import datetime, timedelta, timezone as dt_timezone, date as date_type
 from django.utils import timezone
 from core.models import Project, Task
+import calendar
 
 
 class TimelineGanttAgent(BaseAgent):
@@ -30,6 +31,41 @@ class TimelineGanttAgent(BaseAgent):
         self.system_prompt = """You are a Project Timeline / Gantt Agent for a project management system.
         Your role is to manage project timelines, create schedules, and visualize project progress.
         You should consider dependencies, resources, and constraints when planning timelines."""
+        self.workdays_per_week = 5  # Monday-Friday
+        self.hours_per_day = 8
+    
+    def _is_workday(self, date: date_type) -> bool:
+        """Check if a date is a workday (Monday-Friday)"""
+        return date.weekday() < 5  # 0-4 are Monday-Friday
+    
+    def _add_workdays(self, start_date: date_type, workdays: int) -> date_type:
+        """Add workdays to a date, skipping weekends. Supports negative workdays."""
+        if workdays == 0:
+            return start_date
+        
+        current = start_date
+        days_added = 0
+        direction = 1 if workdays > 0 else -1
+        target = abs(workdays)
+        
+        while abs(days_added) < target:
+            current += timedelta(days=direction)
+            if self._is_workday(current):
+                days_added += direction
+        
+        return current
+    
+    def _calculate_workdays_between(self, start_date: date_type, end_date: date_type) -> int:
+        """Calculate number of workdays between two dates"""
+        if end_date < start_date:
+            return 0
+        workdays = 0
+        current = start_date
+        while current <= end_date:
+            if self._is_workday(current):
+                workdays += 1
+            current += timedelta(days=1)
+        return workdays
     
     def create_timeline(self, project_id: int, tasks: List[Dict]) -> Dict:
         """
@@ -107,16 +143,77 @@ class TimelineGanttAgent(BaseAgent):
             }
             timeline_data['tasks'].append(task_data)
         
-        # Identify milestones (tasks with high priority or key dependencies)
-        milestones = []
-        for task in sorted_tasks:
-            if task.get('priority') == 'high' or len(task.get('dependencies', [])) > 2:
-                milestones.append({
-                    'task_id': task.get('id'),
-                    'title': task.get('title'),
-                    'due_date': task.get('due_date'),
-                    'type': 'high_priority' if task.get('priority') == 'high' else 'key_dependency'
-                })
+        # Use AI to identify meaningful milestones
+        import json
+        try:
+            milestone_prompt = f"""Analyze these project tasks and identify key milestones.
+
+Project: {project.name}
+Tasks:
+{json.dumps([{'id': t.get('id'), 'title': t.get('title'), 'description': t.get('description', '')[:100], 
+              'priority': t.get('priority'), 'status': t.get('status'), 
+              'dependencies': len(t.get('dependencies', [])), 'due_date': t.get('due_date')} 
+             for t in sorted_tasks[:20]], indent=2)}
+
+Identify milestones based on:
+1. High-priority tasks that represent major deliverables
+2. Tasks that unblock many other tasks (key dependencies)
+3. Tasks that mark phase transitions
+4. Tasks with significant business value
+
+Return JSON array:
+[
+  {{
+    "task_id": task_id,
+    "title": "milestone title",
+    "type": "deliverable|dependency|phase_transition|business_value",
+    "importance": "high|medium",
+    "reasoning": "why this is a milestone"
+  }}
+]"""
+            
+            milestone_response = self._call_llm(milestone_prompt, self.system_prompt, temperature=0.4, max_tokens=1500)
+            
+            # Extract JSON
+            if "```json" in milestone_response:
+                json_start = milestone_response.find("```json") + 7
+                json_end = milestone_response.find("```", json_start)
+                milestone_response = milestone_response[json_start:json_end].strip()
+            elif "```" in milestone_response:
+                json_start = milestone_response.find("```") + 3
+                json_end = milestone_response.find("```", json_start)
+                if json_end > json_start:
+                    milestone_response = milestone_response[json_start:json_end].strip()
+            
+            ai_milestones = json.loads(milestone_response)
+            milestones = []
+            for ms in ai_milestones:
+                # Find corresponding task
+                task = next((t for t in sorted_tasks if t.get('id') == ms.get('task_id')), None)
+                if task:
+                    milestones.append({
+                        'task_id': task.get('id'),
+                        'title': ms.get('title', task.get('title')),
+                        'due_date': task.get('due_date'),
+                        'type': ms.get('type', 'deliverable'),
+                        'importance': ms.get('importance', 'medium'),
+                        'reasoning': ms.get('reasoning', '')
+                    })
+        except Exception as e:
+            self.log_action("AI milestone identification failed, using fallback", {"error": str(e)})
+            # Fallback to simple milestone identification
+            milestones = []
+            for task in sorted_tasks:
+                if task.get('priority') == 'high' or len(task.get('dependencies', [])) > 2:
+                    milestones.append({
+                        'task_id': task.get('id'),
+                        'title': task.get('title'),
+                        'due_date': task.get('due_date'),
+                        'type': 'high_priority' if task.get('priority') == 'high' else 'key_dependency',
+                        'importance': 'high' if task.get('priority') == 'high' else 'medium',
+                        'reasoning': ''
+                    })
+        
         timeline_data['milestones'] = milestones
         
         # Calculate timeline summary
@@ -139,13 +236,13 @@ class TimelineGanttAgent(BaseAgent):
     
     def generate_gantt_chart(self, project_id: int) -> Dict:
         """
-        Generate Gantt chart data for visualization.
+        Generate Gantt chart data for visualization with AI-optimized timeline calculations.
         
         Args:
             project_id (int): Project ID
             
         Returns:
-            Dict: Gantt chart data with start/end dates for each task
+            Dict: Gantt chart data with start/end dates for each task, optimized by AI
         """
         self.log_action("Generating Gantt chart", {"project_id": project_id})
         
@@ -158,7 +255,86 @@ class TimelineGanttAgent(BaseAgent):
             }
         
         # Get all tasks for the project
-        tasks_queryset = Task.objects.filter(project=project).select_related('assignee').prefetch_related('depends_on')
+        tasks_queryset = Task.objects.filter(project=project).select_related('assignee').prefetch_related('depends_on', 'dependent_tasks')
+        
+        # Prepare task data for AI analysis
+        tasks_data = []
+        for task in tasks_queryset:
+            tasks_data.append({
+                'id': task.id,
+                'title': task.title,
+                'description': task.description[:200] if task.description else '',
+                'status': task.status,
+                'priority': task.priority,
+                'due_date': task.due_date.isoformat() if task.due_date else None,
+                'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
+                'actual_hours': float(task.actual_hours) if task.actual_hours else None,
+                'assignee': task.assignee.username if task.assignee else None,
+                'dependencies': [dep.id for dep in task.depends_on.all()],
+                'dependent_count': task.dependent_tasks.count()
+            })
+        
+        # Use AI to optimize timeline if we have tasks
+        if tasks_data:
+            import json
+            prompt = f"""You are a project timeline expert. Analyze these tasks and optimize their start/end dates for a Gantt chart.
+
+Project: {project.name}
+Project Start Date: {project.start_date.isoformat() if project.start_date else 'Not set'}
+Project End Date: {project.end_date.isoformat() if project.end_date else 'Not set'}
+
+Tasks:
+{json.dumps(tasks_data, indent=2)}
+
+For each task, calculate optimal start_date and end_date considering:
+1. Task dependencies (must start after dependencies complete)
+2. Estimated hours (convert to working days: 8 hours = 1 day)
+3. Task priority (high priority tasks should be scheduled earlier)
+4. Resource availability (consider assignee workload)
+5. Realistic buffers for task completion
+6. Critical path analysis
+
+Rules:
+- If task has dependencies, start_date = max(dependency end_dates) + 1 day buffer
+- If task has estimated_hours, duration = max(1, ceil(estimated_hours / 8)) days
+- If no estimated_hours, estimate based on task complexity (default: 3 days for medium, 5 for high priority, 2 for low)
+- end_date = start_date + duration - 1 (inclusive)
+- If task has due_date, respect it but ensure it's after start_date
+- Add 10-20% buffer for high-priority or complex tasks
+
+Return JSON array with optimized dates:
+[
+  {{
+    "task_id": task_id,
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD",
+    "duration_days": number,
+    "reasoning": "brief explanation of date calculation"
+  }}
+]"""
+            
+            try:
+                response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=2000)
+                
+                # Extract JSON from response
+                if "```json" in response:
+                    json_start = response.find("```json") + 7
+                    json_end = response.find("```", json_start)
+                    response = response[json_start:json_end].strip()
+                elif "```" in response:
+                    json_start = response.find("```") + 3
+                    json_end = response.find("```", json_start)
+                    if json_end > json_start:
+                        response = response[json_start:json_end].strip()
+                
+                # Parse AI response
+                ai_optimizations = json.loads(response)
+                optimization_map = {opt['task_id']: opt for opt in ai_optimizations}
+            except Exception as e:
+                self.log_action("AI optimization failed, using fallback", {"error": str(e)})
+                optimization_map = {}
+        else:
+            optimization_map = {}
         
         gantt_data = {
             'project_id': project_id,
@@ -168,37 +344,29 @@ class TimelineGanttAgent(BaseAgent):
             'tasks': []
         }
         
-        # Calculate start and end dates for each task
+        # Calculate start and end dates for each task (use AI optimization if available)
         project_start = project.start_date or timezone.now().date()
         
         for task in tasks_queryset:
-            # Calculate task start date (consider dependencies)
-            task_start = project_start
-            if task.depends_on.exists():
-                # Start after the latest dependency ends
-                latest_dependency_end = None
-                for dep_task in task.depends_on.all():
-                    if dep_task.due_date:
-                        dep_end = dep_task.due_date.date()
-                        if not latest_dependency_end or dep_end > latest_dependency_end:
-                            latest_dependency_end = dep_end
-                if latest_dependency_end:
-                    task_start = latest_dependency_end + timedelta(days=1)
-            
-            # Calculate task end date
-            task_end = task.due_date.date() if task.due_date else None
-            if not task_end:
-                # Estimate end date based on estimated hours
-                if task.estimated_hours:
-                    # Assume 8 hours per day
-                    days_to_add = max(1, int(task.estimated_hours / 8))
-                    task_end = task_start + timedelta(days=days_to_add)
-                else:
-                    # Default to 3 days if no estimate
-                    task_end = task_start + timedelta(days=3)
+            # Use AI optimization if available
+            if task.id in optimization_map:
+                opt = optimization_map[task.id]
+                try:
+                    task_start = datetime.strptime(opt['start_date'], '%Y-%m-%d').date()
+                    task_end = datetime.strptime(opt['end_date'], '%Y-%m-%d').date()
+                    ai_reasoning = opt.get('reasoning', '')
+                except (ValueError, KeyError):
+                    # Fallback to manual calculation
+                    task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
+            else:
+                # Manual calculation
+                task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
             
             # Get dependencies
             dependencies = [dep.id for dep in task.depends_on.all()]
+            
+            # Calculate progress more accurately
+            progress = self._calculate_task_progress(task)
             
             gantt_task = {
                 'id': task.id,
@@ -213,7 +381,9 @@ class TimelineGanttAgent(BaseAgent):
                 'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
                 'actual_hours': float(task.actual_hours) if task.actual_hours else None,
                 'dependencies': dependencies,
-                'progress': 100 if task.status == 'done' else (50 if task.status == 'in_progress' else 0)
+                'progress': progress,
+                'duration_days': (task_end - task_start).days + 1,
+                'ai_reasoning': ai_reasoning if task.id in optimization_map else None
             }
             
             gantt_data['tasks'].append(gantt_task)
@@ -221,19 +391,330 @@ class TimelineGanttAgent(BaseAgent):
         # Sort tasks by start date
         gantt_data['tasks'].sort(key=lambda x: x['start_date'])
         
-        # Calculate overall project timeline
+        # Calculate overall project timeline (using workdays)
         if gantt_data['tasks']:
             earliest_start = min(t['start_date'] for t in gantt_data['tasks'])
             latest_end = max(t['end_date'] for t in gantt_data['tasks'])
+            start_date = datetime.strptime(earliest_start, '%Y-%m-%d').date()
+            end_date = datetime.strptime(latest_end, '%Y-%m-%d').date()
+            total_workdays = self._calculate_workdays_between(start_date, end_date)
+            total_calendar_days = (end_date - start_date).days + 1
+            
             gantt_data['timeline'] = {
                 'start': earliest_start,
-                'end': latest_end
+                'end': latest_end,
+                'total_duration_days': total_calendar_days,
+                'total_workdays': total_workdays,
+                'total_weeks': round(total_workdays / self.workdays_per_week, 1)
+            }
+        
+        # Add critical path analysis using proper CPM algorithm
+        critical_path_tasks, task_slack = self._identify_critical_path(gantt_data['tasks'], tasks_queryset)
+        
+        # Add slack information to each task
+        for task in gantt_data['tasks']:
+            if task['id'] in task_slack:
+                task['slack'] = task_slack[task['id']]
+        
+        gantt_data['critical_path'] = critical_path_tasks
+        
+        # Add project timeline metrics
+        if critical_path_tasks:
+            critical_path_duration = 0
+            if critical_path_tasks:
+                first_task_start = datetime.strptime(critical_path_tasks[0]['early_start'], '%Y-%m-%d').date()
+                last_task_finish = datetime.strptime(critical_path_tasks[-1]['late_finish'], '%Y-%m-%d').date()
+                critical_path_duration = self._calculate_workdays_between(first_task_start, last_task_finish)
+            
+            gantt_data['critical_path_metrics'] = {
+                'total_tasks_on_critical_path': len(critical_path_tasks),
+                'critical_path_duration_days': critical_path_duration,
+                'project_end_date_estimate': critical_path_tasks[-1]['late_finish'] if critical_path_tasks else None
             }
         
         return {
             'success': True,
             'gantt_chart': gantt_data
         }
+    
+    def _calculate_task_dates(self, task, project_start):
+        """Helper method to calculate task start and end dates with workday awareness"""
+        # Calculate task start date (consider dependencies)
+        task_start = project_start
+        if task.depends_on.exists():
+            # Start after the latest dependency ends
+            latest_dependency_end = None
+            for dep_task in task.depends_on.all():
+                # Check actual completion first, then due date, then estimate
+                if dep_task.status == 'done' and hasattr(dep_task, 'completed_at') and dep_task.completed_at:
+                    dep_end = dep_task.completed_at.date()
+                elif dep_task.due_date:
+                    dep_end = dep_task.due_date.date()
+                elif dep_task.estimated_hours:
+                    # Estimate dependency end based on hours (convert to workdays)
+                    workdays = max(1, int(dep_task.estimated_hours / self.hours_per_day))
+                    dep_start = dep_task.created_at.date() if hasattr(dep_task, 'created_at') else project_start
+                    dep_end = self._add_workdays(dep_start, workdays - 1)
+                else:
+                    continue
+                
+                if not latest_dependency_end or dep_end > latest_dependency_end:
+                    latest_dependency_end = dep_end
+            
+            if latest_dependency_end:
+                # Start on next workday after dependency ends
+                task_start = self._add_workdays(latest_dependency_end, 1)
+        
+        # Ensure start date is a workday
+        if not self._is_workday(task_start):
+            task_start = self._add_workdays(task_start, 1)
+        
+        # Calculate task end date
+        task_end = task.due_date.date() if task.due_date else None
+        if not task_end:
+            # Estimate end date based on estimated hours
+            if task.estimated_hours:
+                # Convert hours to workdays
+                workdays = max(1, int(task.estimated_hours / self.hours_per_day))
+                if task.priority == 'high':
+                    workdays = int(workdays * 1.2)  # 20% buffer for high priority
+                task_end = self._add_workdays(task_start, workdays - 1)
+            else:
+                # Default workdays based on priority
+                default_workdays = {'high': 5, 'medium': 3, 'low': 2}.get(task.priority, 3)
+                task_end = self._add_workdays(task_start, default_workdays - 1)
+        else:
+            # If due date provided, ensure it's reasonable
+            if task_end < task_start:
+                # Due date is before start, adjust it
+                if task.estimated_hours:
+                    workdays = max(1, int(task.estimated_hours / self.hours_per_day))
+                    task_end = self._add_workdays(task_start, workdays - 1)
+                else:
+                    task_end = self._add_workdays(task_start, 3)
+        
+        return task_start, task_end, None
+    
+    def _calculate_task_progress(self, task):
+        """Calculate task progress percentage considering subtasks and actual hours"""
+        if task.status == 'done':
+            return 100
+        
+        # Check subtask completion for more accurate progress
+        try:
+            subtasks = task.subtasks.all()
+            if subtasks.exists():
+                completed_subtasks = subtasks.filter(status='done').count()
+                total_subtasks = subtasks.count()
+                subtask_progress = (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
+                
+                if task.status == 'in_progress':
+                    # Blend subtask progress with time-based progress
+                    if task.estimated_hours and task.actual_hours:
+                        time_progress = min(90, (task.actual_hours / task.estimated_hours) * 100)
+                        # Weight: 60% subtasks, 40% time
+                        progress = (subtask_progress * 0.6) + (time_progress * 0.4)
+                        return max(10, min(90, int(progress)))
+                    return max(10, min(90, int(subtask_progress * 0.8)))  # Cap at 90% if not done
+        except:
+            pass  # If subtasks don't exist, fall back to time-based
+        
+        # Time-based progress calculation
+        if task.status == 'in_progress':
+            if task.estimated_hours and task.actual_hours:
+                progress = min(90, int((task.actual_hours / task.estimated_hours) * 100))
+                return max(10, progress)  # At least 10% if in progress
+            return 50
+        elif task.status == 'review':
+            return 90
+        elif task.status == 'blocked':
+            return 0
+        else:
+            return 0
+    
+    def _identify_critical_path(self, tasks_data: List[Dict], tasks_queryset=None) -> Tuple[List[Dict], Dict]:
+        """
+        Identify critical path using Critical Path Method (CPM) algorithm.
+        Calculates early start/finish, late start/finish, and float for each task.
+        """
+        if not tasks_data:
+            return []
+        
+        # Build task map and dependency graph
+        task_map = {t['id']: t for t in tasks_data}
+        dependencies = {}
+        dependents = {}
+        
+        for task in tasks_data:
+            task_id = task['id']
+            deps = task.get('dependencies', [])
+            dependencies[task_id] = deps
+            for dep_id in deps:
+                if dep_id not in dependents:
+                    dependents[dep_id] = []
+                dependents[dep_id].append(task_id)
+        
+        # Find tasks with no dependencies (start nodes)
+        start_tasks = [t_id for t_id in task_map.keys() if not dependencies.get(t_id, [])]
+        
+        # Forward pass: Calculate Early Start (ES) and Early Finish (EF)
+        early_start = {}
+        early_finish = {}
+        visited = set()
+        
+        def get_task_duration(task_data):
+            """Get task duration in days"""
+            duration = task_data.get('duration_days', 1)
+            if duration <= 0:
+                # Estimate from hours or default
+                hours = task_data.get('estimated_hours', 0) or 0
+                if hours > 0:
+                    return max(1, int(hours / self.hours_per_day))
+                return 3  # Default 3 days
+            return max(1, duration)
+        
+        def forward_pass(task_id):
+            if task_id in visited:
+                return early_start.get(task_id, date_type.today())
+            
+            visited.add(task_id)
+            task = task_map[task_id]
+            
+            # Get dependencies' early finish dates
+            dep_early_finishes = []
+            for dep_id in dependencies.get(task_id, []):
+                if dep_id in task_map:
+                    forward_pass(dep_id)  # Ensure dependency is processed
+                    dep_ef = early_finish.get(dep_id)
+                    if dep_ef:
+                        dep_early_finishes.append(dep_ef)
+            
+            # Early start is max of all dependency early finishes (or project start)
+            if dep_early_finishes:
+                es = max(dep_early_finishes)
+                # Add 1 workday buffer between tasks
+                es = self._add_workdays(es, 1)
+            else:
+                # Start task on project start date (or earliest date in tasks)
+                start_dates = [datetime.strptime(t.get('start_date', ''), '%Y-%m-%d').date() 
+                             for t in tasks_data if t.get('start_date')]
+                es = min(start_dates) if start_dates else date_type.today()
+            
+            duration = get_task_duration(task)
+            ef = self._add_workdays(es, duration - 1)  # -1 because start day counts
+            
+            early_start[task_id] = es
+            early_finish[task_id] = ef
+            
+            return es
+        
+        # Process all tasks
+        for task_id in task_map.keys():
+            forward_pass(task_id)
+        
+        # Find project end date (max early finish)
+        if not early_finish:
+            return [], {}
+        
+        project_end = max(early_finish.values())
+        
+        # Backward pass: Calculate Late Start (LS) and Late Finish (LF)
+        late_finish = {}
+        late_start = {}
+        visited_backward = set()
+        
+        def backward_pass(task_id):
+            if task_id in visited_backward:
+                return late_finish.get(task_id, project_end)
+            
+            visited_backward.add(task_id)
+            task = task_map[task_id]
+            
+            # Get dependents' late start dates
+            dependent_late_starts = []
+            for dep_id in dependents.get(task_id, []):
+                if dep_id in task_map:
+                    backward_pass(dep_id)  # Ensure dependent is processed
+                    dep_ls = late_start.get(dep_id)
+                    if dep_ls:
+                        dependent_late_starts.append(dep_ls)
+            
+            # Late finish is min of all dependent late starts (or project end)
+            if dependent_late_starts:
+                lf = min(dependent_late_starts)
+                # Subtract 1 workday buffer
+                lf = self._add_workdays(lf, -1)
+            else:
+                lf = project_end
+            
+            duration = get_task_duration(task)
+            ls = self._add_workdays(lf, -(duration - 1))
+            
+            late_finish[task_id] = lf
+            late_start[task_id] = ls
+            
+            return lf
+        
+        # Process all tasks in reverse order
+        for task_id in reversed(list(task_map.keys())):
+            backward_pass(task_id)
+        
+        # Calculate float (slack) for all tasks and identify critical path
+        all_task_slack = {}
+        critical_path = []
+        
+        for task_id, task_data in task_map.items():
+            es = early_start.get(task_id)
+            ef = early_finish.get(task_id)
+            ls = late_start.get(task_id)
+            lf = late_finish.get(task_id)
+            
+            if es and ef and ls and lf:
+                # Total float = LS - ES or LF - EF (should be same)
+                total_float = self._calculate_workdays_between(ef, lf)
+                
+                # Free float (can delay without affecting next task)
+                free_float = float('inf')
+                for dep_id in dependents.get(task_id, []):
+                    if dep_id in early_start:
+                        dep_es = early_start[dep_id]
+                        free_float = min(free_float, self._calculate_workdays_between(ef, dep_es))
+                
+                if free_float == float('inf'):
+                    free_float = total_float
+                
+                # Critical path: tasks with zero or near-zero float
+                is_critical = total_float <= 1  # Allow 1 day tolerance
+                
+                # Store slack for all tasks
+                all_task_slack[task_id] = {
+                    'total_float': total_float,
+                    'free_float': free_float,
+                    'early_start': es.isoformat(),
+                    'early_finish': ef.isoformat(),
+                    'late_start': ls.isoformat(),
+                    'late_finish': lf.isoformat()
+                }
+                
+                # Add to critical path if zero float
+                if is_critical:
+                    critical_path.append({
+                        'task_id': task_id,
+                        'title': task_data.get('title', 'Unknown'),
+                        'early_start': es.isoformat(),
+                        'early_finish': ef.isoformat(),
+                        'late_start': ls.isoformat(),
+                        'late_finish': lf.isoformat(),
+                        'total_float': total_float,
+                        'free_float': free_float,
+                        'duration_days': get_task_duration(task_data),
+                        'reason': f'Zero float - on critical path (blocks project completion)'
+                    })
+        
+        # Sort by early start
+        critical_path.sort(key=lambda x: x['early_start'])
+        
+        return critical_path, all_task_slack
     
     def track_milestones(self, project_id: int) -> Dict:
         """
@@ -393,8 +874,17 @@ class TimelineGanttAgent(BaseAgent):
                             'description': f'Task "{task.title}" is due before its dependency "{dep_task.title}"'
                         })
             
-            # Check for overlapping assignments (same person, overlapping timeframes)
+            # Check for overlapping assignments with actual task durations
             if task.assignee and task.due_date:
+                # Calculate actual task duration window
+                if task.estimated_hours:
+                    workdays = max(1, int(task.estimated_hours / self.hours_per_day))
+                    task_start_window = self._add_workdays(task.due_date.date(), -(workdays - 1))
+                else:
+                    task_start_window = task.due_date.date() - timedelta(days=3)
+                
+                task_end_window = task.due_date.date()
+                
                 overlapping_tasks = Task.objects.filter(
                     project=project,
                     assignee=task.assignee,
@@ -404,24 +894,35 @@ class TimelineGanttAgent(BaseAgent):
                 
                 for other_task in overlapping_tasks:
                     if other_task.due_date:
-                        # Check if dates overlap significantly
-                        task_start = task.due_date - timedelta(days=3)  # Assume 3 days before due
-                        task_end = task.due_date
-                        other_start = other_task.due_date - timedelta(days=3)
-                        other_end = other_task.due_date
+                        # Calculate other task's duration window
+                        if other_task.estimated_hours:
+                            other_workdays = max(1, int(other_task.estimated_hours / self.hours_per_day))
+                            other_start_window = self._add_workdays(other_task.due_date.date(), -(other_workdays - 1))
+                        else:
+                            other_start_window = other_task.due_date.date() - timedelta(days=3)
                         
-                        if not (task_end < other_start or task_start > other_end):
-                            conflicts.append({
-                                'type': 'resource_overload',
-                                'task_id': task.id,
-                                'task_title': task.title,
-                                'conflicting_task_id': other_task.id,
-                                'conflicting_task_title': other_task.title,
-                                'assignee': task.assignee.username,
-                                'assignee_id': task.assignee.id,
-                                'severity': 'medium',
-                                'description': f'"{task.assignee.username}" has overlapping deadlines for "{task.title}" and "{other_task.title}"'
-                            })
+                        other_end_window = other_task.due_date.date()
+                        
+                        # Check for overlap in workday windows
+                        if not (task_end_window < other_start_window or task_start_window > other_end_window):
+                            # Calculate overlap in workdays
+                            overlap_start = max(task_start_window, other_start_window)
+                            overlap_end = min(task_end_window, other_end_window)
+                            overlap_days = self._calculate_workdays_between(overlap_start, overlap_end)
+                            
+                            if overlap_days > 0:
+                                conflicts.append({
+                                    'type': 'resource_overload',
+                                    'task_id': task.id,
+                                    'task_title': task.title,
+                                    'conflicting_task_id': other_task.id,
+                                    'conflicting_task_title': other_task.title,
+                                    'assignee': task.assignee.username,
+                                    'assignee_id': task.assignee.id,
+                                    'overlap_workdays': overlap_days,
+                                    'severity': 'high' if overlap_days > 3 else 'medium',
+                                    'description': f'"{task.assignee.username}" has {overlap_days} workday(s) overlap between "{task.title}" and "{other_task.title}"'
+                                })
         
         # Check for missing dependencies (tasks that should depend on others but don't)
         for task in tasks:
@@ -438,7 +939,78 @@ class TimelineGanttAgent(BaseAgent):
                         'description': f'Task "{task.title}" has {dependent_count} dependent tasks but no deadline set'
                     })
         
-        return {
+        # Use AI to analyze conflicts and provide resolution suggestions
+        if conflicts or dependency_issues:
+            import json
+            try:
+                conflict_prompt = f"""Analyze these project conflicts and provide resolution recommendations.
+
+Project: {project.name}
+Conflicts Found: {len(conflicts)} timing/resource conflicts
+Dependency Issues: {len(dependency_issues)} dependency problems
+
+Conflicts:
+{json.dumps(conflicts[:10], indent=2)}
+
+Dependency Issues:
+{json.dumps(dependency_issues[:10], indent=2)}
+
+For each conflict/issue, provide:
+1. Resolution strategy (how to fix it)
+2. Priority of resolution (high/medium/low)
+3. Impact if not resolved
+4. Recommended action steps
+
+Return JSON:
+{{
+  "resolutions": [
+    {{
+      "conflict_id": "reference to conflict",
+      "type": "conflict_type",
+      "resolution_strategy": "detailed strategy",
+      "priority": "high|medium|low",
+      "impact": "what happens if not fixed",
+      "action_steps": ["step1", "step2"]
+    }}
+  ],
+  "summary": "overall conflict analysis and recommendations"
+}}"""
+                
+                resolution_response = self._call_llm(conflict_prompt, self.system_prompt, temperature=0.4, max_tokens=2000)
+                
+                # Extract JSON
+                if "```json" in resolution_response:
+                    json_start = resolution_response.find("```json") + 7
+                    json_end = resolution_response.find("```", json_start)
+                    resolution_response = resolution_response[json_start:json_end].strip()
+                elif "```" in resolution_response:
+                    json_start = resolution_response.find("```") + 3
+                    json_end = resolution_response.find("```", json_start)
+                    if json_end > json_start:
+                        resolution_response = resolution_response[json_start:json_end].strip()
+                
+                ai_resolutions = json.loads(resolution_response)
+                
+                # Add resolutions to conflicts
+                resolution_map = {r.get('conflict_id', ''): r for r in ai_resolutions.get('resolutions', [])}
+                for i, conflict in enumerate(conflicts):
+                    conflict_key = f"conflict_{i}"
+                    if conflict_key in resolution_map:
+                        conflict['resolution'] = resolution_map[conflict_key]
+                
+                for i, issue in enumerate(dependency_issues):
+                    issue_key = f"issue_{i}"
+                    if issue_key in resolution_map:
+                        issue['resolution'] = resolution_map[issue_key]
+                
+                ai_summary = ai_resolutions.get('summary', '')
+            except Exception as e:
+                self.log_action("AI conflict resolution failed", {"error": str(e)})
+                ai_summary = None
+        else:
+            ai_summary = None
+        
+        result = {
             'success': True,
             'conflicts': conflicts,
             'dependency_issues': dependency_issues,
@@ -452,17 +1024,22 @@ class TimelineGanttAgent(BaseAgent):
                 'medium_severity': sum(1 for c in conflicts + dependency_issues if c.get('severity') == 'medium')
             }
         }
+        
+        if ai_summary:
+            result['ai_analysis'] = ai_summary
+        
+        return result
     
     def suggest_adjustments(self, project_id: int, current_progress: Dict) -> Dict:
         """
-        Suggest timeline adjustments based on progress - monitor task completion and adjust timelines.
+        Suggest timeline adjustments based on progress with AI-powered analysis.
         
         Args:
             project_id (int): Project ID
             current_progress (Dict): Current project progress data
             
         Returns:
-            Dict: Timeline adjustment suggestions
+            Dict: Timeline adjustment suggestions with AI reasoning
         """
         self.log_action("Suggesting timeline adjustments", {"project_id": project_id})
         
@@ -477,64 +1054,175 @@ class TimelineGanttAgent(BaseAgent):
         # Get all tasks
         tasks = Task.objects.filter(project=project).select_related('assignee').prefetch_related('depends_on')
         
-        suggestions = []
+        # Prepare task data for AI analysis
+        import json
         now = timezone.now()
-        
-        # Analyze each task's progress
+        tasks_analysis = []
         for task in tasks:
-            if task.status in ['todo', 'in_progress', 'review']:
-                # Check if task is behind schedule
-                if task.due_date and task.due_date < now:
-                    days_overdue = (now - task.due_date).days
-                    suggestions.append({
-                        'type': 'extend_deadline',
-                        'task_id': task.id,
-                        'task_title': task.title,
-                        'current_due_date': task.due_date.isoformat(),
-                        'days_overdue': days_overdue,
-                        'suggested_extension_days': max(3, days_overdue + 2),
-                        'reason': f'Task is {days_overdue} day(s) overdue'
-                    })
-                
-                # Check if estimated hours vs actual hours indicate delay
-                if task.estimated_hours and task.actual_hours:
-                    if task.actual_hours > task.estimated_hours * 1.2:  # 20% over estimate
-                        overage_percentage = ((task.actual_hours - task.estimated_hours) / task.estimated_hours) * 100
-                        suggestions.append({
-                            'type': 'revise_estimate',
-                            'task_id': task.id,
-                            'task_title': task.title,
-                            'current_estimate': task.estimated_hours,
-                            'actual_hours': task.actual_hours,
-                            'overage_percentage': round(overage_percentage, 1),
-                            'reason': f'Task is taking {round(overage_percentage, 1)}% longer than estimated'
-                        })
+            days_overdue = None
+            if task.due_date and task.due_date < now:
+                days_overdue = (now - task.due_date).days
+            
+            overage_percentage = None
+            if task.estimated_hours and task.actual_hours:
+                if task.actual_hours > task.estimated_hours:
+                    overage_percentage = ((task.actual_hours - task.estimated_hours) / task.estimated_hours) * 100
+            
+            tasks_analysis.append({
+                'id': task.id,
+                'title': task.title,
+                'status': task.status,
+                'priority': task.priority,
+                'due_date': task.due_date.isoformat() if task.due_date else None,
+                'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
+                'actual_hours': float(task.actual_hours) if task.actual_hours else None,
+                'days_overdue': days_overdue,
+                'overage_percentage': round(overage_percentage, 1) if overage_percentage else None,
+                'assignee': task.assignee.username if task.assignee else None,
+                'dependencies_count': task.depends_on.count(),
+                'dependent_tasks_count': task.dependent_tasks.count()
+            })
         
-        # Check overall project progress
+        # Calculate project metrics
         total_tasks = tasks.count()
         completed_tasks = tasks.filter(status='done').count()
         completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
         
-        # If project is behind schedule
-        if project.end_date:
-            days_remaining = (project.end_date - now.date()).days
-            if days_remaining > 0:
-                expected_completion_rate = ((now.date() - (project.start_date or project.created_at.date())).days / 
-                                          (project.end_date - (project.start_date or project.created_at.date())).days * 100)
-                
-                if completion_rate < expected_completion_rate - 10:  # 10% behind
-                    suggestions.append({
-                        'type': 'extend_project_deadline',
-                        'project_id': project.id,
-                        'project_name': project.name,
-                        'current_completion_rate': round(completion_rate, 1),
-                        'expected_completion_rate': round(expected_completion_rate, 1),
-                        'current_end_date': project.end_date.isoformat(),
-                        'suggested_extension_days': max(7, int((expected_completion_rate - completion_rate) / 10)),
-                        'reason': f'Project is {round(expected_completion_rate - completion_rate, 1)}% behind expected progress'
-                    })
+        expected_completion_rate = None
+        if project.end_date and project.start_date:
+            project_duration = (project.end_date - project.start_date).days
+            elapsed_days = (now.date() - project.start_date).days
+            if project_duration > 0:
+                expected_completion_rate = (elapsed_days / project_duration) * 100
         
-        # Check for resource bottlenecks (too many tasks assigned to one person)
+        # Use AI to generate comprehensive suggestions
+        prompt = f"""You are a project management expert. Analyze this project's progress and suggest timeline adjustments.
+
+Project: {project.name}
+Project Status: {project.status}
+Project Start: {project.start_date.isoformat() if project.start_date else 'Not set'}
+Project End: {project.end_date.isoformat() if project.end_date else 'Not set'}
+Current Date: {now.isoformat()}
+
+Progress Metrics:
+- Total Tasks: {total_tasks}
+- Completed Tasks: {completed_tasks}
+- Completion Rate: {round(completion_rate, 1)}%
+- Expected Completion Rate: {round(expected_completion_rate, 1) if expected_completion_rate else 'N/A'}%
+
+Tasks Analysis:
+{json.dumps(tasks_analysis, indent=2)}
+
+Analyze and suggest adjustments for:
+1. Overdue tasks - suggest realistic deadline extensions
+2. Tasks taking longer than estimated - revise estimates or extend deadlines
+3. Project timeline - if behind schedule, suggest extension or acceleration strategies
+4. Resource overload - identify overloaded team members and suggest redistribution
+5. Critical path tasks - prioritize adjustments for tasks blocking others
+6. Risk mitigation - suggest buffers and contingency plans
+
+For each suggestion, provide:
+- Type of adjustment needed
+- Specific task/project affected
+- Recommended action with dates/values
+- Detailed reasoning explaining why this adjustment is needed
+- Priority level (high/medium/low)
+
+Return JSON array:
+[
+  {{
+    "type": "extend_deadline|revise_estimate|extend_project_deadline|redistribute_workload|add_buffer|prioritize_task",
+    "task_id": task_id_or_null,
+    "task_title": "task title or null",
+    "project_level": true_if_project_level,
+    "current_value": "current deadline/estimate/etc",
+    "suggested_value": "new deadline/estimate/etc",
+    "suggested_extension_days": number_or_null,
+    "priority": "high|medium|low",
+    "reasoning": "detailed explanation (2-3 sentences) of why this adjustment is needed, considering dependencies, resource constraints, and project goals",
+    "impact": "description of how this affects the project"
+  }}
+]"""
+        
+        suggestions = []
+        try:
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=2500)
+            
+            # Extract JSON
+            if "```json" in response:
+                json_start = response.find("```json") + 7
+                json_end = response.find("```", json_start)
+                response = response[json_start:json_end].strip()
+            elif "```" in response:
+                json_start = response.find("```") + 3
+                json_end = response.find("```", json_start)
+                if json_end > json_start:
+                    response = response[json_start:json_end].strip()
+            
+            ai_suggestions = json.loads(response)
+            
+            # Validate and add AI suggestions
+            for sug in ai_suggestions:
+                if sug.get('task_id'):
+                    # Verify task exists
+                    task = tasks.filter(id=sug['task_id']).first()
+                    if task:
+                        sug['task_title'] = task.title
+                        sug['assignee'] = task.assignee.username if task.assignee else None
+                suggestions.append(sug)
+                
+        except Exception as e:
+            self.log_action("AI suggestions failed, using fallback", {"error": str(e)})
+            # Fallback to rule-based suggestions
+            for task in tasks:
+                if task.status in ['todo', 'in_progress', 'review']:
+                    if task.due_date and task.due_date < now:
+                        days_overdue = (now - task.due_date).days
+                        suggestions.append({
+                            'type': 'extend_deadline',
+                            'task_id': task.id,
+                            'task_title': task.title,
+                            'current_due_date': task.due_date.isoformat(),
+                            'days_overdue': days_overdue,
+                            'suggested_extension_days': max(3, days_overdue + 2),
+                            'priority': 'high' if days_overdue > 7 else 'medium',
+                            'reasoning': f'Task is {days_overdue} day(s) overdue',
+                            'impact': 'May delay dependent tasks'
+                        })
+                    
+                    if task.estimated_hours and task.actual_hours:
+                        if task.actual_hours > task.estimated_hours * 1.2:
+                            overage_percentage = ((task.actual_hours - task.estimated_hours) / task.estimated_hours) * 100
+                            suggestions.append({
+                                'type': 'revise_estimate',
+                                'task_id': task.id,
+                                'task_title': task.title,
+                                'current_estimate': task.estimated_hours,
+                                'actual_hours': task.actual_hours,
+                                'overage_percentage': round(overage_percentage, 1),
+                                'priority': 'medium',
+                                'reasoning': f'Task is taking {round(overage_percentage, 1)}% longer than estimated',
+                                'impact': 'Future similar tasks may need revised estimates'
+                            })
+        
+        # Add project-level suggestions
+        if project.end_date and expected_completion_rate:
+            if completion_rate < expected_completion_rate - 10:
+                suggestions.append({
+                    'type': 'extend_project_deadline',
+                    'project_id': project.id,
+                    'project_name': project.name,
+                    'project_level': True,
+                    'current_completion_rate': round(completion_rate, 1),
+                    'expected_completion_rate': round(expected_completion_rate, 1),
+                    'current_end_date': project.end_date.isoformat(),
+                    'suggested_extension_days': max(7, int((expected_completion_rate - completion_rate) / 10)),
+                    'priority': 'high',
+                    'reasoning': f'Project is {round(expected_completion_rate - completion_rate, 1)}% behind expected progress',
+                    'impact': 'Project deadline may need adjustment'
+                })
+        
+        # Resource overload check
         assignee_counts = {}
         for task in tasks.filter(status__in=['todo', 'in_progress']):
             if task.assignee:
@@ -542,14 +1230,16 @@ class TimelineGanttAgent(BaseAgent):
                 assignee_counts[assignee_id] = assignee_counts.get(assignee_id, 0) + 1
         
         for assignee_id, count in assignee_counts.items():
-            if count > 5:  # More than 5 active tasks
+            if count > 5:
                 assignee = tasks.filter(assignee_id=assignee_id).first().assignee
                 suggestions.append({
                     'type': 'redistribute_workload',
                     'assignee_id': assignee_id,
                     'assignee_name': assignee.username,
                     'current_task_count': count,
-                    'reason': f'{assignee.username} has {count} active tasks, consider redistributing'
+                    'priority': 'high' if count > 8 else 'medium',
+                    'reasoning': f'{assignee.username} has {count} active tasks, which may lead to delays',
+                    'impact': 'May cause bottlenecks and missed deadlines'
                 })
         
         return {
@@ -560,19 +1250,22 @@ class TimelineGanttAgent(BaseAgent):
                 'deadline_extensions': sum(1 for s in suggestions if s['type'] == 'extend_deadline'),
                 'estimate_revisions': sum(1 for s in suggestions if s['type'] == 'revise_estimate'),
                 'workload_redistributions': sum(1 for s in suggestions if s['type'] == 'redistribute_workload'),
-                'project_extensions': sum(1 for s in suggestions if s['type'] == 'extend_project_deadline')
+                'project_extensions': sum(1 for s in suggestions if s['type'] == 'extend_project_deadline'),
+                'high_priority': sum(1 for s in suggestions if s.get('priority') == 'high'),
+                'medium_priority': sum(1 for s in suggestions if s.get('priority') == 'medium'),
+                'low_priority': sum(1 for s in suggestions if s.get('priority') == 'low')
             }
         }
     
     def calculate_duration_estimate(self, tasks: List[Dict]) -> Dict:
         """
-        Calculate project duration estimates based on tasks.
+        Calculate project duration estimates with AI-powered analysis.
         
         Args:
             tasks (List[Dict]): List of tasks with estimated hours and dependencies
             
         Returns:
-            Dict: Duration estimates including optimistic, realistic, and pessimistic scenarios
+            Dict: Duration estimates including optimistic, realistic, and pessimistic scenarios with AI insights
         """
         self.log_action("Calculating duration estimate", {"tasks_count": len(tasks)})
         
@@ -582,54 +1275,133 @@ class TimelineGanttAgent(BaseAgent):
                 'error': 'No tasks provided for duration estimation'
             }
         
-        # Calculate total estimated hours
+        # Prepare task summary for AI
+        import json
+        task_summary = []
+        for task in tasks[:30]:  # Limit for token efficiency
+            task_summary.append({
+                'id': task.get('id'),
+                'title': task.get('title', '')[:50],
+                'estimated_hours': task.get('estimated_hours'),
+                'priority': task.get('priority', 'medium'),
+                'status': task.get('status', 'todo'),
+                'dependencies_count': len(task.get('dependencies', [])),
+                'has_due_date': bool(task.get('due_date'))
+            })
+        
+        # Use AI for more accurate estimation
+        prompt = f"""You are a project estimation expert. Analyze these tasks and provide accurate duration estimates.
+
+Tasks Summary:
+{json.dumps(task_summary, indent=2)}
+
+Total Tasks: {len(tasks)}
+Tasks with Estimated Hours: {sum(1 for t in tasks if t.get('estimated_hours'))}
+Tasks with Dependencies: {sum(1 for t in tasks if t.get('dependencies'))}
+
+Provide duration estimates considering:
+1. Task complexity (based on titles and descriptions)
+2. Dependencies (critical path analysis)
+3. Resource availability (assume standard team)
+4. Risk factors (high priority tasks, dependencies, etc.)
+5. Historical patterns (tasks often take 20-30% longer than estimated)
+
+Calculate:
+- Total estimated hours (sum of all task estimates, or estimate if missing)
+- Working days needed (8 hours per day)
+- Calendar days (accounting for weekends, 5-day work weeks)
+- Optimistic scenario (best case, 15% faster)
+- Realistic scenario (most likely, with buffers)
+- Pessimistic scenario (worst case, 30% slower with delays)
+- Expected duration (PERT: (optimistic + 4*realistic + pessimistic) / 6)
+
+Return JSON:
+{{
+  "total_estimated_hours": number,
+  "working_days": {{
+    "optimistic": number,
+    "realistic": number,
+    "pessimistic": number,
+    "expected": number
+  }},
+  "calendar_days": {{
+    "expected": number,
+    "weeks": number
+  }},
+  "dependency_buffer_days": number,
+  "risk_buffer_days": number,
+  "recommendations": {{
+    "suggested_deadline_days": number,
+    "suggested_deadline_weeks": number,
+    "confidence_level": "high|medium|low",
+    "key_risks": ["risk1", "risk2"],
+    "notes": "brief explanation of estimates and assumptions"
+  }}
+}}"""
+        
+        try:
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1500)
+            
+            # Extract JSON
+            if "```json" in response:
+                json_start = response.find("```json") + 7
+                json_end = response.find("```", json_start)
+                response = response[json_start:json_end].strip()
+            elif "```" in response:
+                json_start = response.find("```") + 3
+                json_end = response.find("```", json_start)
+                if json_end > json_start:
+                    response = response[json_start:json_end].strip()
+            
+            ai_estimates = json.loads(response)
+        except Exception as e:
+            self.log_action("AI estimation failed, using fallback", {"error": str(e)})
+            ai_estimates = None
+        
+        # Calculate base estimates
         total_estimated_hours = sum(
             task.get('estimated_hours', 0) or 0 
             for task in tasks 
             if task.get('estimated_hours')
         )
         
-        # If no estimated hours, use default estimates based on task count
         if total_estimated_hours == 0:
-            # Default: 8 hours per task
             total_estimated_hours = len(tasks) * 8
         
-        # Calculate working days (assuming 8 hours per day)
         working_days = total_estimated_hours / 8
-        
-        # Consider dependencies (critical path)
-        # Simple approach: if tasks have dependencies, add buffer
         tasks_with_deps = sum(1 for task in tasks if task.get('dependencies'))
-        dependency_buffer = tasks_with_deps * 0.5  # 0.5 days per dependency
+        dependency_buffer = tasks_with_deps * 0.5
         
-        # Three-point estimation (PERT)
-        optimistic_days = working_days * 0.8  # 20% faster
-        realistic_days = working_days + dependency_buffer
-        pessimistic_days = working_days * 1.5 + dependency_buffer  # 50% slower
-        
-        # Expected duration (PERT formula)
-        expected_days = (optimistic_days + 4 * realistic_days + pessimistic_days) / 6
-        
-        # Calculate calendar days (assuming 5 working days per week)
-        calendar_weeks = expected_days / 5
-        calendar_days = calendar_weeks * 7
-        
-        # Get date range if tasks have due dates
-        tasks_with_dates = [t for t in tasks if t.get('due_date')]
-        if tasks_with_dates:
-            dates = [datetime.fromisoformat(t['due_date'].replace('Z', '+00:00')) for t in tasks_with_dates if t.get('due_date')]
-            if dates:
-                earliest_date = min(dates)
-                latest_date = max(dates)
-                actual_span_days = (latest_date - earliest_date).days
-            else:
-                actual_span_days = None
+        # Use AI estimates if available, otherwise use calculated
+        if ai_estimates:
+            estimates = {
+                'total_tasks': len(tasks),
+                'total_estimated_hours': round(ai_estimates.get('total_estimated_hours', total_estimated_hours), 2),
+                'working_days': {
+                    'optimistic': round(ai_estimates['working_days'].get('optimistic', working_days * 0.85), 1),
+                    'realistic': round(ai_estimates['working_days'].get('realistic', working_days + dependency_buffer), 1),
+                    'pessimistic': round(ai_estimates['working_days'].get('pessimistic', working_days * 1.3 + dependency_buffer), 1),
+                    'expected': round(ai_estimates['working_days'].get('expected', (working_days * 0.85 + 4 * (working_days + dependency_buffer) + (working_days * 1.3 + dependency_buffer)) / 6), 1)
+                },
+                'calendar_days': {
+                    'expected': round(ai_estimates['calendar_days'].get('expected', (ai_estimates['working_days'].get('expected', working_days) / 5) * 7), 1),
+                    'weeks': round(ai_estimates['calendar_days'].get('weeks', ai_estimates['working_days'].get('expected', working_days) / 5), 1)
+                },
+                'dependency_buffer_days': round(ai_estimates.get('dependency_buffer_days', dependency_buffer), 1),
+                'risk_buffer_days': round(ai_estimates.get('risk_buffer_days', 0), 1),
+                'tasks_with_dependencies': tasks_with_deps
+            }
+            recommendations = ai_estimates.get('recommendations', {})
         else:
-            actual_span_days = None
-        
-        return {
-            'success': True,
-            'estimates': {
+            # Fallback calculations
+            optimistic_days = working_days * 0.85
+            realistic_days = working_days + dependency_buffer
+            pessimistic_days = working_days * 1.3 + dependency_buffer
+            expected_days = (optimistic_days + 4 * realistic_days + pessimistic_days) / 6
+            calendar_weeks = expected_days / 5
+            calendar_days = calendar_weeks * 7
+            
+            estimates = {
                 'total_tasks': len(tasks),
                 'total_estimated_hours': round(total_estimated_hours, 2),
                 'working_days': {
@@ -642,15 +1414,40 @@ class TimelineGanttAgent(BaseAgent):
                     'expected': round(calendar_days, 1),
                     'weeks': round(calendar_weeks, 1)
                 },
-                'actual_span_days': actual_span_days,
-                'tasks_with_dependencies': tasks_with_deps,
-                'dependency_buffer_days': round(dependency_buffer, 1)
-            },
-            'recommendations': {
-                'suggested_deadline_days': round(expected_days + 3, 1),  # Add 3 day buffer
-                'suggested_deadline_weeks': round((expected_days + 3) / 5, 1),
-                'note': 'Estimates assume 8-hour working days and 5-day work weeks. Add buffer for unexpected delays.'
+                'dependency_buffer_days': round(dependency_buffer, 1),
+                'risk_buffer_days': 0,
+                'tasks_with_dependencies': tasks_with_deps
             }
+            recommendations = {
+                'suggested_deadline_days': round(expected_days + 3, 1),
+                'suggested_deadline_weeks': round((expected_days + 3) / 5, 1),
+                'confidence_level': 'medium',
+                'key_risks': ['Uncertain task estimates', 'Dependency delays'],
+                'notes': 'Estimates assume 8-hour working days and 5-day work weeks. Add buffer for unexpected delays.'
+            }
+        
+        # Get actual span if tasks have due dates
+        tasks_with_dates = [t for t in tasks if t.get('due_date')]
+        if tasks_with_dates:
+            try:
+                dates = [datetime.fromisoformat(t['due_date'].replace('Z', '+00:00')) for t in tasks_with_dates if t.get('due_date')]
+                if dates:
+                    earliest_date = min(dates)
+                    latest_date = max(dates)
+                    actual_span_days = (latest_date - earliest_date).days
+                else:
+                    actual_span_days = None
+            except:
+                actual_span_days = None
+        else:
+            actual_span_days = None
+        
+        estimates['actual_span_days'] = actual_span_days
+        
+        return {
+            'success': True,
+            'estimates': estimates,
+            'recommendations': recommendations
         }
     
     def manage_phases(self, project_id: int, phases: List[Dict] = None) -> Dict:
@@ -939,7 +1736,63 @@ class TimelineGanttAgent(BaseAgent):
             depth = calculate_depth(task_info['task_id'])
             max_dependency_depth = max(max_dependency_depth, depth)
         
-        return {
+        # Use AI to analyze dependencies and provide insights
+        if dependency_map:
+            import json
+            try:
+                deps_prompt = f"""Analyze this project's dependency structure and provide insights.
+
+Project: {project.name}
+Total Tasks with Dependencies: {len(dependency_map)}
+Critical Path Tasks: {len(critical_path)}
+Bottleneck Tasks: {len(bottlenecks)}
+
+Dependency Map (sample):
+{json.dumps(dependency_map[:15], indent=2)}
+
+Critical Path:
+{json.dumps(critical_path[:10], indent=2)}
+
+Bottlenecks:
+{json.dumps(bottlenecks[:10], indent=2)}
+
+Provide analysis:
+1. Critical path identification and recommendations
+2. Bottleneck mitigation strategies
+3. Dependency optimization suggestions
+4. Risk assessment for blocking tasks
+5. Recommendations for improving project flow
+
+Return JSON:
+{{
+  "critical_path_analysis": "analysis of critical path and recommendations",
+  "bottleneck_strategies": ["strategy1", "strategy2"],
+  "optimization_suggestions": ["suggestion1", "suggestion2"],
+  "risk_assessment": "overall risk level and key risks",
+  "recommendations": "actionable recommendations for improving dependency structure"
+}}"""
+                
+                deps_response = self._call_llm(deps_prompt, self.system_prompt, temperature=0.4, max_tokens=2000)
+                
+                # Extract JSON
+                if "```json" in deps_response:
+                    json_start = deps_response.find("```json") + 7
+                    json_end = deps_response.find("```", json_start)
+                    deps_response = deps_response[json_start:json_end].strip()
+                elif "```" in deps_response:
+                    json_start = deps_response.find("```") + 3
+                    json_end = deps_response.find("```", json_start)
+                    if json_end > json_start:
+                        deps_response = deps_response[json_start:json_end].strip()
+                
+                ai_analysis = json.loads(deps_response)
+            except Exception as e:
+                self.log_action("AI dependency analysis failed", {"error": str(e)})
+                ai_analysis = None
+        else:
+            ai_analysis = None
+        
+        result = {
             'success': True,
             'dependency_map': dependency_map,
             'critical_path': critical_path,
@@ -956,6 +1809,11 @@ class TimelineGanttAgent(BaseAgent):
                 'blocking_tasks': len(bottleneck_risks)
             }
         }
+        
+        if ai_analysis:
+            result['ai_insights'] = ai_analysis
+        
+        return result
     
     def get_shared_view(self, project_id: int) -> Dict:
         """
@@ -1099,6 +1957,72 @@ class TimelineGanttAgent(BaseAgent):
             status__in=['todo', 'in_progress', 'review']
         ).order_by('due_date')[:10]
         
+        # Use AI to generate insights and recommendations
+        import json
+        try:
+            insights_prompt = f"""Analyze this project's current state and provide actionable insights.
+
+Project: {project.name}
+Status: {project.status}
+Completion: {round(completion_percentage, 2)}%
+
+Tasks:
+- Total: {total_tasks}
+- Completed: {completed_tasks}
+- In Progress: {in_progress_tasks}
+- Blocked: {blocked_tasks}
+- Todo: {len(tasks_by_status['todo'])}
+
+Priority Distribution:
+- High: {priority_distribution['high']}
+- Medium: {priority_distribution['medium']}
+- Low: {priority_distribution['low']}
+
+Team Members: {len(team_workload)}
+Upcoming Deadlines (next 7 days): {len(upcoming_deadlines)}
+Overdue Tasks: {tasks.filter(due_date__lt=now, status__in=['todo', 'in_progress', 'review']).count()}
+
+Provide:
+1. Overall project health assessment
+2. Key risks and concerns
+3. Immediate action items (top 3-5 priorities)
+4. Recommendations for improvement
+5. Success factors and what's going well
+
+Return JSON:
+{{
+  "health_assessment": "overall project health (excellent|good|fair|poor) with brief explanation",
+  "key_risks": ["risk1", "risk2", "risk3"],
+  "action_items": [
+    {{
+      "priority": "high|medium|low",
+      "action": "specific action to take",
+      "reason": "why this is important"
+    }}
+  ],
+  "recommendations": ["recommendation1", "recommendation2"],
+  "success_factors": ["what's going well"],
+  "summary": "brief overall summary and next steps"
+}}"""
+            
+            insights_response = self._call_llm(insights_prompt, self.system_prompt, temperature=0.5, max_tokens=2000)
+            
+            # Extract JSON
+            if "```json" in insights_response:
+                json_start = insights_response.find("```json") + 7
+                json_end = insights_response.find("```", json_start)
+                insights_response = insights_response[json_start:json_end].strip()
+            elif "```" in insights_response:
+                json_start = insights_response.find("```") + 3
+                json_end = insights_response.find("```", json_start)
+                if json_end > json_start:
+                    insights_response = insights_response[json_start:json_end].strip()
+            
+            ai_insights = json.loads(insights_response)
+        except Exception as e:
+            self.log_action("AI insights generation failed", {"error": str(e)})
+            ai_insights = None
+        
         shared_view = {
             'project': project_overview,
             'tasks': {
@@ -1136,6 +2060,9 @@ class TimelineGanttAgent(BaseAgent):
             },
             'generated_at': timezone.now().isoformat()
         }
+        
+        if ai_insights:
+            shared_view['ai_insights'] = ai_insights
         
         return {
             'success': True,

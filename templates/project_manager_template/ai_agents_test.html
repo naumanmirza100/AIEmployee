@@ -41,6 +41,9 @@
                 <button onclick="testDelegation()" class="btn btn-primary" style="width: auto; padding: 0.75rem 1.5rem;">
                     Suggest Delegation
                 </button>
+                <button onclick="generateSubtasks()" class="btn btn-primary" style="width: auto; padding: 0.75rem 1.5rem; background: var(--success-color);">
+                    Generate Subtasks
+                </button>
             </div>
 
             <div id="task-result" style="margin-top: 1.5rem; display: none;">
@@ -498,6 +501,58 @@ async function testDelegation() {
         
         const data = await response.json();
         resultContent.innerHTML = renderDelegation(data);
+    } catch (error) {
+        resultContent.innerHTML = `<div class="dashboard-card"><p style="color: var(--error-color);">Error: ${error.message}</p></div>`;
+    }
+}
+
+async function generateSubtasks() {
+    const projectId = document.getElementById('project-select').value;
+    const resultDiv = document.getElementById('task-result');
+    const resultContent = document.getElementById('task-result-content');
+    
+    if (!projectId) {
+        alert('Please select a project first');
+        return;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultContent.innerHTML = '<div class="dashboard-card"><p>⏳ Generating subtasks for all tasks in the project with AI...</p></div>';
+    
+    try {
+        const response = await fetch('/api/ai/generate-subtasks/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                project_id: projectId
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            resultContent.innerHTML = `
+                <div class="dashboard-card">
+                    <h4 style="margin-bottom: 1rem; color: var(--success-color);">✅ Subtasks Generated Successfully!</h4>
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">${data.message || 'Subtasks have been generated and saved to the database.'}</p>
+                    <div style="background: var(--bg-secondary); padding: 1rem; border-radius: var(--radius-sm); margin-top: 1rem;">
+                        <strong>Summary:</strong>
+                        <ul style="margin: 0.5rem 0 0 0; padding-left: 1.5rem;">
+                            <li>Tasks processed: ${Object.keys(data.subtasks_by_task || {}).length}</li>
+                            <li>Total subtasks created: ${data.saved_count || 0}</li>
+                        </ul>
+                    </div>
+                    <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+                        You can now view subtasks for each task by going to the project detail page and clicking "View Subtasks" on any task card.
+                    </p>
+                </div>
+            `;
+        } else {
+            resultContent.innerHTML = `<div class="dashboard-card"><p style="color: var(--error-color);">Error: ${data.error || 'Failed to generate subtasks'}</p></div>`;
+        }
     } catch (error) {
         resultContent.innerHTML = `<div class="dashboard-card"><p style="color: var(--error-color);">Error: ${error.message}</p></div>`;
     }

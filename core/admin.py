@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    Project, Task, TeamMember, Meeting, 
+    Project, Task, Subtask, TeamMember, Meeting, 
     ActionItem, Workflow, WorkflowStep, WorkflowExecution, Analytics, UserProfile
 )
 
@@ -17,6 +17,14 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = ['title', 'project', 'assignee', 'status', 'priority', 'due_date']
     list_filter = ['status', 'priority', 'project']
     search_fields = ['title', 'description']
+
+
+@admin.register(Subtask)
+class SubtaskAdmin(admin.ModelAdmin):
+    list_display = ['title', 'task', 'status', 'order', 'created_at']
+    list_filter = ['status', 'task__project']
+    search_fields = ['title', 'description']
+    ordering = ['task', 'order', 'created_at']
 
 
 @admin.register(TeamMember)
