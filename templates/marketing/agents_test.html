@@ -1,0 +1,615 @@
+{% extends 'base.html' %}
+{% block title %}Marketing Agents - AI Marketing Assistant{% endblock %}
+{% block content %}
+<style>
+    .agents-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .agents-header {
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .agent-tabs {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .agent-tab {
+        padding: 1rem 1.5rem;
+        background: transparent;
+        border: none;
+        border-bottom: 3px solid transparent;
+        cursor: pointer;
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        transition: all 0.3s ease;
+    }
+    .agent-tab:hover {
+        color: var(--primary-color);
+    }
+    .agent-tab.active {
+        color: var(--primary-color);
+        border-bottom-color: var(--primary-color);
+    }
+    .agent-panel {
+        display: none;
+        background: var(--card-background);
+        padding: 2rem;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border-color);
+    }
+    .agent-panel.active {
+        display: block;
+    }
+    .agent-panel h3 {
+        margin: 0 0 1rem 0;
+        color: var(--text-primary);
+    }
+    .agent-panel p {
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+    }
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid var(--border-color);
+        border-radius: var(--radius-md);
+        font-size: 1rem;
+        font-family: inherit;
+    }
+    .form-group textarea {
+        min-height: 150px;
+        resize: vertical;
+    }
+    .result-box {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: var(--background-color);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-color);
+        display: none;
+    }
+    .result-box.show {
+        display: block;
+    }
+    .result-box h4 {
+        margin: 0 0 1rem 0;
+        color: var(--text-primary);
+    }
+    .result-content {
+        white-space: normal;
+        word-wrap: break-word;
+        color: var(--text-primary);
+        line-height: 1.6;
+    }
+    .result-content h2 {
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        color: var(--primary-color);
+        border-bottom: 2px solid var(--border-color);
+        padding-bottom: 0.5rem;
+        font-size: 1.5rem;
+    }
+    .result-content h3 {
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+        color: var(--text-primary);
+        font-size: 1.25rem;
+    }
+    .result-content ul, .result-content ol {
+        margin: 1rem 0;
+        padding-left: 2rem;
+    }
+    .result-content li {
+        margin: 0.5rem 0;
+    }
+    .result-content table {
+        width: 100%;
+        margin: 1rem 0;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+    }
+    .result-content table th,
+    .result-content table td {
+        border: 1px solid var(--border-color);
+        padding: 0.75rem;
+        text-align: left;
+    }
+    .result-content table th {
+        background-color: var(--background-color);
+        font-weight: 600;
+    }
+    .result-content hr {
+        margin: 2rem 0;
+        border: none;
+        border-top: 2px solid var(--border-color);
+    }
+    .result-content strong {
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .result-content p {
+        margin: 1rem 0;
+    }
+    .loading {
+        display: none;
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-secondary);
+    }
+    .loading.show {
+        display: block;
+    }
+</style>
+
+<div class="agents-container">
+    <div class="agents-header">
+        <h1>🤖 Marketing AI Agents</h1>
+        <p style="color: var(--text-secondary);">
+            Select and interact with different marketing agents. Each agent specializes in specific marketing tasks.
+        </p>
+        <a href="{% url 'marketing_dashboard' %}" class="btn btn-secondary" style="margin-top: 1rem;">
+            ← Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Agent Tabs -->
+    <div class="agent-tabs">
+        <button class="agent-tab active" onclick="switchTab('qa')" id="tab-qa">
+            📊 Knowledge Q&A + Analytics
+        </button>
+        <button class="agent-tab" onclick="switchTab('research')" id="tab-research">
+            🔍 Market Research
+        </button>
+        <button class="agent-tab" onclick="switchTab('campaign')" id="tab-campaign" disabled>
+            🚀 Campaign (Coming Soon)
+        </button>
+        <button class="agent-tab" onclick="switchTab('analytics')" id="tab-analytics" disabled>
+            📈 Analytics (Coming Soon)
+        </button>
+        <button class="agent-tab" onclick="switchTab('document')" id="tab-document" disabled>
+            📄 Document Authoring (Coming Soon)
+        </button>
+        <button class="agent-tab" onclick="switchTab('notification')" id="tab-notification" disabled>
+            🔔 Notifications (Coming Soon)
+        </button>
+    </div>
+
+    <!-- Knowledge Q&A + Analytics Panel -->
+    <div class="agent-panel active" id="panel-qa">
+        <h3>📊 Knowledge Q&A + Analytics Agent</h3>
+        <p>
+            Ask marketing questions and get data-driven answers. This foundation agent analyzes your campaigns,
+            performance metrics, and provides intelligent insights.
+        </p>
+        
+        <form id="qa-form" onsubmit="handleQA(event)">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="qa-question">Ask a Marketing Question</label>
+                <textarea 
+                    id="qa-question" 
+                    name="question" 
+                    placeholder="Examples:&#10;• Why are sales dropping?&#10;• What campaigns are performing best?&#10;• What is our ROI?&#10;• Which channels are most effective?&#10;• What should we focus on?"
+                    required
+                ></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Ask AI</button>
+        </form>
+
+        <div class="loading" id="qa-loading">
+            <p>🤔 Analyzing data and generating insights...</p>
+        </div>
+
+        <div class="result-box" id="qa-result">
+            <h4>AI Response</h4>
+            <div class="result-content" id="qa-result-content"></div>
+        </div>
+    </div>
+
+    <!-- Market Research Panel -->
+    <div class="agent-panel" id="panel-research">
+        <h3>🔍 Market & Competitive Research Agent</h3>
+        <p>
+            Analyzes market trends, competitor activities, and customer behavior to identify opportunities, 
+            risks, and positioning strategies. Research findings are automatically available to the Q&A agent.
+        </p>
+        
+        <form id="research-form" onsubmit="handleMarketResearch(event)">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="research-type">Research Type</label>
+                <select id="research-type" name="research_type" required>
+                    <option value="market_trend">Market Trend Analysis</option>
+                    <option value="competitor">Competitor Analysis</option>
+                    <option value="customer_behavior">Customer Behavior Analysis</option>
+                    <option value="opportunity">Opportunity Identification</option>
+                    <option value="threat">Risk & Threat Analysis</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="research-topic">Research Topic</label>
+                <textarea 
+                    id="research-topic" 
+                    name="topic" 
+                    placeholder="Examples:&#10;• AI marketing tools market trends&#10;• Competitor analysis for social media platforms&#10;• Customer buying behavior in e-commerce&#10;• Opportunities in mobile marketing&#10;• Risks in digital advertising"
+                    required
+                ></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="research-context">Additional Context (Optional - JSON format)</label>
+                <textarea 
+                    id="research-context" 
+                    name="context" 
+                    placeholder='{"competitors": ["Competitor A", "Competitor B"], "industry": "Technology", "geographic_region": "North America"}'
+                    rows="3"
+                ></textarea>
+                <small style="color: var(--text-secondary);">Optional: Add competitor names, industry, geographic region, etc.</small>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">🔍 Conduct Research</button>
+        </form>
+
+        <div class="loading" id="research-loading">
+            <p>🔍 Analyzing market trends and conducting research...</p>
+        </div>
+
+        <div class="result-box" id="research-result">
+            <h4>Research Findings</h4>
+            <div class="result-content" id="research-result-content"></div>
+        </div>
+    </div>
+
+    <div class="agent-panel" id="panel-campaign">
+        <h3>🚀 Outreach & Campaign Agent</h3>
+        <p style="color: var(--text-secondary);">
+            This agent will create and manage multi-channel marketing campaigns.
+            Coming soon in Phase 4!
+        </p>
+    </div>
+
+    <div class="agent-panel" id="panel-analytics">
+        <h3>📈 Analytics & Dashboard Agent</h3>
+        <p style="color: var(--text-secondary);">
+            This agent will track campaign performance and provide real-time dashboards.
+            Coming soon in Phase 3!
+        </p>
+    </div>
+
+    <div class="agent-panel" id="panel-document">
+        <h3>📄 Document Authoring Agent</h3>
+        <p style="color: var(--text-secondary);">
+            This agent will create marketing strategies, proposals, and reports.
+            Coming soon in Phase 5!
+        </p>
+    </div>
+
+    <div class="agent-panel" id="panel-notification">
+        <h3>🔔 Proactive Notification Agent</h3>
+        <p style="color: var(--text-secondary);">
+            This agent will monitor performance and send proactive alerts.
+            Coming soon in Phase 6!
+        </p>
+    </div>
+</div>
+
+<script>
+// Simple markdown to HTML converter for research results
+function markdownToHtml(markdown) {
+    if (!markdown) return '';
+    
+    let html = markdown;
+    
+    // First pass: Convert markdown tables (process before splitting lines)
+    const tableRegex = /(\|[^\n]+\|\n)((?:\|:?-+:?\|)+\n)((?:\|[^\n]+\|\n?)+)/g;
+    html = html.replace(tableRegex, (match, headerRow, separatorRow, dataRows) => {
+        const headers = headerRow.trim().split('|').map(c => c.trim()).filter(c => c);
+        const rows = dataRows.trim().split('\n').map(row => 
+            row.trim().split('|').map(c => c.trim()).filter(c => c)
+        ).filter(row => row.length > 0);
+        
+        let tableHtml = '<table><thead><tr>';
+        headers.forEach(h => tableHtml += `<th>${h}</th>`);
+        tableHtml += '</tr></thead><tbody>';
+        rows.forEach(row => {
+            tableHtml += '<tr>';
+            row.forEach(cell => tableHtml += `<td>${cell}</td>`);
+            tableHtml += '</tr>';
+        });
+        tableHtml += '</tbody></table>';
+        return tableHtml;
+    });
+    
+    // Split into lines for processing
+    const lines = html.split('\n');
+    const output = [];
+    let inList = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Check for horizontal rules
+        if (line.match(/^---+$/)) {
+            if (inList) {
+                output.push('</ul>');
+                inList = false;
+            }
+            output.push('<hr>');
+            continue;
+        }
+        
+        // Check if it's a table (already converted)
+        if (line.includes('<table>')) {
+            if (inList) {
+                output.push('</ul>');
+                inList = false;
+            }
+            // Extract the full table HTML (might span multiple lines)
+            let tableHtml = line;
+            let j = i + 1;
+            while (j < lines.length && !lines[j].includes('</table>')) {
+                tableHtml += '\n' + lines[j];
+                j++;
+            }
+            if (j < lines.length) {
+                tableHtml += '\n' + lines[j];
+            }
+            output.push(tableHtml);
+            i = j;
+            continue;
+        }
+        
+        // Check for headers
+        if (line.match(/^### /)) {
+            if (inList) {
+                output.push('</ul>');
+                inList = false;
+            }
+            output.push(`<h3>${line.replace(/^### /, '')}</h3>`);
+            continue;
+        }
+        
+        if (line.match(/^## /)) {
+            if (inList) {
+                output.push('</ul>');
+                inList = false;
+            }
+            output.push(`<h2>${line.replace(/^## /, '')}</h2>`);
+            continue;
+        }
+        
+        // Check for list items
+        if (line.match(/^[\s]*(?:•|\-|\*|\d+\.)\s+/)) {
+            if (!inList) {
+                output.push('<ul>');
+                inList = true;
+            }
+            const content = line.replace(/^[\s]*(?:•|\-|\*|\d+\.)\s+/, '');
+            // Convert bold within list items
+            const processedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            output.push(`<li>${processedContent}</li>`);
+            continue;
+        } else if (inList && line === '') {
+            output.push('</ul>');
+            inList = false;
+            continue;
+        }
+        
+        // Regular paragraph
+        if (line && !line.includes('<table')) {
+            if (inList) {
+                output.push('</ul>');
+                inList = false;
+            }
+            // Convert bold
+            let content = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            output.push(`<p>${content}</p>`);
+        }
+    }
+    
+    // Close any open list
+    if (inList) {
+        output.push('</ul>');
+    }
+    
+    return output.join('\n');
+}
+
+function switchTab(tabName) {
+    // Hide all panels and remove active class from tabs
+    document.querySelectorAll('.agent-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    document.querySelectorAll('.agent-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+
+    // Show selected panel and activate tab
+    const panel = document.getElementById(`panel-${tabName}`);
+    const tab = document.getElementById(`tab-${tabName}`);
+    if (panel && tab && !tab.disabled) {
+        panel.classList.add('active');
+        tab.classList.add('active');
+    }
+}
+
+async function handleQA(event) {
+    event.preventDefault();
+    
+    const question = document.getElementById('qa-question').value;
+    const loading = document.getElementById('qa-loading');
+    const result = document.getElementById('qa-result');
+    const resultContent = document.getElementById('qa-result-content');
+    
+    // Show loading
+    loading.classList.add('show');
+    result.classList.remove('show');
+    
+    try {
+        const response = await fetch('{% url "test_marketing_qa" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({
+                question: question
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let output = data.answer || 'No answer provided.';
+            
+            // Add insights if available
+            if (data.insights && data.insights.length > 0) {
+                output += '\n\n📊 Key Insights:\n';
+                data.insights.forEach(insight => {
+                    output += `• ${insight.title}: ${insight.value}\n`;
+                });
+            }
+            
+            resultContent.textContent = output;
+            result.classList.add('show');
+        } else {
+            resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
+            result.classList.add('show');
+        }
+    } catch (error) {
+        resultContent.textContent = `Error: ${error.message}`;
+        result.classList.add('show');
+    } finally {
+        loading.classList.remove('show');
+    }
+}
+
+async function handleMarketResearch(event) {
+    event.preventDefault();
+    
+    const researchType = document.getElementById('research-type').value;
+    const topic = document.getElementById('research-topic').value;
+    const contextInput = document.getElementById('research-context').value;
+    const loading = document.getElementById('research-loading');
+    const result = document.getElementById('research-result');
+    const resultContent = document.getElementById('research-result-content');
+    
+    // Show loading
+    loading.classList.add('show');
+    result.classList.remove('show');
+    
+    // Parse context if provided
+    let context = {};
+    if (contextInput.trim()) {
+        try {
+            context = JSON.parse(contextInput);
+        } catch (e) {
+            alert('Invalid JSON in context field. Please check the format.');
+            loading.classList.remove('show');
+            return;
+        }
+    }
+    
+    try {
+        const response = await fetch('{% url "test_market_research" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({
+                research_type: researchType,
+                topic: topic,
+                context: context
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Build output with proper formatting - use insights directly as it contains formatted markdown
+            let output = '';
+            
+            if (data.insights) {
+                // The insights field now contains the full formatted response from AI
+                output = data.insights;
+            } else {
+                // Fallback to structured output if insights not available
+                output = `## 📊 Research Findings\n\n`;
+                output += `**Research Type**: ${data.research_type}\n`;
+                output += `**Topic**: ${data.topic}\n\n`;
+                
+                if (data.opportunities && data.opportunities.length > 0) {
+                    output += `### 🎯 Opportunities\n\n`;
+                    data.opportunities.forEach(opp => {
+                        output += `• ${opp}\n`;
+                    });
+                    output += `\n`;
+                }
+                
+                if (data.risks && data.risks.length > 0) {
+                    output += `### ⚠️ Risks & Threats\n\n`;
+                    data.risks.forEach(risk => {
+                        output += `• ${risk}\n`;
+                    });
+                    output += `\n`;
+                }
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    output += `### 💼 Recommendations\n\n`;
+                    data.recommendations.forEach(rec => {
+                        output += `• ${rec}\n`;
+                    });
+                    output += `\n`;
+                }
+            }
+            
+            if (data.research_id) {
+                output += `\n\n---\n\n✅ **Research saved to database (ID: ${data.research_id})**. Available for Q&A agent.`;
+            }
+            
+            // Convert markdown to HTML and display
+            resultContent.innerHTML = markdownToHtml(output);
+            result.classList.add('show');
+        } else {
+            resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
+            result.classList.add('show');
+        }
+    } catch (error) {
+        resultContent.textContent = `Error: ${error.message}`;
+        result.classList.add('show');
+    } finally {
+        loading.classList.remove('show');
+    }
+}
+
+// Handle hash in URL (e.g., #qa)
+window.addEventListener('DOMContentLoaded', () => {
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+        switchTab(hash);
+    }
+});
+</script>
+{% endblock %}
+

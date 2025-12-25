@@ -39,5 +39,8 @@ urlpatterns = [
     # Recruitment Agent
     path('recruitment/', include('recruitment_agent.urls')),
     
+    # Marketing Agent
+    path('marketing/', include('marketing_agent.urls')),
+    
     path('', user_login, name='home'),  # Home redirects to login
 ]

@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     'core',
     'project_manager_agent',
     'recruitment_agent',
+    'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
 ]
 
 MIDDLEWARE = [
@@ -127,32 +128,34 @@ LOGIN_URL = '/login/'
 
 
 # --------------------
-# AI / API Settings
+# AI / API Settings (for project manager agents and marketing Q&A agent)
 # --------------------
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
-GROQ_REC_API_KEY = os.getenv('GROQ_REC_API_KEY', '')
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')  # Default model (used for Q&A)
 
+# OpenAI API Settings (for Marketing Agents - for document writing and advanced tasks)
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4.1')  # Default model (or gpt-4.1 if available)
+OPENAI_REASONING_MODEL = os.getenv('OPENAI_REASONING_MODEL', 'gpt-4.1')  # For advanced reasoning
+OPENAI_WRITING_MODEL = os.getenv('OPENAI_WRITING_MODEL', 'gpt-4.1')  # For document writing
+OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')  # For RAG/embeddings
 
-# --------------------
-# Email Configuration
-# --------------------
-# Check EMAIL_BACKEND from .env (remove quotes if present)
-email_backend_env = os.getenv('EMAIL_BACKEND', '').strip().strip("'\"")
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '').strip()
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '').strip()
+# Email Settings (for Interview Scheduling Agent)
+# For development/testing: emails will be printed to console
+# For production: configure SMTP settings below
 
-# Check if SMTP is requested (either full path or 'smtp' keyword)
-if email_backend_env and ('smtp' in email_backend_env.lower() or 'EmailBackend' in email_backend_env):
-    # SMTP Configuration for actual email sending
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com').strip()
-    EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
-    EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower().strip() == 'true'
-    EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower().strip() == 'true'
+# Check if EMAIL_BACKEND is set in environment, otherwise use console for development
+email_backend_env = os.getenv('EMAIL_BACKEND', '')
+
+# If SMTP backend is requested, check if all required settings are present
+if email_backend_env == 'django.core.mail.backends.smtp.EmailBackend' or 'smtp' in email_backend_env.lower():
+    # SMTP backend requested - check if all settings are configured
+    email_host = os.getenv('EMAIL_HOST', '')
+    email_user = os.getenv('EMAIL_HOST_USER', '')
+    email_password = os.getenv('EMAIL_HOST_PASSWORD', '')
     
-    # Verify SMTP settings are configured
-    if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+    if not email_host or not email_user or not email_password:
+        # SMTP settings incomplete - fallback to console backend
         print("\n" + "="*60)
         print("WARNING: SMTP backend requested but EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set!")
         print("Falling back to console backend (emails will print to terminal)")
