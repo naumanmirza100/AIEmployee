@@ -20,3 +20,9 @@ class MarketingAgentConfig(AppConfig):
             AgentRegistry.register("market_research", MarketResearchAgent)
         except ImportError:
             pass  # Agent not implemented yet
+        
+        try:
+            from .agents.outreach_campaign_agent import OutreachCampaignAgent
+            AgentRegistry.register("outreach_campaign", OutreachCampaignAgent)
+        except ImportError:
+            pass  # Agent not implemented yet

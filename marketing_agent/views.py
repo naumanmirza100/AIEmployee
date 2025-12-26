@@ -38,7 +38,7 @@ def marketing_dashboard(request):
     all_agents = AgentRegistry.list_agents()
     marketing_agents = [
         agent for agent in all_agents 
-        if agent.startswith('marketing') or agent in ['market_research', 'campaign', 'notification']
+        if agent.startswith('marketing') or agent in ['market_research', 'campaign', 'notification', 'outreach_campaign']
     ]
     
     # Get campaign stats
@@ -128,6 +128,45 @@ def test_market_research(request):
 
 
 @login_required
+@require_http_methods(["POST"])
+def test_outreach_campaign(request):
+    """Test Outreach & Campaign Agent"""
+    try:
+        agent = AgentRegistry.get_agent("outreach_campaign")
+        data = json.loads(request.body)
+        
+        action = data.get('action', 'design')
+        
+        if not action:
+            return JsonResponse({
+                'success': False,
+                'error': 'Action is required'
+            }, status=400)
+        
+        # Get action-specific data
+        campaign_data = data.get('campaign_data', {})
+        campaign_id = data.get('campaign_id')
+        context = data.get('context', {})
+        
+        # Process with agent
+        result = agent.process(
+            action=action,
+            user_id=request.user.id,
+            campaign_data=campaign_data,
+            campaign_id=campaign_id,
+            context=context
+        )
+        
+        return JsonResponse(result)
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
 def marketing_agents_test(request):
     """Marketing agents testing interface"""
     # Check access
@@ -147,7 +186,7 @@ def marketing_agents_test(request):
     all_agents = AgentRegistry.list_agents()
     marketing_agents = [
         agent for agent in all_agents 
-        if agent.startswith('marketing') or agent in ['market_research', 'campaign', 'notification']
+        if agent.startswith('marketing') or agent in ['market_research', 'campaign', 'notification', 'outreach_campaign']
     ]
     
     return render(request, 'marketing/agents_test.html', {

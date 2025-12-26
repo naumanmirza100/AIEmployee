@@ -179,8 +179,8 @@
         <button class="agent-tab" onclick="switchTab('research')" id="tab-research">
             🔍 Market Research
         </button>
-        <button class="agent-tab" onclick="switchTab('campaign')" id="tab-campaign" disabled>
-            🚀 Campaign (Coming Soon)
+        <button class="agent-tab" onclick="switchTab('campaign')" id="tab-campaign">
+            🚀 Outreach & Campaign
         </button>
         <button class="agent-tab" onclick="switchTab('analytics')" id="tab-analytics" disabled>
             📈 Analytics (Coming Soon)
@@ -280,12 +280,180 @@
         </div>
     </div>
 
+    <!-- Outreach & Campaign Panel -->
     <div class="agent-panel" id="panel-campaign">
         <h3>🚀 Outreach & Campaign Agent</h3>
-        <p style="color: var(--text-secondary);">
-            This agent will create and manage multi-channel marketing campaigns.
-            Coming soon in Phase 4!
+        <p>
+            Designs, launches, and manages multi-channel marketing campaigns across email, social, paid ads, and partnerships.
+            Ensures consistent messaging and timely execution across all channels.
         </p>
+        
+        <!-- Action Selection -->
+        <div class="form-group">
+            <label for="campaign-action">Select Action</label>
+            <select id="campaign-action" name="action" onchange="updateCampaignForm()" required>
+                <option value="">-- Select Action --</option>
+                <option value="design">Design Campaign</option>
+                <option value="create_multi_channel">Create Multi-Channel Campaign</option>
+                <option value="launch">Launch Campaign</option>
+                <option value="manage">Manage Campaign</option>
+                <option value="optimize">Optimize Campaign</option>
+                <option value="schedule">Schedule Campaign</option>
+            </select>
+        </div>
+
+        <form id="campaign-form" onsubmit="handleCampaign(event)">
+            {% csrf_token %}
+            
+            <!-- Campaign ID (for launch, manage, optimize, schedule) -->
+            <div class="form-group" id="campaign-id-group" style="display: none;">
+                <label for="campaign-id">Campaign ID</label>
+                <input 
+                    type="number" 
+                    id="campaign-id" 
+                    name="campaign_id" 
+                    placeholder="Enter existing campaign ID"
+                />
+                <small style="color: var(--text-secondary);">Required for launch, manage, optimize, and schedule actions</small>
+            </div>
+
+            <!-- Campaign Name -->
+            <div class="form-group" id="campaign-name-group">
+                <label for="campaign-name">Campaign Name</label>
+                <input 
+                    type="text" 
+                    id="campaign-name" 
+                    name="campaign_name" 
+                    placeholder="e.g., Summer Sale 2024"
+                />
+            </div>
+
+            <!-- Campaign Description -->
+            <div class="form-group" id="campaign-description-group">
+                <label for="campaign-description">Campaign Description</label>
+                <textarea 
+                    id="campaign-description" 
+                    name="campaign_description" 
+                    placeholder="Describe your campaign goals and objectives..."
+                    rows="3"
+                ></textarea>
+            </div>
+
+            <!-- Campaign Type -->
+            <div class="form-group" id="campaign-type-group">
+                <label for="campaign-type">Campaign Type</label>
+                <select id="campaign-type" name="campaign_type">
+                    <option value="integrated">Integrated (Multi-Channel)</option>
+                    <option value="email">Email</option>
+                    <option value="social">Social Media</option>
+                    <option value="paid">Paid Advertising</option>
+                    <option value="partnership">Partnership</option>
+                </select>
+            </div>
+
+            <!-- Channels -->
+            <div class="form-group" id="campaign-channels-group">
+                <label>Channels (Select all that apply)</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.5rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="channels" value="email" checked />
+                        <span>📧 Email</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="channels" value="social" checked />
+                        <span>📱 Social Media</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="channels" value="paid" />
+                        <span>💰 Paid Ads</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="channels" value="partnership" />
+                        <span>🤝 Partnerships</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Budget -->
+            <div class="form-group" id="campaign-budget-group">
+                <label for="campaign-budget">Budget ($)</label>
+                <input 
+                    type="number" 
+                    id="campaign-budget" 
+                    name="campaign_budget" 
+                    placeholder="10000"
+                    step="0.01"
+                    min="0"
+                />
+            </div>
+
+            <!-- Goals (JSON) -->
+            <div class="form-group" id="campaign-goals-group">
+                <label for="campaign-goals">Campaign Goals (JSON format)</label>
+                <textarea 
+                    id="campaign-goals" 
+                    name="campaign_goals" 
+                    placeholder='{"revenue": 50000, "leads": 1000, "conversions": 500}'
+                    rows="3"
+                ></textarea>
+                <small style="color: var(--text-secondary);">Enter goals as JSON: revenue, leads, conversions, etc.</small>
+            </div>
+
+            <!-- Target Audience (JSON) -->
+            <div class="form-group" id="campaign-audience-group">
+                <label for="campaign-audience">Target Audience (JSON format)</label>
+                <textarea 
+                    id="campaign-audience" 
+                    name="campaign_audience" 
+                    placeholder='{"age_range": "25-45", "interests": ["technology", "business"], "location": "North America"}'
+                    rows="3"
+                ></textarea>
+                <small style="color: var(--text-secondary);">Enter target audience details as JSON</small>
+            </div>
+
+            <!-- Start Date -->
+            <div class="form-group" id="campaign-start-date-group" style="display: none;">
+                <label for="campaign-start-date">Start Date</label>
+                <input 
+                    type="date" 
+                    id="campaign-start-date" 
+                    name="campaign_start_date"
+                />
+            </div>
+
+            <!-- End Date -->
+            <div class="form-group" id="campaign-end-date-group" style="display: none;">
+                <label for="campaign-end-date">End Date</label>
+                <input 
+                    type="date" 
+                    id="campaign-end-date" 
+                    name="campaign_end_date"
+                />
+            </div>
+
+            <!-- Additional Context -->
+            <div class="form-group" id="campaign-context-group">
+                <label for="campaign-context">Additional Context (Optional - JSON format)</label>
+                <textarea 
+                    id="campaign-context" 
+                    name="campaign_context" 
+                    placeholder='{"industry": "Technology", "competitors": ["Competitor A"], "key_messages": ["Message 1", "Message 2"]}'
+                    rows="3"
+                ></textarea>
+                <small style="color: var(--text-secondary);">Optional: Add industry, competitors, key messages, etc.</small>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="campaign-submit-btn">Execute Action</button>
+        </form>
+
+        <div class="loading" id="campaign-loading">
+            <p>🚀 Processing campaign action...</p>
+        </div>
+
+        <div class="result-box" id="campaign-result">
+            <h4>Campaign Result</h4>
+            <div class="result-content" id="campaign-result-content"></div>
+        </div>
     </div>
 
     <div class="agent-panel" id="panel-analytics">
@@ -603,7 +771,362 @@ async function handleMarketResearch(event) {
     }
 }
 
-// Handle hash in URL (e.g., #qa)
+// Campaign Agent Functions
+function updateCampaignForm() {
+    const action = document.getElementById('campaign-action').value;
+    const campaignIdGroup = document.getElementById('campaign-id-group');
+    const campaignNameGroup = document.getElementById('campaign-name-group');
+    const campaignDescriptionGroup = document.getElementById('campaign-description-group');
+    const campaignTypeGroup = document.getElementById('campaign-type-group');
+    const campaignChannelsGroup = document.getElementById('campaign-channels-group');
+    const campaignBudgetGroup = document.getElementById('campaign-budget-group');
+    const campaignGoalsGroup = document.getElementById('campaign-goals-group');
+    const campaignAudienceGroup = document.getElementById('campaign-audience-group');
+    const campaignStartDateGroup = document.getElementById('campaign-start-date-group');
+    const campaignEndDateGroup = document.getElementById('campaign-end-date-group');
+    const campaignContextGroup = document.getElementById('campaign-context-group');
+    const submitBtn = document.getElementById('campaign-submit-btn');
+    
+    // Reset all groups
+    campaignIdGroup.style.display = 'none';
+    campaignNameGroup.style.display = 'block';
+    campaignDescriptionGroup.style.display = 'block';
+    campaignTypeGroup.style.display = 'block';
+    campaignChannelsGroup.style.display = 'block';
+    campaignBudgetGroup.style.display = 'block';
+    campaignGoalsGroup.style.display = 'block';
+    campaignAudienceGroup.style.display = 'block';
+    campaignStartDateGroup.style.display = 'none';
+    campaignEndDateGroup.style.display = 'none';
+    campaignContextGroup.style.display = 'block';
+    
+    // Update based on action
+    if (action === 'design') {
+        submitBtn.textContent = 'Design Campaign';
+        campaignIdGroup.style.display = 'none';
+    } else if (action === 'create_multi_channel') {
+        submitBtn.textContent = 'Create Campaign';
+        campaignIdGroup.style.display = 'none';
+        campaignStartDateGroup.style.display = 'block';
+        campaignEndDateGroup.style.display = 'block';
+    } else if (action === 'launch' || action === 'manage' || action === 'optimize') {
+        submitBtn.textContent = action.charAt(0).toUpperCase() + action.slice(1) + ' Campaign';
+        campaignIdGroup.style.display = 'block';
+        campaignNameGroup.style.display = 'none';
+        campaignDescriptionGroup.style.display = 'none';
+        campaignTypeGroup.style.display = 'none';
+        campaignChannelsGroup.style.display = 'none';
+        campaignBudgetGroup.style.display = 'none';
+        campaignGoalsGroup.style.display = 'none';
+        campaignAudienceGroup.style.display = 'none';
+    } else if (action === 'schedule') {
+        submitBtn.textContent = 'Schedule Campaign';
+        campaignIdGroup.style.display = 'block';
+        campaignStartDateGroup.style.display = 'block';
+        campaignEndDateGroup.style.display = 'block';
+        campaignNameGroup.style.display = 'none';
+        campaignDescriptionGroup.style.display = 'none';
+        campaignTypeGroup.style.display = 'none';
+        campaignChannelsGroup.style.display = 'none';
+        campaignBudgetGroup.style.display = 'none';
+        campaignGoalsGroup.style.display = 'none';
+        campaignAudienceGroup.style.display = 'none';
+    }
+}
+
+async function handleCampaign(event) {
+    event.preventDefault();
+    
+    const action = document.getElementById('campaign-action').value;
+    if (!action) {
+        alert('Please select an action first.');
+        return;
+    }
+    
+    const loading = document.getElementById('campaign-loading');
+    const result = document.getElementById('campaign-result');
+    const resultContent = document.getElementById('campaign-result-content');
+    
+    // Show loading
+    loading.classList.add('show');
+    result.classList.remove('show');
+    
+    // Build campaign data
+    const campaignData = {};
+    const context = {};
+    
+    // Get campaign ID if needed
+    const campaignId = document.getElementById('campaign-id').value;
+    
+    // Get form values
+    if (document.getElementById('campaign-name').value) {
+        campaignData.name = document.getElementById('campaign-name').value;
+    }
+    if (document.getElementById('campaign-description').value) {
+        campaignData.description = document.getElementById('campaign-description').value;
+    }
+    if (document.getElementById('campaign-type').value) {
+        campaignData.campaign_type = document.getElementById('campaign-type').value;
+    }
+    
+    // Get selected channels
+    const channelCheckboxes = document.querySelectorAll('input[name="channels"]:checked');
+    if (channelCheckboxes.length > 0) {
+        campaignData.channels = Array.from(channelCheckboxes).map(cb => cb.value);
+    }
+    
+    if (document.getElementById('campaign-budget').value) {
+        campaignData.budget = parseFloat(document.getElementById('campaign-budget').value);
+    }
+    
+    // Parse goals JSON
+    const goalsInput = document.getElementById('campaign-goals').value;
+    if (goalsInput.trim()) {
+        try {
+            campaignData.goals = JSON.parse(goalsInput);
+        } catch (e) {
+            alert('Invalid JSON in Goals field. Please check the format.');
+            loading.classList.remove('show');
+            return;
+        }
+    }
+    
+    // Parse audience JSON
+    const audienceInput = document.getElementById('campaign-audience').value;
+    if (audienceInput.trim()) {
+        try {
+            campaignData.target_audience = JSON.parse(audienceInput);
+        } catch (e) {
+            alert('Invalid JSON in Target Audience field. Please check the format.');
+            loading.classList.remove('show');
+            return;
+        }
+    }
+    
+    // Get dates
+    if (document.getElementById('campaign-start-date').value) {
+        campaignData.start_date = document.getElementById('campaign-start-date').value;
+    }
+    if (document.getElementById('campaign-end-date').value) {
+        campaignData.end_date = document.getElementById('campaign-end-date').value;
+    }
+    
+    // Parse context JSON
+    const contextInput = document.getElementById('campaign-context').value;
+    if (contextInput.trim()) {
+        try {
+            Object.assign(context, JSON.parse(contextInput));
+        } catch (e) {
+            alert('Invalid JSON in Context field. Please check the format.');
+            loading.classList.remove('show');
+            return;
+        }
+    }
+    
+    // Build request body
+    const requestBody = {
+        action: action
+    };
+    
+    if (Object.keys(campaignData).length > 0) {
+        requestBody.campaign_data = campaignData;
+    }
+    
+    if (campaignId) {
+        requestBody.campaign_id = parseInt(campaignId);
+    }
+    
+    if (Object.keys(context).length > 0) {
+        requestBody.context = context;
+    }
+    
+    try {
+        const response = await fetch('{% url "test_outreach_campaign" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let output = '';
+            
+            // Format output based on action
+            if (action === 'design') {
+                output = `## 🎨 Campaign Design\n\n`;
+                if (data.campaign_design) {
+                    const design = data.campaign_design;
+                    if (design.raw_design) {
+                        output += design.raw_design;
+                    } else {
+                        output += `**Campaign Name**: ${design.campaign_name || 'N/A'}\n\n`;
+                        output += `**Description**: ${design.description || 'N/A'}\n\n`;
+                        output += `**Channels**: ${(design.channels || []).join(', ')}\n\n`;
+                    }
+                }
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    output += `\n\n---\n\n## 💡 Recommendations\n\n`;
+                    data.recommendations.forEach(rec => {
+                        output += `• ${rec}\n`;
+                    });
+                }
+            } else if (action === 'create_multi_channel') {
+                output = `## ✅ Campaign Created Successfully\n\n`;
+                output += `**Campaign ID**: ${data.campaign_id}\n`;
+                output += `**Campaign Name**: ${data.campaign_name}\n`;
+                output += `**Status**: ${data.status}\n`;
+                output += `**Channels**: ${(data.channels || []).join(', ')}\n\n`;
+                output += `\n${data.message || 'Campaign created successfully!'}\n`;
+                
+                if (data.campaign_design) {
+                    output += `\n\n---\n\n## 🎨 Campaign Design\n\n`;
+                    if (data.campaign_design.raw_design) {
+                        output += data.campaign_design.raw_design;
+                    }
+                }
+            } else if (action === 'launch') {
+                output = `## 🚀 Campaign Launched\n\n`;
+                output += `**Campaign**: ${data.campaign_name}\n`;
+                output += `**Status**: ${data.status}\n`;
+                output += `**Channels**: ${(data.channels || []).join(', ')}\n`;
+                if (data.start_date) {
+                    output += `**Start Date**: ${data.start_date}\n`;
+                }
+                output += `\n${data.message || 'Campaign launched successfully!'}\n`;
+                
+                if (data.launch_plan) {
+                    output += `\n\n---\n\n## 📋 Launch Plan\n\n`;
+                    if (data.launch_plan.full_plan) {
+                        output += data.launch_plan.full_plan;
+                    }
+                    if (data.launch_plan.checklist && data.launch_plan.checklist.length > 0) {
+                        output += `\n\n### ✅ Launch Checklist\n\n`;
+                        data.launch_plan.checklist.forEach(item => {
+                            output += `- ${item}\n`;
+                        });
+                    }
+                }
+            } else if (action === 'manage') {
+                output = `## 📊 Campaign Management\n\n`;
+                output += `**Campaign**: ${data.campaign_name}\n`;
+                output += `**Status**: ${data.current_status}\n\n`;
+                
+                if (data.performance) {
+                    output += `### 📈 Performance Metrics\n\n`;
+                    output += `- Impressions: ${(data.performance.total_impressions || 0).toLocaleString()}\n`;
+                    output += `- Clicks: ${(data.performance.total_clicks || 0).toLocaleString()}\n`;
+                    output += `- Conversions: ${(data.performance.total_conversions || 0).toLocaleString()}\n`;
+                    output += `- CTR: ${(data.performance.ctr || 0).toFixed(2)}%\n`;
+                    output += `- Conversion Rate: ${(data.performance.conversion_rate || 0).toFixed(2)}%\n`;
+                    output += `- Spend: $${(data.performance.spend || 0).toLocaleString(2)}\n`;
+                    output += `- Budget: $${(data.performance.budget || 0).toLocaleString(2)}\n\n`;
+                }
+                
+                if (data.management_plan) {
+                    if (data.management_plan.assessment) {
+                        output += `### 💼 Management Assessment\n\n`;
+                        output += data.management_plan.assessment;
+                        output += `\n\n`;
+                    }
+                }
+                
+                if (data.consistency_check) {
+                    output += `### ✅ Messaging Consistency\n\n`;
+                    output += `**Status**: ${data.consistency_check.is_consistent ? '✅ Consistent' : '⚠️ Needs Review'}\n\n`;
+                    if (data.consistency_check.assessment) {
+                        output += data.consistency_check.assessment;
+                        output += `\n\n`;
+                    }
+                }
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    output += `\n\n---\n\n## 💡 Recommendations\n\n`;
+                    data.recommendations.forEach(rec => {
+                        output += `• ${rec}\n`;
+                    });
+                }
+            } else if (action === 'optimize') {
+                output = `## ⚡ Campaign Optimization\n\n`;
+                output += `**Campaign**: ${data.campaign_name}\n\n`;
+                
+                if (data.current_performance) {
+                    output += `### 📊 Current Performance\n\n`;
+                    output += `- Impressions: ${(data.current_performance.total_impressions || 0).toLocaleString()}\n`;
+                    output += `- Clicks: ${(data.current_performance.total_clicks || 0).toLocaleString()}\n`;
+                    output += `- Conversions: ${(data.current_performance.total_conversions || 0).toLocaleString()}\n`;
+                    output += `- CTR: ${(data.current_performance.ctr || 0).toFixed(2)}%\n`;
+                    output += `- Conversion Rate: ${(data.current_performance.conversion_rate || 0).toFixed(2)}%\n\n`;
+                }
+                
+                if (data.optimization_plan) {
+                    if (data.optimization_plan.optimization_plan) {
+                        output += `### 🎯 Optimization Plan\n\n`;
+                        output += data.optimization_plan.optimization_plan;
+                        output += `\n\n`;
+                    }
+                }
+                
+                if (data.priority_actions && data.priority_actions.length > 0) {
+                    output += `\n\n---\n\n## 🔥 Priority Actions\n\n`;
+                    data.priority_actions.forEach(action => {
+                        output += `• ${action}\n`;
+                    });
+                }
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    output += `\n\n---\n\n## 💡 Recommendations\n\n`;
+                    data.recommendations.forEach(rec => {
+                        output += `• ${rec}\n`;
+                    });
+                }
+            } else if (action === 'schedule') {
+                output = `## 📅 Campaign Scheduled\n\n`;
+                output += `**Campaign**: ${data.campaign_name}\n`;
+                output += `**Status**: ${data.status}\n`;
+                if (data.start_date) {
+                    output += `**Start Date**: ${data.start_date}\n`;
+                }
+                if (data.end_date) {
+                    output += `**End Date**: ${data.end_date}\n`;
+                }
+                output += `\n`;
+                
+                if (data.schedule) {
+                    if (data.schedule.schedule) {
+                        output += `### 📋 Schedule Details\n\n`;
+                        output += data.schedule.schedule;
+                        output += `\n\n`;
+                    }
+                    if (data.schedule.milestones && data.schedule.milestones.length > 0) {
+                        output += `### 🎯 Key Milestones\n\n`;
+                        data.schedule.milestones.forEach(milestone => {
+                            output += `• ${milestone}\n`;
+                        });
+                    }
+                }
+            }
+            
+            // Convert markdown to HTML and display
+            resultContent.innerHTML = markdownToHtml(output);
+            result.classList.add('show');
+        } else {
+            resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
+            result.classList.add('show');
+        }
+    } catch (error) {
+        resultContent.textContent = `Error: ${error.message}`;
+        result.classList.add('show');
+    } finally {
+        loading.classList.remove('show');
+    }
+}
+
+// Handle hash in URL (e.g., #qa, #campaign)
 window.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.substring(1);
     if (hash) {
