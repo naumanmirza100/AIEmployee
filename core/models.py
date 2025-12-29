@@ -298,6 +298,7 @@ class UserProfile(models.Model):
         ('developer', 'Developer'),
         ('viewer', 'Viewer'),
         ('recruitment_agent', 'Recruitment Agent'),
+        ('frontline_agent', 'Frontline Agent'),
         ('marketing_agent', 'Marketing Agent'),
     ]
     
@@ -326,6 +327,10 @@ class UserProfile(models.Model):
         """Check if user is a recruitment agent"""
         return self.role == 'recruitment_agent'
     
+    def is_frontline_agent(self):
+        """Check if user is a frontline agent"""
+        return self.role == 'frontline_agent'
+
     def is_marketing_agent(self):
         """Check if user is a marketing agent"""
         return self.role == 'marketing_agent'

@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Frontline Agent Dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'frontline_agent/css/dashboard.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="frontline-container">
+    <div class="dashboard-header">
+        <h1>🎯 Frontline Agent Dashboard</h1>
+        <p class="subtitle">Manage tickets, knowledge base, workflows, and more with AI-powered agents</p>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">📋</div>
+            <div class="stat-content">
+                <h3>{{ open_tickets }}</h3>
+                <p>Open Tickets</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-content">
+                <h3>{{ resolved_tickets }}</h3>
+                <p>Resolved Tickets</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🔔</div>
+            <div class="stat-content">
+                <h3>{{ unread_notifications }}</h3>
+                <p>Unread Notifications</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-content">
+                <h3 id="resolution-rate">—</h3>
+                <p>Resolution Rate</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="content-grid">
+        <!-- Left Column -->
+        <div class="left-column">
+            <!-- Knowledge Q&A Agent -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>💡 Knowledge Q&A Agent</h2>
+                    <p class="card-subtitle">Ask questions and get answers from the knowledge base</p>
+                </div>
+                <div class="card-body">
+                    <div class="input-group">
+                        <textarea id="knowledge-question" placeholder="Ask a question about tickets, procedures, or policies..." rows="3"></textarea>
+                        <button id="ask-question-btn" class="btn-primary">Ask Question</button>
+                    </div>
+                    <div id="knowledge-answer" class="answer-box" style="display: none;">
+                        <div class="answer-content"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ticket Management -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>🎫 Ticket Triage & Auto-resolution</h2>
+                    <p class="card-subtitle">Create and manage support tickets</p>
+                </div>
+                <div class="card-body">
+                    <button id="create-ticket-btn" class="btn-primary">Create New Ticket</button>
+                    <div id="ticket-form" style="display: none; margin-top: 1rem;">
+                        <input type="text" id="ticket-title" placeholder="Ticket Title" class="form-input">
+                        <textarea id="ticket-description" placeholder="Describe the issue..." rows="4" class="form-input"></textarea>
+                        <select id="ticket-priority" class="form-input">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                        </select>
+                        <select id="ticket-category" class="form-input">
+                            <option value="technical">Technical</option>
+                            <option value="billing">Billing</option>
+                            <option value="account">Account</option>
+                            <option value="bug">Bug</option>
+                            <option value="feature_request">Feature Request</option>
+                            <option value="other" selected>Other</option>
+                        </select>
+                        <div class="button-group">
+                            <button id="submit-ticket-btn" class="btn-primary">Submit Ticket</button>
+                            <button id="cancel-ticket-btn" class="btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="tickets-list" class="tickets-list"></div>
+                </div>
+            </div>
+
+            <!-- Workflow / SOP Runner -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>⚙️ Workflow / SOP Runner</h2>
+                    <p class="card-subtitle">Execute standard operating procedures</p>
+                </div>
+                <div class="card-body">
+                    <input type="text" id="workflow-name" placeholder="Workflow Name" class="form-input">
+                    <textarea id="workflow-description" placeholder="Workflow Description..." rows="3" class="form-input"></textarea>
+                    <button id="execute-workflow-btn" class="btn-primary">Execute Workflow</button>
+                    <div id="workflow-result" class="result-box" style="display: none;"></div>
+                </div>
+            </div>
+
+            <!-- Document Processing -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>📄 Document Processing Agent</h2>
+                    <p class="card-subtitle">Upload and process documents</p>
+                </div>
+                <div class="card-body">
+                    <input type="file" id="document-file" class="form-input">
+                    <input type="text" id="document-title" placeholder="Document Title" class="form-input">
+                    <button id="upload-document-btn" class="btn-primary">Upload Document</button>
+                    <div id="document-result" class="result-box" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="right-column">
+            <!-- Proactive Notifications -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>🔔 Proactive Notifications</h2>
+                    <p class="card-subtitle">Recent notifications and follow-ups</p>
+                </div>
+                <div class="card-body">
+                    <div id="notifications-list" class="notifications-list"></div>
+                    <button id="refresh-notifications-btn" class="btn-secondary">Refresh</button>
+                </div>
+            </div>
+
+            <!-- Meeting Scheduling -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>📅 Meeting Scheduling Agent</h2>
+                    <p class="card-subtitle">Schedule meetings and appointments</p>
+                </div>
+                <div class="card-body">
+                    <input type="text" id="meeting-title" placeholder="Meeting Title" class="form-input">
+                    <textarea id="meeting-description" placeholder="Meeting Description..." rows="2" class="form-input"></textarea>
+                    <input type="datetime-local" id="meeting-datetime" class="form-input">
+                    <input type="number" id="meeting-duration" placeholder="Duration (minutes)" value="60" class="form-input">
+                    <input type="url" id="meeting-link" placeholder="Meeting Link (optional)" class="form-input">
+                    <button id="schedule-meeting-btn" class="btn-primary">Schedule Meeting</button>
+                    <div id="meeting-result" class="result-box" style="display: none;"></div>
+                </div>
+            </div>
+
+            <!-- Analytics Dashboard -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>📊 Analytics & Dashboard</h2>
+                    <p class="card-subtitle">View performance metrics and insights</p>
+                </div>
+                <div class="card-body">
+                    <button id="load-analytics-btn" class="btn-primary">Load Analytics</button>
+                    <div id="analytics-content" class="analytics-content" style="display: none;"></div>
+                </div>
+            </div>
+
+            <!-- Recent Tickets -->
+            <div class="agent-card">
+                <div class="card-header">
+                    <h2>📋 Recent Tickets</h2>
+                </div>
+                <div class="card-body">
+                    <div id="recent-tickets-list" class="tickets-list">
+                        {% for ticket in recent_tickets %}
+                        <div class="ticket-item">
+                            <div class="ticket-header">
+                                <span class="ticket-id">#{{ ticket.id }}</span>
+                                <span class="ticket-status status-{{ ticket.status }}">{{ ticket.get_status_display }}</span>
+                            </div>
+                            <h4>{{ ticket.title }}</h4>
+                            <p class="ticket-meta">{{ ticket.created_at|date:"M d, Y H:i" }}</p>
+                        </div>
+                        {% empty %}
+                        <p class="empty-state">No recent tickets</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{% static 'frontline_agent/js/dashboard.js' %}"></script>
+{% endblock %}
+
