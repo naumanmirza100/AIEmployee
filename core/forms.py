@@ -139,9 +139,10 @@ class CustomUserCreationForm(UserCreationForm):
     """Custom signup form with role selection"""
     role = forms.ChoiceField(
         choices=[
-            ('project_manager', 'Project Manager'), 
+            ('project_manager', 'Project Manager'),
             ('recruitment_agent', 'Recruitment Agent'),
-            ('marketing_agent', 'Marketing Agent')
+            ('frontline_agent', 'Frontline Agent'),
+            ('marketing_agent', 'Marketing Agent'),
         ],
         required=True,
         widget=forms.Select(attrs={

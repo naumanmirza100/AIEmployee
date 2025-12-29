@@ -28,6 +28,12 @@
                     {% if user.profile.is_recruitment_agent %}
                         <li><a href="{% url 'recruitment_dashboard' %}">Recruitment</a></li>
                     {% endif %}
+                    {% if user.profile.is_frontline_agent %}
+                        <li><a href="{% url 'frontline_dashboard' %}">Frontline</a></li>
+                    {% endif %}
+                    {% if user.profile.is_marketing_agent %}
+                        <li><a href="{% url 'marketing_dashboard' %}">Marketing</a></li>
+                    {% endif %}
                     <li class="user-info">
                         <span style="color: var(--text-secondary); font-size: 0.9rem;">
                             {{ user.username }} 
@@ -40,6 +46,14 @@
                                     {% elif request.session.selected_role == 'recruitment_agent' %}
                                     <span style="background: var(--primary-color); color: white; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-size: 0.75rem; margin-left: 0.5rem;">
                                         RA (Admin)
+                                    </span>
+                                    {% elif request.session.selected_role == 'frontline_agent' %}
+                                    <span style="background: var(--primary-color); color: white; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-size: 0.75rem; margin-left: 0.5rem;">
+                                        FA (Admin)
+                                    </span>
+                                    {% elif request.session.selected_role == 'marketing_agent' %}
+                                    <span style="background: var(--primary-color); color: white; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-size: 0.75rem; margin-left: 0.5rem;">
+                                        MA (Admin)
                                     </span>
                                     {% elif request.session.selected_role == 'team_member' %}
                                     <span style="background: var(--primary-color); color: white; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-size: 0.75rem; margin-left: 0.5rem;">
