@@ -13,11 +13,11 @@ from .models import (
     Ticket, KnowledgeBase, Notification, FrontlineWorkflowExecution,
     FrontlineMeeting, Document, FrontlineAnalytics
 )
-from core.ai_agents.knowledge_qa_agent import KnowledgeQAAgent
-from core.ai_agents.workflow_sop_agent import WorkflowSOPAgent
-from core.ai_agents.analytics_dashboard_agent import AnalyticsDashboardAgent
-from core.ai_agents.calendar_planner_agent import CalendarPlannerAgent
-from core.ai_agents.meeting_notetaker_agent import MeetingNotetakerAgent
+from project_manager_agent.ai_agents.knowledge_qa_agent import KnowledgeQAAgent
+from project_manager_agent.ai_agents.workflow_sop_agent import WorkflowSOPAgent
+from project_manager_agent.ai_agents.analytics_dashboard_agent import AnalyticsDashboardAgent
+from project_manager_agent.ai_agents.calendar_planner_agent import CalendarPlannerAgent
+from project_manager_agent.ai_agents.meeting_notetaker_agent import MeetingNotetakerAgent
 
 
 # Initialize agents (singleton pattern)

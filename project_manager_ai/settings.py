@@ -235,19 +235,11 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Load environment variables
+load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file
-# override=True ensures .env file values override system environment variables
-env_path = BASE_DIR / '.env'
-load_dotenv(dotenv_path=env_path, override=True)
-
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45'
 DEBUG = True
 ALLOWED_HOSTS = []
@@ -267,8 +259,8 @@ INSTALLED_APPS = [
     'core',
     'project_manager_agent',
     'recruitment_agent',
-    'Frontline_agent',
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
+    'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
 ]
 
 MIDDLEWARE = [
@@ -303,51 +295,24 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 
 
 # --------------------
-# Database Configuration
+# Database (SQL Server Express)
 # --------------------
-# Set USE_SQL_SERVER=True in .env to use SQL Server, otherwise uses SQLite
-USE_SQL_SERVER = os.getenv('USE_SQL_SERVER', 'False').lower() == 'true'
-USE_WINDOWS_AUTH = os.getenv('USE_WINDOWS_AUTH', 'False').lower() == 'true'
+DATABASES = {
+    'default': {
+        'ENGINE': 'mssql',
+        'NAME': os.getenv('DB_NAME', 'project_manager_db'),
+        'HOST': r'localhost\SQLEXPRESS',
+        'OPTIONS': {
+            'driver': 'ODBC Driver 17 for SQL Server',
+            'trusted_connection': 'yes',
+        },
+    }
+}
 
-if USE_SQL_SERVER:
-    # SQL Server Database Configuration
-    # ODBC Driver 18 Configuration:
-    # - Encrypt=yes is required (default behavior)
-    # - TrustServerCertificate=yes bypasses certificate validation (for local dev only)
-    # - For production, remove TrustServerCertificate and use proper SSL certificates
-    db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 18 for SQL Server')
-    
-    db_options = {
-        'driver': db_driver,
-        'extra_params': 'TrustServerCertificate=yes',
-    }
-    
-    # For Windows Authentication, add Trusted_Connection parameter
-    if USE_WINDOWS_AUTH:
-        db_options['extra_params'] = 'TrustServerCertificate=yes;Trusted_Connection=yes'
-    
-    DATABASES = {
-        'default': {
-            'ENGINE': 'mssql',
-            'NAME': os.getenv('DB_NAME', 'project_manager_db'),
-            'HOST': os.getenv('DB_HOST', 'localhost'),
-            'PORT': os.getenv('DB_PORT', '1433'),
-            'OPTIONS': db_options,
-        }
-    }
-    
-    # Add user/password only for SQL Server Authentication (not Windows Auth)
-    if not USE_WINDOWS_AUTH:
-        DATABASES['default']['USER'] = os.getenv('DB_USER', '')
-        DATABASES['default']['PASSWORD'] = os.getenv('DB_PASSWORD', '')
-else:
-    # Default SQLite database (for development/testing)
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+# ⚠️ Notes:
+# - No PORT (SQL Express uses dynamic ports)
+# - No USER / PASSWORD (Windows Authentication)
+# - No extra_params (causes invalid connection string errors)
 
 
 # --------------------
@@ -376,11 +341,6 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
-# --------------------
-# Media files
-# --------------------
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # --------------------
 # Default PK
