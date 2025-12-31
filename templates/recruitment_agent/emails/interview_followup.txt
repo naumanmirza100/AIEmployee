@@ -1,0 +1,33 @@
+Dear {{ candidate_name }},
+
+We wanted to follow up regarding your interview invitation for the {{ job_role }} position.
+
+{% if followup_number > 1 %}
+This is a friendly reminder (follow-up #{{ followup_number }}) - we haven't received your confirmation yet.
+{% else %}
+We haven't received your confirmation yet. Please confirm your interview slot to proceed with the next steps.
+{% endif %}
+
+Interview Details:
+- Position: {{ job_role }}
+- Interview Type: {{ interview_type }}
+
+Available Time Slots:
+
+{% for slot in available_slots %}
+{{ forloop.counter }}. {{ slot.display }}
+{% endfor %}
+
+IMPORTANT: Please confirm your interview by selecting a time slot using the link below:
+
+{{ slot_selection_url }}
+
+Click the link above to select your preferred interview time slot. This will help us proceed with your application.
+
+If you have any questions or need to reschedule, please reply to this email.
+
+We look forward to hearing from you soon!
+
+Best regards,
+Recruitment Team
+

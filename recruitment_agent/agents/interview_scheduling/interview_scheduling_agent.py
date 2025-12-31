@@ -84,7 +84,26 @@ class InterviewSchedulingAgent:
         # Generate unique secure token for candidate slot selection
         confirmation_token = secrets.token_urlsafe(32)
         
-        # Create interview record
+        # Get recruiter email settings to apply to interview
+        from recruitment_agent.models import RecruiterEmailSettings
+        followup_delay = 48
+        reminder_hours = 24
+        max_followups = 3
+        min_between = 24
+        
+        if recruiter_id:
+            try:
+                from django.contrib.auth.models import User
+                recruiter = User.objects.get(id=recruiter_id)
+                settings = recruiter.recruiter_email_settings
+                followup_delay = settings.followup_delay_hours
+                reminder_hours = settings.reminder_hours_before
+                max_followups = settings.max_followup_emails
+                min_between = settings.min_hours_between_followups
+            except (User.DoesNotExist, RecruiterEmailSettings.DoesNotExist):
+                pass  # Use defaults
+        
+        # Create interview record with recruiter preferences
         interview = Interview.objects.create(
             candidate_name=candidate_name,
             candidate_email=candidate_email,
@@ -97,6 +116,11 @@ class InterviewSchedulingAgent:
             recruiter_id=recruiter_id,
             confirmation_token=confirmation_token,
             invitation_sent_at=timezone.now(),
+            # Apply recruiter email timing preferences
+            followup_delay_hours=followup_delay,
+            reminder_hours_before=reminder_hours,
+            max_followup_emails=max_followups,
+            min_hours_between_followups=min_between,
         )
 
         # Send invitation email
@@ -387,6 +411,9 @@ class InterviewSchedulingAgent:
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
             
+            # Trigger automatic follow-up check (signal will handle pre-interview reminders)
+            # The signal will automatically check if reminder needs to be sent
+            
             result = {
                 "success": True,
                 "interview_id": interview.id,
@@ -596,6 +623,7 @@ class InterviewSchedulingAgent:
     ) -> Dict[str, Any]:
         """
         Send a follow-up reminder if candidate hasn't responded.
+        This is for PENDING interviews that haven't been confirmed.
         
         Args:
             interview_id: ID of the interview
@@ -603,6 +631,9 @@ class InterviewSchedulingAgent:
         Returns:
             Dict with reminder status
         """
+        print("\n" + "="*60)
+        print("📧 SENDING FOLLOW-UP REMINDER EMAIL")
+        print("="*60)
         try:
             interview = Interview.objects.get(id=interview_id)
             
@@ -612,76 +643,97 @@ class InterviewSchedulingAgent:
                     "error": f"Interview is not in PENDING status (current: {interview.status})",
                 }
             
-            # Check if enough time has passed (e.g., 24 hours)
-            if interview.invitation_sent_at:
-                time_since_invitation = timezone.now() - interview.invitation_sent_at
-                if time_since_invitation < timedelta(hours=24):
-                    return {
-                        "success": False,
-                        "error": "Not enough time has passed since invitation (minimum 24 hours)",
-                    }
+            # Don't send if interview is in the past
+            if interview.scheduled_datetime and interview.scheduled_datetime < timezone.now():
+                return {
+                    "success": False,
+                    "error": "Interview is in the past",
+                }
             
             # Send reminder - clean job role for subject
             clean_job_role = self._clean_email_header(str(interview.job_role))
             if len(clean_job_role) > 50:
                 clean_job_role = clean_job_role[:47] + "..."
-            subject = f"Reminder: Interview Invitation - {clean_job_role}"
+            subject = f"Reminder: Please Confirm Your Interview - {clean_job_role}"
             
-            available_slots = json.loads(interview.available_slots_json)
+            # Generate slot selection URL with token
+            from django.urls import reverse
+            try:
+                domain = getattr(settings, 'SITE_DOMAIN', 'http://127.0.0.1:8000')
+                if not domain.startswith('http'):
+                    domain = f'http://{domain}'
+                slot_selection_url = f"{domain}/recruitment/interview/select/{interview.confirmation_token}/"
+            except:
+                slot_selection_url = f"http://127.0.0.1:8000/recruitment/interview/select/{interview.confirmation_token}/"
+            
+            available_slots = json.loads(interview.available_slots_json) if interview.available_slots_json else []
             context = {
                 'candidate_name': interview.candidate_name,
                 'job_role': interview.job_role,
                 'interview_type': interview.interview_type,
                 'available_slots': available_slots,
                 'interview_id': interview.id,
+                'slot_selection_url': slot_selection_url,
+                'followup_number': interview.followup_count + 1,
             }
             
-            from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+            from_email_raw = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+            from_email = self._clean_email_header(from_email_raw)
+            to_email = self._clean_email_header(interview.candidate_email)
             email_backend = getattr(settings, 'EMAIL_BACKEND', 'Not configured')
+            
+            print(f"✓ Interview ID: {interview.id}")
+            print(f"✓ Candidate: {interview.candidate_name}")
+            print(f"✓ Email: {to_email}")
+            print(f"✓ Follow-up #: {interview.followup_count + 1}")
+            print(f"✓ Email Backend: {email_backend}")
             
             print("\n📝 Rendering email templates...")
             try:
-                message = render_to_string('recruitment_agent/emails/interview_reminder.txt', context)
-                html_message = render_to_string('recruitment_agent/emails/interview_reminder.html', context)
+                message = render_to_string('recruitment_agent/emails/interview_followup.txt', context)
+                html_message = render_to_string('recruitment_agent/emails/interview_followup.html', context)
                 print("✓ Templates rendered successfully")
             except Exception as template_error:
                 print(f"❌ ERROR: Template rendering failed: {template_error}")
-                raise
-            
-            print(f"✓ Email Backend: {email_backend}")
+                # Fallback to reminder template if followup template doesn't exist
+                try:
+                    message = render_to_string('recruitment_agent/emails/interview_reminder.txt', context)
+                    html_message = render_to_string('recruitment_agent/emails/interview_reminder.html', context)
+                    print("✓ Using fallback reminder templates")
+                except:
+                    raise template_error
             
             self._log_step("sending_followup_reminder", {
                 "interview_id": interview.id,
-                "to": interview.candidate_email,
+                "to": to_email,
+                "followup_number": interview.followup_count + 1,
             })
             
-            print(f"\n🚀 Sending reminder email...")
+            print(f"\n🚀 Sending follow-up reminder email...")
             try:
                 send_mail(
                     subject=subject,
                     message=message,
                     from_email=from_email,
-                    recipient_list=[interview.candidate_email],
+                    recipient_list=[to_email],
                     html_message=html_message,
                     fail_silently=False,
                 )
-                print("✅ Reminder email sent successfully!")
+                print("✅ Follow-up reminder email sent successfully!")
             except Exception as send_error:
-                print(f"❌ ERROR: Reminder email failed: {send_error}")
+                print(f"❌ ERROR: Follow-up reminder email failed: {send_error}")
                 print(f"   Error Type: {type(send_error).__name__}")
                 import traceback
                 print(f"\n📋 Full Traceback:")
                 print(traceback.format_exc())
                 raise
             
-            interview.last_reminder_sent_at = timezone.now()
-            interview.save(update_fields=['last_reminder_sent_at'])
-            
-            print(f"✓ Timestamp updated: {interview.last_reminder_sent_at}")
+            print(f"✓ Timestamp will be updated by management command")
             print("="*60 + "\n")
             
             self._log_step("followup_reminder_sent", {
                 "interview_id": interview.id,
+                "followup_number": interview.followup_count + 1,
             })
             
             return {
@@ -819,6 +871,10 @@ class InterviewSchedulingAgent:
                 print(traceback.format_exc())
                 print("="*60 + "\n")
                 raise
+            
+            # Update interview record (timestamp will be updated by management command)
+            # interview.pre_interview_reminder_sent_at = timezone.now()
+            # interview.save(update_fields=['pre_interview_reminder_sent_at'])
             
             self._log_step("pre_interview_reminder_sent", {
                 "interview_id": interview.id,

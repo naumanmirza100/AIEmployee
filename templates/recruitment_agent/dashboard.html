@@ -544,6 +544,89 @@
     </div>
   </div>
 
+  <!-- Email Settings Section -->
+  <div class="dashboard-section full-width-section" id="emailSettingsSection">
+    <div class="section-header">
+      <h2>⚙️ Email Settings</h2>
+      <button class="btn btn-small" onclick="toggleEmailSettings()" id="toggleEmailSettingsBtn">Show Settings</button>
+    </div>
+    <div id="emailSettingsForm" style="display: none;">
+      <div style="background: #f8fafc; padding: 16px; border-radius: 10px; margin-bottom: 20px;">
+        <p style="margin: 0; color: var(--muted); font-size: 14px;">
+          Configure your email timing preferences. These settings will be applied to all new interviews you create.
+        </p>
+      </div>
+      
+      <form id="emailSettingsFormElement">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <!-- Follow-up Settings -->
+          <div>
+            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text); border-bottom: 2px solid var(--border); padding-bottom: 8px;">
+              📧 Follow-up Email Settings (PENDING Interviews)
+            </h3>
+            
+            <label for="followupDelayHours">
+              Follow-up Delay (Hours)
+              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Kitne hours baad pehli follow-up email bhejni hai</span>
+            </label>
+            <input type="number" id="followupDelayHours" name="followup_delay_hours" min="1" max="168" value="48" required />
+            <div class="hint">Default: 48 hours (2 days)</div>
+            
+            <label for="minHoursBetweenFollowups" style="margin-top: 16px;">
+              Minimum Hours Between Follow-ups
+              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Do follow-up emails ke beech minimum gap</span>
+            </label>
+            <input type="number" id="minHoursBetweenFollowups" name="min_hours_between_followups" min="1" max="72" value="24" required />
+            <div class="hint">Default: 24 hours</div>
+            
+            <label for="maxFollowupEmails" style="margin-top: 16px;">
+              Maximum Follow-up Emails
+              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Maximum kitne follow-up emails bhejne hain</span>
+            </label>
+            <input type="number" id="maxFollowupEmails" name="max_followup_emails" min="1" max="10" value="3" required />
+            <div class="hint">Default: 3 emails</div>
+          </div>
+          
+          <!-- Reminder Settings -->
+          <div>
+            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text); border-bottom: 2px solid var(--border); padding-bottom: 8px;">
+              🔔 Reminder Email Settings (SCHEDULED Interviews)
+            </h3>
+            
+            <label for="reminderHoursBefore">
+              Reminder Hours Before Interview
+              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Interview se kitne hours pehle reminder bhejni hai</span>
+            </label>
+            <input type="number" id="reminderHoursBefore" name="reminder_hours_before" min="1" max="168" value="24" required />
+            <div class="hint">Default: 24 hours (1 day before)</div>
+            
+            <div style="margin-top: 24px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--border);">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="autoSendFollowups" name="auto_send_followups" checked style="width: auto; cursor: pointer;" />
+                <span>Automatically send follow-up emails</span>
+              </label>
+              <div class="hint" style="margin-top: 4px; margin-left: 24px;">If unchecked, you'll need to send follow-ups manually</div>
+            </div>
+            
+            <div style="margin-top: 16px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--border);">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="autoSendReminders" name="auto_send_reminders" checked style="width: auto; cursor: pointer;" />
+                <span>Automatically send reminder emails</span>
+              </label>
+              <div class="hint" style="margin-top: 4px; margin-left: 24px;">If unchecked, you'll need to send reminders manually</div>
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
+          <button type="submit" class="btn" id="saveEmailSettingsBtn">💾 Save Email Settings</button>
+          <button type="button" class="btn btn-secondary" onclick="loadEmailSettings()">🔄 Reset to Current</button>
+          <span id="emailSettingsStatus" class="hint"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Candidate Status Section (Full Width) -->
   <div class="dashboard-section full-width-section">
     <div class="section-header">
@@ -1035,5 +1118,105 @@
     }
     window.location.href = url.toString();
   }
+
+  // Email Settings Functions
+  function toggleEmailSettings() {
+    const form = document.getElementById('emailSettingsForm');
+    const btn = document.getElementById('toggleEmailSettingsBtn');
+    if (form.style.display === 'none') {
+      form.style.display = 'block';
+      btn.textContent = 'Hide Settings';
+      loadEmailSettings(); // Load current settings when showing
+    } else {
+      form.style.display = 'none';
+      btn.textContent = 'Show Settings';
+    }
+  }
+
+  // Load current email settings
+  async function loadEmailSettings() {
+    try {
+      const response = await fetch('{% url "recruiter_email_settings" %}', {
+        method: 'GET',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken')
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to load settings');
+      }
+      
+      const data = await response.json();
+      if (data.success && data.settings) {
+        const settings = data.settings;
+        document.getElementById('followupDelayHours').value = settings.followup_delay_hours || 48;
+        document.getElementById('minHoursBetweenFollowups').value = settings.min_hours_between_followups || 24;
+        document.getElementById('maxFollowupEmails').value = settings.max_followup_emails || 3;
+        document.getElementById('reminderHoursBefore').value = settings.reminder_hours_before || 24;
+        document.getElementById('autoSendFollowups').checked = settings.auto_send_followups !== false;
+        document.getElementById('autoSendReminders').checked = settings.auto_send_reminders !== false;
+      }
+    } catch (error) {
+      console.error('Error loading email settings:', error);
+    }
+  }
+
+  // Save email settings
+  document.getElementById('emailSettingsFormElement').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const btn = document.getElementById('saveEmailSettingsBtn');
+    const status = document.getElementById('emailSettingsStatus');
+    
+    btn.disabled = true;
+    status.textContent = 'Saving...';
+    status.style.color = 'var(--muted)';
+    
+    const settings = {
+      followup_delay_hours: parseInt(document.getElementById('followupDelayHours').value),
+      min_hours_between_followups: parseInt(document.getElementById('minHoursBetweenFollowups').value),
+      max_followup_emails: parseInt(document.getElementById('maxFollowupEmails').value),
+      reminder_hours_before: parseInt(document.getElementById('reminderHoursBefore').value),
+      auto_send_followups: document.getElementById('autoSendFollowups').checked,
+      auto_send_reminders: document.getElementById('autoSendReminders').checked
+    };
+    
+    try {
+      const response = await fetch('{% url "recruiter_email_settings" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify(settings)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save settings');
+      }
+      
+      const data = await response.json();
+      if (data.success) {
+        status.textContent = '✅ Settings saved successfully!';
+        status.style.color = '#10b981';
+        
+        // Show success message for 3 seconds
+        setTimeout(() => {
+          status.textContent = '';
+        }, 3000);
+      } else {
+        throw new Error(data.error || 'Failed to save settings');
+      }
+    } catch (error) {
+      status.textContent = '❌ Error: ' + error.message;
+      status.style.color = 'var(--danger)';
+      alert('Error saving email settings: ' + error.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
 </script>
 {% endblock %}

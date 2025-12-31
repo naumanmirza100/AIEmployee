@@ -634,13 +634,133 @@ def get_interview_details(request, interview_id):
 # Manual sending has been disabled to ensure consistent automatic processing
 # Run: python manage.py send_interview_reminders (via cron/scheduler)
 
-# @login_required
-# @require_http_methods(["POST"])
-# def send_followup_reminder(request):
-#     """Send follow-up reminder for pending interviews - DISABLED: Use automatic command instead"""
-#     return JsonResponse({
-#         "error": "Manual follow-up reminders are disabled. Follow-up reminders are sent automatically via management command."
-#     }, status=400)
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def auto_check_interview_followups(request):
+    """
+    Automatic endpoint to check and send follow-up emails.
+    This can be called by cron jobs, scheduled tasks, or automatically.
+    No authentication required for automated systems (can be secured with API key if needed).
+    """
+    try:
+        from recruitment_agent.tasks import check_and_send_followup_emails
+        
+        # Run the automatic check
+        stats = check_and_send_followup_emails()
+        
+        return JsonResponse({
+            "success": True,
+            "message": "Follow-up email check completed",
+            "stats": stats
+        })
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def recruiter_email_settings(request):
+    """
+    Get or update recruiter email timing preferences.
+    GET: Returns current settings
+    POST: Updates settings
+    """
+    from recruitment_agent.models import RecruiterEmailSettings
+    
+    # Check if user has recruitment_agent role
+    is_recruitment_agent = request.user.profile.is_recruitment_agent()
+    if (request.user.is_superuser or request.user.is_staff):
+        selected_role = request.session.get('selected_role')
+        if selected_role == 'recruitment_agent':
+            is_recruitment_agent = True
+    
+    if not is_recruitment_agent:
+        return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
+    
+    if request.method == 'GET':
+        # Get current settings or return defaults
+        try:
+            settings = request.user.recruiter_email_settings
+            return JsonResponse({
+                "success": True,
+                "settings": {
+                    "followup_delay_hours": settings.followup_delay_hours,
+                    "min_hours_between_followups": settings.min_hours_between_followups,
+                    "max_followup_emails": settings.max_followup_emails,
+                    "reminder_hours_before": settings.reminder_hours_before,
+                    "auto_send_followups": settings.auto_send_followups,
+                    "auto_send_reminders": settings.auto_send_reminders,
+                }
+            })
+        except RecruiterEmailSettings.DoesNotExist:
+            # Return defaults
+            return JsonResponse({
+                "success": True,
+                "settings": {
+                    "followup_delay_hours": 48,
+                    "min_hours_between_followups": 24,
+                    "max_followup_emails": 3,
+                    "reminder_hours_before": 24,
+                    "auto_send_followups": True,
+                    "auto_send_reminders": True,
+                }
+            })
+    
+    elif request.method == 'POST':
+        # Update settings
+        try:
+            data = json.loads(request.body) if request.body else {}
+            
+            # Get or create settings
+            settings, created = RecruiterEmailSettings.objects.get_or_create(
+                recruiter=request.user,
+                defaults={
+                    'followup_delay_hours': 48,
+                    'min_hours_between_followups': 24,
+                    'max_followup_emails': 3,
+                    'reminder_hours_before': 24,
+                    'auto_send_followups': True,
+                    'auto_send_reminders': True,
+                }
+            )
+            
+            # Update fields if provided
+            if 'followup_delay_hours' in data:
+                settings.followup_delay_hours = int(data['followup_delay_hours'])
+            if 'min_hours_between_followups' in data:
+                settings.min_hours_between_followups = int(data['min_hours_between_followups'])
+            if 'max_followup_emails' in data:
+                settings.max_followup_emails = int(data['max_followup_emails'])
+            if 'reminder_hours_before' in data:
+                settings.reminder_hours_before = int(data['reminder_hours_before'])
+            if 'auto_send_followups' in data:
+                settings.auto_send_followups = bool(data['auto_send_followups'])
+            if 'auto_send_reminders' in data:
+                settings.auto_send_reminders = bool(data['auto_send_reminders'])
+            
+            settings.save()
+            
+            return JsonResponse({
+                "success": True,
+                "message": "Email settings updated successfully",
+                "settings": {
+                    "followup_delay_hours": settings.followup_delay_hours,
+                    "min_hours_between_followups": settings.min_hours_between_followups,
+                    "max_followup_emails": settings.max_followup_emails,
+                    "reminder_hours_before": settings.reminder_hours_before,
+                    "auto_send_followups": settings.auto_send_followups,
+                    "auto_send_reminders": settings.auto_send_reminders,
+                }
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                "success": False,
+                "error": str(e)
+            }, status=500)
 
 
 @login_required
