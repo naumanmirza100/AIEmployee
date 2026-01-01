@@ -266,9 +266,13 @@ class CareerApplication(models.Model):
     resume_path = models.CharField(max_length=500, blank=True, null=True)
     cover_letter = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='pending')
-    position = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='career_applications')
+    # FIX: Changed related_name to be unique and descriptive
+    # This avoids any potential conflicts and makes the reverse relationship clearer
+    position = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='position_career_applications')
     application_token = models.CharField(max_length=255, unique=True, blank=True, null=True)
-    company = models.ForeignKey('core.Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='career_applications')
+    # FIX: Changed related_name to be unique and descriptive
+    # This avoids any potential conflicts and makes the reverse relationship clearer
+    company = models.ForeignKey('core.Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='company_career_applications')
     created_at = models.DateTimeField(default=timezone.now)
     
     class Meta:

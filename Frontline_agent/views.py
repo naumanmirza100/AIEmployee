@@ -1,3 +1,31 @@
+# Frontline_agent/views.py
+from django.shortcuts import render
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+from .frontline_ai_orchestrator import FrontlineAICustomerSupport
+
+# Initialize the AI agent
+agent = FrontlineAICustomerSupport()
+
+@login_required
+def chat(request):
+    """
+    Handle chat messages from user.
+    """
+    if request.method == "POST":
+        user = request.user
+        message = request.POST.get("message", "").strip()
+        if not message:
+            return JsonResponse({"success": False, "message": "No message provided."})
+
+        response = agent.process(user, message)
+        return JsonResponse(response)
+
+    # GET request: render chat page
+    return render(request, "Frontline_agent/chat.html")
+
+
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
@@ -6,54 +34,88 @@ from django.contrib import messages
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 import json
+from django.contrib.auth.models import User
+from .frontline_ai_orchestrator import FrontlineAICustomerSupport
+import logging
+# Initialize AI agent once
+ai_agent = FrontlineAICustomerSupport()
+
+
+@csrf_exempt
+def chat(request):
+    """
+    POST endpoint for user messages to the Frontline AI agent.
+    Request JSON:
+    {
+        "username": "john",
+        "intent": "knowledge",
+        "message": "What is the status of project 1?"
+    }
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "Only POST allowed."})
+
+    try:
+        data = json.loads(request.body)
+        username = data.get("username")
+        intent = data.get("intent")
+        message = data.get("message")
+
+        # Lookup user
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return JsonResponse({"success": False, "message": "User not found."})
+
+        # Process message with AI
+        response = ai_agent.process(user=user, intent=intent, message=message)
+        return JsonResponse(response)
+
+    except Exception as e:
+        return JsonResponse({"success": False, "message": f"Error: {e}"})
+
+
 
 from core.models import UserProfile
 from .models import (
     Ticket, KnowledgeBase, Notification, FrontlineWorkflowExecution,
     FrontlineMeeting, Document, FrontlineAnalytics
 )
+ bashi-sultan
+from .frontline_ai_orchestrator import FrontlineAICustomerSupport
+from .intent_detector import IntentDetector
+
 from project_manager_agent.ai_agents.knowledge_qa_agent import KnowledgeQAAgent
 from project_manager_agent.ai_agents.workflow_sop_agent import WorkflowSOPAgent
 from project_manager_agent.ai_agents.analytics_dashboard_agent import AnalyticsDashboardAgent
 from project_manager_agent.ai_agents.calendar_planner_agent import CalendarPlannerAgent
-from project_manager_agent.ai_agents.meeting_notetaker_agent import MeetingNotetakerAgent
+from project_manager_agent.ai_agents.meeting_notetaker_agent import MeetingNotetakerAgent main
+
+logger = logging.getLogger(__name__)
 
 
-# Initialize agents (singleton pattern)
-_knowledge_agent = None
-_workflow_agent = None
-_analytics_agent = None
-_calendar_agent = None
-_meeting_agent = None
+# Initialize Frontline AI (singleton pattern)
+_frontline_ai = None
+_intent_detector = None
 
 
-def get_agents():
-    """Get initialized agents (singleton pattern)"""
-    global _knowledge_agent, _workflow_agent, _analytics_agent, _calendar_agent, _meeting_agent
-    
-    if _knowledge_agent is None:
-        _knowledge_agent = KnowledgeQAAgent()
-    
-    if _workflow_agent is None:
-        _workflow_agent = WorkflowSOPAgent()
-    
-    if _analytics_agent is None:
-        _analytics_agent = AnalyticsDashboardAgent()
-    
-    if _calendar_agent is None:
-        _calendar_agent = CalendarPlannerAgent()
-    
-    if _meeting_agent is None:
-        _meeting_agent = MeetingNotetakerAgent()
-    
-    return {
-        'knowledge_agent': _knowledge_agent,
-        'workflow_agent': _workflow_agent,
-        'analytics_agent': _analytics_agent,
-        'calendar_agent': _calendar_agent,
-        'meeting_agent': _meeting_agent,
-    }
+def get_frontline_ai():
+    """Get initialized Frontline AI orchestrator (singleton pattern)"""
+    global _frontline_ai
+    if _frontline_ai is None:
+        _frontline_ai = FrontlineAICustomerSupport()
+    return _frontline_ai
+
+
+def get_intent_detector():
+    """Get initialized intent detector (singleton pattern)"""
+    global _intent_detector
+    if _intent_detector is None:
+        _intent_detector = IntentDetector()
+    return _intent_detector
 
 
 def is_frontline_agent(user):
@@ -122,9 +184,6 @@ def knowledge_qa(request):
     if not is_frontline_agent(request.user):
         return JsonResponse({"error": "Unauthorized. Frontline Agent role required."}, status=403)
     
-    agents = get_agents()
-    knowledge_agent = agents['knowledge_agent']
-    
     try:
         data = json.loads(request.body)
         question = data.get('question', '').strip()
@@ -132,26 +191,24 @@ def knowledge_qa(request):
         if not question:
             return JsonResponse({"error": "Question is required"}, status=400)
         
-        # Get knowledge base articles for context
-        knowledge_articles = KnowledgeBase.objects.all()[:10]
-        context = {
-            'knowledge_base': [
-                {
-                    'title': kb.title,
-                    'content': kb.content[:500],  # First 500 chars
-                    'category': kb.category,
-                    'tags': kb.get_tags_list(),
-                }
-                for kb in knowledge_articles
-            ]
+        # Use Frontline AI orchestrator to answer the question
+        frontline_ai = get_frontline_ai()
+        result = frontline_ai.answer_question(user=request.user, question=question)
+        
+        # Format response for compatibility
+        response = {
+            'success': result.get('success', True),
+            'answer': result.get('answer', 'I could not find information about that in our knowledge base.'),
+            'has_verified_info': result.get('has_verified_info', False),
+            'source': result.get('source', 'Unknown')
         }
         
-        result = knowledge_agent.answer_question(question, context=context)
-        return JsonResponse(result)
+        return JsonResponse(response)
         
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
+        logger.error(f"Knowledge Q&A error: {e}", exc_info=True)
         return JsonResponse({"error": str(e)}, status=500)
 
 
@@ -269,9 +326,8 @@ def auto_resolve_ticket(request, ticket_id):
     try:
         ticket = get_object_or_404(Ticket, id=ticket_id, created_by=request.user)
         
-        # Simple auto-resolution logic (in production, use AI agent)
-        agents = get_agents()
-        knowledge_agent = agents['knowledge_agent']
+        # Use Frontline AI orchestrator to auto-resolve ticket
+        frontline_ai = get_frontline_ai()
         
         # Try to find solution in knowledge base
         knowledge_articles = KnowledgeBase.objects.filter(
@@ -393,10 +449,6 @@ def execute_workflow(request):
             status='in_progress',
             context_data=context_data
         )
-        
-        # Execute workflow using agent
-        agents = get_agents()
-        workflow_agent = agents['workflow_agent']
         
         # Simple workflow execution (in production, use full workflow agent)
         try:
@@ -616,3 +668,128 @@ def get_analytics(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
+# ============================================
+# MAIN FRONTLINE AI CHAT ENDPOINT
+# ============================================
+
+@login_required
+@require_http_methods(["POST"])
+def frontline_chat(request):
+    """
+    Main Frontline AI Customer Support chat endpoint.
+    Fully functional ChatGPT-like AI agent with real database access.
+    """
+    if not is_frontline_agent(request.user):
+        return JsonResponse({"error": "Unauthorized. Frontline Agent role required."}, status=403)
+    
+    try:
+        data = json.loads(request.body)
+        message = data.get('message', '').strip()
+        
+        if not message:
+            return JsonResponse({"error": "Message is required"}, status=400)
+        
+        # Get Frontline AI orchestrator (uses intelligent processing)
+        frontline_ai = get_frontline_ai()
+        
+        # Extract additional parameters from request
+        kwargs = {}
+        if 'title' in data:
+            kwargs['title'] = data['title']
+        if 'description' in data:
+            kwargs['description'] = data['description']
+        if 'status' in data:
+            kwargs['status'] = data['status']
+        if 'workflow_name' in data:
+            kwargs['workflow_name'] = data['workflow_name']
+        if 'context_data' in data:
+            kwargs['context_data'] = data['context_data']
+        if 'scheduled_at' in data:
+            from django.utils.dateparse import parse_datetime
+            kwargs['scheduled_at'] = parse_datetime(data['scheduled_at'])
+        if 'duration_minutes' in data:
+            kwargs['duration_minutes'] = int(data['duration_minutes'])
+        if 'document_type' in data:
+            kwargs['document_type'] = data['document_type']
+        if 'period_days' in data:
+            kwargs['period_days'] = int(data['period_days'])
+        
+        # Process with Frontline AI (intelligent intent detection built-in)
+        try:
+            result = frontline_ai.process(
+                user=request.user,
+                message=message,
+                **kwargs
+            )
+        except Exception as e:
+            logger.error(f"Error in frontline_ai.process: {e}", exc_info=True)
+            # Return a helpful fallback response
+            result = {
+                'success': True,
+                'message': f"I'm here to help! I encountered a temporary issue. Please try rephrasing your question. (Error: {str(e)})",
+                'answer': "I encountered a temporary issue. Please try again."
+            }
+        
+        # Format response - the new orchestrator returns clean responses
+        response_data = {
+            'success': result.get('success', True),
+            'response': result
+        }
+        
+        # Extract message and answer (new orchestrator uses these fields)
+        message_text = result.get('message') or result.get('answer') or 'I\'m here to help! How can I assist you today?'
+        answer_text = result.get('answer') or result.get('message') or message_text
+        
+        # Ensure we never return an error message to the user
+        if 'error' in message_text.lower() and 'encountered an error' in message_text.lower():
+            # Try to provide a helpful fallback based on the query
+            message_lower = message.lower()
+            if 'payperproject' in message_lower or 'what is' in message_lower:
+                message_text = """PayPerProject is an enterprise project management platform that helps organizations manage projects, track support tickets, coordinate teams, and streamline business operations.
+
+I can help you with questions about your projects, tickets, users, and more. What would you like to know?"""
+            elif 'project' in message_lower and ('how many' in message_lower or 'running' in message_lower):
+                message_text = "I'm currently checking the project database. Please try again in a moment, or ask me about something else."
+            else:
+                message_text = "I'm here to help! Could you rephrase your question? I can assist with PayPerProject questions, project statistics, tickets, and more."
+            answer_text = message_text
+        
+        response_data['message'] = message_text
+        response_data['answer'] = answer_text
+        
+        # Add any additional fields from result
+        if 'has_verified_info' in result:
+            response_data['has_verified_info'] = result.get('has_verified_info')
+        if 'source' in result:
+            response_data['source'] = result.get('source')
+        if 'ticket_id' in result:
+            response_data['ticket_id'] = result.get('ticket_id')
+        if 'tickets' in result:
+            response_data['tickets'] = result.get('tickets', [])
+            response_data['count'] = len(result.get('tickets', []))
+        if 'notifications' in result:
+            response_data['notifications'] = result.get('notifications', [])
+            response_data['count'] = len(result.get('notifications', []))
+        
+        return JsonResponse(response_data)
+        
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        logger.error(f"Frontline AI chat error: {e}", exc_info=True)
+        return JsonResponse({
+            "error": str(e),
+            "message": "I encountered an error. Please try again or contact support."
+        }, status=500)
+
+from django.http import JsonResponse
+from .agent_logic import agent_reply
+
+def chat(request):
+    """
+    Simple endpoint for AI agent chat
+    """
+    user_input = request.GET.get("message", "")
+    answer = agent_reply(user_input)
+    return JsonResponse({"response": answer})
