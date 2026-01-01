@@ -84,8 +84,15 @@ from .models import (
     Ticket, KnowledgeBase, Notification, FrontlineWorkflowExecution,
     FrontlineMeeting, Document, FrontlineAnalytics
 )
+ bashi-sultan
 from .frontline_ai_orchestrator import FrontlineAICustomerSupport
 from .intent_detector import IntentDetector
+
+from project_manager_agent.ai_agents.knowledge_qa_agent import KnowledgeQAAgent
+from project_manager_agent.ai_agents.workflow_sop_agent import WorkflowSOPAgent
+from project_manager_agent.ai_agents.analytics_dashboard_agent import AnalyticsDashboardAgent
+from project_manager_agent.ai_agents.calendar_planner_agent import CalendarPlannerAgent
+from project_manager_agent.ai_agents.meeting_notetaker_agent import MeetingNotetakerAgent main
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ from django.conf import settings
 from .logging_config import setup_frontline_logging
 setup_frontline_logging()
 
-from core.ai_agents.base_agent import BaseAgent
+from project_manager_agent.ai_agents.base_agent import BaseAgent
 from .services import KnowledgeService, TicketAutomationService
 from .prompts import (
     FRONTLINE_SYSTEM_PROMPT,

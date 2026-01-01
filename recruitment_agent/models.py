@@ -3,6 +3,54 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 
 
+class RecruiterEmailSettings(models.Model):
+    """
+    Recruiter email timing preferences.
+    Each recruiter can set their own preferences for follow-up and reminder emails.
+    """
+    recruiter = models.OneToOneField(User, on_delete=models.CASCADE, related_name='recruiter_email_settings')
+    
+    # Follow-up email settings for PENDING interviews
+    followup_delay_hours = models.IntegerField(
+        default=48,
+        help_text="Hours to wait before sending first follow-up email for unconfirmed interviews"
+    )
+    min_hours_between_followups = models.IntegerField(
+        default=24,
+        help_text="Minimum hours between follow-up emails"
+    )
+    max_followup_emails = models.IntegerField(
+        default=3,
+        help_text="Maximum number of follow-up emails to send"
+    )
+    
+    # Reminder email settings for SCHEDULED interviews
+    reminder_hours_before = models.IntegerField(
+        default=24,
+        help_text="Hours before scheduled interview to send reminder email"
+    )
+    
+    # Additional settings
+    auto_send_followups = models.BooleanField(
+        default=True,
+        help_text="Automatically send follow-up emails (if False, emails must be sent manually)"
+    )
+    auto_send_reminders = models.BooleanField(
+        default=True,
+        help_text="Automatically send pre-interview reminders (if False, reminders must be sent manually)"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Recruiter Email Settings'
+        verbose_name_plural = 'Recruiter Email Settings'
+    
+    def __str__(self):
+        return f"Email Settings for {self.recruiter.username}"
+
+
 class JobDescription(models.Model):
     """
     Model to store job descriptions for recruitment positions.
@@ -119,10 +167,19 @@ class Interview(models.Model):
     # Recruiter information
     recruiter = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='scheduled_interviews')
     
+    # Recruiter Email Timing Preferences (configurable per interview, defaults from RecruiterEmailSettings)
+    followup_delay_hours = models.IntegerField(default=48, help_text="Hours to wait before sending first follow-up email for PENDING interviews")
+    reminder_hours_before = models.IntegerField(default=24, help_text="Hours before scheduled interview to send reminder email")
+    max_followup_emails = models.IntegerField(default=3, help_text="Maximum number of follow-up emails to send")
+    min_hours_between_followups = models.IntegerField(default=24, help_text="Minimum hours between follow-up emails")
+    
     # Timestamps
     invitation_sent_at = models.DateTimeField(null=True, blank=True)
     confirmation_sent_at = models.DateTimeField(null=True, blank=True)
     last_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    last_followup_sent_at = models.DateTimeField(null=True, blank=True, help_text="Last time a follow-up email was sent for unconfirmed interview")
+    pre_interview_reminder_sent_at = models.DateTimeField(null=True, blank=True, help_text="When the pre-interview reminder was sent")
+    followup_count = models.IntegerField(default=0, help_text="Number of follow-up emails sent for unconfirmed interview")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -140,6 +197,56 @@ class Interview(models.Model):
     
     def __str__(self):
         return f"Interview: {self.candidate_name} - {self.job_role} ({self.status})"
+    
+    def get_recruiter_settings(self):
+        """Get recruiter email settings, with defaults if not set"""
+        if self.recruiter:
+            try:
+                return self.recruiter.recruiter_email_settings
+            except RecruiterEmailSettings.DoesNotExist:
+                # Return default settings object
+                return RecruiterEmailSettings(
+                    recruiter=self.recruiter,
+                    followup_delay_hours=48,
+                    reminder_hours_before=24,
+                    max_followup_emails=3,
+                    min_hours_between_followups=24
+                )
+        # Return default settings if no recruiter
+        return RecruiterEmailSettings(
+            followup_delay_hours=48,
+            reminder_hours_before=24,
+            max_followup_emails=3,
+            min_hours_between_followups=24
+        )
+    
+    def get_followup_delay_hours(self):
+        """Get follow-up delay hours from recruiter settings or interview-specific setting"""
+        if self.followup_delay_hours != 48:  # If custom value set
+            return self.followup_delay_hours
+        settings = self.get_recruiter_settings()
+        return settings.followup_delay_hours
+    
+    def get_reminder_hours_before(self):
+        """Get reminder hours before from recruiter settings or interview-specific setting"""
+        if self.reminder_hours_before != 24:  # If custom value set
+            return self.reminder_hours_before
+        settings = self.get_recruiter_settings()
+        return settings.reminder_hours_before
+    
+    def get_max_followup_emails(self):
+        """Get max follow-up emails from recruiter settings or interview-specific setting"""
+        if self.max_followup_emails != 3:  # If custom value set
+            return self.max_followup_emails
+        settings = self.get_recruiter_settings()
+        return settings.max_followup_emails
+    
+    def get_min_hours_between_followups(self):
+        """Get min hours between follow-ups from recruiter settings or interview-specific setting"""
+        if self.min_hours_between_followups != 24:  # If custom value set
+            return self.min_hours_between_followups
+        settings = self.get_recruiter_settings()
+        return settings.min_hours_between_followups
 
 
 class CareerApplication(models.Model):

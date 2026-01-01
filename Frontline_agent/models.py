@@ -102,8 +102,11 @@ class Notification(models.Model):
         ('system', 'System'),
     ]
     
+ bashi-sultan
     # FIX: Changed related_name to avoid conflict with core.models.Notification.user
     # Both models have user field pointing to User, so we need unique related_name
+
+ main
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_notifications')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='system')
     title = models.CharField(max_length=200)
@@ -235,7 +238,11 @@ class Document(models.Model):
     file_path = models.CharField(max_length=1000)
     file_size = models.IntegerField(null=True, blank=True)
     mime_type = models.CharField(max_length=100, blank=True)
+ bashi-sultan
     uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_uploaded_documents')
+
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_documents')
+ main
     processed = models.BooleanField(default=False)
     processed_data = models.JSONField(default=dict, blank=True)
     related_ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')

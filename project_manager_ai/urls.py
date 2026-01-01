@@ -52,6 +52,18 @@ urlpatterns = [
 
     # Frontline Agent
     path('frontline/', include('Frontline_agent.urls')),
+ bashi-sultan
+
+    
+    # Frontline Agent Core APIs (from core.Fronline_agent)
+    path('api/frontline/', include('core.Fronline_agent.urls')),
+    
+    # Marketing Agent
+    path('marketing/', include('marketing_agent.urls')),
+    
+    # API Routes
+    path('api/', include('api.urls')),
+ main
 
     # Frontline Agent Core APIs (if exists in core.Frontline_agent)
     # Only include if this app folder and urls.py exist

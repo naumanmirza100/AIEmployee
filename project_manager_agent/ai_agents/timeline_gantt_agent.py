@@ -202,17 +202,17 @@ Return JSON array:
         except Exception as e:
             self.log_action("AI milestone identification failed, using fallback", {"error": str(e)})
             # Fallback to simple milestone identification
-            milestones = []
-            for task in sorted_tasks:
-                if task.get('priority') == 'high' or len(task.get('dependencies', [])) > 2:
-                    milestones.append({
-                        'task_id': task.get('id'),
-                        'title': task.get('title'),
-                        'due_date': task.get('due_date'),
+        milestones = []
+        for task in sorted_tasks:
+            if task.get('priority') == 'high' or len(task.get('dependencies', [])) > 2:
+                milestones.append({
+                    'task_id': task.get('id'),
+                    'title': task.get('title'),
+                    'due_date': task.get('due_date'),
                         'type': 'high_priority' if task.get('priority') == 'high' else 'key_dependency',
                         'importance': 'high' if task.get('priority') == 'high' else 'medium',
                         'reasoning': ''
-                    })
+                })
         
         timeline_data['milestones'] = milestones
         
@@ -358,9 +358,9 @@ Return JSON array with optimized dates:
                 except (ValueError, KeyError):
                     # Fallback to manual calculation
                     task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
-            else:
-                # Manual calculation
-                task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
+                else:
+                    # Manual calculation
+                    task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
             
             # Get dependencies
             dependencies = [dep.id for dep in task.depends_on.all()]
@@ -912,17 +912,17 @@ Return JSON array with optimized dates:
                             
                             if overlap_days > 0:
                                 conflicts.append({
-                                    'type': 'resource_overload',
-                                    'task_id': task.id,
-                                    'task_title': task.title,
-                                    'conflicting_task_id': other_task.id,
-                                    'conflicting_task_title': other_task.title,
-                                    'assignee': task.assignee.username,
-                                    'assignee_id': task.assignee.id,
+                                'type': 'resource_overload',
+                                'task_id': task.id,
+                                'task_title': task.title,
+                                'conflicting_task_id': other_task.id,
+                                'conflicting_task_title': other_task.title,
+                                'assignee': task.assignee.username,
+                                'assignee_id': task.assignee.id,
                                     'overlap_workdays': overlap_days,
                                     'severity': 'high' if overlap_days > 3 else 'medium',
                                     'description': f'"{task.assignee.username}" has {overlap_days} workday(s) overlap between "{task.title}" and "{other_task.title}"'
-                                })
+                            })
         
         # Check for missing dependencies (tasks that should depend on others but don't)
         for task in tasks:
@@ -1174,32 +1174,32 @@ Return JSON array:
         except Exception as e:
             self.log_action("AI suggestions failed, using fallback", {"error": str(e)})
             # Fallback to rule-based suggestions
-            for task in tasks:
-                if task.status in ['todo', 'in_progress', 'review']:
-                    if task.due_date and task.due_date < now:
-                        days_overdue = (now - task.due_date).days
-                        suggestions.append({
-                            'type': 'extend_deadline',
-                            'task_id': task.id,
-                            'task_title': task.title,
-                            'current_due_date': task.due_date.isoformat(),
-                            'days_overdue': days_overdue,
-                            'suggested_extension_days': max(3, days_overdue + 2),
+        for task in tasks:
+            if task.status in ['todo', 'in_progress', 'review']:
+                if task.due_date and task.due_date < now:
+                    days_overdue = (now - task.due_date).days
+                    suggestions.append({
+                        'type': 'extend_deadline',
+                        'task_id': task.id,
+                        'task_title': task.title,
+                        'current_due_date': task.due_date.isoformat(),
+                        'days_overdue': days_overdue,
+                        'suggested_extension_days': max(3, days_overdue + 2),
                             'priority': 'high' if days_overdue > 7 else 'medium',
                             'reasoning': f'Task is {days_overdue} day(s) overdue',
                             'impact': 'May delay dependent tasks'
-                        })
-                    
-                    if task.estimated_hours and task.actual_hours:
-                        if task.actual_hours > task.estimated_hours * 1.2:
-                            overage_percentage = ((task.actual_hours - task.estimated_hours) / task.estimated_hours) * 100
-                            suggestions.append({
-                                'type': 'revise_estimate',
-                                'task_id': task.id,
-                                'task_title': task.title,
-                                'current_estimate': task.estimated_hours,
-                                'actual_hours': task.actual_hours,
-                                'overage_percentage': round(overage_percentage, 1),
+                    })
+                
+                if task.estimated_hours and task.actual_hours:
+                    if task.actual_hours > task.estimated_hours * 1.2:
+                        overage_percentage = ((task.actual_hours - task.estimated_hours) / task.estimated_hours) * 100
+                        suggestions.append({
+                            'type': 'revise_estimate',
+                            'task_id': task.id,
+                            'task_title': task.title,
+                            'current_estimate': task.estimated_hours,
+                            'actual_hours': task.actual_hours,
+                            'overage_percentage': round(overage_percentage, 1),
                                 'priority': 'medium',
                                 'reasoning': f'Task is taking {round(overage_percentage, 1)}% longer than estimated',
                                 'impact': 'Future similar tasks may need revised estimates'
@@ -1209,18 +1209,18 @@ Return JSON array:
         if project.end_date and expected_completion_rate:
             if completion_rate < expected_completion_rate - 10:
                 suggestions.append({
-                    'type': 'extend_project_deadline',
-                    'project_id': project.id,
-                    'project_name': project.name,
+                        'type': 'extend_project_deadline',
+                        'project_id': project.id,
+                        'project_name': project.name,
                     'project_level': True,
-                    'current_completion_rate': round(completion_rate, 1),
-                    'expected_completion_rate': round(expected_completion_rate, 1),
-                    'current_end_date': project.end_date.isoformat(),
-                    'suggested_extension_days': max(7, int((expected_completion_rate - completion_rate) / 10)),
+                        'current_completion_rate': round(completion_rate, 1),
+                        'expected_completion_rate': round(expected_completion_rate, 1),
+                        'current_end_date': project.end_date.isoformat(),
+                        'suggested_extension_days': max(7, int((expected_completion_rate - completion_rate) / 10)),
                     'priority': 'high',
                     'reasoning': f'Project is {round(expected_completion_rate - completion_rate, 1)}% behind expected progress',
                     'impact': 'Project deadline may need adjustment'
-                })
+                    })
         
         # Resource overload check
         assignee_counts = {}

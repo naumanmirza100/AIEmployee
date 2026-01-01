@@ -304,6 +304,8 @@ class UserProfile(models.Model):
     
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='team_member')
+    # Company association (required for project_manager role)
+    company = models.ForeignKey('Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_profiles')
     # Additional fields from payPerProject
     company_name = models.CharField(max_length=255, blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
@@ -338,6 +340,19 @@ class UserProfile(models.Model):
     def is_developer(self):
         """Check if user is a developer"""
         return self.role == 'developer'
+    
+    def clean(self):
+        """Validate that project_manager role has company"""
+        from django.core.exceptions import ValidationError
+        if self.role == 'project_manager' and not self.company:
+            raise ValidationError({
+                'company': 'Project Manager role requires a company association.'
+            })
+    
+    def save(self, *args, **kwargs):
+        """Override save to call clean validation"""
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 @receiver(post_save, sender=User)
@@ -485,6 +500,7 @@ class Company(models.Model):
 class CompanyUser(models.Model):
     """Users belonging to companies"""
     ROLE_CHOICES = [
+        ('owner', 'Owner'),
         ('admin', 'Admin'),
         ('manager', 'Manager'),
         ('recruiter', 'Recruiter'),
