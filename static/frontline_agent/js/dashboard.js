@@ -353,6 +353,155 @@ document.getElementById('load-analytics-btn')?.addEventListener('click', async (
 // Refresh Notifications
 document.getElementById('refresh-notifications-btn')?.addEventListener('click', loadNotifications);
 
+// Frontline AI Chat Interface
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const sendChatBtn = document.getElementById('send-chat-btn');
+
+function addChatMessage(message, isBot = false) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${isBot ? 'bot-message' : 'user-message'}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    
+    if (typeof message === 'string') {
+        contentDiv.innerHTML = `<p>${message}</p>`;
+    } else {
+        // Handle structured response
+        let html = '';
+        if (message.answer) {
+            html += `<p><strong>Answer:</strong> ${message.answer}</p>`;
+        }
+        if (message.has_verified_info !== undefined) {
+            html += `<p class="info-badge ${message.has_verified_info ? 'verified' : 'unverified'}">${message.has_verified_info ? '✓ Verified Information' : '⚠ Information Not Available'}</p>`;
+        }
+        if (message.source) {
+            html += `<p class="source-info">Source: ${message.source}</p>`;
+        }
+        if (message.ticket_id) {
+            html += `<p><strong>Ticket Created:</strong> #${message.ticket_id} (Status: ${message.ticket_status})</p>`;
+            if (message.auto_resolved) {
+                html += `<p class="success-badge">✓ Auto-Resolved</p>`;
+                if (message.resolution) {
+                    html += `<p><strong>Resolution:</strong> ${message.resolution}</p>`;
+                }
+            }
+        }
+        if (message.tickets) {
+            html += `<p><strong>Your Tickets (${message.count}):</strong></p><ul>`;
+            message.tickets.slice(0, 5).forEach(ticket => {
+                html += `<li>#${ticket.id} - ${ticket.title} (${ticket.status})</li>`;
+            });
+            html += `</ul>`;
+        }
+        if (message.notifications) {
+            html += `<p><strong>Notifications (${message.count}):</strong></p><ul>`;
+            message.notifications.slice(0, 5).forEach(notif => {
+                html += `<li>${notif.title}: ${notif.message}</li>`;
+            });
+            html += `</ul>`;
+        }
+        if (message.error) {
+            html += `<p class="error-message">Error: ${message.error}</p>`;
+        }
+        if (!html) {
+            html = `<p>${JSON.stringify(message, null, 2)}</p>`;
+        }
+        contentDiv.innerHTML = html;
+    }
+    
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+async function sendChatMessage() {
+    const message = chatInput.value.trim();
+    if (!message) return;
+    
+    // Add user message to chat
+    addChatMessage(message, false);
+    chatInput.value = '';
+    sendChatBtn.disabled = true;
+    sendChatBtn.textContent = 'Sending...';
+    
+    // Show typing indicator
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'chat-message bot-message typing';
+    typingDiv.innerHTML = '<div class="message-content"><p>🤖 Thinking...</p></div>';
+    chatMessages.appendChild(typingDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    try {
+        const response = await fetch('/frontline/api/chat/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify({ message })
+        });
+        
+        const data = await response.json();
+        
+        // Remove typing indicator
+        typingDiv.remove();
+        
+        if (data.success) {
+            // Display response based on intent
+            const responseData = data.response;
+            if (responseData.answer) {
+                addChatMessage({
+                    answer: responseData.answer,
+                    has_verified_info: responseData.has_verified_info,
+                    source: responseData.source
+                }, true);
+            } else if (responseData.ticket_id) {
+                addChatMessage({
+                    ticket_id: responseData.ticket_id,
+                    ticket_status: responseData.ticket_status,
+                    auto_resolved: responseData.auto_resolved,
+                    resolution: responseData.resolution
+                }, true);
+            } else if (responseData.tickets) {
+                addChatMessage({
+                    tickets: responseData.tickets,
+                    count: responseData.count
+                }, true);
+            } else if (responseData.notifications) {
+                addChatMessage({
+                    notifications: responseData.notifications,
+                    count: responseData.count
+                }, true);
+            } else {
+                addChatMessage(responseData.message || 'Request processed successfully', true);
+            }
+        } else {
+            addChatMessage({
+                error: data.error || data.message || 'An error occurred'
+            }, true);
+        }
+    } catch (error) {
+        typingDiv.remove();
+        addChatMessage({
+            error: `Network error: ${error.message}`
+        }, true);
+    } finally {
+        sendChatBtn.disabled = false;
+        sendChatBtn.textContent = 'Send';
+    }
+}
+
+// Chat event listeners
+sendChatBtn?.addEventListener('click', sendChatMessage);
+chatInput?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+    }
+});
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadTickets();

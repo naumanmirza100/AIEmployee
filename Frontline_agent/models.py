@@ -102,7 +102,9 @@ class Notification(models.Model):
         ('system', 'System'),
     ]
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    # FIX: Changed related_name to avoid conflict with core.models.Notification.user
+    # Both models have user field pointing to User, so we need unique related_name
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_notifications')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='system')
     title = models.CharField(max_length=200)
     message = models.TextField()
@@ -188,40 +190,11 @@ class FrontlineMeeting(models.Model):
         return f"{self.title} - {self.scheduled_at}"
 
 
-class Document(models.Model):
-    """Document processing for Frontline Agent"""
-    DOCUMENT_TYPE_CHOICES = [
-        ('ticket_attachment', 'Ticket Attachment'),
-        ('knowledge_base', 'Knowledge Base'),
-        ('policy', 'Policy'),
-        ('procedure', 'Procedure'),
-        ('report', 'Report'),
-        ('other', 'Other'),
-    ]
-    
-    title = models.CharField(max_length=200)
-    description = models.TextField(blank=True)
-    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES, default='other')
-    file_path = models.CharField(max_length=1000, help_text="Path to stored document file")
-    file_size = models.IntegerField(null=True, blank=True, help_text="File size in bytes")
-    mime_type = models.CharField(max_length=100, blank=True)
-    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_documents')
-    processed = models.BooleanField(default=False)
-    processed_data = models.JSONField(default=dict, blank=True, help_text="Extracted/processed content from document")
-    related_ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
-    related_knowledge = models.ForeignKey(KnowledgeBase, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['document_type', 'processed']),
-            models.Index(fields=['created_at']),
-        ]
-    
-    def __str__(self):
-        return self.title
+from django.db import models
+from django.contrib.auth.models import User
+
+
+
 
 
 class FrontlineAnalytics(models.Model):
@@ -242,3 +215,36 @@ class FrontlineAnalytics(models.Model):
     def __str__(self):
         return f"{self.metric_name} - {self.metric_value}"
 
+from django.db import models
+from django.contrib.auth.models import User
+from Frontline_agent.models import Ticket, KnowledgeBase  # Make sure these exist
+
+class Document(models.Model):
+    DOCUMENT_TYPE_CHOICES = [
+        ('ticket_attachment', 'Ticket Attachment'),
+        ('knowledge_base', 'Knowledge Base'),
+        ('policy', 'Policy'),
+        ('procedure', 'Procedure'),
+        ('report', 'Report'),
+        ('other', 'Other'),
+    ]
+
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES, default='other')
+    file_path = models.CharField(max_length=1000)
+    file_size = models.IntegerField(null=True, blank=True)
+    mime_type = models.CharField(max_length=100, blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_uploaded_documents')
+    processed = models.BooleanField(default=False)
+    processed_data = models.JSONField(default=dict, blank=True)
+    related_ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+    related_knowledge = models.ForeignKey(KnowledgeBase, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title

@@ -1,8 +1,18 @@
+# Frontline_agent/urls.py
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path("chat/", views.chat, name="frontline_chat"),
+]
+
+
 from django.urls import path
 from . import views
 
 urlpatterns = [
     path('', views.frontline_dashboard, name='frontline_dashboard'),
+    path("chat/", views.chat, name="chat"),
     
     # Knowledge Q&A Agent
     path('api/knowledge-qa/', views.knowledge_qa, name='frontline_knowledge_qa'),
@@ -27,5 +37,8 @@ urlpatterns = [
     
     # Analytics & Dashboard Agent
     path('api/analytics/', views.get_analytics, name='frontline_get_analytics'),
+    
+    # Main Frontline AI Chat Endpoint (uses all internal agents)
+    path('api/chat/', views.frontline_chat, name='frontline_chat'),
 ]
 
