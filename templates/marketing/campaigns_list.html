@@ -1,0 +1,330 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Campaigns - Marketing Dashboard{% endblock %}
+
+{% block content %}
+<style>
+    .campaigns-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .page-header h1 {
+        margin: 0;
+        color: #1f2937;
+        font-size: 2rem;
+        font-weight: 700;
+    }
+    
+    .page-header-actions {
+        display: flex;
+        gap: 1rem;
+    }
+    
+    .btn {
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        border: none;
+        cursor: pointer;
+        font-size: 0.95rem;
+    }
+    
+    .btn-primary {
+        background: #3b82f6;
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background: #2563eb;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+    }
+    
+    .btn-secondary {
+        background: #6b7280;
+        color: white;
+    }
+    
+    .btn-secondary:hover {
+        background: #4b5563;
+    }
+    
+    .btn-danger {
+        background: #ef4444;
+        color: white;
+    }
+    
+    .btn-danger:hover {
+        background: #dc2626;
+    }
+    
+    .btn-success {
+        background: #10b981;
+        color: white;
+    }
+    
+    .btn-success:hover {
+        background: #059669;
+    }
+    
+    .btn-warning {
+        background: #f59e0b;
+        color: white;
+    }
+    
+    .btn-warning:hover {
+        background: #d97706;
+    }
+    
+    .campaigns-table {
+        background: white;
+        border-radius: 0.75rem;
+        border: 1px solid #e5e7eb;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .campaigns-table table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .campaigns-table thead {
+        background: #f9fafb;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .campaigns-table th {
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .campaigns-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #e5e7eb;
+        color: #1f2937;
+    }
+    
+    .campaigns-table tbody tr:hover {
+        background: #f9fafb;
+    }
+    
+    .campaigns-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    
+    .status-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+    }
+    
+    .status-draft {
+        background: #f3f4f6;
+        color: #6b7280;
+    }
+    
+    .status-active {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .status-paused {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .status-completed {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .status-scheduled {
+        background: #e0e7ff;
+        color: #3730a3;
+    }
+    
+    .status-cancelled {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .campaign-name {
+        font-weight: 600;
+        color: #1f2937;
+        font-size: 1rem;
+    }
+    
+    .campaign-description {
+        color: #6b7280;
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+    }
+    
+    .campaign-meta {
+        font-size: 0.875rem;
+        color: #6b7280;
+    }
+    
+    .btn-sm {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: white;
+        border: 2px dashed #e5e7eb;
+        border-radius: 0.75rem;
+    }
+    
+    .empty-state-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+    
+    .empty-state h3 {
+        color: #1f2937;
+        margin-bottom: 0.5rem;
+    }
+    
+    .empty-state p {
+        color: #6b7280;
+        margin-bottom: 1.5rem;
+    }
+    
+    .stats-bar {
+        display: flex;
+        gap: 2rem;
+        background: white;
+        padding: 1.5rem;
+        border-radius: 0.75rem;
+        border: 1px solid #e5e7eb;
+        margin-bottom: 2rem;
+    }
+    
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1f2937;
+    }
+    
+    .stat-label {
+        font-size: 0.875rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+</style>
+
+<div class="campaigns-container">
+    <div class="page-header">
+        <div>
+            <h1>📊 Campaigns</h1>
+            <p style="color: #6b7280; margin: 0.5rem 0 0 0;">Manage and monitor your marketing campaigns</p>
+        </div>
+        <div class="page-header-actions">
+            <a href="{% url 'marketing_dashboard' %}" class="btn btn-secondary">
+                ← Back to Dashboard
+            </a>
+            <a href="{% url 'marketing_agents_test' %}#campaign" class="btn btn-primary">
+                ➕ Create Campaign
+            </a>
+        </div>
+    </div>
+
+    {% if campaigns %}
+    <div class="stats-bar">
+        <div class="stat-item">
+            <div class="stat-value">{{ campaigns|length }}</div>
+            <div class="stat-label">Total Campaigns</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value">{{ active_count }}</div>
+            <div class="stat-label">Active Campaigns</div>
+        </div>
+    </div>
+
+    <div class="campaigns-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Campaign Name</th>
+                    <th>Status</th>
+                    <th>Type</th>
+                    <th>Budget</th>
+                    <th>Spent</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for campaign in campaigns %}
+                <tr>
+                    <td>
+                        <div class="campaign-name">{{ campaign.name }}</div>
+                        {% if campaign.description %}
+                        <div class="campaign-description">{{ campaign.description|truncatewords:15 }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="status-badge status-{{ campaign.status }}">{{ campaign.get_status_display }}</span>
+                    </td>
+                    <td class="campaign-meta">{{ campaign.get_campaign_type_display }}</td>
+                    <td class="campaign-meta">${{ campaign.budget|floatformat:2 }}</td>
+                    <td class="campaign-meta">${{ campaign.actual_spend|floatformat:2 }}</td>
+                    <td class="campaign-meta">{{ campaign.created_at|date:"M d, Y" }}</td>
+                    <td>
+                        <a href="{% url 'campaign_detail' campaign.id %}" class="btn btn-primary btn-sm">
+                            📊 Manage
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <h3>No Campaigns Yet</h3>
+        <p>Get started by creating your first marketing campaign</p>
+        <a href="{% url 'marketing_agents_test' %}#campaign" class="btn btn-primary">
+            ➕ Create Your First Campaign
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+

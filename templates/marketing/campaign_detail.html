@@ -1,0 +1,2302 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load tz %}
+{% block title %}{{ campaign.name }} - Campaign Details{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<style>
+    .campaign-detail-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .page-header h1 {
+        margin: 0;
+        color: #1f2937;
+        font-size: 2rem;
+        font-weight: 700;
+    }
+    
+    .btn {
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        border: none;
+        cursor: pointer;
+        font-size: 0.95rem;
+    }
+    
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-secondary { background: #6b7280; color: white; }
+    .btn-secondary:hover { background: #4b5563; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-warning { background: #f59e0b; color: white; }
+    .btn-warning:hover { background: #d97706; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-success:hover { background: #059669; }
+    
+    .detail-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 2rem;
+        margin-bottom: 2rem;
+    }
+    
+    .detail-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .detail-card h2 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin: 0 0 1rem 0;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+    
+    .info-item {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .info-label {
+        font-size: 0.75rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+    
+    .info-value {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    
+    .status-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+    }
+    
+    .status-draft { background: #f3f4f6; color: #6b7280; }
+    .status-active { background: #d1fae5; color: #065f46; }
+    .status-paused { background: #fef3c7; color: #92400e; }
+    .status-completed { background: #dbeafe; color: #1e40af; }
+    .status-scheduled { background: #e0e7ff; color: #3730a3; }
+    .status-cancelled { background: #fee2e2; color: #991b1b; }
+    
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    
+    .section-header h2 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    
+    .description-text {
+        color: #6b7280;
+        line-height: 1.6;
+        margin: 1rem 0;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    .btn-action {
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        border: none;
+        cursor: pointer;
+        font-size: 0.95rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-action:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+    
+    .btn-action:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    /* Modal styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        animation: fadeIn 0.2s;
+    }
+    
+    .modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    .modal-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        max-width: 500px;
+        width: 90%;
+        animation: slideDown 0.3s;
+    }
+    
+    @keyframes slideDown {
+        from {
+            transform: translateY(-50px);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+    
+    .modal-header {
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .modal-header h2 {
+        margin: 0;
+        color: #1f2937;
+        font-size: 1.5rem;
+    }
+    
+    .modal-body {
+        margin-bottom: 1.5rem;
+    }
+    
+    .form-group-modal {
+        margin-bottom: 1.5rem;
+    }
+    
+    .form-group-modal label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #374151;
+        font-size: 0.95rem;
+    }
+    
+    .form-group-modal input[type="date"] {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #e5e7eb;
+        border-radius: 0.5rem;
+        font-size: 1rem;
+        transition: border-color 0.2s;
+    }
+    
+    .form-group-modal input:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .modal-footer {
+        display: flex;
+        gap: 1rem;
+        justify-content: flex-end;
+    }
+    
+    /* Analytics Dashboard Styles */
+    .metric-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .metric-icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .metric-label {
+        font-size: 0.875rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-bottom: 0.25rem;
+    }
+    
+    .metric-value.positive {
+        color: #10b981;
+    }
+    
+    .metric-value.negative {
+        color: #ef4444;
+    }
+    
+    .metric-subtext {
+        font-size: 0.75rem;
+        color: #9ca3af;
+    }
+    
+</style>
+
+<div class="campaign-detail-container">
+    <div class="page-header">
+        <div>
+            <h1>{{ campaign.name }}</h1>
+            <p style="color: #6b7280; margin: 0.5rem 0 0 0;">
+                Campaign created on {{ campaign.created_at|date:"M d, Y" }}
+            </p>
+        </div>
+        <div class="action-buttons">
+            <a href="{% url 'campaigns_list' %}" class="btn-action btn-secondary">← Back to List</a>
+            
+            <!-- Draft/Paused: Show Launch and Schedule -->
+            {% if campaign.status == 'draft' or campaign.status == 'paused' %}
+            <button onclick="showLaunchModal('{{ campaign.id }}')" class="btn-action btn-success">
+                <span>🚀</span> Launch Campaign
+            </button>
+            <button onclick="showScheduleModal('{{ campaign.id }}')" class="btn-action btn-primary">
+                <span>📅</span> Schedule
+            </button>
+            {% endif %}
+            
+            <!-- Scheduled: Show Launch, Manage, Optimize -->
+            {% if campaign.status == 'scheduled' %}
+            <button onclick="showLaunchModal('{{ campaign.id }}')" class="btn-action btn-success">
+                <span>🚀</span> Launch Campaign
+            </button>
+            <!-- <button onclick="handleCampaignAction('manage', '{{ campaign.id }}', this)" class="btn-action btn-secondary">
+                <span>📊</span> Manage
+            </button> -->
+            <button onclick="handleCampaignAction('optimize', '{{ campaign.id }}'  , this)" class="btn-action btn-primary">
+                <span>⚡</span> Optimize
+            </button>
+            {% endif %}
+            
+            <!-- Active: Show Optimize, Stop, Manage -->
+            {% if campaign.status == 'active' %}
+            <button onclick="handleCampaignAction('optimize', '{{ campaign.id }}', this)" class="btn-action btn-primary">
+                <span>⚡</span> Optimize
+            </button>
+            <form method="POST" action="{% url 'campaign_stop' campaign.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to stop this campaign?');">
+                {% csrf_token %}
+                <button type="submit" class="btn-action btn-warning">
+                    <span>⏸️</span> Stop Campaign
+                </button>
+            </form>
+            <!-- <button onclick="handleCampaignAction('manage', '{{ campaign.id }}', this)" class="btn-action btn-secondary">
+                <span>📊</span> Manage
+            </button> -->
+            {% endif %}
+            
+            <!-- Always show Edit and Delete -->
+            <a href="{% url 'campaign_edit' campaign.id %}" class="btn-action btn-secondary">
+                <span>✏️</span> Edit
+            </a>
+            <form method="POST" action="{% url 'campaign_delete' campaign.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this campaign? This action cannot be undone.');">
+                {% csrf_token %}
+                <button type="submit" class="btn-action btn-danger">
+                    <span>🗑️</span> Delete
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="detail-grid">
+        <div class="detail-card">
+            <h2>Campaign Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Status</span>
+                    <span class="status-badge status-{{ campaign.status }}">{{ campaign.get_status_display }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Type</span>
+                    <span class="info-value">{{ campaign.campaign_type }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Budget</span>
+                    <span class="info-value">${{ campaign.budget|floatformat:2 }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Spent</span>
+                    <span class="info-value">${{ campaign.actual_spend|floatformat:2 }}</span>
+                </div>
+                {% if campaign.start_date %}
+                <div class="info-item">
+                    <span class="info-label">Start Date</span>
+                    <span class="info-value">{{ campaign.start_date|date:"M d, Y" }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.end_date %}
+                <div class="info-item">
+                    <span class="info-label">End Date</span>
+                    <span class="info-value">{{ campaign.end_date|date:"M d, Y" }}</span>
+                </div>
+                {% endif %}
+            </div>
+            
+            {% if campaign.description %}
+            <div style="margin-top: 1.5rem;">
+                <span class="info-label">Description</span>
+                <p class="description-text">{{ campaign.description }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="detail-card">
+            <h2>Goals & Targets</h2>
+            <div class="info-grid">
+                {% if campaign.target_revenue %}
+                <div class="info-item">
+                    <span class="info-label">Target Revenue</span>
+                    <span class="info-value">${{ campaign.target_revenue|floatformat:2 }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.target_leads %}
+                <div class="info-item">
+                    <span class="info-label">Target Leads</span>
+                    <span class="info-value">{{ campaign.target_leads }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.target_conversions %}
+                <div class="info-item">
+                    <span class="info-label">Target Conversions</span>
+                    <span class="info-value">{{ campaign.target_conversions }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <h2 style="margin-top: 2rem;">Target Audience</h2>
+            <div class="info-grid">
+                {% if campaign.age_range %}
+                <div class="info-item">
+                    <span class="info-label">Age Range</span>
+                    <span class="info-value">{{ campaign.age_range }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.location %}
+                <div class="info-item">
+                    <span class="info-label">Location</span>
+                    <span class="info-value">{{ campaign.location }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.industry %}
+                <div class="info-item">
+                    <span class="info-label">Industry</span>
+                    <span class="info-value">{{ campaign.industry }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.company_size %}
+                <div class="info-item">
+                    <span class="info-label">Company Size</span>
+                    <span class="info-value">{{ campaign.company_size }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.interests %}
+                <div class="info-item">
+                    <span class="info-label">Interests</span>
+                    <span class="info-value">{{ campaign.interests }}</span>
+                </div>
+                {% endif %}
+                {% if campaign.language %}
+                <div class="info-item">
+                    <span class="info-label">Language</span>
+                    <span class="info-value">{{ campaign.language }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Analytics & Dashboard Section -->
+    <div class="detail-card" style="margin-top: 2rem;">
+        <div class="section-header">
+            <h2>📈 Analytics & Dashboard</h2>
+            <p style="color: #6b7280; margin: 0; font-size: 0.95rem;">Track campaign performance, customer engagement, and ROI through real-time metrics</p>
+        </div>
+
+        <!-- Key Performance Metrics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
+            <div class="metric-card">
+                <div class="metric-icon">👁️</div>
+                <div class="metric-label">Impressions</div>
+                <div class="metric-value">{{ analytics.impressions|floatformat:0 }}</div>
+                {% if analytics.target_revenue %}
+                <div class="metric-subtext">Target: N/A</div>
+                {% endif %}
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">🖱️</div>
+                <div class="metric-label">Clicks</div>
+                <div class="metric-value">{{ analytics.clicks|floatformat:0 }}</div>
+                <div class="metric-subtext">CTR: {{ analytics.ctr|floatformat:2 }}%</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">✅</div>
+                <div class="metric-label">Conversions</div>
+                <div class="metric-value">{{ analytics.conversions|floatformat:0 }}</div>
+                {% if analytics.target_conversions %}
+                <div class="metric-subtext">Target: {{ analytics.target_conversions }} ({{ analytics.conversion_progress|floatformat:1 }}%)</div>
+                {% else %}
+                <div class="metric-subtext">Rate: {{ analytics.conversion_rate|floatformat:2 }}%</div>
+                {% endif %}
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">💰</div>
+                <div class="metric-label">Revenue</div>
+                <div class="metric-value">${{ analytics.revenue|floatformat:2 }}</div>
+                {% if analytics.target_revenue %}
+                <div class="metric-subtext">Target: ${{ analytics.target_revenue|floatformat:2 }} ({{ analytics.revenue_progress|floatformat:1 }}%)</div>
+                {% endif %}
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">📊</div>
+                <div class="metric-label">ROI</div>
+                <div class="metric-value {% if analytics.roi > 0 %}positive{% elif analytics.roi < 0 %}negative{% endif %}">
+                    {{ analytics.roi|floatformat:2 }}%
+                </div>
+                <div class="metric-subtext">Return on Investment</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">💚</div>
+                <div class="metric-label">Engagement</div>
+                <div class="metric-value">{{ analytics.engagement|floatformat:2 }}%</div>
+                <div class="metric-subtext">Customer Engagement Rate</div>
+            </div>
+        </div>
+
+        <!-- Budget & Spending -->
+        <div style="margin: 2rem 0; padding: 1.5rem; background: #f9fafb; border-radius: 0.5rem;">
+            <h3 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">Budget & Spending</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;">
+                <div>
+                    <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem;">Total Budget</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: #1f2937;">${{ campaign.budget|floatformat:2 }}</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem;">Amount Spent</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">${{ campaign.actual_spend|floatformat:2 }}</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem;">Remaining</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: #10b981;">${{ analytics.budget_remaining|floatformat:2 }}</div>
+                </div>
+            </div>
+            <div style="margin-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.875rem;">
+                    <span style="color: #6b7280;">Budget Utilization</span>
+                    <span style="font-weight: 600; color: #1f2937;">{{ analytics.budget_utilization|floatformat:1 }}%</span>
+                </div>
+                <div style="width: 100%; height: 12px; background: #e5e7eb; border-radius: 6px; overflow: hidden;">
+                    <div style="width: {{ analytics.budget_utilization|floatformat:0 }}%; height: 100%; background: linear-gradient(90deg, #10b981 0%, #059669 100%); transition: width 0.3s;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Towards Targets -->
+        {% if analytics.target_revenue or analytics.target_leads or analytics.target_conversions %}
+        <div style="margin: 2rem 0;">
+            <h3 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.25rem;">Progress Towards Targets</h3>
+            <div style="display: grid; gap: 1.5rem;">
+                {% if analytics.target_revenue %}
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="font-weight: 600; color: #374151;">Revenue Target</span>
+                        <span style="font-weight: 600; color: #1f2937;">${{ analytics.revenue|floatformat:2 }} / ${{ analytics.target_revenue|floatformat:2 }}</span>
+                    </div>
+                    <div style="width: 100%; height: 16px; background: #e5e7eb; border-radius: 8px; overflow: hidden;">
+                        <div style="width: {% if analytics.revenue_progress > 100 %}100{% else %}{{ analytics.revenue_progress|floatformat:0 }}{% endif %}%; height: 100%; background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);"></div>
+                    </div>
+                    <div style="text-align: right; margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">{{ analytics.revenue_progress|floatformat:1 }}% Complete</div>
+                </div>
+                {% endif %}
+                
+                {% if analytics.target_conversions %}
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="font-weight: 600; color: #374151;">Conversions Target</span>
+                        <span style="font-weight: 600; color: #1f2937;">{{ analytics.conversions|floatformat:0 }} / {{ analytics.target_conversions }}</span>
+                    </div>
+                    <div style="width: 100%; height: 16px; background: #e5e7eb; border-radius: 8px; overflow: hidden;">
+                        <div style="width: {% if analytics.conversion_progress > 100 %}100{% else %}{{ analytics.conversion_progress|floatformat:0 }}{% endif %}%; height: 100%; background: linear-gradient(90deg, #10b981 0%, #059669 100%);"></div>
+                    </div>
+                    <div style="text-align: right; margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">{{ analytics.conversion_progress|floatformat:1 }}% Complete</div>
+                </div>
+                {% endif %}
+                
+                {% if analytics.target_leads %}
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="font-weight: 600; color: #374151;">Leads Target</span>
+                        <span style="font-weight: 600; color: #1f2937;">{{ leads|length }} / {{ analytics.target_leads }}</span>
+                    </div>
+                    <div style="width: 100%; height: 16px; background: #e5e7eb; border-radius: 8px; overflow: hidden;">
+                        <div style="width: {% if analytics.leads_progress > 100 %}100{% else %}{{ analytics.leads_progress|floatformat:0 }}{% endif %}%; height: 100%; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                    </div>
+                    <div style="text-align: right; margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">{{ analytics.leads_progress|floatformat:1 }}% Complete</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Performance Chart -->
+        {% if analytics.chart_data.dates and analytics.chart_data.dates != "[]" %}
+        <div style="margin: 2rem 0; padding: 1.5rem; background: white; border: 1px solid #e5e7eb; border-radius: 0.5rem;">
+            <h3 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.25rem;">Performance Over Time (Last 30 Days)</h3>
+            <div style="height: 300px; position: relative;">
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const dates = {{ analytics.chart_data.dates|safe }};
+                const impressions = {{ analytics.chart_data.impressions|safe }};
+                const clicks = {{ analytics.chart_data.clicks|safe }};
+                const conversions = {{ analytics.chart_data.conversions|safe }};
+                const revenue = {{ analytics.chart_data.revenue|safe }};
+                
+                const chartData = {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: 'Impressions',
+                            data: impressions,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Clicks',
+                            data: clicks,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Conversions',
+                            data: conversions,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Revenue ($)',
+                            data: revenue,
+                            borderColor: '#8b5cf6',
+                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                            tension: 0.4,
+                            fill: true,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                };
+                
+                const ctx = document.getElementById('performanceChart');
+                if (ctx && typeof Chart !== 'undefined') {
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: chartData,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: {
+                                mode: 'index',
+                                intersect: false,
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                },
+                                title: {
+                                    display: false
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    type: 'linear',
+                                    display: true,
+                                    position: 'left',
+                                    beginAtZero: true
+                                },
+                                y1: {
+                                    type: 'linear',
+                                    display: true,
+                                    position: 'right',
+                                    beginAtZero: true,
+                                    grid: {
+                                        drawOnChartArea: false,
+                                    },
+                                },
+                            }
+                        }
+                    });
+                }
+            });
+        </script>
+        {% else %}
+        <div style="margin: 2rem 0; padding: 2rem; text-align: center; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">
+            <p style="color: #6b7280; margin: 0;">📊 Performance data will appear here once the campaign is active and metrics are recorded.</p>
+        </div>
+        {% endif %}
+
+        <!-- Actionable Insights -->
+        <div style="margin: 2rem 0; padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 0.75rem; color: white;">
+            <h3 style="margin: 0 0 1rem 0; font-size: 1.25rem;">💡 Key Insights</h3>
+            <div style="display: grid; gap: 1rem; font-size: 0.95rem;">
+                {% if analytics.roi > 0 %}
+                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
+                    ✅ <strong>Positive ROI:</strong> Your campaign is generating {{ analytics.roi|floatformat:2 }}% return on investment.
+                </div>
+                {% elif analytics.roi < 0 %}
+                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
+                    ⚠️ <strong>Negative ROI:</strong> Consider optimizing your campaign strategy to improve returns.
+                </div>
+                {% endif %}
+                
+                {% if analytics.ctr > 3 %}
+                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
+                    ✅ <strong>Strong CTR:</strong> Your click-through rate of {{ analytics.ctr|floatformat:2 }}% is above the industry average.
+                </div>
+                {% elif analytics.ctr > 0 and analytics.ctr < 1 %}
+                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
+                    💡 <strong>CTR Optimization:</strong> Your CTR of {{ analytics.ctr|floatformat:2 }}% could be improved. Consider A/B testing your messaging.
+                </div>
+                {% endif %}
+                
+                {% if analytics.conversion_rate > 5 %}
+                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
+                    ✅ <strong>Excellent Conversion Rate:</strong> {{ analytics.conversion_rate|floatformat:2 }}% conversion rate indicates strong audience targeting.
+                </div>
+                {% endif %}
+                
+                {% if analytics.budget_utilization > 80 %}
+                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
+                    💰 <strong>Budget Alert:</strong> {{ analytics.budget_utilization|floatformat:1 }}% of budget utilized. Consider reviewing spending patterns.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Email Sequences Section -->
+    <div class="detail-card" style="margin-top: 2rem;">
+        <div class="section-header">
+            <div>
+                <h2>📧 Email Sequences</h2>
+                <p style="color: #6b7280; margin: 0.5rem 0 0 0; font-size: 0.95rem;">
+                    Create and manage email sequences for this campaign. All emails are sent through sequences.
+                </p>
+            </div>
+            <div>
+                <a href="{% url 'sequence_management' campaign.id %}" 
+                   class="btn-action btn-primary" 
+                   style="text-decoration: none; padding: 0.75rem 1.5rem; font-size: 0.95rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <span>📋</span> Manage Email Sequences
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Email Sending Activity Section -->
+    <div class="detail-card" style="margin-top: 2rem;">
+        <div class="section-header">
+            <div>
+                <h2>📊 Email Sending Activity</h2>
+                <p style="color: #6b7280; margin: 0.5rem 0 0 0; font-size: 0.95rem;">
+                    Track emails sent to leads, delivery status, opens, and clicks.
+                </p>
+            </div>
+            <div>
+                <a href="{% url 'email_sending_status' campaign.id %}" 
+                   class="btn btn-primary" 
+                   style="text-decoration: none; padding: 0.5rem 1rem; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <span>📋</span> View Detailed Status
+                </a>
+            </div>
+        </div>
+        
+        <!-- Email Stats Overview -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
+            <div style="padding: 1rem; background: #eff6ff; border-radius: 0.5rem; border-left: 4px solid #3b82f6;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Total Sent</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #1e40af;">{{ email_stats.total_sent }}</div>
+            </div>
+            <div style="padding: 1rem; background: #d1fae5; border-radius: 0.5rem; border-left: 4px solid #10b981;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Delivered</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #065f46;">{{ email_stats.total_delivered }}</div>
+            </div>
+            <div style="padding: 1rem; background: #fef3c7; border-radius: 0.5rem; border-left: 4px solid #f59e0b;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Opened</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #92400e;">{{ email_stats.total_opened }}</div>
+            </div>
+            <div style="padding: 1rem; background: #ede9fe; border-radius: 0.5rem; border-left: 4px solid #8b5cf6;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Clicked</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #5b21b6;">{{ email_stats.total_clicked }}</div>
+            </div>
+            <div style="padding: 1rem; background: #fee2e2; border-radius: 0.5rem; border-left: 4px solid #ef4444;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Failed</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #991b1b;">{{ email_stats.total_failed }}</div>
+            </div>
+            <div style="padding: 1rem; background: #fce7f3; border-radius: 0.5rem; border-left: 4px solid #ec4899;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Bounced</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #9f1239;">{{ email_stats.total_bounced }}</div>
+            </div>
+        </div>
+        
+        <!-- Email Send History Table -->
+        {% if email_sends %}
+        <div style="margin-top: 1.5rem;">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: #1f2937;">Recent Email Sends</h3>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; background: white;">
+                    <thead>
+                        <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Recipient</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Subject</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Template</th>
+                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Status</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Sent At</th>
+                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">A/B Variant</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for email_send in email_sends %}
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 0.75rem; color: #1f2937;">{{ email_send.recipient_email }}</td>
+                            <td style="padding: 0.75rem; color: #1f2937; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ email_send.subject }}</td>
+                            <td style="padding: 0.75rem; color: #1f2937;">
+                                {% if email_send.email_template %}
+                                    {{ email_send.email_template.name }}
+                                {% else %}
+                                    <span style="color: #9ca3af;">—</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; text-align: center;">
+                                <span class="status-badge" style="
+                                    background: {% if email_send.status == 'sent' %}#dbeafe{% elif email_send.status == 'delivered' %}#d1fae5{% elif email_send.status == 'opened' %}#fef3c7{% elif email_send.status == 'clicked' %}#ede9fe{% elif email_send.status == 'failed' %}#fee2e2{% elif email_send.status == 'bounced' %}#fce7f3{% else %}#f3f4f6{% endif %};
+                                    color: {% if email_send.status == 'sent' %}#1e40af{% elif email_send.status == 'delivered' %}#065f46{% elif email_send.status == 'opened' %}#92400e{% elif email_send.status == 'clicked' %}#5b21b6{% elif email_send.status == 'failed' %}#991b1b{% elif email_send.status == 'bounced' %}#9f1239{% else %}#6b7280{% endif %};
+                                    padding: 0.25rem 0.75rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 500; display: inline-block;
+                                ">
+                                    {{ email_send.get_status_display }}
+                                </span>
+                            </td>
+                            <td style="padding: 0.75rem; color: #6b7280; font-size: 0.875rem;">
+                                {% if email_send.sent_at %}
+                                    <span class="email-sent-time" data-utc-timestamp="{{ email_send.sent_at|date:"U" }}">
+                                        {{ email_send.sent_at|date:"M d, Y H:i" }}
+                                    </span>
+                                {% else %}
+                                    <span style="color: #9ca3af;">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; text-align: center;">
+                                {% if email_send.is_ab_test and email_send.ab_test_variant %}
+                                    <span style="background: #fef3c7; color: #92400e; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                        {{ email_send.ab_test_variant }}
+                                    </span>
+                                {% else %}
+                                    <span style="color: #9ca3af;">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if email_send.error_message %}
+                        <tr>
+                            <td colspan="6" style="padding: 0.5rem 0.75rem; background: #fef2f2; color: #991b1b; font-size: 0.875rem;">
+                                ⚠️ Error: {{ email_send.error_message }}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 1rem; color: #6b7280; font-size: 0.875rem;">
+                Showing last 50 emails. Total sent: <strong>{{ email_stats.total_sent }}</strong>
+            </div>
+        </div>
+        {% else %}
+        <div style="margin: 2rem 0; padding: 2rem; text-align: center; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">
+            <p style="color: #6b7280; margin: 0;">
+                📭 No emails sent yet. Emails will appear here after you launch the campaign.
+            </p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Leads Management Section -->
+    <div class="detail-card" style="margin-top: 2rem;">
+        <div class="section-header">
+            <div>
+                <h2>👥 Campaign Leads</h2>
+                <p style="color: #6b7280; margin: 0.5rem 0 0 0; font-size: 0.95rem;">
+                    Manage leads for this campaign. Upload CSV/Excel files or add leads manually.
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+                <button onclick="showUploadLeadsModal()" class="btn-action btn-primary">
+                    <span>📤</span> Upload Leads
+                </button>
+                <!-- <button onclick="showAddLeadModal()" class="btn-action btn-success">
+                    <span>➕</span> Add Lead
+                </button> -->
+                {% if leads %}
+                <a href="{% url 'export_leads' campaign.id %}" class="btn-action btn-secondary">
+                    <span>📥</span> Export CSV
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Leads Table -->
+        {% if leads %}
+        <div style="overflow-x: auto; margin-top: 1.5rem;">
+            <table style="width: 100%; border-collapse: collapse; background: white;">
+                <thead>
+                    <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Email</th>
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Name</th>
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Phone</th>
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Company</th>
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Job Title</th>
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Status</th>
+                        <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Source</th>
+                        <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lead in leads %}
+                    <tr style="border-bottom: 1px solid #e5e7eb; transition: background 0.2s;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
+                        <td style="padding: 0.75rem; color: #1f2937;">{{ lead.email }}</td>
+                        <td style="padding: 0.75rem; color: #1f2937;">
+                            {% if lead.first_name or lead.last_name %}
+                                {{ lead.first_name }} {{ lead.last_name }}
+                            {% else %}
+                                <span style="color: #9ca3af;">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.75rem; color: #1f2937;">{{ lead.phone|default:"—" }}</td>
+                        <td style="padding: 0.75rem; color: #1f2937;">{{ lead.company|default:"—" }}</td>
+                        <td style="padding: 0.75rem; color: #1f2937;">{{ lead.job_title|default:"—" }}</td>
+                        <td style="padding: 0.75rem;">
+                            <span class="status-badge" style="background: {% if lead.status == 'converted' %}#d1fae5{% elif lead.status == 'qualified' %}#dbeafe{% elif lead.status == 'contacted' %}#fef3c7{% elif lead.status == 'lost' %}#fee2e2{% else %}#f3f4f6{% endif %}; color: {% if lead.status == 'converted' %}#065f46{% elif lead.status == 'qualified' %}#1e40af{% elif lead.status == 'contacted' %}#92400e{% elif lead.status == 'lost' %}#991b1b{% else %}#6b7280{% endif %};">
+                                {{ lead.get_status_display }}
+                            </span>
+                        </td>
+                        <td style="padding: 0.75rem; color: #1f2937;">{{ lead.source|default:"—" }}</td>
+                        <td style="padding: 0.75rem; text-align: center;">
+                            <button onclick="showEditLeadModal({{ lead.id }}, '{{ lead.email|escapejs }}', '{{ lead.first_name|escapejs }}', '{{ lead.last_name|escapejs }}', '{{ lead.phone|escapejs }}', '{{ lead.company|escapejs }}', '{{ lead.job_title|escapejs }}', '{{ lead.status }}', '{{ lead.source|escapejs }}', '{{ lead.notes|escapejs }}')" 
+                                    class="btn-action" style="padding: 0.5rem 1rem; font-size: 0.875rem; background: #3b82f6; color: white; margin-right: 0.5rem;">
+                                ✏️ Edit
+                            </button>
+                            <button onclick="deleteLead({{ lead.id }}, '{{ lead.email|escapejs }}')" 
+                                    class="btn-action" style="padding: 0.5rem 1rem; font-size: 0.875rem; background: #ef4444; color: white;">
+                                🗑️ Delete
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top: 1rem; color: #6b7280; font-size: 0.875rem;">
+            Total: <strong>{{ leads|length }}</strong> lead{{ leads|length|pluralize }}
+            {% if campaign.target_leads %}
+                (Target: {{ campaign.target_leads }})
+            {% endif %}
+        </div>
+        {% else %}
+        <div style="margin: 2rem 0; padding: 2rem; text-align: center; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">
+            <p style="color: #6b7280; margin: 0 0 1rem 0;">📋 No leads added yet. Upload a CSV/Excel file or add leads manually to get started.</p>
+            <button onclick="showUploadLeadsModal()" class="btn-action btn-primary" style="margin-right: 0.5rem;">
+                <span>📤</span> Upload Leads
+            </button>
+            <!-- <button onclick="showAddLeadModal()" class="btn-action btn-success">
+                <span>➕</span> Add Lead
+            </button> -->
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Upload Leads Modal -->
+<div id="uploadLeadsModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h2>📤 Upload Leads</h2>
+        </div>
+        <div class="modal-body">
+            <p style="color: #6b7280; margin-bottom: 1rem;">Upload a CSV or Excel file containing leads. The file must include an <strong>Email</strong> column. Supported columns:</p>
+            <ul style="color: #6b7280; margin-bottom: 1.5rem; padding-left: 1.5rem;">
+                <li><strong>Email</strong> (required)</li>
+                <li>First Name</li>
+                <li>Last Name</li>
+                <li>Phone</li>
+                <li>Company</li>
+                <li>Job Title</li>
+                <li>Source</li>
+            </ul>
+            <form id="upload-leads-form" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="form-group-modal">
+                    <label for="leads-file">Select File (CSV, XLSX, or XLS)</label>
+                    <input type="file" id="leads-file" name="file" accept=".csv,.xlsx,.xls" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div id="upload-leads-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" onclick="closeModal('uploadLeadsModal')" class="btn-action btn-secondary">Cancel</button>
+            <button type="button" onclick="handleUploadLeads()" class="btn-action btn-primary">Upload</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add Lead Modal -->
+<div id="addLeadModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h2>➕ Add Lead</h2>
+        </div>
+        <div class="modal-body">
+            <form id="add-lead-form">
+                {% csrf_token %}
+                <div class="form-group-modal">
+                    <label for="add-email">Email *</label>
+                    <input type="email" id="add-email" name="email" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="add-first-name">First Name</label>
+                    <input type="text" id="add-first-name" name="first_name" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="add-last-name">Last Name</label>
+                    <input type="text" id="add-last-name" name="last_name" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="add-phone">Phone</label>
+                    <input type="text" id="add-phone" name="phone" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="add-company">Company</label>
+                    <input type="text" id="add-company" name="company" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="add-job-title">Job Title</label>
+                    <input type="text" id="add-job-title" name="job_title" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="add-source">Source</label>
+                    <input type="text" id="add-source" name="source" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div id="add-lead-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('addLeadModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="handleAddLead()" class="btn-action btn-success">Add Lead</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Lead Modal -->
+<div id="editLeadModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h2>✏️ Edit Lead</h2>
+        </div>
+        <div class="modal-body">
+            <form id="edit-lead-form">
+                {% csrf_token %}
+                <input type="hidden" id="edit-lead-id" name="lead_id">
+                <div class="form-group-modal">
+                    <label for="edit-email">Email *</label>
+                    <input type="email" id="edit-email" name="email" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-first-name">First Name</label>
+                    <input type="text" id="edit-first-name" name="first_name" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-last-name">Last Name</label>
+                    <input type="text" id="edit-last-name" name="last_name" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-phone">Phone</label>
+                    <input type="text" id="edit-phone" name="phone" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-company">Company</label>
+                    <input type="text" id="edit-company" name="company" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-job-title">Job Title</label>
+                    <input type="text" id="edit-job-title" name="job_title" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-status">Status</label>
+                    <select id="edit-status" name="status" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="qualified">Qualified</option>
+                        <option value="converted">Converted</option>
+                        <option value="lost">Lost</option>
+                    </select>
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-source">Source</label>
+                    <input type="text" id="edit-source" name="source" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-notes">Notes</label>
+                    <textarea id="edit-notes" name="notes" rows="3" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;"></textarea>
+                </div>
+                <div id="edit-lead-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('editLeadModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="handleEditLead()" class="btn-action btn-primary">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Template and Sequence modals removed - now managed in sequence_management page -->
+<!-- Create Email Template Modal -->
+<div id="createTemplateModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+            <h2>➕ Create Email Template</h2>
+        </div>
+        <div class="modal-body">
+            <form id="create-template-form">
+                {% csrf_token %}
+                <div class="form-group-modal">
+                    <label for="template-name">Template Name *</label>
+                    <input type="text" id="template-name" name="name" required placeholder="e.g., Welcome Email, Follow-up #1" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="template-email-type">Email Type *</label>
+                    <select id="template-email-type" name="email_type" required onchange="updateTemplateForm()" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <option value="initial">Initial Campaign Email</option>
+                        <option value="followup">Follow-up Email</option>
+                        <option value="test">Test Email</option>
+                    </select>
+                </div>
+                <div class="form-group-modal" id="followup-sequence-group" style="display: none;">
+                    <label for="template-sequence-number">Follow-up Sequence Number</label>
+                    <input type="number" id="template-sequence-number" name="followup_sequence_number" min="1" value="1" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                    <small style="color: #6b7280;">Which follow-up email is this? (1 = first follow-up, 2 = second, etc.)</small>
+                </div>
+                <div class="form-group-modal" id="followup-delay-group" style="display: none;">
+                    <label for="template-delay-days">Delay Days</label>
+                    <input type="number" id="template-delay-days" name="followup_delay_days" min="0" value="3" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                    <small style="color: #6b7280;">How many days after the previous email should this be sent?</small>
+                </div>
+                <div class="form-group-modal">
+                    <label>
+                        <input type="checkbox" id="template-ab-test" name="is_ab_test" onchange="updateTemplateForm()">
+                        Enable A/B Testing
+                    </label>
+                    <small style="color: #6b7280; display: block; margin-top: 0.25rem;">Create two variants (A and B) to test which performs better</small>
+                </div>
+                <div class="form-group-modal" id="ab-test-variant-group" style="display: none;">
+                    <label for="template-ab-variant">A/B Test Variant</label>
+                    <select id="template-ab-variant" name="ab_test_variant" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <option value="A">Variant A</option>
+                        <option value="B">Variant B</option>
+                    </select>
+                    <small style="color: #6b7280;">Select which variant this template is (create two templates with the same settings but different variants)</small>
+                </div>
+                <div class="form-group-modal">
+                    <label for="template-subject">Email Subject *</label>
+                    <input type="text" id="template-subject" name="subject" required placeholder="e.g., Welcome to {{ campaign.name }}!" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                    <small style="color: #6b7280;">Available variables: {{lead_name}}, {{campaign_name}}, {{lead_email}}</small>
+                </div>
+                <div class="form-group-modal">
+                    <label for="template-html-content">HTML Content *</label>
+                    <textarea id="template-html-content" name="html_content" rows="15" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: monospace;"><!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #f4f4f4; padding: 20px; text-align: center; }
+        .content { padding: 20px; }
+        .button { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Hello {{lead_name}}!</h1>
+        </div>
+        <div class="content">
+            <p>Welcome to {{campaign_name}}!</p>
+            <p>We're excited to have you on board.</p>
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="#" class="button">Get Started</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Best regards,<br>The {{campaign_name}} Team</p>
+            <p><a href="#">Unsubscribe</a></p>
+        </div>
+    </div>
+</body>
+</html></textarea>
+                    <small style="color: #6b7280;">Available variables: {{lead_name}}, {{campaign_name}}, {{lead_email}}, {{lead_company}}<br>
+                    <strong>Note:</strong> Do NOT include delay_days, delay_hours, or any delay-related variables in the email content. Delay settings are only for scheduling when to send emails, not for email content.</small>
+                </div>
+                <div class="form-group-modal">
+                    <label for="template-text-content">Plain Text Content (Optional)</label>
+                    <textarea id="template-text-content" name="text_content" rows="10" placeholder="Plain text version for email clients that don't support HTML" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: monospace;"></textarea>
+                </div>
+                <div id="create-template-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('createTemplateModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="handleCreateTemplate()" class="btn-action btn-primary">Create Template</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Email Template Modal -->
+<div id="editTemplateModal" class="modal">
+    <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+            <h2>✏️ Edit Email Template</h2>
+        </div>
+        <div class="modal-body">
+            <form id="edit-template-form">
+                {% csrf_token %}
+                <input type="hidden" id="edit-template-id" name="template_id">
+                <div class="form-group-modal">
+                    <label for="edit-template-name">Template Name *</label>
+                    <input type="text" id="edit-template-name" name="name" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-template-email-type">Email Type *</label>
+                    <select id="edit-template-email-type" name="email_type" required onchange="updateEditTemplateForm()" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <option value="initial">Initial Campaign Email</option>
+                        <option value="followup">Follow-up Email</option>
+                        <option value="test">Test Email</option>
+                    </select>
+                </div>
+                <div class="form-group-modal" id="edit-followup-sequence-group" style="display: none;">
+                    <label for="edit-template-sequence-number">Follow-up Sequence Number</label>
+                    <input type="number" id="edit-template-sequence-number" name="followup_sequence_number" min="1" value="1" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal" id="edit-followup-delay-group" style="display: none;">
+                    <label for="edit-template-delay-days">Delay Days</label>
+                    <input type="number" id="edit-template-delay-days" name="followup_delay_days" min="0" value="3" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label>
+                        <input type="checkbox" id="edit-template-ab-test" name="is_ab_test" onchange="updateEditTemplateForm()">
+                        Enable A/B Testing
+                    </label>
+                </div>
+                <div class="form-group-modal" id="edit-ab-test-variant-group" style="display: none;">
+                    <label for="edit-template-ab-variant">A/B Test Variant</label>
+                    <select id="edit-template-ab-variant" name="ab_test_variant" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <option value="A">Variant A</option>
+                        <option value="B">Variant B</option>
+                    </select>
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-template-subject">Email Subject *</label>
+                    <input type="text" id="edit-template-subject" name="subject" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-template-html-content">HTML Content *</label>
+                    <textarea id="edit-template-html-content" name="html_content" rows="15" required style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: monospace;"></textarea>
+                </div>
+                <div class="form-group-modal">
+                    <label for="edit-template-text-content">Plain Text Content (Optional)</label>
+                    <textarea id="edit-template-text-content" name="text_content" rows="10" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: monospace;"></textarea>
+                </div>
+                <div class="form-group-modal">
+                    <label>
+                        <input type="checkbox" id="edit-template-is-active" name="is_active" checked>
+                        Active
+                    </label>
+                </div>
+                <div id="edit-template-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('editTemplateModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="handleUpdateTemplate()" class="btn-action btn-primary">Update Template</button>
+        </div>
+    </div>
+</div>
+
+<!-- Test Email Modal -->
+<div id="testEmailModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h2>✉️ Test Email</h2>
+        </div>
+        <div class="modal-body">
+            <form id="test-email-form">
+                {% csrf_token %}
+                <input type="hidden" id="test-template-id" name="template_id">
+                <div class="form-group-modal">
+                    <label for="test-email-address">Test Email Address *</label>
+                    <input type="email" id="test-email-address" name="test_email" required placeholder="your-email@example.com" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label for="test-lead-name">Lead Name (Optional)</label>
+                    <input type="text" id="test-lead-name" name="lead_name" placeholder="John Doe" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div id="test-email-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('testEmailModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="handleTestEmail()" class="btn-action btn-success">Send Test Email</button>
+        </div>
+    </div>
+</div>
+
+<!-- Create Email Sequence Modal -->
+<div id="createSequenceModal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-header">
+            <h2>📋 Create Email Sequence</h2>
+        </div>
+        <div class="modal-body">
+            <form id="create-sequence-form">
+                {% csrf_token %}
+                <div class="form-group-modal">
+                    <label for="sequence-name">Sequence Name *</label>
+                    <input type="text" id="sequence-name" name="name" required placeholder="e.g., Welcome Series, Product Launch" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group-modal">
+                    <label>Select Templates for Sequence</label>
+                    <small style="color: #6b7280; display: block; margin-bottom: 0.5rem;">Select templates and set delay timing for each step</small>
+                    <div id="sequence-templates-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem;">
+                        {% if email_templates %}
+                            {% for template in email_templates %}
+                            <div class="sequence-template-item" data-template-id="{{ template.id }}" style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; background: #f9fafb;">
+                                <label style="display: flex; align-items: start; cursor: pointer; margin-bottom: 0.75rem;">
+                                    <input type="checkbox" name="template_ids" value="{{ template.id }}" class="template-checkbox" 
+                                           onchange="updateSequenceTemplateSettings(this)" style="margin-right: 0.5rem; margin-top: 0.25rem;">
+                                    <div style="flex: 1;">
+                                        <strong>{{ template.name }}</strong> - {{ template.subject }}
+                                        {% if template.email_type == 'followup' %}
+                                        <span style="color: #6b7280; font-size: 0.875rem;">(Follow-up #{{ template.followup_sequence_number }})</span>
+                                        {% endif %}
+                                    </div>
+                                </label>
+                                <div class="sequence-delay-settings" style="display: none; margin-left: 1.75rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-bottom: 0.5rem;">
+                                        <div>
+                                            <label style="font-size: 0.875rem; color: #374151; font-weight: 500;">Delay Days</label>
+                                            <input type="number" class="delay-days-input" data-template-id="{{ template.id }}" 
+                                                   min="0" value="0" placeholder="0"
+                                                   style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem;">
+                                        </div>
+                                        <div>
+                                            <label style="font-size: 0.875rem; color: #374151; font-weight: 500;">Delay Hours</label>
+                                            <input type="number" class="delay-hours-input" data-template-id="{{ template.id }}" 
+                                                   min="0" max="23" value="0" placeholder="0"
+                                                   style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem;">
+                                        </div>
+                                        <div>
+                                            <label style="font-size: 0.875rem; color: #374151; font-weight: 500;">Delay Minutes</label>
+                                            <input type="number" class="delay-minutes-input" data-template-id="{{ template.id }}" 
+                                                   min="0" max="59" value="0" placeholder="0"
+                                                   style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem;">
+                                        </div>
+                                    </div>
+                                    <small style="color: #6b7280; font-size: 0.75rem;">Time to wait after the previous email before sending this one</small>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p style="color: #6b7280; text-align: center; padding: 2rem;">
+                                No templates available. Please create email templates first.
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+                <div id="create-sequence-message" style="margin-top: 1rem;"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('createSequenceModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="handleCreateSequence()" class="btn-action btn-primary">Create Sequence</button>
+        </div>
+    </div>
+</div>
+
+<!-- Launch Modal -->
+<div id="launchModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>🚀 Launch Campaign</h2>
+        </div>
+        <div class="modal-body">
+            <div class="form-group-modal">
+                <label for="launch-start-date">Start Date *</label>
+                <input type="date" id="launch-start-date" required>
+            </div>
+            <div class="form-group-modal">
+                <label for="launch-end-date">End Date (Optional)</label>
+                <input type="date" id="launch-end-date">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('launchModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="confirmLaunch()" class="btn-action btn-success">Launch Campaign</button>
+        </div>
+    </div>
+</div>
+
+<!-- Schedule Modal -->
+<div id="scheduleModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>📅 Schedule Campaign</h2>
+        </div>
+        <div class="modal-body">
+            <div class="form-group-modal">
+                <label for="schedule-start-date">Start Date *</label>
+                <input type="date" id="schedule-start-date" required>
+            </div>
+            <div class="form-group-modal">
+                <label for="schedule-end-date">End Date *</label>
+                <input type="date" id="schedule-end-date" required>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('scheduleModal')" class="btn-action btn-secondary">Cancel</button>
+            <button onclick="confirmSchedule()" class="btn-action btn-primary">Schedule Campaign</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentCampaignId = null;
+
+function showLaunchModal(campaignId) {
+    currentCampaignId = campaignId;
+    console.log('showLaunchModal currentCampaignId', currentCampaignId);
+    
+    // Check if email templates exist
+    {% if not has_email_templates %}
+    alert('⚠️ You must create at least one email template and sequence before launching this campaign.\n\nPlease go to "Manage Email Sequences" to create templates and sequences first, then try launching again.');
+    window.location.href = '{% url "sequence_management" campaign.id %}';
+    return;
+    {% endif %}
+    
+    const modal = document.getElementById('launchModal');
+    
+    // Set current dates if they exist
+    {% if campaign.start_date %}
+    document.getElementById('launch-start-date').value = '{{ campaign.start_date|date:"Y-m-d" }}';
+    {% else %}
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('launch-start-date').value = today;
+    document.getElementById('launch-start-date').min = today;
+    {% endif %}
+    
+    {% if campaign.end_date %}
+    document.getElementById('launch-end-date').value = '{{ campaign.end_date|date:"Y-m-d" }}';
+    {% else %}
+    document.getElementById('launch-end-date').value = '';
+    {% endif %}
+    
+    modal.classList.add('show');
+}
+
+function showScheduleModal(campaignId) {
+    currentCampaignId = campaignId;
+    const modal = document.getElementById('scheduleModal');
+    
+    // Set current dates if they exist (user can change them)
+    {% if campaign.start_date %}
+    document.getElementById('schedule-start-date').value = '{{ campaign.start_date|date:"Y-m-d" }}';
+    {% else %}
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('schedule-start-date').value = today;
+    document.getElementById('schedule-start-date').min = today;
+    {% endif %}
+    
+    {% if campaign.end_date %}
+    document.getElementById('schedule-end-date').value = '{{ campaign.end_date|date:"Y-m-d" }}';
+    {% else %}
+    document.getElementById('schedule-end-date').value = '';
+    {% endif %}
+    
+    // Set min date for end date based on start date
+    const startDateInput = document.getElementById('schedule-start-date');
+    const endDateInput = document.getElementById('schedule-end-date');
+    if (startDateInput.value) {
+        endDateInput.min = startDateInput.value;
+    } else {
+        const today = new Date().toISOString().split('T')[0];
+        endDateInput.min = today;
+    }
+    
+    // Update end date min when start date changes
+    startDateInput.addEventListener('change', function() {
+        endDateInput.min = this.value;
+        if (endDateInput.value && new Date(endDateInput.value) < new Date(this.value)) {
+            endDateInput.value = this.value;
+        }
+    });
+    
+    modal.classList.add('show');
+}
+
+// Email Template Management Functions
+function showCreateTemplateModal() {
+    document.getElementById('createTemplateModal').classList.add('show');
+    document.getElementById('create-template-message').innerHTML = '';
+    document.getElementById('create-template-form').reset();
+    updateTemplateForm();
+}
+
+function updateTemplateForm() {
+    const emailType = document.getElementById('template-email-type').value;
+    const isABTest = document.getElementById('template-ab-test').checked;
+    
+    if (emailType === 'followup') {
+        document.getElementById('followup-sequence-group').style.display = 'block';
+        document.getElementById('followup-delay-group').style.display = 'block';
+    } else {
+        document.getElementById('followup-sequence-group').style.display = 'none';
+        document.getElementById('followup-delay-group').style.display = 'none';
+    }
+    
+    if (isABTest) {
+        document.getElementById('ab-test-variant-group').style.display = 'block';
+    } else {
+        document.getElementById('ab-test-variant-group').style.display = 'none';
+    }
+}
+
+function updateEditTemplateForm() {
+    const emailType = document.getElementById('edit-template-email-type').value;
+    const isABTest = document.getElementById('edit-template-ab-test').checked;
+    
+    if (emailType === 'followup') {
+        document.getElementById('edit-followup-sequence-group').style.display = 'block';
+        document.getElementById('edit-followup-delay-group').style.display = 'block';
+    } else {
+        document.getElementById('edit-followup-sequence-group').style.display = 'none';
+        document.getElementById('edit-followup-delay-group').style.display = 'none';
+    }
+    
+    if (isABTest) {
+        document.getElementById('edit-ab-test-variant-group').style.display = 'block';
+    } else {
+        document.getElementById('edit-ab-test-variant-group').style.display = 'none';
+    }
+}
+
+async function handleCreateTemplate() {
+    const form = document.getElementById('create-template-form');
+    const formData = new FormData(form);
+    const messageDiv = document.getElementById('create-template-message');
+    
+    const data = {
+        name: formData.get('name'),
+        email_type: formData.get('email_type'),
+        subject: formData.get('subject'),
+        html_content: formData.get('html_content'),
+        text_content: formData.get('text_content'),
+        is_ab_test: document.getElementById('template-ab-test').checked,
+        ab_test_variant: formData.get('ab_test_variant') || '',
+        followup_sequence_number: parseInt(formData.get('followup_sequence_number') || '0'),
+        followup_delay_days: parseInt(formData.get('followup_delay_days') || '3'),
+    };
+    
+    try {
+        const response = await fetch('{% url "email_templates_list" campaign.id %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            messageDiv.innerHTML = '<div style="color: #10b981; padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem;">✓ Template created successfully!</div>';
+            setTimeout(() => {
+                closeModal('createTemplateModal');
+                location.reload();
+            }, 1500);
+        } else {
+            messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + (result.error || 'Failed to create template') + '</div>';
+        }
+    } catch (error) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + error.message + '</div>';
+    }
+}
+
+async function showEditTemplateModal(templateId) {
+    try {
+        const response = await fetch('{% url "email_template_detail" campaign.id 0 %}'.replace('0', templateId));
+        const result = await response.json();
+        
+        if (result.success) {
+            const template = result.template;
+            document.getElementById('edit-template-id').value = template.id;
+            document.getElementById('edit-template-name').value = template.name;
+            document.getElementById('edit-template-email-type').value = template.email_type;
+            document.getElementById('edit-template-subject').value = template.subject;
+            document.getElementById('edit-template-html-content').value = template.html_content;
+            document.getElementById('edit-template-text-content').value = template.text_content || '';
+            document.getElementById('edit-template-ab-test').checked = template.is_ab_test;
+            document.getElementById('edit-template-ab-variant').value = template.ab_test_variant || 'A';
+            document.getElementById('edit-template-sequence-number').value = template.followup_sequence_number;
+            document.getElementById('edit-template-delay-days').value = template.followup_delay_days;
+            document.getElementById('edit-template-is-active').checked = template.is_active;
+            
+            updateEditTemplateForm();
+            document.getElementById('edit-template-message').innerHTML = '';
+            document.getElementById('editTemplateModal').classList.add('show');
+        } else {
+            alert('Error loading template: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function handleUpdateTemplate() {
+    const form = document.getElementById('edit-template-form');
+    const formData = new FormData(form);
+    const templateId = formData.get('template_id');
+    const messageDiv = document.getElementById('edit-template-message');
+    
+    const data = {
+        name: formData.get('name'),
+        email_type: formData.get('email_type'),
+        subject: formData.get('subject'),
+        html_content: formData.get('html_content'),
+        text_content: formData.get('text_content'),
+        is_ab_test: document.getElementById('edit-template-ab-test').checked,
+        ab_test_variant: formData.get('ab_test_variant') || '',
+        followup_sequence_number: parseInt(formData.get('followup_sequence_number') || '0'),
+        followup_delay_days: parseInt(formData.get('followup_delay_days') || '3'),
+        is_active: document.getElementById('edit-template-is-active').checked,
+    };
+    
+    try {
+        const response = await fetch('{% url "email_template_detail" campaign.id 0 %}'.replace('0', templateId), {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            messageDiv.innerHTML = '<div style="color: #10b981; padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem;">✓ Template updated successfully!</div>';
+            setTimeout(() => {
+                closeModal('editTemplateModal');
+                location.reload();
+            }, 1500);
+        } else {
+            messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + (result.error || 'Failed to update template') + '</div>';
+        }
+    } catch (error) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + error.message + '</div>';
+    }
+}
+
+async function deleteTemplate(templateId, templateName) {
+    if (!confirm('Are you sure you want to delete the template "' + templateName + '"? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('{% url "email_template_detail" campaign.id 0 %}'.replace('0', templateId), {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Template deleted successfully!');
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to delete template'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function showTestEmailModal(templateId) {
+    document.getElementById('test-template-id').value = templateId;
+    document.getElementById('test-email-address').value = '';
+    document.getElementById('test-lead-name').value = '';
+    document.getElementById('test-email-message').innerHTML = '';
+    document.getElementById('testEmailModal').classList.add('show');
+}
+
+async function handleTestEmail() {
+    const form = document.getElementById('test-email-form');
+    const formData = new FormData(form);
+    const messageDiv = document.getElementById('test-email-message');
+    
+    const testEmail = formData.get('test_email');
+    if (!testEmail) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Please enter a test email address.</div>';
+        return;
+    }
+    
+    const data = {
+        test_email: testEmail,
+        lead_name: formData.get('lead_name') || 'Test User'
+    };
+    
+    messageDiv.innerHTML = '<div style="color: #3b82f6; padding: 0.75rem; background: #dbeafe; border-radius: 0.5rem;">Sending test email...</div>';
+    
+    try {
+        const templateId = formData.get('template_id');
+        const response = await fetch('{% url "test_email_template" campaign.id 0 %}'.replace('0', templateId), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            messageDiv.innerHTML = '<div style="color: #10b981; padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem;">✓ Test email sent to ' + testEmail + '!</div>';
+        } else {
+            messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + (result.error || 'Failed to send test email') + '</div>';
+        }
+    } catch (error) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + error.message + '</div>';
+    }
+}
+
+function showCreateSequenceModal() {
+    document.getElementById('createSequenceModal').classList.add('show');
+    document.getElementById('create-sequence-message').innerHTML = '';
+    document.getElementById('create-sequence-form').reset();
+    // Reset all template settings
+    document.querySelectorAll('.template-checkbox').forEach(cb => {
+        cb.checked = false;
+        updateSequenceTemplateSettings(cb);
+    });
+}
+
+function updateSequenceTemplateSettings(checkbox) {
+    const templateItem = checkbox.closest('.sequence-template-item');
+    const delaySettings = templateItem.querySelector('.sequence-delay-settings');
+    if (checkbox.checked) {
+        delaySettings.style.display = 'block';
+    } else {
+        delaySettings.style.display = 'none';
+    }
+}
+
+async function handleCreateSequence() {
+    const form = document.getElementById('create-sequence-form');
+    const formData = new FormData(form);
+    const messageDiv = document.getElementById('create-sequence-message');
+    
+    const name = formData.get('name');
+    if (!name) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Please enter a sequence name.</div>';
+        return;
+    }
+    
+    const checkedBoxes = Array.from(form.querySelectorAll('input[name="template_ids"]:checked'));
+    if (checkedBoxes.length === 0) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Please select at least one template.</div>';
+        return;
+    }
+    
+    const steps = [];
+    for (let i = 0; i < checkedBoxes.length; i++) {
+        const templateId = parseInt(checkedBoxes[i].value);
+        const templateItem = checkedBoxes[i].closest('.sequence-template-item');
+        
+        // Get delay values from inputs
+        const delayDaysInput = templateItem.querySelector('.delay-days-input[data-template-id="' + templateId + '"]');
+        const delayHoursInput = templateItem.querySelector('.delay-hours-input[data-template-id="' + templateId + '"]');
+        const delayMinutesInput = templateItem.querySelector('.delay-minutes-input[data-template-id="' + templateId + '"]');
+        
+        const delayDays = delayDaysInput ? parseInt(delayDaysInput.value) || 0 : 0;
+        const delayHours = delayHoursInput ? parseInt(delayHoursInput.value) || 0 : 0;
+        const delayMinutes = delayMinutesInput ? parseInt(delayMinutesInput.value) || 0 : 0;
+        
+        steps.push({
+            template_id: templateId,
+            step_order: i + 1,
+            delay_days: delayDays,
+            delay_hours: delayHours,
+            delay_minutes: delayMinutes
+        });
+    }
+    
+    const data = {
+        name: name,
+        steps: steps
+    };
+    
+    try {
+        const response = await fetch('{% url "email_sequences_list" campaign.id %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            messageDiv.innerHTML = '<div style="color: #10b981; padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem;">✓ Sequence created successfully!</div>';
+            setTimeout(function() {
+                closeModal('createSequenceModal');
+                location.reload();
+            }, 1500);
+        } else {
+            messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + (result.error || 'Failed to create sequence') + '</div>';
+        }
+    } catch (error) {
+        messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + error.message + '</div>';
+    }
+}
+
+// Lead Management Functions
+function showUploadLeadsModal() {
+    document.getElementById('uploadLeadsModal').classList.add('show');
+    document.getElementById('upload-leads-message').innerHTML = '';
+    document.getElementById('upload-leads-form').reset();
+}
+
+// function showAddLeadModal() {
+//     document.getElementById('addLeadModal').classList.add('show');
+//     document.getElementById('add-lead-message').innerHTML = '';
+//     document.getElementById('add-lead-form').reset();
+// }
+
+function showEditLeadModal(leadId, email, firstName, lastName, phone, company, jobTitle, status, source, notes) {
+    document.getElementById('editLeadModal').classList.add('show');
+    document.getElementById('edit-lead-message').innerHTML = '';
+    document.getElementById('edit-lead-id').value = leadId;
+    document.getElementById('edit-email').value = email || '';
+    document.getElementById('edit-first-name').value = firstName || '';
+    document.getElementById('edit-last-name').value = lastName || '';
+    document.getElementById('edit-phone').value = phone || '';
+    document.getElementById('edit-company').value = company || '';
+    document.getElementById('edit-job-title').value = jobTitle || '';
+    document.getElementById('edit-status').value = status || 'new';
+    document.getElementById('edit-source').value = source || '';
+    document.getElementById('edit-notes').value = notes || '';
+}
+
+async function handleUploadLeads() {
+    const fileInput = document.getElementById('leads-file');
+    const messageDiv = document.getElementById('upload-leads-message');
+    
+    if (!fileInput || !fileInput.files.length) {
+        messageDiv.innerHTML = '<p style="color: #ef4444;">Please select a file</p>';
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    console.log('Uploading file:', file.name, 'Size:', file.size);
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // Get CSRF token
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+    if (csrfToken) {
+        formData.append('csrfmiddlewaretoken', csrfToken.value);
+    } else {
+        // Try to get from cookie
+        const cookieValue = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('csrftoken='))
+            ?.split('=')[1];
+        if (cookieValue) {
+            formData.append('csrfmiddlewaretoken', cookieValue);
+        }
+    }
+    
+    messageDiv.innerHTML = '<p style="color: #3b82f6;">Uploading and processing...</p>';
+    
+    try {
+        const uploadUrl = '{% url "upload_leads" campaign.id %}';
+        console.log('Upload URL:', uploadUrl);
+        
+        const response = await fetch(uploadUrl, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+            }
+        });
+        
+        console.log('Response status:', response.status);
+        
+        let result;
+        try {
+            result = await response.json();
+            console.log('Response data:', result);
+        } catch (jsonError) {
+            const text = await response.text();
+            console.error('Failed to parse JSON:', text);
+            throw new Error(`Server error: ${response.status} - ${text.substring(0, 200)}`);
+        }
+        
+        if (result.success) {
+            messageDiv.innerHTML = `<p style="color: #10b981;">${result.message}</p>`;
+            // Close modal
+            closeModal('uploadLeadsModal');
+            // Wait longer for database transaction to fully commit
+            setTimeout(() => {
+                // Force full page reload (not cached)
+                window.location.href = window.location.pathname + window.location.search + (window.location.search ? '&' : '?') + '_t=' + new Date().getTime();
+            }, 2000);
+        } else {
+            messageDiv.innerHTML = `<p style="color: #ef4444;">Error: ${result.error || 'Upload failed'}</p>`;
+            console.error('Upload failed:', result);
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        messageDiv.innerHTML = `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+    }
+}
+
+async function handleAddLead() {
+    const form = document.getElementById('add-lead-form');
+    const messageDiv = document.getElementById('add-lead-message');
+    const formData = new FormData(form);
+    
+    messageDiv.innerHTML = '<p style="color: #3b82f6;">⏳ Adding lead...</p>';
+    
+    try {
+        const response = await fetch('{% url "add_lead" campaign.id %}', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            messageDiv.innerHTML = '<p style="color: #10b981;">✅ Lead added successfully!</p>';
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            messageDiv.innerHTML = `<p style="color: #ef4444;">❌ ${result.error}</p>`;
+        }
+    } catch (error) {
+        messageDiv.innerHTML = `<p style="color: #ef4444;">❌ Error: ${error.message}</p>`;
+    }
+}
+
+async function handleEditLead() {
+    const form = document.getElementById('edit-lead-form');
+    const messageDiv = document.getElementById('edit-lead-message');
+    const leadId = document.getElementById('edit-lead-id').value;
+    const formData = new FormData(form);
+    
+    messageDiv.innerHTML = '<p style="color: #3b82f6;">⏳ Updating lead...</p>';
+    
+    try {
+        const response = await fetch('{% url "edit_lead" campaign.id 0 %}'.replace('0', leadId), {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            messageDiv.innerHTML = '<p style="color: #10b981;">✅ Lead updated successfully!</p>';
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            messageDiv.innerHTML = `<p style="color: #ef4444;">❌ ${result.error}</p>`;
+        }
+    } catch (error) {
+        messageDiv.innerHTML = `<p style="color: #ef4444;">❌ Error: ${error.message}</p>`;
+    }
+}
+
+async function deleteLead(leadId, email) {
+    if (!confirm(`Are you sure you want to remove "${email}" from this campaign?`)) {
+        return;
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+        
+        const response = await fetch('{% url "delete_lead" campaign.id 0 %}'.replace('0', leadId), {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            window.location.reload();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    modal.classList.remove('show');
+    currentCampaignId = null;
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const launchModal = document.getElementById('launchModal');
+    const scheduleModal = document.getElementById('scheduleModal');
+    const uploadLeadsModal = document.getElementById('uploadLeadsModal');
+    const addLeadModal = document.getElementById('addLeadModal');
+    const editLeadModal = document.getElementById('editLeadModal');
+    
+    if (event.target == launchModal) {
+        closeModal('launchModal');
+    }
+    if (event.target == scheduleModal) {
+        closeModal('scheduleModal');
+    }
+    if (event.target == uploadLeadsModal) {
+        closeModal('uploadLeadsModal');
+    }
+    if (event.target == addLeadModal) {
+        closeModal('addLeadModal');
+    }
+    if (event.target == editLeadModal) {
+        closeModal('editLeadModal');
+    }
+}
+
+async function confirmLaunch() {
+    const startDate = document.getElementById('launch-start-date').value;
+    const endDate = document.getElementById('launch-end-date').value;
+    
+    if (!startDate) {
+        alert('Please select a start date.');
+        return;
+    }
+    
+    // Save campaign ID before closing modal (which sets it to null)
+    const campaignId = currentCampaignId;
+    
+    if (!campaignId) {
+        alert('Campaign ID is missing. Please refresh the page and try again.');
+        return;
+    }
+    
+    let campaignData = {
+        start_date: startDate
+    };
+    
+    if (endDate) {
+        if (new Date(endDate) < new Date(startDate)) {
+            alert('End date must be after start date.');
+            return;
+        }
+        campaignData.end_date = endDate;
+    }
+    
+    closeModal('launchModal');
+    await handleCampaignActionWithData('launch', campaignId, campaignData);
+}
+
+async function confirmSchedule() {
+    const startDate = document.getElementById('schedule-start-date').value;
+    const endDate = document.getElementById('schedule-end-date').value;
+    
+    if (!startDate || !endDate) {
+        alert('Please select both start and end dates.');
+        return;
+    }
+    
+    if (new Date(endDate) < new Date(startDate)) {
+        alert('End date must be after start date.');
+        return;
+    }
+    
+    // Save campaign ID before closing modal (which sets it to null)
+    const campaignId = currentCampaignId;
+    
+    if (!campaignId) {
+        alert('Campaign ID is missing. Please refresh the page and try again.');
+        return;
+    }
+    
+    let scheduleData = {
+        start_date: startDate,
+        end_date: endDate
+    };
+    
+    closeModal('scheduleModal');
+    await handleCampaignActionWithData('schedule', campaignId, scheduleData);
+}
+
+async function handleCampaignActionWithData(action, campaignId, data) {
+    // Find the button that triggered this action
+    let loadingBtn = null;
+    if (action === 'launch') {
+        loadingBtn = document.querySelector('button[onclick*="showLaunchModal"]');
+    } else if (action === 'schedule') {
+        loadingBtn = document.querySelector('button[onclick*="showScheduleModal"]');
+    }
+    
+    const originalText = loadingBtn ? loadingBtn.innerHTML : '';
+    
+    if (loadingBtn) {
+        loadingBtn.disabled = true;
+        loadingBtn.innerHTML = '<span>⏳</span> Processing...';
+    }
+    
+    // Ensure campaignId is a number
+    const parsedCampaignId = parseInt(campaignId);
+    if (isNaN(parsedCampaignId)) {
+        alert('Invalid campaign ID');
+        if (loadingBtn) {
+            loadingBtn.disabled = false;
+            loadingBtn.innerHTML = originalText;
+        }
+        return;
+    }
+    
+    try {
+        const requestBody = {
+            action: action,
+            campaign_id: parsedCampaignId
+        };
+        
+        if (data) {
+            requestBody.campaign_data = data;
+        }
+        
+        const response = await fetch('{% url "test_outreach_campaign" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            window.location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Unknown error occurred'));
+            if (loadingBtn) {
+                loadingBtn.disabled = false;
+                loadingBtn.innerHTML = originalText;
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error: ' + error.message);
+        if (loadingBtn) {
+            loadingBtn.disabled = false;
+            loadingBtn.innerHTML = originalText;
+        }
+    }
+}
+
+async function handleCampaignAction(action, campaignId, button) {
+    if (!confirm(`Are you sure you want to ${action} this campaign?`)) {
+        return;
+    }
+    
+    // Show loading indicator
+    const originalText = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span>⏳</span> Processing...';
+    
+    try {
+        const response = await fetch('{% url "test_outreach_campaign" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({
+                action: action,
+                campaign_id: campaignId
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error occurred'));
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error: ' + error.message);
+        button.disabled = false;
+        button.innerHTML = originalText;
+    }
+}
+
+// Convert UTC times to local timezone
+document.addEventListener('DOMContentLoaded', function() {
+    const timeElements = document.querySelectorAll('.email-sent-time');
+    timeElements.forEach(function(element) {
+        const utcTimestamp = element.getAttribute('data-utc-timestamp');
+        if (utcTimestamp) {
+            try {
+                // Parse the UTC timestamp (Unix timestamp in seconds)
+                const utcDate = new Date(parseInt(utcTimestamp) * 1000);
+                
+                // Check if date is valid
+                if (isNaN(utcDate.getTime())) {
+                    console.error('Invalid timestamp:', utcTimestamp);
+                    return;
+                }
+                
+                // Format to local time: "Jan 01, 2026 13:41"
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const month = months[utcDate.getMonth()];
+                const day = String(utcDate.getDate()).padStart(2, '0');
+                const year = utcDate.getFullYear();
+                const hours = String(utcDate.getHours()).padStart(2, '0');
+                const minutes = String(utcDate.getMinutes()).padStart(2, '0');
+                
+                const localTime = `${month} ${day}, ${year} ${hours}:${minutes}`;
+                
+                // Update the display
+                element.textContent = localTime;
+            } catch (e) {
+                console.error('Error converting time:', e);
+            }
+        }
+    });
+});
+</script>
+
+{% endblock %}
+

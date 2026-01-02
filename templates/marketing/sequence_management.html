@@ -1,0 +1,1352 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load tz %}
+{% block title %}Email Sequences - {{ campaign.name }}{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<style>
+    .sequence-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+
+    .sequence-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .sequence-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        margin-bottom: 1rem;
+    }
+
+    .sequence-steps {
+        margin-top: 1rem;
+    }
+
+    .step-item {
+        display: flex;
+        align-items: center;
+        padding: 1rem;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .step-number {
+        width: 40px;
+        height: 40px;
+        background: #3b82f6;
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        margin-right: 1rem;
+    }
+
+    .step-content {
+        flex: 1;
+    }
+
+    .step-delay {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        font-size: 0.875rem;
+        color: #6b7280;
+    }
+
+    .btn {
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+
+    .btn-primary {
+        background: #3b82f6;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #2563eb;
+    }
+
+    .btn-danger {
+        background: #ef4444;
+        color: white;
+    }
+
+    .btn-danger:hover {
+        background: #dc2626;
+    }
+
+    .btn-secondary {
+        background: #6b7280;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #4b5563;
+    }
+
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-content {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 2rem;
+        max-width: 800px;
+        width: 90%;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: #374151;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #e5e7eb;
+        border-radius: 0.5rem;
+        font-size: 1rem;
+    }
+
+    .delay-inputs {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 0.75rem;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .stat-card {
+        background: #f9fafb;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        text-align: center;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #1f2937;
+    }
+
+    .stat-label {
+        font-size: 0.875rem;
+        color: #6b7280;
+        margin-top: 0.25rem;
+    }
+
+    .badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .badge-active {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .badge-inactive {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+</style>
+
+<div class="sequence-container">
+    <div class="page-header">
+        <div>
+            <h1 style="margin: 0; color: #1f2937;">📧 Email Sequences</h1>
+            <p style="color: #6b7280; margin: 0.5rem 0 0 0;">
+                <a href="{% url 'campaign_detail' campaign.id %}" style="color: #3b82f6; text-decoration: none;">
+                    ← Back to {{ campaign.name }}
+                </a>
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <button onclick="showCreateTemplateModal()" class="btn btn-secondary">
+                ✏️ Create Email Template
+            </button>
+            <button onclick="showCreateSequenceModal()" class="btn btn-primary">
+                ➕ Create New Sequence
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= Email Templates Section ================= -->
+    <div class="sequence-card" style="margin-bottom: 2rem;">
+        <h2 style="margin: 0 0 1rem 0; color: #1f2937;">📧 Email Templates</h2>
+
+        {% if templates %}
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+            {% for template in templates %}
+            <div style="display: flex; justify-content: space-between; align-items: center; 
+                    border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.75rem 1rem; background: white;">
+
+                <!-- Left: Template info -->
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                        <span style="font-weight: 600; color: #1f2937;">{{ template.name }}</span>
+                        {% if not template.is_active %}
+                        <span
+                            style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.75rem;">
+                            Inactive
+                        </span>
+                        {% endif %}
+                    </div>
+                    <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem;">
+                        <strong>Subject:</strong> {{ template.subject }}
+                    </div>
+                </div>
+
+                <!-- Right: Buttons -->
+                <div style="display: flex; gap: 0.5rem;">
+                    <button onclick="showViewTemplateModal({{ template.id }})"
+                        style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #e5e7eb; border: none; border-radius: 0.25rem; cursor: pointer;">
+                        👁️ View
+                    </button>
+                    <button onclick="showTestEmailModal({{ template.id }})"
+                        style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #10b981; color: white; border: none; border-radius: 0.25rem; cursor: pointer;">
+                        ✉️ Test
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div
+            style="text-align: center; padding: 2rem; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">
+            <p style="color: #6b7280; margin: 0 0 1rem 0;">No email templates created yet</p>
+            <button onclick="showCreateTemplateModal()"
+                style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 0.25rem; cursor: pointer;">
+                ➕ Create Your First Template
+            </button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ================= Email Sequences Section ================= -->
+    <div class="sequence-card" style="margin-bottom: 2rem;">
+        <h2 style="margin: 0 0 1.5rem 0; color: #1f2937;">📋 Email Sequences</h2>
+
+        {% if sequences %}
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+            {% for seq_data in sequences %}
+            <div style="border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; background: white;">
+
+                <!-- Header -->
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="flex: 1;">
+                        <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem; color: #1f2937;">
+                            {{ seq_data.sequence.name }}
+                            <span
+                                style="padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.75rem; 
+                                     {% if seq_data.sequence.is_active %}background: #d1fae5; color: #065f46;{% else %}background: #fee2e2; color: #991b1b;{% endif %}">
+                                {% if seq_data.sequence.is_active %}Active{% else %}Inactive{% endif %}
+                            </span>
+                        </h3>
+                        {% if seq_data.sequence.email_account %}
+                        <p style="margin: 0.25rem 0 0 0; color: #6b7280; font-size: 0.875rem;">
+                            📮 Sender: {{ seq_data.sequence.email_account.email }}
+                        </p>
+                        {% else %}
+                        <p style="margin: 0.25rem 0 0 0; color: #f59e0b; font-size: 0.875rem;">
+                            ⚠️ No email account selected
+                        </p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button onclick="showEditSequenceModal({{ seq_data.sequence.id }})"
+                            style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #e5e7eb; border: none; border-radius: 0.25rem; cursor: pointer;">
+                            ✏️ Edit
+                        </button>
+                        <button onclick="showSequenceDetails({{ seq_data.sequence.id }})"
+                            style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #e5e7eb; border: none; border-radius: 0.25rem; cursor: pointer;">
+                            📊 Details
+                        </button>
+                        <button
+                            onclick="deleteSequence({{ seq_data.sequence.id }}, '{{ seq_data.sequence.name|escapejs }}')"
+                            style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #ef4444; color: white; border: none; border-radius: 0.25rem; cursor: pointer;">
+                            🗑️ Delete
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div style="display: flex; gap: 1rem; margin-top: 0.75rem;">
+                    <div
+                        style="flex: 1; background: #f3f4f6; padding: 0.5rem; border-radius: 0.25rem; text-align: center;">
+                        <div style="font-weight: 600;">{{ seq_data.total_sent }}</div>
+                        <div style="font-size: 0.75rem; color: #6b7280;">Emails Sent</div>
+                    </div>
+                    <div
+                        style="flex: 1; background: #f3f4f6; padding: 0.5rem; border-radius: 0.25rem; text-align: center;">
+                        <div style="font-weight: 600;">{{ seq_data.steps|length }}</div>
+                        <div style="font-size: 0.75rem; color: #6b7280;">Steps</div>
+                    </div>
+                </div>
+
+                <!-- Steps -->
+                <div style="margin-top: 1rem;">
+                    <h4 style="font-size: 0.875rem; color: #374151; margin-bottom: 0.5rem;">Sequence Steps</h4>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        {% for step in seq_data.steps %}
+                        <div
+                            style="display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 0.25rem;">
+                            <div style="font-weight: 600; color: #1f2937;">{{ forloop.counter }}.</div>
+                            <div>
+                                <div style="font-weight: 500;">{{ step.template.name }}</div>
+                                <div style="font-size: 0.75rem; color: #6b7280;">Subject: {{ step.template.subject }}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #6b7280;">
+                                    ⏱️ Delay:
+                                    {% if step.delay_days > 0 %}
+                                    {{ step.delay_days }} day{{ step.delay_days|pluralize }}
+                                    {% endif %}
+                                    {% if step.delay_hours > 0 %}
+                                    {{ step.delay_hours }} hour{{ step.delay_hours|pluralize }}
+                                    {% endif %}
+                                    {% if step.delay_minutes > 0 %}
+                                    {{ step.delay_minutes }} minute{{ step.delay_minutes|pluralize }}
+                                    {% endif %}
+                                    {% if step.delay_days == 0 and step.delay_hours == 0 and step.delay_minutes == 0 %}
+                                    Immediate
+                                    {% endif %}
+                                </div>
+
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div
+            style="text-align: center; padding: 2rem; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">
+            <h4 style="color: #6b7280; margin-bottom: 1rem;">No sequences created yet</h4>
+            <p style="color: #9ca3af; margin-bottom: 1rem;">Create your first email sequence. All emails in the sequence
+                will be sent automatically based on the delays you configure.</p>
+            <button onclick="showCreateSequenceModal()"
+                style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 0.25rem; cursor: pointer;">
+                ➕ Create First Sequence
+            </button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Create / Edit Sequence Modal -->
+<!-- Create / Edit Sequence Modal -->
+<div id="sequenceModal" class="modal">
+  <div class="modal-content"
+       style="
+        max-width: 900px;
+        max-height: 90vh;
+        overflow-y: auto;
+        padding: 0;
+        border-radius: 0.75rem;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+       ">
+
+    <!-- Header -->
+    <div style="
+        padding: 1.25rem 1.5rem;
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    ">
+      <h2 id="modalTitle" style="margin: 0; color:#1f2937;">
+        Create Email Sequence
+      </h2>
+
+      <button type="button"
+        onclick="closeSequenceModal()"
+        style="
+          background:none;
+          border:none;
+          font-size:1.75rem;
+          cursor:pointer;
+          color:#6b7280;
+          line-height:1;
+        ">
+        &times;
+      </button>
+    </div>
+
+    <!-- Body -->
+    <div style="padding: 1.5rem;">
+      <form id="sequenceForm">
+        {% csrf_token %}
+
+        <!-- Sequence Name -->
+        <div class="form-group">
+          <label for="sequence-name">Sequence Name *</label>
+          <input id="sequence-name"
+                 name="name"
+                 type="text"
+                 required
+                 placeholder="e.g., Follow-up Sequence">
+        </div>
+
+        <!-- Email Account -->
+        <div class="form-group">
+          <label for="sequence-email-account">Email Account *</label>
+          <select id="sequence-email-account"
+                  name="email_account_id"
+                  required>
+            <option value="">-- Select Email Account --</option>
+            {% for account in email_accounts %}
+            <option value="{{ account.id }}">
+              {{ account.email }}{% if account.is_default %} (Default){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Active Toggle -->
+        <div class="form-group"
+             style="
+                display:flex;
+                align-items:center;
+                gap:0.5rem;
+                background:#f9fafb;
+                padding:0.75rem;
+                border-radius:0.5rem;
+             ">
+          <input id="sequence-is-active"
+                 name="is_active"
+                 type="checkbox"
+                 checked
+                 style="width:auto;">
+          <label for="sequence-is-active" style="margin:0; font-weight:500;">
+            Active (send emails automatically)
+          </label>
+        </div>
+
+        <!-- Steps Header -->
+        <div style="
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            margin-top:2rem;
+            padding-bottom:0.5rem;
+            border-bottom:1px solid #e5e7eb;
+        ">
+          <h3 style="margin:0; color:#1f2937; flex:1; width: 90%;">
+            Sequence Steps
+          </h3>
+          <button type="button"
+                  class="btn btn-secondary"
+                  style="width: 40%;"
+                  onclick="addSequenceStep()">
+            ➕ Add Step
+          </button>
+        </div>
+
+        <!-- Steps Container -->
+        <div id="sequence-steps-container"
+             style="margin-top:1rem; display:flex; flex-direction:column; gap:0.75rem;">
+        </div>
+
+        <!-- Footer Buttons -->
+        <div style="
+            display:flex;
+            gap:0.75rem;
+            justify-content:flex-end;
+            margin-top:2.5rem;
+            padding-top:1rem;
+            border-top:1px solid #e5e7eb;
+        ">
+          <button type="button"
+                  class="btn btn-secondary"
+                  onclick="closeSequenceModal()">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-primary">
+            Save Sequence
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+    <!-- View Template Modal -->
+    <div id="viewTemplateModal" class="modal">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #1f2937;">👁️ View Email Template</h2>
+                <button onclick="closeViewTemplateModal()"
+                    style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280;">&times;</button>
+            </div>
+            <div id="view-template-content">
+                <!-- Template content will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Email Modal -->
+    <div id="testEmailModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #1f2937;">✉️ Test Email</h2>
+                <button onclick="closeTestEmailModal()"
+                    style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280;">&times;</button>
+            </div>
+            <form id="test-email-form">
+                {% csrf_token %}
+                <input type="hidden" id="test-template-id" name="template_id">
+                <div class="form-group">
+                    <label for="test-email-address">Test Email Address *</label>
+                    <input type="email" id="test-email-address" name="test_email" required
+                        placeholder="your-email@example.com"
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group">
+                    <label for="test-lead-name">Lead Name (Optional)</label>
+                    <input type="text" id="test-lead-name" name="lead_name" placeholder="John Doe"
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div id="test-email-message" style="margin-top: 1rem;"></div>
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 2rem;">
+                    <button type="button" onclick="closeTestEmailModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="button" onclick="handleTestEmail()" class="btn"
+                        style="background: #10b981; color: white;">Send Test Email</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Sequence Details Modal -->
+    <div id="detailsModal" class="modal">
+        <div class="modal-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #1f2937;">Sequence Details</h2>
+                <button onclick="closeDetailsModal()"
+                    style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280;">&times;</button>
+            </div>
+            <div id="details-content">
+                <!-- Details will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Email Template Modal -->
+    <div id="createTemplateModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #1f2937;">✏️ Create Email Template</h2>
+                <button onclick="closeTemplateModal()"
+                    style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280;">&times;</button>
+            </div>
+            <form id="create-template-form">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label for="template-name">Template Name *</label>
+                    <input type="text" id="template-name" name="name" required
+                        placeholder="e.g., Welcome Email, Product Introduction"
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                </div>
+                <div class="form-group">
+                    <label for="template-subject">Email Subject *</label>
+                    <input type="text" id="template-subject" name="subject" required
+                        placeholder="e.g., Welcome to {{ campaign.name }}!"
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                    <small style="color: #6b7280; display: block; margin-top: 0.25rem;">Available variables:
+                        {{lead_name}}, {{campaign_name}}, {{lead_email}}, {{lead_company}}</small>
+                </div>
+                <div class="form-group">
+                    <label for="template-html-content">HTML Content *</label>
+                    <textarea id="template-html-content" name="html_content" rows="15" required
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: monospace;"><!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #f4f4f4; padding: 20px; text-align: center; }
+        .content { padding: 20px; }
+        .button { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Hello {{lead_name}}!</h1>
+        </div>
+        <div class="content">
+            <p>Welcome to {{campaign_name}}!</p>
+            <p>We're excited to have you on board.</p>
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="#" class="button">Get Started</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Best regards,<br>The {{campaign_name}} Team</p>
+            <p><a href="#">Unsubscribe</a></p>
+        </div>
+    </div>
+</body>
+</html></textarea>
+                    <small style="color: #6b7280; display: block; margin-top: 0.25rem;">Available variables:
+                        {{lead_name}}, {{campaign_name}}, {{lead_email}}, {{lead_company}}</small>
+                </div>
+                <div class="form-group">
+                    <label for="template-text-content">Plain Text Content (Optional)</label>
+                    <textarea id="template-text-content" name="text_content" rows="10"
+                        placeholder="Plain text version for email clients that don't support HTML"
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: monospace;"></textarea>
+                </div>
+                <div id="create-template-message" style="margin-top: 1rem;"></div>
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 2rem;">
+                    <button type="button" onclick="closeTemplateModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="button" onclick="handleCreateTemplate()" class="btn btn-primary">Create
+                        Template</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentSequenceId = null;
+        let stepCounter = 0;
+
+        const templates = [
+            {% for template in templates %}
+        {
+            id: {{ template.id }},
+            name: "{{ template.name|escapejs }}",
+                subject: "{{ template.subject|escapejs }}"
+        } {% if not forloop.last %}, {% endif %}
+        {% endfor %}
+];
+
+        function showCreateSequenceModal() {
+            currentSequenceId = null;
+            console.log('showCreateSequenceModal called');
+            document.getElementById('modalTitle').textContent = 'Create Email Sequence';
+            document.getElementById('sequenceForm').reset();
+            document.getElementById('sequence-steps-container').innerHTML = '';
+            stepCounter = 0;
+            document.getElementById('sequenceModal').classList.add('show');
+        }
+
+        function showEditSequenceModal(sequenceId) {
+            console.log('showEditSequenceModal called with sequenceId:', sequenceId);
+            currentSequenceId = sequenceId;
+            document.getElementById('modalTitle').textContent = 'Edit Email Sequence';
+
+            // Load sequence data
+            const url = `{% url 'get_sequence_details' campaign.id 0 %}`.replace('0', sequenceId);
+            console.log('Fetching from URL:', url);
+
+            fetch(url)
+                .then(r => {
+                    console.log('Response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('Received data:', data);
+                    if (data.success) {
+                        const seq = data.sequence;
+                        document.getElementById('sequence-name').value = seq.name || '';
+                        document.getElementById('sequence-email-account').value = seq.email_account_id || '';
+                        document.getElementById('sequence-is-active').checked = seq.is_active || false;
+
+                        // Load steps
+                        document.getElementById('sequence-steps-container').innerHTML = '';
+                        stepCounter = 0;
+                        if (seq.steps && seq.steps.length > 0) {
+                            seq.steps.forEach(step => {
+                                addSequenceStep(step);
+                            });
+                            // After loading, ensure steps are numbered sequentially
+                            renumberSequenceSteps();
+                        }
+
+                        document.getElementById('sequenceModal').classList.add('show');
+                    } else {
+                        alert('Error loading sequence: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error in showEditSequenceModal:', error);
+                    alert('Error loading sequence: ' + error.message);
+                });
+        }
+
+        function addSequenceStep(stepData = null) {
+            // Calculate the next step number based on existing steps
+            const existingSteps = document.querySelectorAll('#sequence-steps-container .step-item');
+            const nextStepNum = existingSteps.length + 1;
+
+            const stepDiv = document.createElement('div');
+            stepDiv.className = 'step-item';
+            stepDiv.style.marginBottom = '1rem';
+            stepDiv.style.padding = '1rem';
+            stepDiv.style.background = '#f9fafb';
+            stepDiv.style.borderRadius = '0.5rem';
+
+            const stepNum = stepData ? stepData.step_order : nextStepNum;
+
+            stepDiv.innerHTML = `
+        <div style="display: flex; gap: 1rem; width: 100%;">
+            <div style="flex: 1;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Step ${stepNum} - Template *</label>
+                <select name="step_template_${stepNum}" required class="step-template-select" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                    <option value="">-- Select Template --</option>
+                    ${templates.map(t => `<option value="${t.id}" ${stepData && stepData.template_id == t.id ? 'selected' : ''}>${t.name} - ${t.subject}</option>`).join('')}
+                </select>
+            </div>
+            <div style="flex: 1;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Delay</label>
+                <div class="delay-inputs">
+                    <div>
+                        <input type="number" name="step_delay_days_${stepNum}" min="0" value="${stepData ? stepData.delay_days : 0}" placeholder="Days" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <small style="color: #6b7280; font-size: 0.75rem;">Days</small>
+                    </div>
+                    <div>
+                        <input type="number" name="step_delay_hours_${stepNum}" min="0" max="23" value="${stepData ? stepData.delay_hours : 0}" placeholder="Hours" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <small style="color: #6b7280; font-size: 0.75rem;">Hours</small>
+                    </div>
+                    <div>
+                        <input type="number" name="step_delay_minutes_${stepNum}" min="0" max="59" value="${stepData ? stepData.delay_minutes : 0}" placeholder="Minutes" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <small style="color: #6b7280; font-size: 0.75rem;">Minutes</small>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+                <button type="button" onclick="removeSequenceStep(this)" class="btn btn-danger" style="padding: 0.75rem;">
+                    🗑️
+                </button>
+            </div>
+        </div>
+    `;
+
+            document.getElementById('sequence-steps-container').appendChild(stepDiv);
+
+            // Renumber all steps to ensure sequential numbering
+            renumberSequenceSteps();
+        }
+
+        function removeSequenceStep(button) {
+            // Remove the step
+            const stepItem = button.closest('.step-item');
+            stepItem.remove();
+
+            // Renumber all remaining steps sequentially (1, 2, 3...)
+            renumberSequenceSteps();
+        }
+
+        function renumberSequenceSteps() {
+            const stepItems = document.querySelectorAll('#sequence-steps-container .step-item');
+
+            stepItems.forEach((item, index) => {
+                const newStepNum = index + 1; // Sequential numbering starting from 1
+
+                // Update label
+                const label = item.querySelector('label');
+                if (label) {
+                    label.textContent = `Step ${newStepNum} - Template *`;
+                }
+
+                // Update select name and get current value
+                const templateSelect = item.querySelector('.step-template-select');
+                if (templateSelect) {
+                    const currentValue = templateSelect.value;
+                    templateSelect.setAttribute('name', `step_template_${newStepNum}`);
+                    templateSelect.value = currentValue; // Preserve selected value
+                }
+
+                // Update delay input names
+                const delayDaysInput = item.querySelector('input[name^="step_delay_days_"]');
+                const delayHoursInput = item.querySelector('input[name^="step_delay_hours_"]');
+                const delayMinutesInput = item.querySelector('input[name^="step_delay_minutes_"]');
+
+                if (delayDaysInput) {
+                    const currentValue = delayDaysInput.value;
+                    delayDaysInput.setAttribute('name', `step_delay_days_${newStepNum}`);
+                    delayDaysInput.value = currentValue; // Preserve value
+                }
+
+                if (delayHoursInput) {
+                    const currentValue = delayHoursInput.value;
+                    delayHoursInput.setAttribute('name', `step_delay_hours_${newStepNum}`);
+                    delayHoursInput.value = currentValue; // Preserve value
+                }
+
+                if (delayMinutesInput) {
+                    const currentValue = delayMinutesInput.value;
+                    delayMinutesInput.setAttribute('name', `step_delay_minutes_${newStepNum}`);
+                    delayMinutesInput.value = currentValue; // Preserve value
+                }
+            });
+        }
+
+        function closeSequenceModal() {
+            document.getElementById('sequenceModal').classList.remove('show');
+        }
+
+        // Wait for DOM to be ready
+        document.addEventListener('DOMContentLoaded', function () {
+            const form = document.getElementById('sequenceForm');
+            if (!form) {
+                console.error('Sequence form not found!');
+                return;
+            }
+
+            console.log('Form found, attaching submit listener');
+
+            form.addEventListener('submit', async function (e) {
+                e.preventDefault();
+                console.log('Form submit event triggered');
+
+                try {
+                    const formData = new FormData(e.target);
+                    const steps = [];
+
+                    // Collect steps - get values directly from DOM elements
+                    const stepItems = document.querySelectorAll('.step-item');
+                    console.log('Found step items:', stepItems.length);
+
+                    stepItems.forEach((item, index) => {
+                        const templateSelect = item.querySelector('.step-template-select');
+                        if (!templateSelect) {
+                            console.log('No template select found in step', index);
+                            return;
+                        }
+
+                        const templateId = templateSelect.value;
+                        if (templateId) {
+                            // Get step number from the select name attribute
+                            const selectName = templateSelect.getAttribute('name');
+                            const stepNumMatch = selectName ? selectName.match(/step_template_(\d+)/) : null;
+                            const stepNum = stepNumMatch ? parseInt(stepNumMatch[1]) : (index + 1);
+
+                            // Get delay values directly from the input elements in this step item
+                            const delayDaysInput = item.querySelector(`input[name="step_delay_days_${stepNum}"]`);
+                            const delayHoursInput = item.querySelector(`input[name="step_delay_hours_${stepNum}"]`);
+                            const delayMinutesInput = item.querySelector(`input[name="step_delay_minutes_${stepNum}"]`);
+
+                            steps.push({
+                                step_order: index + 1, // Use sequential order (1, 2, 3...)
+                                template_id: parseInt(templateId),
+                                delay_days: delayDaysInput ? parseInt(delayDaysInput.value || 0) : 0,
+                                delay_hours: delayHoursInput ? parseInt(delayHoursInput.value || 0) : 0,
+                                delay_minutes: delayMinutesInput ? parseInt(delayMinutesInput.value || 0) : 0,
+                            });
+                        }
+                    });
+
+                    console.log('Collected steps:', steps);
+
+                    if (steps.length === 0) {
+                        alert('Please add at least one step to the sequence');
+                        return;
+                    }
+
+                    // Validate required fields
+                    const name = document.getElementById('sequence-name').value.trim();
+                    if (!name) {
+                        alert('Please enter a sequence name');
+                        return;
+                    }
+
+                    const emailAccountId = document.getElementById('sequence-email-account').value;
+                    if (!emailAccountId) {
+                        alert('Please select an email account');
+                        return;
+                    }
+
+                    const data = {
+                        name: name,
+                        email_account_id: parseInt(emailAccountId),
+                        is_active: document.getElementById('sequence-is-active').checked,
+                        steps: steps
+                    };
+
+                    console.log('Sending data:', data);
+
+                    const url = currentSequenceId
+                        ? `{% url 'update_sequence' campaign.id 0 %}`.replace('0', currentSequenceId)
+                        : `{% url 'create_sequence' campaign.id %}`;
+                    const method = currentSequenceId ? 'PUT' : 'POST';
+
+                    // Get CSRF token
+                    const csrfToken = (document.querySelector('#sequenceForm [name=csrfmiddlewaretoken]') ||
+                        document.querySelector('[name=csrfmiddlewaretoken]'));
+                    if (!csrfToken || !csrfToken.value) {
+                        alert('CSRF token not found. Please refresh the page and try again.');
+                        return;
+                    }
+
+                    // Show loading state
+                    const submitBtn = e.target.querySelector('button[type="submit"]');
+                    const originalText = submitBtn.textContent;
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Saving...';
+
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken.value
+                        },
+                        body: JSON.stringify(data)
+                    });
+
+                    console.log('Response status:', response.status);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Error response:', errorText);
+                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('Result:', result);
+
+                    if (result.success) {
+                        alert(result.message || 'Sequence saved successfully!');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (result.error || 'Failed to save sequence'));
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = originalText;
+                    }
+                } catch (error) {
+                    console.error('Error saving sequence:', error);
+                    alert('Error: ' + error.message + '\n\nCheck browser console (F12) for details.');
+                    const submitBtn = e.target.querySelector('button[type="submit"]');
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Save Sequence';
+                    }
+                }
+            }); // Close form.addEventListener
+        }); // Close DOMContentLoaded
+
+        function deleteSequence(sequenceId, sequenceName) {
+            if (!confirm(`Are you sure you want to delete the sequence "${sequenceName}"? This action cannot be undone.`)) {
+                return;
+            }
+
+            fetch(`{% url 'delete_sequence' campaign.id 0 %}`.replace('0', sequenceId), {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message);
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Failed to delete sequence'));
+                    }
+                });
+        }
+
+        function showSequenceDetails(sequenceId) {
+            console.log('showSequenceDetails called with sequenceId:', sequenceId);
+            const url = `{% url 'get_sequence_details' campaign.id 0 %}`.replace('0', sequenceId);
+            console.log('Fetching from URL:', url);
+
+            fetch(url)
+                .then(r => {
+                    console.log('Response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('Received data:', data);
+                    if (data.success) {
+                        const seq = data.sequence;
+                        const stats = seq.stats || {};
+
+                        let html = `
+                    <h3 style="margin-bottom: 1rem;">${seq.name || 'Unnamed Sequence'}</h3>
+                    <p style="color: #6b7280; margin-bottom: 1rem;">
+                        Email Account: ${seq.email_account || 'Not set'}
+                    </p>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.total_leads || 0}</div>
+                            <div class="stat-label">Total Leads</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.total_sent || 0}</div>
+                            <div class="stat-label">Emails Sent</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.total_delivered || 0}</div>
+                            <div class="stat-label">Delivered</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.total_opened || 0}</div>
+                            <div class="stat-label">Opened</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.total_clicked || 0}</div>
+                            <div class="stat-label">Clicked</div>
+                        </div>
+                    </div>
+                    
+                    <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Sequence Steps</h4>
+                `;
+
+                        if (seq.steps && seq.steps.length > 0) {
+                            seq.steps.forEach(step => {
+                                const delay = [];
+                                if (step.delay_days > 0) delay.push(`${step.delay_days} day${step.delay_days > 1 ? 's' : ''}`);
+                                if (step.delay_hours > 0) delay.push(`${step.delay_hours} hour${step.delay_hours > 1 ? 's' : ''}`);
+                                if (step.delay_minutes > 0) delay.push(`${step.delay_minutes} minute${step.delay_minutes > 1 ? 's' : ''}`);
+
+                                html += `
+                            <div class="step-item">
+                                <div class="step-number">${step.step_order}</div>
+                                <div class="step-content">
+                                    <div style="font-weight: 600;">${step.template_name || 'Unknown Template'}</div>
+                                    <div class="step-delay" style="margin-top: 0.5rem;">
+                                        Delay: ${delay.length > 0 ? delay.join(', ') : 'Immediate'}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                            });
+                        } else {
+                            html += `<p style="color: #6b7280;">No steps configured yet.</p>`;
+                        }
+
+                        if (seq.next_sends && seq.next_sends.length > 0) {
+                            html += `<h4 style="margin-top: 2rem; margin-bottom: 1rem;">Upcoming Sends</h4>`;
+                            seq.next_sends.forEach(next => {
+                                const date = new Date(next.next_send_time);
+                                html += `
+                            <div style="padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; margin-bottom: 0.5rem;">
+                                <strong>${next.lead_email}</strong> - Step ${next.next_step} at ${date.toLocaleString()}
+                            </div>
+                        `;
+                            });
+                        }
+
+                        document.getElementById('details-content').innerHTML = html;
+                        document.getElementById('detailsModal').classList.add('show');
+                    } else {
+                        alert('Error loading sequence details: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error in showSequenceDetails:', error);
+                    alert('Error loading sequence details: ' + error.message);
+                });
+        }
+
+        function closeDetailsModal() {
+            document.getElementById('detailsModal').classList.remove('show');
+        }
+
+        // View Template Functions
+        async function showViewTemplateModal(templateId) {
+            console.log('showViewTemplateModal called with templateId:', templateId);
+            const url = `{% url 'email_template_detail' campaign.id 0 %}`.replace('0', templateId);
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (data.success) {
+                    const template = data.template;
+                    const html = `
+                <div style="margin-bottom: 1.5rem;">
+                    <h3 style="margin: 0 0 0.5rem 0; color: #1f2937;">${template.name || 'Unnamed Template'}</h3>
+                    <p style="color: #6b7280; margin: 0;">
+                        <strong>Subject:</strong> ${template.subject || 'No subject'}
+                    </p>
+                    <p style="color: #6b7280; margin: 0.5rem 0 0 0;">
+                        <strong>Status:</strong> ${template.is_active ? '<span style="color: #10b981;">Active</span>' : '<span style="color: #ef4444;">Inactive</span>'}
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="margin: 0 0 0.75rem 0; color: #374151;">HTML Content</h4>
+                    <div style="border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; background: #f9fafb; max-height: 400px; overflow-y: auto;">
+                        <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 0.875rem;">${escapeHtml(template.html_content || 'No HTML content')}</pre>
+                    </div>
+                </div>
+                
+                ${template.text_content ? `
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="margin: 0 0 0.75rem 0; color: #374151;">Plain Text Content</h4>
+                    <div style="border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; background: #f9fafb; max-height: 300px; overflow-y: auto;">
+                        <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 0.875rem;">${escapeHtml(template.text_content)}</pre>
+                    </div>
+                </div>
+                ` : ''}
+                
+                <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e5e7eb;">
+                    <h4 style="margin: 0 0 0.75rem 0; color: #374151;">Preview</h4>
+                    <div style="border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; background: white; max-height: 500px; overflow-y: auto;">
+                        <iframe id="template-preview-iframe" style="width: 100%; min-height: 400px; border: none;"></iframe>
+                    </div>
+                </div>
+            `;
+
+                    document.getElementById('view-template-content').innerHTML = html;
+
+                    // Set iframe content for preview
+                    setTimeout(() => {
+                        const iframe = document.getElementById('template-preview-iframe');
+                        if (iframe) {
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                            iframeDoc.open();
+                            iframeDoc.write(template.html_content || '<p>No HTML content</p>');
+                            iframeDoc.close();
+                        }
+                    }, 100);
+
+                    document.getElementById('viewTemplateModal').classList.add('show');
+                } else {
+                    alert('Error loading template: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error in showViewTemplateModal:', error);
+                alert('Error loading template: ' + error.message);
+            }
+        }
+
+        function closeViewTemplateModal() {
+            document.getElementById('viewTemplateModal').classList.remove('show');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Test Email Functions
+        function showTestEmailModal(templateId) {
+            document.getElementById('test-template-id').value = templateId;
+            document.getElementById('test-email-address').value = '';
+            document.getElementById('test-lead-name').value = '';
+            document.getElementById('test-email-message').innerHTML = '';
+            document.getElementById('testEmailModal').classList.add('show');
+        }
+
+        function closeTestEmailModal() {
+            document.getElementById('testEmailModal').classList.remove('show');
+        }
+
+        async function handleTestEmail() {
+            const form = document.getElementById('test-email-form');
+            const formData = new FormData(form);
+            const messageDiv = document.getElementById('test-email-message');
+
+            const testEmail = formData.get('test_email');
+            if (!testEmail) {
+                messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Please enter a test email address.</div>';
+                return;
+            }
+
+            const data = {
+                test_email: testEmail,
+                lead_name: formData.get('lead_name') || 'Test User'
+            };
+
+            messageDiv.innerHTML = '<div style="color: #3b82f6; padding: 0.75rem; background: #dbeafe; border-radius: 0.5rem;">Sending test email...</div>';
+
+            try {
+                const templateId = formData.get('template_id');
+                const url = `{% url 'test_email_template' campaign.id 0 %}`.replace('0', templateId);
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    messageDiv.innerHTML = '<div style="color: #10b981; padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem;">✓ Test email sent successfully to ' + testEmail + '!</div>';
+                    setTimeout(() => {
+                        closeTestEmailModal();
+                    }, 2000);
+                } else {
+                    messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + (result.error || 'Failed to send test email') + '</div>';
+                }
+            } catch (error) {
+                messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + error.message + '</div>';
+            }
+        }
+
+        // Template Management Functions
+        function showCreateTemplateModal() {
+            document.getElementById('createTemplateModal').classList.add('show');
+            document.getElementById('create-template-message').innerHTML = '';
+            document.getElementById('create-template-form').reset();
+        }
+
+        function closeTemplateModal() {
+            document.getElementById('createTemplateModal').classList.remove('show');
+        }
+
+        async function handleCreateTemplate() {
+            const form = document.getElementById('create-template-form');
+            const formData = new FormData(form);
+            const messageDiv = document.getElementById('create-template-message');
+
+            const data = {
+                name: formData.get('name'),
+                email_type: 'initial', // Default value - templates are simple, no distinction needed
+                subject: formData.get('subject'),
+                html_content: formData.get('html_content'),
+                text_content: formData.get('text_content'),
+            };
+
+            if (!data.name || !data.subject || !data.html_content) {
+                messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Please fill in all required fields.</div>';
+                return;
+            }
+
+            try {
+                const response = await fetch('{% url "email_templates_list" campaign.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    messageDiv.innerHTML = '<div style="color: #10b981; padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem;">✓ Template created successfully! Refreshing page...</div>';
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
+                } else {
+                    messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + (result.error || 'Failed to create template') + '</div>';
+                }
+            } catch (error) {
+                messageDiv.innerHTML = '<div style="color: #ef4444; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">Error: ' + error.message + '</div>';
+            }
+        }
+
+        // Trigger sequence emails manually
+        async function triggerSequenceEmails() {
+            if (!confirm('This will process and send all pending sequence emails for this campaign. Continue?')) {
+                return;
+            }
+
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '⏳ Processing...';
+
+            try {
+                const response = await fetch('{% url "trigger_sequence_emails" campaign.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('✓ Sequence emails processed successfully!\n\n' + (result.output || 'Check the email sending status page for details.'));
+                    location.reload();
+                } else {
+                    alert('✗ Error: ' + (result.error || 'Failed to process sequence emails'));
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }
+            } catch (error) {
+                alert('✗ Error: ' + error.message);
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+    </script>
+
+    {% endblock %}

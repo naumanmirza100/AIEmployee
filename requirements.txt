@@ -14,4 +14,12 @@ djangorestframework>=3.14.0
 djangorestframework-simplejwt>=5.3.0
 # Note: If you encounter pydantic compatibility issues with Python 3.12,
 # you may need to install: pip install "pydantic<2.0" or upgrade spacy
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Celery & Redis (Optional - for Celery Beat automation)
+# Uncomment if you want to use Celery Beat instead of cron
+# celery>=5.3.4
+# redis>=5.0.1
+# django-celery-beat>=2.5.0
 

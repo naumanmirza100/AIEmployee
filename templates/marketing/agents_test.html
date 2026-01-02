@@ -7,11 +7,13 @@
         margin: 0 auto;
         padding: 2rem;
     }
+
     .agents-header {
         margin-bottom: 2rem;
         padding-bottom: 1.5rem;
         border-bottom: 2px solid var(--border-color);
     }
+
     .agent-tabs {
         display: flex;
         gap: 1rem;
@@ -19,6 +21,7 @@
         flex-wrap: wrap;
         border-bottom: 2px solid var(--border-color);
     }
+
     .agent-tab {
         padding: 1rem 1.5rem;
         background: transparent;
@@ -30,13 +33,16 @@
         color: var(--text-secondary);
         transition: all 0.3s ease;
     }
+
     .agent-tab:hover {
         color: var(--primary-color);
     }
+
     .agent-tab.active {
         color: var(--primary-color);
         border-bottom-color: var(--primary-color);
     }
+
     .agent-panel {
         display: none;
         background: var(--card-background);
@@ -45,26 +51,32 @@
         box-shadow: var(--shadow-sm);
         border: 1px solid var(--border-color);
     }
+
     .agent-panel.active {
         display: block;
     }
+
     .agent-panel h3 {
         margin: 0 0 1rem 0;
         color: var(--text-primary);
     }
+
     .agent-panel p {
         color: var(--text-secondary);
         margin-bottom: 1.5rem;
     }
+
     .form-group {
         margin-bottom: 1.5rem;
     }
+
     .form-group label {
         display: block;
         margin-bottom: 0.5rem;
         font-weight: 600;
         color: var(--text-primary);
     }
+
     .form-group input,
     .form-group textarea,
     .form-group select {
@@ -75,10 +87,12 @@
         font-size: 1rem;
         font-family: inherit;
     }
+
     .form-group textarea {
         min-height: 150px;
         resize: vertical;
     }
+
     .result-box {
         margin-top: 2rem;
         padding: 1.5rem;
@@ -87,19 +101,23 @@
         border: 1px solid var(--border-color);
         display: none;
     }
+
     .result-box.show {
         display: block;
     }
+
     .result-box h4 {
         margin: 0 0 1rem 0;
         color: var(--text-primary);
     }
+
     .result-content {
         white-space: normal;
         word-wrap: break-word;
         color: var(--text-primary);
         line-height: 1.6;
     }
+
     .result-content h2 {
         margin-top: 2rem;
         margin-bottom: 1rem;
@@ -108,55 +126,197 @@
         padding-bottom: 0.5rem;
         font-size: 1.5rem;
     }
+
     .result-content h3 {
         margin-top: 1.5rem;
         margin-bottom: 0.75rem;
         color: var(--text-primary);
         font-size: 1.25rem;
     }
-    .result-content ul, .result-content ol {
+
+    .result-content ul,
+    .result-content ol {
         margin: 1rem 0;
         padding-left: 2rem;
     }
+
     .result-content li {
         margin: 0.5rem 0;
     }
+
     .result-content table {
         width: 100%;
         margin: 1rem 0;
         border-collapse: collapse;
         font-size: 0.95rem;
     }
+
     .result-content table th,
     .result-content table td {
         border: 1px solid var(--border-color);
         padding: 0.75rem;
         text-align: left;
     }
+
     .result-content table th {
         background-color: var(--background-color);
         font-weight: 600;
     }
+
     .result-content hr {
         margin: 2rem 0;
         border: none;
         border-top: 2px solid var(--border-color);
     }
+
     .result-content strong {
         font-weight: 600;
         color: var(--text-primary);
     }
+
     .result-content p {
         margin: 1rem 0;
     }
+
     .loading {
         display: none;
         text-align: center;
         padding: 2rem;
         color: var(--text-secondary);
     }
+
     .loading.show {
         display: block;
+    }
+
+    .campaign-section {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(168, 85, 247, 0.05) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 2rem;
+        margin-bottom: 2rem;
+        transition: all 0.3s ease;
+    }
+
+    .campaign-section:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .section-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    .section-header h5 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: 1.2rem;
+    }
+
+    .section-icon {
+        font-size: 1.5rem;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.25rem;
+    }
+
+    .form-grid-2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.25rem;
+    }
+
+    .form-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1.25rem;
+    }
+
+    .input-with-icon {
+        position: relative;
+    }
+
+    .input-icon {
+        position: absolute;
+        left: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-secondary);
+        font-size: 1.1rem;
+    }
+
+    .input-with-icon input,
+    .input-with-icon select {
+        padding-left: 2.5rem;
+    }
+
+    .field-hint {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+        font-style: italic;
+    }
+
+    .required-field {
+        color: #e74c3c;
+        margin-left: 0.25rem;
+    }
+
+    .campaign-card {
+        background: var(--card-background);
+        border-radius: var(--radius-lg);
+        padding: 2rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--border-color);
+    }
+
+    .designed-campaign-actions {
+        display: none;
+        margin-bottom: 1.5rem;
+        padding: 1.5rem;
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%);
+        border-radius: var(--radius-md);
+        border: 2px solid rgba(34, 197, 94, 0.3);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+
+    .action-btn {
+        flex: 1;
+        min-width: 150px;
+        padding: 0.875rem;
+        font-weight: 600;
+        border-radius: var(--radius-md);
+        transition: all 0.3s ease;
+    }
+
+    .action-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .metric-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: var(--background-color);
+        border-radius: var(--radius-md);
+        font-size: 0.9rem;
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
     }
 </style>
 
@@ -179,8 +339,8 @@
         <button class="agent-tab" onclick="switchTab('research')" id="tab-research">
             🔍 Market Research
         </button>
-        <button class="agent-tab" onclick="switchTab('campaign')" id="tab-campaign" disabled>
-            🚀 Campaign (Coming Soon)
+        <button class="agent-tab" onclick="switchTab('campaign')" id="tab-campaign">
+            🚀 Outreach & Campaign
         </button>
         <button class="agent-tab" onclick="switchTab('analytics')" id="tab-analytics" disabled>
             📈 Analytics (Coming Soon)
@@ -200,17 +360,14 @@
             Ask marketing questions and get data-driven answers. This foundation agent analyzes your campaigns,
             performance metrics, and provides intelligent insights.
         </p>
-        
+
         <form id="qa-form" onsubmit="handleQA(event)">
             {% csrf_token %}
             <div class="form-group">
                 <label for="qa-question">Ask a Marketing Question</label>
-                <textarea 
-                    id="qa-question" 
-                    name="question" 
+                <textarea id="qa-question" name="question"
                     placeholder="Examples:&#10;• Why are sales dropping?&#10;• What campaigns are performing best?&#10;• What is our ROI?&#10;• Which channels are most effective?&#10;• What should we focus on?"
-                    required
-                ></textarea>
+                    required></textarea>
             </div>
             <button type="submit" class="btn btn-primary">Ask AI</button>
         </form>
@@ -229,10 +386,10 @@
     <div class="agent-panel" id="panel-research">
         <h3>🔍 Market & Competitive Research Agent</h3>
         <p>
-            Analyzes market trends, competitor activities, and customer behavior to identify opportunities, 
+            Analyzes market trends, competitor activities, and customer behavior to identify opportunities,
             risks, and positioning strategies. Research findings are automatically available to the Q&A agent.
         </p>
-        
+
         <form id="research-form" onsubmit="handleMarketResearch(event)">
             {% csrf_token %}
             <div class="form-group">
@@ -245,28 +402,23 @@
                     <option value="threat">Risk & Threat Analysis</option>
                 </select>
             </div>
-            
+
             <div class="form-group">
                 <label for="research-topic">Research Topic</label>
-                <textarea 
-                    id="research-topic" 
-                    name="topic" 
+                <textarea id="research-topic" name="topic"
                     placeholder="Examples:&#10;• AI marketing tools market trends&#10;• Competitor analysis for social media platforms&#10;• Customer buying behavior in e-commerce&#10;• Opportunities in mobile marketing&#10;• Risks in digital advertising"
-                    required
-                ></textarea>
+                    required></textarea>
             </div>
-            
+
             <div class="form-group">
                 <label for="research-context">Additional Context (Optional - JSON format)</label>
-                <textarea 
-                    id="research-context" 
-                    name="context" 
+                <textarea id="research-context" name="context"
                     placeholder='{"competitors": ["Competitor A", "Competitor B"], "industry": "Technology", "geographic_region": "North America"}'
-                    rows="3"
-                ></textarea>
-                <small style="color: var(--text-secondary);">Optional: Add competitor names, industry, geographic region, etc.</small>
+                    rows="3"></textarea>
+                <small style="color: var(--text-secondary);">Optional: Add competitor names, industry, geographic
+                    region, etc.</small>
             </div>
-            
+
             <button type="submit" class="btn btn-primary">🔍 Conduct Research</button>
         </form>
 
@@ -280,12 +432,358 @@
         </div>
     </div>
 
+    <!-- Outreach & Campaign Panel -->
     <div class="agent-panel" id="panel-campaign">
-        <h3>🚀 Outreach & Campaign Agent</h3>
-        <p style="color: var(--text-secondary);">
-            This agent will create and manage multi-channel marketing campaigns.
-            Coming soon in Phase 4!
+        <h3>📧 Email Campaign Agent</h3>
+        <p>
+            Design, launch, and manage email marketing campaigns. Create targeted email campaigns with AI assistance.
         </p>
+
+        <!-- Campaign Form Section -->
+        <div class="campaign-card">
+            <div class="section-header">
+                <span class="section-icon">🚀</span>
+                <h5>Create Email Campaign</h5>
+            </div>
+
+            <!-- Action Selection -->
+            <div class="form-group">
+                <label for="campaign-action">
+                    <span>⚡</span> Select Action <span class="required-field">*</span>
+                </label>
+                <select id="campaign-action" name="action" onchange="updateCampaignForm()" required
+                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; background: var(--card-background);">
+                    <option value="">-- Select Action First --</option>
+                    <option value="design">🎨 Design Campaign</option>
+                    <option value="create_multi_channel">📧 Create Email Campaign</option>
+                    <option value="launch">🚀 Launch Campaign</option>
+                    <!-- <option value="manage">📊 Manage Campaign</option> -->
+                    <option value="optimize">⚡ Optimize Campaign</option>
+                    <option value="schedule">📅 Schedule Campaign</option>
+                </select>
+                <div id="action-hint"
+                    style="margin-top: 0.5rem; padding: 1rem; background: var(--background-color); border-radius: var(--radius-md); border-left: 4px solid var(--primary-color); display: none;">
+                    <strong>💡 Hint:</strong> <span id="action-hint-text"></span>
+                </div>
+            </div>
+
+            <!-- Designed Campaign Actions (shown after design) -->
+            <div id="designed-campaign-actions" class="designed-campaign-actions">
+                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+                    <span style="font-size: 1.5rem;">✅</span>
+                    <h6 style="margin: 0; color: var(--text-primary); font-size: 1.1rem;">Campaign Design Ready!</h6>
+                </div>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.95rem;">
+                    Your campaign has been designed. Use the buttons below to create, launch, or schedule it.
+                </p>
+                <div class="action-buttons">
+                    <button type="button" class="btn btn-primary action-btn"
+                        onclick="useDesignedCampaign('create_multi_channel')">
+                        📧 Create Campaign
+                    </button>
+                    <button type="button" class="btn btn-primary action-btn" onclick="useDesignedCampaign('launch')">
+                        🚀 Launch Campaign
+                    </button>
+                    <button type="button" class="btn btn-primary action-btn" onclick="useDesignedCampaign('schedule')">
+                        📅 Schedule Campaign
+                    </button>
+                </div>
+            </div>
+            <div id="campaign-form-container" style="display: none;">
+                <form id="campaign-form" onsubmit="handleCampaign(event)">
+                    {% csrf_token %}
+
+                    <!-- Campaign Selection (for launch, manage, optimize, schedule) -->
+                    <div class="form-group" id="campaign-select-group" style="display: none;">
+                    <label for="campaign-select">Select Campaign <span style="color: #e74c3c;">*</span></label>
+                    <select id="campaign-select" name="campaign_select" onchange="loadCampaignData(this.value)" style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                        <option value="">-- Select Campaign --</option>
+                        {% for campaign in campaigns %}
+                        <option value="{{ campaign.id }}">{{ campaign.name }} ({{ campaign.get_status_display }})</option>
+                        {% endfor %}
+                    </select>
+                    <small style="color: var(--text-secondary);">Select an existing campaign to manage, launch, optimize, or schedule. Form will auto-fill with campaign data.</small>
+            </div>
+
+                    <!-- Basic Information -->
+                    <div class="campaign-section" style="margin-bottom: 1.5rem;">
+                    <div class="section-header">
+                        <span class="section-icon">📋</span>
+                        <h5>Basic Information</h5>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group" id="campaign-name-group" style="margin-bottom: 0;">
+                            <label for="campaign-name">
+                                <span>📝</span> Campaign Name <span class="required-field">*</span>
+                            </label>
+                <input 
+                    type="text" 
+                    id="campaign-name" 
+                    name="campaign_name" 
+                    placeholder="e.g., Summer Sale 2024"
+                                required
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                />
+            </div>
+
+                        <div class="form-group" id="campaign-budget-group" style="margin-bottom: 0;">
+                            <label for="campaign-budget">
+                                <span>💰</span> Budget ($)
+                            </label>
+                            <input 
+                                type="number" 
+                                id="campaign-budget" 
+                                name="campaign_budget" 
+                                placeholder="10000"
+                                step="0.01"
+                                min="0"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="campaign-description-group" style="margin-top: 1rem; margin-bottom: 0;">
+                        <label for="campaign-description">
+                            <span>📄</span> Campaign Description
+                        </label>
+                <textarea 
+                    id="campaign-description" 
+                    name="campaign_description" 
+                            placeholder="Describe your campaign goals, objectives, and key messaging..."
+                    rows="3"
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; resize: vertical;"
+                ></textarea>
+                        <div class="field-hint">Provide a detailed description to help the AI create better campaign strategies</div>
+                    </div>
+            </div>
+
+                    <!-- Goals Section -->
+                    <div class="campaign-section" style="margin-bottom: 1.5rem;">
+                    <div class="section-header">
+                        <span class="section-icon">🎯</span>
+                        <h5>Campaign Goals & Metrics</h5>
+            </div>
+                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.9rem;">
+                        Set your campaign targets to help the AI create optimized strategies and track performance.
+                    </p>
+                    
+                    <div style="margin-bottom: 1.5rem;">
+                        <h6 style="margin: 0 0 1rem 0; color: var(--text-primary); font-size: 1rem; font-weight: 600;">📊 Primary Goals</h6>
+                        <div class="form-grid">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="target-revenue">
+                                    <span>💵</span> Target Revenue ($)
+                    </label>
+                                <input 
+                                    type="number" 
+                                    id="target-revenue" 
+                                    name="target_revenue" 
+                                    placeholder="50000"
+                                    step="0.01"
+                                    min="0"
+                                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                                />
+                                <div class="field-hint">Total revenue goal for this campaign</div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="target-leads">
+                                    <span>👥</span> Target Qualified Leads
+                    </label>
+                                <input 
+                                    type="number" 
+                                    id="target-leads" 
+                                    name="target_leads" 
+                                    placeholder="1000"
+                                    min="0"
+                                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                                />
+                                <div class="field-hint">Target number of leads that show interest/qualify (not total uploaded leads)</div>
+            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="target-conversions">
+                                    <span>✅</span> Target Conversions
+                                </label>
+                <input 
+                    type="number" 
+                                    id="target-conversions" 
+                                    name="target_conversions" 
+                                    placeholder="500"
+                    min="0"
+                                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                />
+                                <div class="field-hint">Number of desired conversions</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Leads Upload Section (only for create_multi_channel action) -->
+                    <div class="campaign-section" id="leads-upload-section" style="margin-bottom: 1.5rem; display: none;">
+                        <div class="section-header">
+                            <span class="section-icon">📋</span>
+                            <h5>Upload Leads (Optional)</h5>
+                        </div>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.9rem;">
+                            Upload a CSV or Excel file containing your leads. You can also add leads later from the campaign dashboard.
+                        </p>
+                        <div class="form-group">
+                            <label for="leads-file-upload">
+                                <span>📄</span> Leads File (CSV, XLS, XLSX)
+                            </label>
+                            <input 
+                                type="file" 
+                                id="leads-file-upload" 
+                                name="leads_file" 
+                                accept=".csv,.xls,.xlsx"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                            />
+                            <div class="field-hint">
+                                Supported formats: CSV, Excel (.xls, .xlsx). Required columns: Email (required), First Name, Last Name, Phone, Company, Job Title.
+                                <br><strong>Note:</strong> Target Leads above refers to qualified/interested leads, not the total number of leads uploaded.
+                            </div>
+                        </div>
+                    </div>
+            </div>
+
+                    <!-- Target Audience Section -->
+                    <div class="campaign-section" style="margin-bottom: 1.5rem;">
+                        <div class="section-header">
+                            <span class="section-icon">👥</span>
+                            <h5>Target Audience</h5>
+                        </div>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.9rem;">
+                            Define your ideal customer profile to help the AI create more targeted and effective
+                            campaigns.
+                        </p>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <h6
+                                style="margin: 0 0 1rem 0; color: var(--text-primary); font-size: 1rem; font-weight: 600;">
+                                👤 Demographics</h6>
+                            <div class="form-grid">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="age-range">
+                                        <span>🎂</span> Age Range
+                                    </label>
+                                    <input type="text" id="age-range" name="age_range" placeholder="e.g., 25-45"
+                                        style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                                    <div class="field-hint">Target age range</div>
+                                </div>
+
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="location">
+                                        <span>🌍</span> Location
+                                    </label>
+                                    <input type="text" id="location" name="location"
+                                        placeholder="e.g., North America, Europe"
+                                        style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                                    <div class="field-hint">Geographic region or country</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <h6
+                                style="margin: 0 0 1rem 0; color: var(--text-primary); font-size: 1rem; font-weight: 600;">
+                                💼 Professional Profile</h6>
+                            <div class="form-grid">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="industry">
+                                        <span>🏢</span> Industry
+                                    </label>
+                                    <input type="text" id="industry" name="industry"
+                                        placeholder="e.g., Technology, Healthcare, Finance"
+                                        style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                                    <div class="field-hint">Target industry sectors</div>
+                                </div>
+
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="company-size">
+                                        <span>📏</span> Company Size
+                                    </label>
+                                    <select id="company-size" name="company_size"
+                                        style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; background: var(--card-background);">
+                                        <option value="">Any</option>
+                                        <option value="1-10">1-10 employees</option>
+                                        <option value="11-50">11-50 employees</option>
+                                        <option value="51-200">51-200 employees</option>
+                                        <option value="201-1000">201-1000 employees</option>
+                                        <option value="1001-5000">1001-5000 employees</option>
+                                        <option value="5000+">5000+ employees</option>
+                                    </select>
+                                    <div class="field-hint">Target company size</div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <div>
+                            <h6
+                                style="margin: 0 0 1rem 0; color: var(--text-primary); font-size: 1rem; font-weight: 600;">
+                                🎯 Interests & Preferences</h6>
+                            <div class="form-grid-2">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="interests">
+                                        <span>❤️</span> Interests
+                                    </label>
+                                    <input type="text" id="interests" name="interests"
+                                        placeholder="e.g., technology, business, marketing"
+                                        style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                                    <div class="field-hint">Comma-separated interests</div>
+                                </div>
+
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="language">
+                                        <span>🗣️</span> Language
+                                    </label>
+                                    <input type="text" id="language" name="language"
+                                        placeholder="e.g., English, Spanish, French"
+                                        style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                                    <div class="field-hint">Preferred language</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dates Section -->
+                    <div
+                        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div class="form-group" id="campaign-start-date-group" style="display: none; margin-bottom: 0;">
+                            <label for="campaign-start-date">Start Date</label>
+                            <input type="date" id="campaign-start-date" name="campaign_start_date"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                        </div>
+
+                        <div class="form-group" id="campaign-end-date-group" style="display: none; margin-bottom: 0;">
+                            <label for="campaign-end-date">End Date</label>
+                            <input type="date" id="campaign-end-date" name="campaign_end_date"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="campaign-submit-btn"
+                        style="width: 100%; padding: 1.25rem; font-size: 1.1rem; font-weight: 600; border-radius: var(--radius-md); background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); border: none; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); transition: all 0.3s ease; cursor: pointer;">
+                        <span>🚀</span> Execute Action
+                    </button>
+                    <style>
+                        #campaign-submit-btn:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+                        }
+                    </style>
+                </form>
+            </div>
+
+            <div class="loading" id="campaign-loading">
+                <p>🚀 Processing campaign action...</p>
+            </div>
+
+            <div class="result-box" id="campaign-result">
+                <h4>Campaign Result</h4>
+                <div class="result-content" id="campaign-result-content"></div>
+            </div>
+        </div>
     </div>
 
     <div class="agent-panel" id="panel-analytics">
@@ -314,302 +812,999 @@
 </div>
 
 <script>
-// Simple markdown to HTML converter for research results
-function markdownToHtml(markdown) {
-    if (!markdown) return '';
-    
-    let html = markdown;
-    
-    // First pass: Convert markdown tables (process before splitting lines)
-    const tableRegex = /(\|[^\n]+\|\n)((?:\|:?-+:?\|)+\n)((?:\|[^\n]+\|\n?)+)/g;
-    html = html.replace(tableRegex, (match, headerRow, separatorRow, dataRows) => {
-        const headers = headerRow.trim().split('|').map(c => c.trim()).filter(c => c);
-        const rows = dataRows.trim().split('\n').map(row => 
-            row.trim().split('|').map(c => c.trim()).filter(c => c)
-        ).filter(row => row.length > 0);
-        
-        let tableHtml = '<table><thead><tr>';
-        headers.forEach(h => tableHtml += `<th>${h}</th>`);
-        tableHtml += '</tr></thead><tbody>';
-        rows.forEach(row => {
-            tableHtml += '<tr>';
-            row.forEach(cell => tableHtml += `<td>${cell}</td>`);
-            tableHtml += '</tr>';
+    // Simple markdown to HTML converter for research results
+    function markdownToHtml(markdown) {
+        if (!markdown) return '';
+
+        let html = markdown;
+
+        // First pass: Convert markdown tables (process before splitting lines)
+        const tableRegex = /(\|[^\n]+\|\n)((?:\|:?-+:?\|)+\n)((?:\|[^\n]+\|\n?)+)/g;
+        html = html.replace(tableRegex, (match, headerRow, separatorRow, dataRows) => {
+            const headers = headerRow.trim().split('|').map(c => c.trim()).filter(c => c);
+            const rows = dataRows.trim().split('\n').map(row =>
+                row.trim().split('|').map(c => c.trim()).filter(c => c)
+            ).filter(row => row.length > 0);
+
+            let tableHtml = '<table><thead><tr>';
+            headers.forEach(h => tableHtml += `<th>${h}</th>`);
+            tableHtml += '</tr></thead><tbody>';
+            rows.forEach(row => {
+                tableHtml += '<tr>';
+                row.forEach(cell => tableHtml += `<td>${cell}</td>`);
+                tableHtml += '</tr>';
+            });
+            tableHtml += '</tbody></table>';
+            return tableHtml;
         });
-        tableHtml += '</tbody></table>';
-        return tableHtml;
-    });
-    
-    // Split into lines for processing
-    const lines = html.split('\n');
-    const output = [];
-    let inList = false;
-    
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        
-        // Check for horizontal rules
-        if (line.match(/^---+$/)) {
-            if (inList) {
+
+        // Split into lines for processing
+        const lines = html.split('\n');
+        const output = [];
+        let inList = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            // Check for horizontal rules
+            if (line.match(/^---+$/)) {
+                if (inList) {
+                    output.push('</ul>');
+                    inList = false;
+                }
+                output.push('<hr>');
+                continue;
+            }
+
+            // Check if it's a table (already converted)
+            if (line.includes('<table>')) {
+                if (inList) {
+                    output.push('</ul>');
+                    inList = false;
+                }
+                // Extract the full table HTML (might span multiple lines)
+                let tableHtml = line;
+                let j = i + 1;
+                while (j < lines.length && !lines[j].includes('</table>')) {
+                    tableHtml += '\n' + lines[j];
+                    j++;
+                }
+                if (j < lines.length) {
+                    tableHtml += '\n' + lines[j];
+                }
+                output.push(tableHtml);
+                i = j;
+                continue;
+            }
+
+            // Check for headers
+            if (line.match(/^### /)) {
+                if (inList) {
+                    output.push('</ul>');
+                    inList = false;
+                }
+                output.push(`<h3>${line.replace(/^### /, '')}</h3>`);
+                continue;
+            }
+
+            if (line.match(/^## /)) {
+                if (inList) {
+                    output.push('</ul>');
+                    inList = false;
+                }
+                output.push(`<h2>${line.replace(/^## /, '')}</h2>`);
+                continue;
+            }
+
+            // Check for list items
+            if (line.match(/^[\s]*(?:•|\-|\*|\d+\.)\s+/)) {
+                if (!inList) {
+                    output.push('<ul>');
+                    inList = true;
+                }
+                const content = line.replace(/^[\s]*(?:•|\-|\*|\d+\.)\s+/, '');
+                // Convert bold within list items
+                const processedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                output.push(`<li>${processedContent}</li>`);
+                continue;
+            } else if (inList && line === '') {
                 output.push('</ul>');
                 inList = false;
+                continue;
             }
-            output.push('<hr>');
-            continue;
+
+            // Regular paragraph
+            if (line && !line.includes('<table')) {
+                if (inList) {
+                    output.push('</ul>');
+                    inList = false;
+                }
+                // Convert bold
+                let content = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                output.push(`<p>${content}</p>`);
+            }
         }
-        
-        // Check if it's a table (already converted)
-        if (line.includes('<table>')) {
-            if (inList) {
-                output.push('</ul>');
-                inList = false;
-            }
-            // Extract the full table HTML (might span multiple lines)
-            let tableHtml = line;
-            let j = i + 1;
-            while (j < lines.length && !lines[j].includes('</table>')) {
-                tableHtml += '\n' + lines[j];
-                j++;
-            }
-            if (j < lines.length) {
-                tableHtml += '\n' + lines[j];
-            }
-            output.push(tableHtml);
-            i = j;
-            continue;
-        }
-        
-        // Check for headers
-        if (line.match(/^### /)) {
-            if (inList) {
-                output.push('</ul>');
-                inList = false;
-            }
-            output.push(`<h3>${line.replace(/^### /, '')}</h3>`);
-            continue;
-        }
-        
-        if (line.match(/^## /)) {
-            if (inList) {
-                output.push('</ul>');
-                inList = false;
-            }
-            output.push(`<h2>${line.replace(/^## /, '')}</h2>`);
-            continue;
-        }
-        
-        // Check for list items
-        if (line.match(/^[\s]*(?:•|\-|\*|\d+\.)\s+/)) {
-            if (!inList) {
-                output.push('<ul>');
-                inList = true;
-            }
-            const content = line.replace(/^[\s]*(?:•|\-|\*|\d+\.)\s+/, '');
-            // Convert bold within list items
-            const processedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            output.push(`<li>${processedContent}</li>`);
-            continue;
-        } else if (inList && line === '') {
+
+        // Close any open list
+        if (inList) {
             output.push('</ul>');
-            inList = false;
-            continue;
         }
-        
-        // Regular paragraph
-        if (line && !line.includes('<table')) {
-            if (inList) {
-                output.push('</ul>');
-                inList = false;
-            }
-            // Convert bold
-            let content = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            output.push(`<p>${content}</p>`);
-        }
-    }
-    
-    // Close any open list
-    if (inList) {
-        output.push('</ul>');
-    }
-    
-    return output.join('\n');
-}
 
-function switchTab(tabName) {
-    // Hide all panels and remove active class from tabs
-    document.querySelectorAll('.agent-panel').forEach(panel => {
-        panel.classList.remove('active');
-    });
-    document.querySelectorAll('.agent-tab').forEach(tab => {
-        tab.classList.remove('active');
-    });
-
-    // Show selected panel and activate tab
-    const panel = document.getElementById(`panel-${tabName}`);
-    const tab = document.getElementById(`tab-${tabName}`);
-    if (panel && tab && !tab.disabled) {
-        panel.classList.add('active');
-        tab.classList.add('active');
+        return output.join('\n');
     }
-}
 
-async function handleQA(event) {
-    event.preventDefault();
-    
-    const question = document.getElementById('qa-question').value;
-    const loading = document.getElementById('qa-loading');
-    const result = document.getElementById('qa-result');
-    const resultContent = document.getElementById('qa-result-content');
-    
-    // Show loading
-    loading.classList.add('show');
-    result.classList.remove('show');
-    
-    try {
-        const response = await fetch('{% url "test_marketing_qa" %}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            },
-            body: JSON.stringify({
-                question: question
-            })
+    function switchTab(tabName) {
+        // Hide all panels and remove active class from tabs
+        document.querySelectorAll('.agent-panel').forEach(panel => {
+            panel.classList.remove('active');
         });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            let output = data.answer || 'No answer provided.';
-            
-            // Add insights if available
-            if (data.insights && data.insights.length > 0) {
-                output += '\n\n📊 Key Insights:\n';
-                data.insights.forEach(insight => {
-                    output += `• ${insight.title}: ${insight.value}\n`;
-                });
-            }
-            
-            resultContent.textContent = output;
-            result.classList.add('show');
-        } else {
-            resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
-            result.classList.add('show');
-        }
-    } catch (error) {
-        resultContent.textContent = `Error: ${error.message}`;
-        result.classList.add('show');
-    } finally {
-        loading.classList.remove('show');
-    }
-}
+        document.querySelectorAll('.agent-tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
 
-async function handleMarketResearch(event) {
-    event.preventDefault();
-    
-    const researchType = document.getElementById('research-type').value;
-    const topic = document.getElementById('research-topic').value;
-    const contextInput = document.getElementById('research-context').value;
-    const loading = document.getElementById('research-loading');
-    const result = document.getElementById('research-result');
-    const resultContent = document.getElementById('research-result-content');
-    
-    // Show loading
-    loading.classList.add('show');
-    result.classList.remove('show');
-    
-    // Parse context if provided
-    let context = {};
-    if (contextInput.trim()) {
+        // Show selected panel and activate tab
+        const panel = document.getElementById(`panel-${tabName}`);
+        const tab = document.getElementById(`tab-${tabName}`);
+        if (panel && tab && !tab.disabled) {
+            panel.classList.add('active');
+            tab.classList.add('active');
+        }
+    }
+
+    async function handleQA(event) {
+        event.preventDefault();
+
+        const question = document.getElementById('qa-question').value;
+        const loading = document.getElementById('qa-loading');
+        const result = document.getElementById('qa-result');
+        const resultContent = document.getElementById('qa-result-content');
+
+        // Show loading
+        loading.classList.add('show');
+        result.classList.remove('show');
+
         try {
-            context = JSON.parse(contextInput);
-        } catch (e) {
-            alert('Invalid JSON in context field. Please check the format.');
+            const response = await fetch('{% url "test_marketing_qa" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({
+                    question: question
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                let output = data.answer || 'No answer provided.';
+
+                // Add insights if available
+                if (data.insights && data.insights.length > 0) {
+                    output += '\n\n📊 Key Insights:\n';
+                    data.insights.forEach(insight => {
+                        output += `• ${insight.title}: ${insight.value}\n`;
+                    });
+                }
+
+                resultContent.textContent = output;
+                result.classList.add('show');
+            } else {
+                resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
+                result.classList.add('show');
+            }
+        } catch (error) {
+            resultContent.textContent = `Error: ${error.message}`;
+            result.classList.add('show');
+        } finally {
             loading.classList.remove('show');
+        }
+    }
+
+    async function handleMarketResearch(event) {
+        event.preventDefault();
+
+        const researchType = document.getElementById('research-type').value;
+        const topic = document.getElementById('research-topic').value;
+        const contextInput = document.getElementById('research-context').value;
+        const loading = document.getElementById('research-loading');
+        const result = document.getElementById('research-result');
+        const resultContent = document.getElementById('research-result-content');
+
+        // Show loading
+        loading.classList.add('show');
+        result.classList.remove('show');
+
+        // Parse context if provided
+        let context = {};
+        if (contextInput.trim()) {
+            try {
+                context = JSON.parse(contextInput);
+            } catch (e) {
+                alert('Invalid JSON in context field. Please check the format.');
+                loading.classList.remove('show');
+                return;
+            }
+        }
+
+        try {
+            const response = await fetch('{% url "test_market_research" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({
+                    research_type: researchType,
+                    topic: topic,
+                    context: context
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Build output with proper formatting - use insights directly as it contains formatted markdown
+                let output = '';
+
+                if (data.insights) {
+                    // The insights field now contains the full formatted response from AI
+                    output = data.insights;
+                } else {
+                    // Fallback to structured output if insights not available
+                    output = `## 📊 Research Findings\n\n`;
+                    output += `**Research Type**: ${data.research_type}\n`;
+                    output += `**Topic**: ${data.topic}\n\n`;
+
+                    if (data.opportunities && data.opportunities.length > 0) {
+                        output += `### 🎯 Opportunities\n\n`;
+                        data.opportunities.forEach(opp => {
+                            output += `• ${opp}\n`;
+                        });
+                        output += `\n`;
+                    }
+
+                    if (data.risks && data.risks.length > 0) {
+                        output += `### ⚠️ Risks & Threats\n\n`;
+                        data.risks.forEach(risk => {
+                            output += `• ${risk}\n`;
+                        });
+                        output += `\n`;
+                    }
+
+                    if (data.recommendations && data.recommendations.length > 0) {
+                        output += `### 💼 Recommendations\n\n`;
+                        data.recommendations.forEach(rec => {
+                            output += `• ${rec}\n`;
+                        });
+                        output += `\n`;
+                    }
+                }
+
+                if (data.research_id) {
+                    output += `\n\n---\n\n✅ **Research saved to database (ID: ${data.research_id})**. Available for Q&A agent.`;
+                }
+
+                // Convert markdown to HTML and display
+                resultContent.innerHTML = markdownToHtml(output);
+                result.classList.add('show');
+            } else {
+                resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
+                result.classList.add('show');
+            }
+        } catch (error) {
+            resultContent.textContent = `Error: ${error.message}`;
+            result.classList.add('show');
+        } finally {
+            loading.classList.remove('show');
+        }
+    }
+
+    // Store designed campaign data
+    let designedCampaignData = null;
+
+    // Use designed campaign for other actions
+    function useDesignedCampaign(action) {
+        if (!designedCampaignData) {
+            alert('No campaign design available. Please design a campaign first.');
             return;
         }
-    }
-    
-    try {
-        const response = await fetch('{% url "test_market_research" %}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            },
-            body: JSON.stringify({
-                research_type: researchType,
-                topic: topic,
-                context: context
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Build output with proper formatting - use insights directly as it contains formatted markdown
-            let output = '';
-            
-            if (data.insights) {
-                // The insights field now contains the full formatted response from AI
-                output = data.insights;
-            } else {
-                // Fallback to structured output if insights not available
-                output = `## 📊 Research Findings\n\n`;
-                output += `**Research Type**: ${data.research_type}\n`;
-                output += `**Topic**: ${data.topic}\n\n`;
-                
-                if (data.opportunities && data.opportunities.length > 0) {
-                    output += `### 🎯 Opportunities\n\n`;
-                    data.opportunities.forEach(opp => {
-                        output += `• ${opp}\n`;
-                    });
-                    output += `\n`;
-                }
-                
-                if (data.risks && data.risks.length > 0) {
-                    output += `### ⚠️ Risks & Threats\n\n`;
-                    data.risks.forEach(risk => {
-                        output += `• ${risk}\n`;
-                    });
-                    output += `\n`;
-                }
-                
-                if (data.recommendations && data.recommendations.length > 0) {
-                    output += `### 💼 Recommendations\n\n`;
-                    data.recommendations.forEach(rec => {
-                        output += `• ${rec}\n`;
-                    });
-                    output += `\n`;
-                }
-            }
-            
-            if (data.research_id) {
-                output += `\n\n---\n\n✅ **Research saved to database (ID: ${data.research_id})**. Available for Q&A agent.`;
-            }
-            
-            // Convert markdown to HTML and display
-            resultContent.innerHTML = markdownToHtml(output);
-            result.classList.add('show');
-        } else {
-            resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
-            result.classList.add('show');
-        }
-    } catch (error) {
-        resultContent.textContent = `Error: ${error.message}`;
-        result.classList.add('show');
-    } finally {
-        loading.classList.remove('show');
-    }
-}
 
-// Handle hash in URL (e.g., #qa)
-window.addEventListener('DOMContentLoaded', () => {
-    const hash = window.location.hash.substring(1);
-    if (hash) {
-        switchTab(hash);
+        // Set the action
+        document.getElementById('campaign-action').value = action;
+        updateCampaignForm();
+
+        // Pre-fill form with designed campaign data
+        if (designedCampaignData.name && document.getElementById('campaign-name')) {
+            document.getElementById('campaign-name').value = designedCampaignData.name;
+        }
+        if (designedCampaignData.description && document.getElementById('campaign-description')) {
+            document.getElementById('campaign-description').value = designedCampaignData.description;
+        }
+        if (designedCampaignData.budget && document.getElementById('campaign-budget')) {
+            document.getElementById('campaign-budget').value = designedCampaignData.budget;
+        }
+        if (designedCampaignData.target_revenue && document.getElementById('target-revenue')) {
+            document.getElementById('target-revenue').value = designedCampaignData.target_revenue;
+        }
+        if (designedCampaignData.target_leads && document.getElementById('target-leads')) {
+            document.getElementById('target-leads').value = designedCampaignData.target_leads;
+        }
+        if (designedCampaignData.target_conversions && document.getElementById('target-conversions')) {
+            document.getElementById('target-conversions').value = designedCampaignData.target_conversions;
+        }
+        if (designedCampaignData.age_range && document.getElementById('age-range')) {
+            document.getElementById('age-range').value = designedCampaignData.age_range;
+        }
+        if (designedCampaignData.location && document.getElementById('location')) {
+            document.getElementById('location').value = designedCampaignData.location;
+        }
+        if (designedCampaignData.interests && document.getElementById('interests')) {
+            document.getElementById('interests').value = designedCampaignData.interests;
+        }
+        if (designedCampaignData.industry && document.getElementById('industry')) {
+            document.getElementById('industry').value = designedCampaignData.industry;
+        }
+        if (designedCampaignData.company_size && document.getElementById('company-size')) {
+            document.getElementById('company-size').value = designedCampaignData.company_size;
+        }
+        if (designedCampaignData.language && document.getElementById('language')) {
+            document.getElementById('language').value = designedCampaignData.language;
+        }
+
+        // Scroll to form
+        document.getElementById('campaign-form-container').scrollIntoView({ behavior: 'smooth' });
     }
-});
+
+    // Initialize form - hide it initially if no action selected
+    document.addEventListener('DOMContentLoaded', () => {
+        const actionSelect = document.getElementById('campaign-action');
+        if (actionSelect && !actionSelect.value) {
+            const campaignForm = document.getElementById('campaign-form-container');
+            if (campaignForm) campaignForm.style.display = 'none';
+        }
+    });
+
+    // Load campaign data and populate form
+    async function loadCampaignData(campaignId) {
+        console.log('Campaign ID:', campaignId);
+
+        if (!campaignId) {
+            // Clear form if no campaign selected
+            clearCampaignForm();
+            return;
+        }
+
+        try {
+            // Construct URL for campaign details API
+            // Build URL manually: /marketing/api/campaign/<id>/
+            let campaignUrl = `/marketing/api/campaign/${campaignId}/`;
+
+            console.log('Fetching campaign data from:', campaignUrl);
+            // console.log('Campaign /ID:', campaignId);
+
+            const response = await fetch(campaignUrl, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                credentials: 'same-origin'  // Include cookies for authentication
+            });
+
+            // Check if response is ok
+            if (!response.ok) {
+                // Try to get error message
+                let errorText = '';
+                try {
+                    errorText = await response.text();
+                    // Try to parse as JSON first
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        throw new Error(errorJson.error || `HTTP ${response.status}`);
+                    } catch {
+                        // Not JSON, use text
+                        console.error('HTTP Error Response:', response.status, errorText.substring(0, 200));
+                        throw new Error(`HTTP ${response.status}: Server returned HTML instead of JSON. Check if URL is correct.`);
+                    }
+                } catch (e) {
+                    if (e.message) throw e;
+                    throw new Error(`HTTP ${response.status}: Failed to load campaign`);
+                }
+            }
+
+            // Check content type
+            const contentType = response.headers.get('content-type') || '';
+            console.log('Content Type:', contentType);
+            if (!contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('Non-JSON response received. Content-Type:', contentType);
+                console.error('Response preview:', text.substring(0, 300));
+                throw new Error('Server returned non-JSON response. This usually means the URL is incorrect or there\'s a server error. Check browser console for details.');
+            }
+
+            const data = await response.json();
+            console.log('Received campaign data:', data);
+
+            if (data.success && data.campaign) {
+                const campaign = data.campaign;
+                console.log('Populating form with campaign:', campaign);
+
+                // Helper function to safely set field values
+                function setFieldValue(fieldId, value) {
+                    const field = document.getElementById(fieldId);
+                    if (field) {
+                        // Handle null/undefined values
+                        const fieldValue = (value !== null && value !== undefined) ? value : '';
+                        field.value = fieldValue;
+                        console.log(`Set ${fieldId} = "${fieldValue}"`);
+                        return true;
+                    } else {
+                        console.warn(`Field not found: ${fieldId}`);
+                        return false;
+                    }
+                }
+
+                // Populate Basic Information fields
+                setFieldValue('campaign-name', campaign.name);
+                setFieldValue('campaign-description', campaign.description);
+                setFieldValue('campaign-budget', campaign.budget);
+
+                // Populate Goals fields
+                setFieldValue('target-revenue', campaign.target_revenue);
+                setFieldValue('target-leads', campaign.target_leads);
+                setFieldValue('target-conversions', campaign.target_conversions);
+
+                // Populate Target Audience fields
+                setFieldValue('age-range', campaign.age_range);
+                setFieldValue('location', campaign.location);
+                setFieldValue('interests', campaign.interests);
+                setFieldValue('industry', campaign.industry);
+                setFieldValue('company-size', campaign.company_size);
+                setFieldValue('language', campaign.language);
+
+                // Populate Date fields
+                setFieldValue('campaign-start-date', campaign.start_date);
+                setFieldValue('campaign-end-date', campaign.end_date);
+
+                // Show form fields for viewing/editing
+                const action = document.getElementById('campaign-action').value;
+                if (action === 'launch' || action === 'manage' || action === 'optimize' || action === 'schedule') {
+                    // Show the basic form fields
+                    const campaignNameGroup = document.getElementById('campaign-name-group');
+                    const campaignDescriptionGroup = document.getElementById('campaign-description-group');
+                    const campaignBudgetGroup = document.getElementById('campaign-budget-group');
+                    const campaignStartDateGroup = document.getElementById('campaign-start-date-group');
+                    const campaignEndDateGroup = document.getElementById('campaign-end-date-group');
+
+                    if (campaignNameGroup) campaignNameGroup.style.display = 'block';
+                    if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
+                    if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
+                    if (campaignStartDateGroup) campaignStartDateGroup.style.display = 'block';
+                    if (campaignEndDateGroup) campaignEndDateGroup.style.display = 'block';
+                }
+
+                console.log('✅ Campaign data successfully loaded into form fields');
+            } else {
+                alert('Failed to load campaign data: ' + (data.error || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Error loading campaign data:', error);
+            alert('Error loading campaign data: ' + error.message);
+        }
+    }
+
+    // Clear campaign form
+    function clearCampaignForm() {
+        const fields = [
+            'campaign-name', 'campaign-description', 'campaign-budget',
+            'target-revenue', 'target-leads', 'target-conversions',
+            'age-range', 'location', 'interests', 'industry', 'company-size', 'language',
+            'campaign-start-date', 'campaign-end-date'
+        ];
+
+        fields.forEach(fieldId => {
+            const field = document.getElementById(fieldId);
+            if (field) field.value = '';
+        });
+    }
+
+    // Campaign Agent Functions
+    function updateCampaignForm() {
+        const action = document.getElementById('campaign-action').value;
+        const campaignForm = document.getElementById('campaign-form-container');
+        const actionHint = document.getElementById('action-hint');
+        const hintText = document.getElementById('action-hint-text');
+        const campaignSelectGroup = document.getElementById('campaign-select-group');
+        const campaignNameGroup = document.getElementById('campaign-name-group');
+        const campaignDescriptionGroup = document.getElementById('campaign-description-group');
+        const campaignBudgetGroup = document.getElementById('campaign-budget-group');
+        const campaignStartDateGroup = document.getElementById('campaign-start-date-group');
+        const campaignEndDateGroup = document.getElementById('campaign-end-date-group');
+        const submitBtn = document.getElementById('campaign-submit-btn');
+
+        // Hide form if no action selected
+        if (!action) {
+            if (campaignForm) campaignForm.style.display = 'none';
+            if (actionHint) actionHint.style.display = 'none';
+            return;
+        }
+
+        // Show form
+        if (campaignForm) campaignForm.style.display = 'block';
+        if (actionHint) actionHint.style.display = 'block';
+
+        // Set hints based on action
+        const hints = {
+            'design': 'Fill in the form below to design your campaign. After designing, you can use the buttons to create, launch, or schedule it.',
+            'create_multi_channel': 'Fill in the campaign details below to create your email campaign.',
+            'launch': 'Select an existing campaign from the dropdown below to launch it.',
+            'manage': 'Select an existing campaign from the dropdown below to manage and view its performance.',
+            'optimize': 'Select an existing campaign from the dropdown below to get optimization recommendations.',
+            'schedule': 'Select an existing campaign and set dates below to schedule it.'
+        };
+        hintText.textContent = hints[action] || '';
+
+        // Reset all groups
+        campaignSelectGroup.style.display = 'none';
+        // Note: campaign-name-group, campaign-description-group, and campaign-budget-group are commented out
+        if (campaignNameGroup) campaignNameGroup.style.display = 'block';
+        if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
+        if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
+        campaignStartDateGroup.style.display = 'none';
+        campaignEndDateGroup.style.display = 'none';
+        
+        // Show/hide leads upload section (for create and launch actions)
+        const leadsUploadSection = document.getElementById('leads-upload-section');
+        if (leadsUploadSection) {
+            leadsUploadSection.style.display = (action === 'create_multi_channel' || action === 'launch') ? 'block' : 'none';
+        }
+
+        // Update based on action
+        if (action === 'design') {
+            submitBtn.textContent = '🎨 Design Campaign';
+            campaignSelectGroup.style.display = 'none';
+        } else if (action === 'create_multi_channel') {
+            submitBtn.textContent = '📧 Create Email Campaign';
+            campaignSelectGroup.style.display = 'none';
+            campaignStartDateGroup.style.display = 'block';
+            campaignEndDateGroup.style.display = 'block';
+        } else if (action === 'launch' || action === 'manage' || action === 'optimize') {
+            submitBtn.textContent = action.charAt(0).toUpperCase() + action.slice(1) + ' Campaign';
+            campaignSelectGroup.style.display = 'block';
+            // Keep form fields visible so they can be auto-filled and viewed (if they exist)
+            if (campaignNameGroup) campaignNameGroup.style.display = 'block';
+            if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
+            if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
+        } else if (action === 'schedule') {
+            submitBtn.textContent = '📅 Schedule Campaign';
+            campaignSelectGroup.style.display = 'block';
+            campaignStartDateGroup.style.display = 'block';
+            campaignEndDateGroup.style.display = 'block';
+            // Keep form fields visible so they can be auto-filled and viewed (if they exist)
+            if (campaignNameGroup) campaignNameGroup.style.display = 'block';
+            if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
+            if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
+        }
+    }
+
+    async function handleCampaign(event) {
+        event.preventDefault();
+
+        const action = document.getElementById('campaign-action').value;
+        if (!action) {
+            alert('Please select an action first.');
+            return;
+        }
+
+        const loading = document.getElementById('campaign-loading');
+        const result = document.getElementById('campaign-result');
+        const resultContent = document.getElementById('campaign-result-content');
+
+        // Show loading
+        loading.classList.add('show');
+        result.classList.remove('show');
+
+        // Build campaign data
+        const campaignData = {};
+        const context = {};
+
+        // Get campaign ID from select dropdown if needed
+        let campaignId = null;
+        const campaignSelect = document.getElementById('campaign-select');
+        if (campaignSelect && campaignSelect.value) {
+            campaignId = parseInt(campaignSelect.value);
+        }
+
+        // Get form values for new campaigns
+        if (document.getElementById('campaign-name') && document.getElementById('campaign-name').value) {
+            campaignData.name = document.getElementById('campaign-name').value;
+        }
+        if (document.getElementById('campaign-description') && document.getElementById('campaign-description').value) {
+            campaignData.description = document.getElementById('campaign-description').value;
+        }
+
+        // Set campaign type to email only
+        campaignData.campaign_type = 'email';
+        campaignData.channels = ['email'];
+
+        // Get budget
+        if (document.getElementById('campaign-budget') && document.getElementById('campaign-budget').value) {
+            campaignData.budget = parseFloat(document.getElementById('campaign-budget').value);
+        }
+
+        // Build goals from individual fields
+        const goals = {};
+        const getValue = (id) => {
+            const el = document.getElementById(id);
+            return el && el.value ? el.value : null;
+        };
+        const getNumberValue = (id) => {
+            const val = getValue(id);
+            return val ? parseFloat(val) : null;
+        };
+        const getIntValue = (id) => {
+            const val = getValue(id);
+            return val ? parseInt(val) : null;
+        };
+
+        // Primary Goals
+        if (getValue('target-revenue')) {
+            const val = getNumberValue('target-revenue');
+            goals.revenue = val;
+            campaignData.target_revenue = val;
+        }
+        if (getValue('target-leads')) {
+            const val = getIntValue('target-leads');
+            goals.leads = val;
+            campaignData.target_leads = val;
+        }
+        if (getValue('target-conversions')) {
+            const val = getIntValue('target-conversions');
+            goals.conversions = val;
+            campaignData.target_conversions = val;
+        }
+
+        if (Object.keys(goals).length > 0) {
+            campaignData.goals = goals;
+        }
+
+        // Build target audience from individual fields
+        const targetAudience = {};
+
+        // Demographics
+        if (getValue('age-range')) {
+            const val = getValue('age-range');
+            targetAudience.age_range = val;
+            campaignData.age_range = val;
+        }
+        if (getValue('location')) {
+            const val = getValue('location');
+            targetAudience.location = val;
+            campaignData.location = val;
+        }
+
+        // Professional Profile
+        if (getValue('industry')) {
+            const val = getValue('industry');
+            targetAudience.industry = val;
+            campaignData.industry = val;
+        }
+        if (getValue('company-size')) {
+            const val = getValue('company-size');
+            targetAudience.company_size = val;
+            campaignData.company_size = val;
+        }
+
+        // Interests & Preferences
+        if (getValue('interests')) {
+            const interestsList = getValue('interests').split(',').map(i => i.trim()).filter(i => i);
+            targetAudience.interests = interestsList;
+            campaignData.interests = getValue('interests');
+        }
+        if (getValue('language')) {
+            const val = getValue('language');
+            targetAudience.language = val;
+            campaignData.language = val;
+        }
+
+        if (Object.keys(targetAudience).length > 0) {
+            campaignData.target_audience = targetAudience;
+        }
+
+        // Get dates
+        if (document.getElementById('campaign-start-date') && document.getElementById('campaign-start-date').value) {
+            campaignData.start_date = document.getElementById('campaign-start-date').value;
+        }
+        if (document.getElementById('campaign-end-date') && document.getElementById('campaign-end-date').value) {
+            campaignData.end_date = document.getElementById('campaign-end-date').value;
+        }
+
+        // Check if we have a file to upload (for create_multi_channel and launch actions)
+        const leadsFileInput = document.getElementById('leads-file-upload');
+        const leadsFile = leadsFileInput && leadsFileInput.files && leadsFileInput.files.length > 0 ? leadsFileInput.files[0] : null;
+        
+        let response;
+        try {
+            // If there's a file, use FormData instead of JSON
+            if (leadsFile && action === 'create_multi_channel') {
+                const formData = new FormData();
+                formData.append('action', action);
+                formData.append('campaign_data', JSON.stringify(campaignData));
+                formData.append('file', leadsFile);
+                
+                if (campaignId) {
+                    formData.append('campaign_id', campaignId.toString());
+                }
+                
+                if (Object.keys(context).length > 0) {
+                    formData.append('context', JSON.stringify(context));
+                }
+                
+                response = await fetch('{% url "test_outreach_campaign" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    },
+                    body: formData
+                });
+            } else {
+                // No file, use JSON
+                const requestBody = {
+                    action: action
+                };
+
+                if (Object.keys(campaignData).length > 0) {
+                    requestBody.campaign_data = campaignData;
+                }
+
+                if (campaignId) {
+                    requestBody.campaign_id = campaignId;
+                }
+
+                if (Object.keys(context).length > 0) {
+                    requestBody.context = context;
+                }
+                
+                response = await fetch('{% url "test_outreach_campaign" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+            }
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    throw new Error(errorJson.error || `HTTP ${response.status}`);
+                } catch {
+                    throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+                }
+            }
+
+            const data = await response.json();
+
+            if (data.success) {
+                let output = '';
+
+                // Format output based on action
+                if (action === 'design') {
+                    // Store designed campaign data
+                    designedCampaignData = {
+                        name: document.getElementById('campaign-name')?.value || '',
+                        description: document.getElementById('campaign-description')?.value || '',
+                        budget: document.getElementById('campaign-budget')?.value || '',
+                        // Store all form data
+                        target_revenue: document.getElementById('target-revenue')?.value || '',
+                        target_leads: document.getElementById('target-leads')?.value || '',
+                        target_conversions: document.getElementById('target-conversions')?.value || '',
+                        age_range: document.getElementById('age-range')?.value || '',
+                        location: document.getElementById('location')?.value || '',
+                        interests: document.getElementById('interests')?.value || '',
+                        industry: document.getElementById('industry')?.value || '',
+                        company_size: document.getElementById('company-size')?.value || '',
+                        language: document.getElementById('language')?.value || ''
+                    };
+
+                    // Show action buttons
+                    document.getElementById('designed-campaign-actions').style.display = 'block';
+
+                    output = `## 🎨 Campaign Design\n\n`;
+                    if (data.campaign_design) {
+                        const design = data.campaign_design;
+                        if (design.raw_design) {
+                            output += design.raw_design;
+                        } else {
+                            output += `**Campaign Name**: ${design.campaign_name || 'N/A'}\n\n`;
+                            output += `**Description**: ${design.description || 'N/A'}\n\n`;
+                            output += `**Channels**: ${(design.channels || []).join(', ')}\n\n`;
+                        }
+                    }
+
+                    if (data.recommendations && data.recommendations.length > 0) {
+                        output += `\n\n---\n\n## 💡 Recommendations\n\n`;
+                        data.recommendations.forEach(rec => {
+                            output += `• ${rec}\n`;
+                        });
+                    }
+
+                    output += `\n\n---\n\n✅ **Campaign design is ready!** Use the buttons above to create, launch, or schedule this campaign.`;
+                } else if (action === 'create_multi_channel') {
+                    // Hide designed campaign actions after creating
+                    document.getElementById('designed-campaign-actions').style.display = 'none';
+                    output = `## ✅ Campaign Created Successfully\n\n`;
+                    output += `**Campaign ID**: ${data.campaign_id}\n`;
+                    output += `**Campaign Name**: ${data.campaign_name}\n`;
+                    output += `**Status**: ${data.status}\n`;
+                    output += `**Channels**: ${(data.channels || []).join(', ')}\n\n`;
+                    if (data.leads_uploaded && data.leads_uploaded > 0) {
+                        output += `**Leads Uploaded**: ${data.leads_uploaded} leads have been uploaded and associated with this campaign.\n\n`;
+                    }
+                    output += `\n${data.message || 'Campaign created successfully!'}\n`;
+                    output += `\n💡 **Note:** You can view and manage leads in the campaign dashboard.`;
+
+
+                    if (data.campaign_design) {
+                        output += `\n\n---\n\n## 🎨 Campaign Design\n\n`;
+                        if (data.campaign_design.raw_design) {
+                            output += data.campaign_design.raw_design;
+                        }
+                    }
+                } else if (action === 'launch') {
+                    output = `## 🚀 Campaign Launched\n\n`;
+                    output += `**Campaign**: ${data.campaign_name}\n`;
+                    output += `**Status**: ${data.status}\n`;
+                    output += `**Channels**: ${(data.channels || []).join(', ')}\n`;
+                    if (data.start_date) {
+                        output += `**Start Date**: ${data.start_date}\n`;
+                    }
+                    if (data.leads_uploaded && data.leads_uploaded > 0) {
+                        output += `\n**Leads Uploaded**: ${data.leads_uploaded} leads have been uploaded and associated with this campaign.\n\n`;
+                    }
+                    output += `\n${data.message || 'Campaign launched successfully!'}\n`;
+                    if (data.leads_uploaded && data.leads_uploaded > 0) {
+                        output += `\n💡 **Note:** You can view and manage leads in the campaign dashboard.`;
+                    }
+
+                    if (data.launch_plan) {
+                        output += `\n\n---\n\n## 📋 Launch Plan\n\n`;
+                        if (data.launch_plan.full_plan) {
+                            output += data.launch_plan.full_plan;
+                        }
+                        if (data.launch_plan.checklist && data.launch_plan.checklist.length > 0) {
+                            output += `\n\n### ✅ Launch Checklist\n\n`;
+                            data.launch_plan.checklist.forEach(item => {
+                                output += `- ${item}\n`;
+                            });
+                        }
+                    }
+                } else if (action === 'manage') {
+                    output = `## 📊 Campaign Management\n\n`;
+                    output += `**Campaign**: ${data.campaign_name}\n`;
+                    output += `**Status**: ${data.current_status}\n\n`;
+
+                    if (data.performance) {
+                        output += `### 📈 Performance Metrics\n\n`;
+                        output += `- Impressions: ${(data.performance.total_impressions || 0).toLocaleString()}\n`;
+                        output += `- Clicks: ${(data.performance.total_clicks || 0).toLocaleString()}\n`;
+                        output += `- Conversions: ${(data.performance.total_conversions || 0).toLocaleString()}\n`;
+                        output += `- CTR: ${(data.performance.ctr || 0).toFixed(2)}%\n`;
+                        output += `- Conversion Rate: ${(data.performance.conversion_rate || 0).toFixed(2)}%\n`;
+                        output += `- Spend: $${(data.performance.spend || 0).toLocaleString(2)}\n`;
+                        output += `- Budget: $${(data.performance.budget || 0).toLocaleString(2)}\n\n`;
+                    }
+
+                    if (data.management_plan) {
+                        if (data.management_plan.assessment) {
+                            output += `### 💼 Management Assessment\n\n`;
+                            output += data.management_plan.assessment;
+                            output += `\n\n`;
+                        }
+                    }
+
+                    if (data.consistency_check) {
+                        output += `### ✅ Messaging Consistency\n\n`;
+                        output += `**Status**: ${data.consistency_check.is_consistent ? '✅ Consistent' : '⚠️ Needs Review'}\n\n`;
+                        if (data.consistency_check.assessment) {
+                            output += data.consistency_check.assessment;
+                            output += `\n\n`;
+                        }
+                    }
+
+                    if (data.recommendations && data.recommendations.length > 0) {
+                        output += `\n\n---\n\n## 💡 Recommendations\n\n`;
+                        data.recommendations.forEach(rec => {
+                            output += `• ${rec}\n`;
+                        });
+                    }
+                } else if (action === 'optimize') {
+                    output = `## ⚡ Campaign Optimization\n\n`;
+                    output += `**Campaign**: ${data.campaign_name}\n\n`;
+
+                    if (data.current_performance) {
+                        output += `### 📊 Current Performance\n\n`;
+                        output += `- Impressions: ${(data.current_performance.total_impressions || 0).toLocaleString()}\n`;
+                        output += `- Clicks: ${(data.current_performance.total_clicks || 0).toLocaleString()}\n`;
+                        output += `- Conversions: ${(data.current_performance.total_conversions || 0).toLocaleString()}\n`;
+                        output += `- CTR: ${(data.current_performance.ctr || 0).toFixed(2)}%\n`;
+                        output += `- Conversion Rate: ${(data.current_performance.conversion_rate || 0).toFixed(2)}%\n\n`;
+                    }
+
+                    if (data.optimization_plan) {
+                        if (data.optimization_plan.optimization_plan) {
+                            output += `### 🎯 Optimization Plan\n\n`;
+                            output += data.optimization_plan.optimization_plan;
+                            output += `\n\n`;
+                        }
+                    }
+
+                    if (data.priority_actions && data.priority_actions.length > 0) {
+                        output += `\n\n---\n\n## 🔥 Priority Actions\n\n`;
+                        data.priority_actions.forEach(action => {
+                            output += `• ${action}\n`;
+                        });
+                    }
+
+                    if (data.recommendations && data.recommendations.length > 0) {
+                        output += `\n\n---\n\n## 💡 Recommendations\n\n`;
+                        data.recommendations.forEach(rec => {
+                            output += `• ${rec}\n`;
+                        });
+                    }
+                } else if (action === 'schedule') {
+                    output = `## 📅 Campaign Scheduled\n\n`;
+                    output += `**Campaign**: ${data.campaign_name}\n`;
+                    output += `**Status**: ${data.status}\n`;
+                    if (data.start_date) {
+                        output += `**Start Date**: ${data.start_date}\n`;
+                    }
+                    if (data.end_date) {
+                        output += `**End Date**: ${data.end_date}\n`;
+                    }
+                    output += `\n`;
+
+                    if (data.schedule) {
+                        if (data.schedule.schedule) {
+                            output += `### 📋 Schedule Details\n\n`;
+                            output += data.schedule.schedule;
+                            output += `\n\n`;
+                        }
+                        if (data.schedule.milestones && data.schedule.milestones.length > 0) {
+                            output += `### 🎯 Key Milestones\n\n`;
+                            data.schedule.milestones.forEach(milestone => {
+                                output += `• ${milestone}\n`;
+                            });
+                        }
+                    }
+                }
+
+                // Convert markdown to HTML and display
+                resultContent.innerHTML = markdownToHtml(output);
+                result.classList.add('show');
+            } else {
+                resultContent.textContent = `Error: ${data.error || 'Unknown error occurred'}`;
+                result.classList.add('show');
+            }
+        } catch (error) {
+            resultContent.textContent = `Error: ${error.message}`;
+            result.classList.add('show');
+        } finally {
+            loading.classList.remove('show');
+        }
+    }
+
+    // Handle hash in URL (e.g., #qa, #campaign)
+    window.addEventListener('DOMContentLoaded', () => {
+        const hash = window.location.hash.substring(1);
+        if (hash) {
+            switchTab(hash);
+        }
+    });
+
 </script>
 {% endblock %}
-

@@ -1,0 +1,453 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load tz %}
+{% block title %}Email Sending Status - {{ campaign.name }}{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<style>
+    .status-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .status-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    
+    .status-card {
+        background: white;
+        border: 2px solid #e5e7eb;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .status-card.active {
+        border-color: #10b981;
+        background: #f0fdf4;
+    }
+    
+    .status-card.pending {
+        border-color: #f59e0b;
+        background: #fffbeb;
+    }
+    
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+    
+    .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+    
+    .status-dot.active {
+        background: #10b981;
+    }
+    
+    .status-dot.inactive {
+        background: #6b7280;
+        animation: none;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    .email-list {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .email-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem;
+        border-bottom: 1px solid #f3f4f6;
+    }
+    
+    .email-item:last-child {
+        border-bottom: none;
+    }
+    
+    .email-type-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    
+    .badge-initial {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .badge-sequence {
+        background: #fce7f3;
+        color: #9f1239;
+    }
+    
+    .badge-pending {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .badge-sent {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .upcoming-item {
+        padding: 1rem;
+        background: #f9fafb;
+        border-left: 4px solid #3b82f6;
+        border-radius: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .refresh-btn {
+        padding: 0.5rem 1rem;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    
+    .refresh-btn:hover {
+        background: #2563eb;
+    }
+    
+    .auto-refresh-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: #10b981;
+        border-radius: 50%;
+        margin-left: 0.5rem;
+        animation: pulse 2s infinite;
+    }
+</style>
+
+<div class="status-container">
+    <div class="page-header">
+        <div>
+            <h1 style="margin: 0; color: #1f2937;">📊 Email Sending Status</h1>
+            <p style="color: #6b7280; margin: 0.5rem 0 0 0;">
+                <a href="{% url 'campaign_detail' campaign.id %}" style="color: #3b82f6; text-decoration: none;">
+                    ← Back to {{ campaign.name }}
+                </a>
+            </p>
+        </div>
+        <button onclick="location.reload()" class="refresh-btn">
+            🔄 Refresh
+            <span class="auto-refresh-indicator" id="autoRefreshIndicator"></span>
+        </button>
+    </div>
+    
+    <!-- Status Cards -->
+    <div class="status-cards">
+        <div class="status-card {% if currently_sending.sequences %}active{% endif %}">
+            <div class="status-indicator">
+                <div class="status-dot {% if currently_sending.sequences %}active{% else %}inactive{% endif %}"></div>
+                <h3 style="margin: 0; color: #1f2937;">Sequence Emails</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
+                {{ stats.total_sequence_sent }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                {% if currently_sending.sequences %}
+                    ✅ Currently sending
+                {% else %}
+                    ⏸️ Not sending
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="status-card {% if stats.pending_count > 0 %}pending{% endif %}">
+            <div class="status-indicator">
+                <div class="status-dot {% if stats.pending_count > 0 %}active{% else %}inactive{% endif %}"></div>
+                <h3 style="margin: 0; color: #1f2937;">Pending</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
+                {{ stats.pending_count }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                Emails waiting to be sent
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="status-dot inactive"></div>
+                <h3 style="margin: 0; color: #1f2937;">Upcoming</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
+                {{ stats.upcoming_count }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                Sequence emails scheduled
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Sequence Emails -->
+    <div class="email-list">
+        <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
+            🔄 Recent Sequence Emails (Last 24 Hours)
+        </h2>
+        {% if sequence_emails %}
+            <div>
+                {% for email in sequence_emails %}
+                <div class="email-item">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <span class="email-type-badge badge-sequence">Sequence</span>
+                            <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
+                        </div>
+                        <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
+                            {{ email.subject }}
+                            {% if email.email_template.sequence_steps.first %}
+                                - Step {{ email.email_template.sequence_steps.first.step_order }}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 0.875rem; color: #6b7280;">
+                            {% if email.sent_at %}
+                                <span class="email-sent-time" data-utc-timestamp="{{ email.sent_at|date:"U" }}">
+                                    {{ email.sent_at|date:"M d, Y H:i" }}
+                                </span>
+                            {% else %}
+                                <span class="email-type-badge badge-pending">Pending</span>
+                            {% endif %}
+                        </div>
+                        <div style="margin-top: 0.25rem;">
+                            <span class="email-type-badge badge-{{ email.status }}">
+                                {{ email.get_status_display }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p style="color: #6b7280; text-align: center; padding: 2rem;">
+                No sequence emails sent in the last 24 hours
+            </p>
+        {% endif %}
+    </div>
+    
+    <!-- Upcoming Sequence Sends -->
+    {% if upcoming_sequence_sends %}
+    <div class="email-list">
+        <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
+            ⏰ Upcoming Sequence Sends (Next 24 Hours)
+        </h2>
+        <div>
+            {% for upcoming in upcoming_sequence_sends %}
+            <div class="upcoming-item">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
+                            {{ upcoming.lead.email }}
+                        </div>
+                        <div style="color: #6b7280; font-size: 0.875rem;">
+                            Sequence: <strong>{{ upcoming.sequence.name }}</strong>
+                        </div>
+                        <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
+                            Next Step: <strong>Step {{ upcoming.next_step.step_order }}</strong> - {{ upcoming.next_step.template.name }}
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: 600; color: #3b82f6; font-size: 1.1rem;">
+                            <span class="upcoming-time" data-utc-timestamp="{{ upcoming.next_send_time|date:"U" }}">
+                                {{ upcoming.next_send_time|date:"M d, H:i" }}
+                            </span>
+                        </div>
+                        <div style="color: #6b7280; font-size: 0.75rem; margin-top: 0.25rem;">
+                            {% localtime on %}
+                                {{ upcoming.next_send_time|timesince }} from now
+                            {% endlocaltime %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Pending Emails -->
+    {% if pending_emails %}
+    <div class="email-list">
+        <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
+            ⏳ Pending Emails
+        </h2>
+        <div>
+            {% for email in pending_emails %}
+            <div class="email-item">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="email-type-badge badge-sequence">
+                            Sequence
+                        </span>
+                        <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
+                    </div>
+                    <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
+                        {{ email.subject }}
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <span class="email-type-badge badge-pending">Pending</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Convert UTC times to local timezone
+document.addEventListener('DOMContentLoaded', function() {
+    const timeElements = document.querySelectorAll('.email-sent-time, .upcoming-time');
+    timeElements.forEach(function(element) {
+        const utcTimestamp = element.getAttribute('data-utc-timestamp');
+        if (utcTimestamp) {
+            try {
+                const utcDate = new Date(parseInt(utcTimestamp) * 1000);
+                
+                if (isNaN(utcDate.getTime())) {
+                    console.error('Invalid timestamp:', utcTimestamp);
+                    return;
+                }
+                
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const month = months[utcDate.getMonth()];
+                const day = String(utcDate.getDate()).padStart(2, '0');
+                const year = utcDate.getFullYear();
+                const hours = String(utcDate.getHours()).padStart(2, '0');
+                const minutes = String(utcDate.getMinutes()).padStart(2, '0');
+                
+                if (element.classList.contains('upcoming-time')) {
+                    element.textContent = `${month} ${day}, ${hours}:${minutes}`;
+                } else {
+                    element.textContent = `${month} ${day}, ${year} ${hours}:${minutes}`;
+                }
+            } catch (e) {
+                console.error('Error converting time:', e);
+            }
+        }
+    });
+    
+    // Auto-refresh every 30 seconds
+    let autoRefreshInterval = setInterval(function() {
+        fetch('{% url "email_status_api" campaign.id %}')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    // Update status indicators
+                    updateStatusIndicators(data);
+                }
+            })
+            .catch(err => console.error('Error refreshing status:', err));
+    }, 30000);
+    
+function updateStatusIndicators(data) {
+    console.log('Updating status indicators with data:', data);
+
+    const statusCards = document.querySelectorAll('.status-card');
+
+    // === 1️⃣ Sequence Emails Card ===
+    if (statusCards.length >= 1) {
+        const sequenceCard = statusCards[0];
+        const sequenceDot = sequenceCard.querySelector('.status-dot');
+        const sequenceCountEl = sequenceCard.querySelector('div:nth-child(2)'); // the number div
+        const sequenceStatusEl = sequenceCard.querySelector('.status-indicator + div + div'); // status text
+
+        // Update total sent
+        sequenceCountEl.textContent = data.stats.total_sequence_sent;
+
+        // Update currently sending status
+        if (data.currently_sending.sequences) {
+            sequenceCard.classList.add('active');
+            sequenceDot.classList.add('active');
+            sequenceStatusEl.textContent = '✅ Currently sending';
+        } else {
+            sequenceCard.classList.remove('active');
+            sequenceDot.classList.remove('active');
+            sequenceStatusEl.textContent = '⏸️ Not sending';
+        }
+    }
+
+    // === 2️⃣ Pending Emails Card ===
+    if (statusCards.length >= 2) {
+        const pendingCard = statusCards[1];
+        const pendingDot = pendingCard.querySelector('.status-dot');
+        const pendingCountEl = pendingCard.querySelector('div:nth-child(2)'); // the number div
+
+        const pendingCount = data.stats.pending_count;
+        pendingCountEl.textContent = pendingCount;
+
+        if (pendingCount > 0) {
+            pendingCard.classList.add('pending');
+            pendingDot.classList.add('active');
+        } else {
+            pendingCard.classList.remove('pending');
+            pendingDot.classList.remove('active');
+        }
+    }
+
+    // === 3️⃣ Upcoming Emails Card ===
+    if (statusCards.length >= 3) {
+        const upcomingCard = statusCards[2];
+        const upcomingCountEl = upcomingCard.querySelector('div:nth-child(2)'); // the number div
+
+        const upcomingCount = data.stats.upcoming_count || 0; // make sure backend sends this
+        upcomingCountEl.textContent = upcomingCount;
+
+        const upcomingDot = upcomingCard.querySelector('.status-dot');
+        if (upcomingCount > 0) {
+            upcomingDot.classList.add('active');
+        } else {
+            upcomingDot.classList.remove('active');
+        }
+    }
+}
+
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', function() {
+        clearInterval(autoRefreshInterval);
+    });
+});
+</script>
+
+{% endblock %}
+

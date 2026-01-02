@@ -155,7 +155,7 @@
         
         <div class="agents-grid">
             <!-- Knowledge Q&A + Analytics Agent (Foundation) -->
-            <div class="agent-card" onclick="location.href='{% url 'marketing_agents_test' %}#qa'">
+            <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#qa'">
                 <h3>📊 Knowledge Q&A + Analytics</h3>
                 <span class="status">Available</span>
                 <p>
@@ -167,7 +167,7 @@
             </div>
 
             <!-- Market Research Agent -->
-            <div class="agent-card" onclick="location.href='{% url 'marketing_agents_test' %}#research'">
+            <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#research'">
                 <h3>🔍 Market & Competitive Research</h3>
                 <span class="status">Available</span>
                 <p>
@@ -179,14 +179,14 @@
             </div>
 
             <!-- Campaign Agent -->
-            <div class="agent-card">
+            <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#campaign'">
                 <h3>🚀 Outreach & Campaign</h3>
-                <span class="status coming-soon">Coming Soon</span>
+                <span class="status">Available</span>
                 <p>
-                    Creates and manages multi-channel marketing campaigns across email, social, and ads.
+                    Designs, launches, and manages multi-channel marketing campaigns across email, social, paid ads, and partnerships.
                 </p>
-                <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    ⏳ Phase 4 - Under development
+                <p style="font-size: 0.85rem; color: var(--primary-color); font-weight: 600;">
+                    ✓ Phase 3 - Ready to use
                 </p>
             </div>
 
@@ -229,9 +229,12 @@
     </div>
 
     <!-- Recent Campaigns -->
-    {% if campaigns %}
     <div class="recent-section">
-        <h3>📋 Recent Campaigns</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">📋 Recent Campaigns</h3>
+            <a href="{% url 'campaigns_list' %}" class="btn-agent" style="text-decoration: none;">View All Campaigns →</a>
+        </div>
+        {% if campaigns %}
         <div style="overflow-x: auto;">
             <table style="width: 100%; border-collapse: collapse;">
                 <thead>
@@ -245,7 +248,7 @@
                 </thead>
                 <tbody>
                     {% for campaign in campaigns %}
-                    <tr style="border-bottom: 1px solid var(--border-color);">
+                    <tr style="border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="window.location.href='{% url 'campaign_detail' campaign.id %}'">
                         <td style="padding: 0.75rem;">{{ campaign.name }}</td>
                         <td style="padding: 0.75rem;">{{ campaign.get_campaign_type_display }}</td>
                         <td style="padding: 0.75rem;">
@@ -265,8 +268,12 @@
                 </tbody>
             </table>
         </div>
+        {% else %}
+        <p style="color: var(--text-secondary); text-align: center; padding: 2rem;">
+            No campaigns yet. <a href="{% url 'marketing_agents_test' %}#campaign" style="color: var(--primary-color);">Create your first campaign</a>
+        </p>
+        {% endif %}
     </div>
-    {% endif %}
 
     <!-- Recent Research -->
     {% if recent_research %}
@@ -292,6 +299,7 @@
             {% endfor %}
         </div>
     </div>
+    
     {% endif %}
 </div>
 {% endblock %}
