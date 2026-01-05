@@ -309,7 +309,7 @@ Return JSON array with optimized dates:
     "start_date": "YYYY-MM-DD",
     "end_date": "YYYY-MM-DD",
     "duration_days": number,
-    "reasoning": "brief explanation of date calculation"
+    "reasoning": "DETAILED explanation (4-6 sentences): WHY this task is scheduled at these specific dates, HOW dependencies and constraints influenced the timeline, WHAT factors were considered (dependencies, estimated hours, priority, resource availability), HOW this scheduling affects the overall project timeline, and WHAT should be done to ensure this timeline is met."
   }}
 ]"""
             
@@ -358,9 +358,9 @@ Return JSON array with optimized dates:
                 except (ValueError, KeyError):
                     # Fallback to manual calculation
                     task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
-                else:
-                    # Manual calculation
-                    task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
+            else:
+                # Manual calculation
+                task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
             
             # Get dependencies
             dependencies = [dep.id for dep in task.depends_on.all()]
@@ -383,7 +383,7 @@ Return JSON array with optimized dates:
                 'dependencies': dependencies,
                 'progress': progress,
                 'duration_days': (task_end - task_start).days + 1,
-                'ai_reasoning': ai_reasoning if task.id in optimization_map else None
+                'ai_reasoning': ai_reasoning or None  # Include reasoning if available
             }
             
             gantt_data['tasks'].append(gantt_task)

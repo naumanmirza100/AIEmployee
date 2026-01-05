@@ -61,13 +61,20 @@ class TaskPrioritizationAgent(BaseAgent):
 2. Task dependencies (blocking tasks = high priority)
 3. Current status (in-progress tasks may need higher priority)
 4. Task importance
+5. Business impact and project goals
 
 Tasks to prioritize:
 {json.dumps(tasks_summary, indent=2)}
 
 For each task, provide:
 - recommended_priority: "high", "medium", or "low"
-- reasoning: Brief explanation (1-2 sentences)
+- reasoning: DETAILED implementation reasoning (4-6 sentences) explaining:
+  * WHY this priority level is appropriate for this specific task
+  * WHAT factors influenced this decision (deadlines, dependencies, importance, status, business impact)
+  * HOW this priority affects the overall project timeline and delivery
+  * WHAT should be done first and why (execution strategy)
+  * HOW to approach this task given its priority level
+  * WHAT risks or dependencies need to be considered
 - suggested_order: Number indicating execution order (1 = first)
 
 Return a JSON array with this structure for each task:
@@ -75,7 +82,7 @@ Return a JSON array with this structure for each task:
   {{
     "id": "task_id",
     "recommended_priority": "high|medium|low",
-    "reasoning": "explanation",
+    "reasoning": "Detailed explanation of why this priority is recommended, what factors influenced the decision, how it affects the project, and what should be done first.",
     "suggested_order": 1
   }}
 ]"""
@@ -96,13 +103,15 @@ Return a JSON array with this structure for each task:
             
             priorities = json.loads(response)
             
-            # Update tasks with priorities
+            # Update tasks with priorities and reasoning
             priority_map = {item['id']: item for item in priorities}
             for task in tasks:
                 task_id = str(task.get('id', ''))
                 if task_id in priority_map:
                     task['ai_priority'] = priority_map[task_id]['recommended_priority']
-                    task['ai_reasoning'] = priority_map[task_id]['reasoning']
+                    # Store reasoning with context prefix
+                    reasoning_prefix = "[Priority Analysis] "
+                    task['ai_reasoning'] = reasoning_prefix + priority_map[task_id]['reasoning']
                     task['suggested_order'] = priority_map[task_id]['suggested_order']
             
             return tasks
@@ -165,7 +174,7 @@ Provide a JSON array with tasks ordered by suggested execution sequence:
   {{
     "id": "task_id",
     "execution_order": 1,
-    "reasoning": "why this order"
+    "reasoning": "DETAILED explanation (4-6 sentences): WHY this task should be done at this position in the sequence, WHAT dependencies or prerequisites make this order optimal, HOW this sequencing affects project flow, WHAT happens if this order is changed, and HOW to execute this task in this position."
   }}
 ]"""
         
@@ -183,10 +192,21 @@ Provide a JSON array with tasks ordered by suggested execution sequence:
                 response = response[json_start:json_end].strip()
             
             order_suggestions = json.loads(response)
-            order_map = {item['id']: item['execution_order'] for item in order_suggestions}
+            order_map = {item['id']: item for item in order_suggestions}
+            
+            # Add reasoning to tasks
+            for task in tasks:
+                task_id = str(task.get('id', ''))
+                if task_id in order_map:
+                    task['execution_order'] = order_map[task_id]['execution_order']
+                    # Store reasoning with context prefix
+                    reasoning_prefix = "[Execution Order Analysis] "
+                    task['order_reasoning'] = reasoning_prefix + order_map[task_id].get('reasoning', '')
+                    # Also update ai_reasoning field for consistency
+                    task['ai_reasoning'] = task.get('ai_reasoning', '') + "\n\n" + task['order_reasoning'] if task.get('ai_reasoning') else task['order_reasoning']
             
             # Sort tasks by suggested order
-            sorted_tasks = sorted(tasks, key=lambda t: order_map.get(str(t.get('id', '')), 999))
+            sorted_tasks = sorted(tasks, key=lambda t: order_map.get(str(t.get('id', '')), {}).get('execution_order', 999))
             return sorted_tasks
             
         except Exception as e:
@@ -296,12 +316,25 @@ Return JSON format:
             "blocking_tasks": len(blocking_tasks)
         }
         
-        prompt = f"""Analyze this project data and identify bottlenecks:
+        prompt = f"""Analyze this project data and identify bottlenecks with detailed reasoning:
 
 Tasks: {len(tasks)} total
 Team Members: {len(team_members)}
 Overloaded Members: {len(overloaded)}
 Blocking Tasks: {len(blocking_tasks)}
+
+For each bottleneck identified, provide DETAILED reasoning explaining:
+- WHY this is a bottleneck (root cause analysis)
+- WHAT tasks or resources are affected
+- HOW this bottleneck impacts project timeline and delivery
+- WHAT specific actions should be taken to resolve it
+- WHAT preventive measures can be implemented
+
+For each affected task, provide task-specific reasoning explaining:
+- WHY this task is part of the bottleneck
+- HOW this bottleneck affects this specific task's execution
+- WHAT should be done to unblock this task
+- HOW to prevent this task from becoming a bottleneck again
 
 Provide analysis in JSON format:
 {{
@@ -310,10 +343,17 @@ Provide analysis in JSON format:
       "type": "resource_overload|task_blocking|dependency_chain",
       "description": "what the bottleneck is",
       "severity": "high|medium|low",
-      "recommendation": "how to resolve"
+      "affected_tasks": [
+        {{
+          "task_id": "task_id1",
+          "task_reasoning": "DETAILED explanation (4-6 sentences): Why this task is part of the bottleneck, how the bottleneck affects this task's execution, what should be done to unblock this task, and how to prevent it from becoming a bottleneck again."
+        }}
+      ],
+      "reasoning": "Detailed explanation (3-5 sentences): Why this is a bottleneck, what's affected, how it impacts the project, what actions to take, and preventive measures.",
+      "recommendation": "Specific actionable steps to resolve the bottleneck"
     }}
   ],
-  "summary": "overall bottleneck summary"
+  "summary": "overall bottleneck summary with key insights"
 }}"""
         
         try:
@@ -378,8 +418,9 @@ Available Team Members:
 
 For each task, suggest:
 - Which team member should handle it
-- Why (based on skills, workload, availability)
+- Why (based on skills, workload, availability, expertise match)
 - Priority level
+- Detailed reasoning explaining the delegation strategy
 
 Return JSON:
 {{
@@ -389,7 +430,7 @@ Return JSON:
       "task_title": "title",
       "suggested_assignee": "member_name",
       "assignee_id": "id",
-      "reasoning": "why",
+      "reasoning": "DETAILED explanation (4-6 sentences): WHY this team member is the best fit for this task, WHAT skills or expertise make them suitable, HOW their current workload allows for this assignment, WHAT benefits this delegation brings to the project, and HOW to ensure successful task completion.",
       "priority": "high|medium|low"
     }}
   ]
