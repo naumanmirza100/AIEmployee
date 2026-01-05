@@ -7,9 +7,12 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
 import json
+import logging
 
 from .models import Campaign, EmailSequence, EmailSequenceStep, EmailTemplate, EmailAccount, EmailSendHistory
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -17,7 +20,13 @@ def sequence_management(request, campaign_id):
     """Main page for managing email sequences for a campaign"""
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     
-    # Get all sequences with their steps
+    # Get all main sequences (not sub-sequences) with their steps
+    main_sequences = EmailSequence.objects.filter(
+        campaign=campaign,
+        is_sub_sequence=False
+    ).prefetch_related('steps__template', 'email_account', 'sub_sequences')
+    
+    # Get all sequences (including sub-sequences) for stats
     sequences = EmailSequence.objects.filter(campaign=campaign).prefetch_related('steps__template', 'email_account')
     
     # Get all templates for the campaign
@@ -28,19 +37,54 @@ def sequence_management(request, campaign_id):
     
     # Get sequence statistics
     sequences_data = []
-    for sequence in sequences:
+    for sequence in main_sequences:
         steps = sequence.steps.all().order_by('step_order')
         
         # Get stats for this sequence
-        total_sent = EmailSendHistory.objects.filter(
+        sequence_emails_sent = EmailSendHistory.objects.filter(
             campaign=campaign,
             email_template__sequence_steps__sequence=sequence
-        ).count()
+        )
+        
+        total_sent = sequence_emails_sent.count()
+        total_opened = sequence_emails_sent.filter(status__in=['opened', 'clicked']).count()
+        total_clicked = sequence_emails_sent.filter(status='clicked').count()
+        
+        # Debug: Log all email statuses for this sequence
+        status_breakdown = {}
+        for status in ['pending', 'sent', 'delivered', 'opened', 'clicked', 'bounced', 'failed']:
+            count = sequence_emails_sent.filter(status=status).count()
+            if count > 0:
+                status_breakdown[status] = count
+        
+        logger.info(
+            f"[SEQUENCE STATS] Sequence '{sequence.name}' (ID: {sequence.id}) - "
+            f"Sent: {total_sent}, Opened: {total_opened}, Clicked: {total_clicked}, "
+            f"Status Breakdown: {status_breakdown}"
+        )
+        
+        # Calculate rates
+        open_rate = (total_opened / total_sent * 100) if total_sent > 0 else 0
+        click_rate = (total_clicked / total_sent * 100) if total_sent > 0 else 0
+        
+        logger.debug(
+            f"[SEQUENCE RATES] Sequence '{sequence.name}' - "
+            f"Open Rate: {open_rate:.2f}%, Click Rate: {click_rate:.2f}%"
+        )
+        
+        # Get sub-sequences for this main sequence
+        sub_sequences = sequence.sub_sequences.filter(is_active=True).prefetch_related('steps__template')
         
         sequences_data.append({
             'sequence': sequence,
             'steps': steps,
             'total_sent': total_sent,
+            'total_opened': total_opened,
+            'total_clicked': total_clicked,
+            'open_rate': round(open_rate, 2),
+            'click_rate': round(click_rate, 2),
+            'debug_status_breakdown': status_breakdown,  # For debugging
+            'sub_sequences': sub_sequences,  # Sub-sequences for this main sequence
         })
     
     context = {
@@ -62,11 +106,25 @@ def create_sequence(request, campaign_id):
     try:
         data = json.loads(request.body)
         
+        # Check if this is a sub-sequence
+        parent_sequence_id = data.get('parent_sequence_id')
+        is_sub_sequence = data.get('is_sub_sequence', False)
+        parent_sequence = None
+        
+        if parent_sequence_id and is_sub_sequence:
+            parent_sequence = get_object_or_404(EmailSequence, id=parent_sequence_id, campaign=campaign)
+        
+        # Get interest level for sub-sequences
+        interest_level = data.get('interest_level', 'any') if is_sub_sequence else 'any'
+        
         sequence = EmailSequence.objects.create(
             name=data.get('name'),
             campaign=campaign,
             email_account_id=data.get('email_account_id'),
-            is_active=data.get('is_active', True)
+            is_active=data.get('is_active', True),
+            parent_sequence=parent_sequence,
+            is_sub_sequence=is_sub_sequence,
+            interest_level=interest_level
         )
         
         # Add steps with sequential step_order (1, 2, 3...)
@@ -177,9 +235,31 @@ def get_sequence_details(request, campaign_id, sequence_id):
     )
     
     total_sent = sequence_emails_sent.count()
-    total_delivered = sequence_emails_sent.filter(status__in=['delivered', 'opened', 'clicked']).count()
+    # Note: 'sent' and 'delivered' are treated the same (emails are set to 'sent' on successful send)
     total_opened = sequence_emails_sent.filter(status__in=['opened', 'clicked']).count()
     total_clicked = sequence_emails_sent.filter(status='clicked').count()
+    
+    # Debug: Log status breakdown
+    status_breakdown = {}
+    for status in ['pending', 'sent', 'delivered', 'opened', 'clicked', 'bounced', 'failed']:
+        count = sequence_emails_sent.filter(status=status).count()
+        if count > 0:
+            status_breakdown[status] = count
+    
+    logger.info(
+        f"[SEQUENCE DETAILS API] Sequence '{sequence.name}' (ID: {sequence_id}) - "
+        f"Total Sent: {total_sent}, Opened: {total_opened}, Clicked: {total_clicked}, "
+        f"Status Breakdown: {status_breakdown}"
+    )
+    
+    # Calculate rates
+    open_rate = (total_opened / total_sent * 100) if total_sent > 0 else 0
+    click_rate = (total_clicked / total_sent * 100) if total_sent > 0 else 0
+    
+    logger.debug(
+        f"[SEQUENCE DETAILS API] Sequence '{sequence.name}' - "
+        f"Open Rate: {open_rate:.2f}%, Click Rate: {click_rate:.2f}%"
+    )
     
     # Get next send times for each lead
     next_sends = []
@@ -217,6 +297,8 @@ def get_sequence_details(request, campaign_id, sequence_id):
             'is_active': sequence.is_active,
             'email_account': sequence.email_account.email if sequence.email_account else None,
             'email_account_id': sequence.email_account.id if sequence.email_account else None,
+            'is_sub_sequence': sequence.is_sub_sequence,
+            'parent_sequence_id': sequence.parent_sequence.id if sequence.parent_sequence else None,
             'steps': [{
                 'id': step.id,
                 'template_id': step.template.id,
@@ -229,9 +311,11 @@ def get_sequence_details(request, campaign_id, sequence_id):
             'stats': {
                 'total_leads': total_leads,
                 'total_sent': total_sent,
-                'total_delivered': total_delivered,
                 'total_opened': total_opened,
                 'total_clicked': total_clicked,
+                'open_rate': round(open_rate, 2),
+                'click_rate': round(click_rate, 2),
+                'debug_status_breakdown': status_breakdown,  # For debugging
             },
             'next_sends': next_sends,
         }

@@ -170,15 +170,15 @@
         </button>
     </div>
     
-    <!-- Status Cards -->
+    <!-- Comprehensive Stats Cards -->
     <div class="status-cards">
         <div class="status-card {% if currently_sending.sequences %}active{% endif %}">
             <div class="status-indicator">
                 <div class="status-dot {% if currently_sending.sequences %}active{% else %}inactive{% endif %}"></div>
-                <h3 style="margin: 0; color: #1f2937;">Sequence Emails</h3>
+                <h3 style="margin: 0; color: #1f2937;">Total Sent</h3>
             </div>
             <div style="font-size: 2rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
-                {{ stats.total_sequence_sent }}
+                {{ stats.total_sent }}
             </div>
             <div style="color: #6b7280; font-size: 0.875rem;">
                 {% if currently_sending.sequences %}
@@ -186,6 +186,32 @@
                 {% else %}
                     ⏸️ Not sending
                 {% endif %}
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="status-dot {% if stats.total_opened > 0 %}active{% else %}inactive{% endif %}"></div>
+                <h3 style="margin: 0; color: #1f2937;">Opened</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #f59e0b; margin-bottom: 0.5rem;">
+                {{ stats.total_opened }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                {{ stats.open_rate|floatformat:1 }}% open rate
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="status-dot {% if stats.total_clicked > 0 %}active{% else %}inactive{% endif %}"></div>
+                <h3 style="margin: 0; color: #1f2937;">Clicked</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #8b5cf6; margin-bottom: 0.5rem;">
+                {{ stats.total_clicked }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                {{ stats.click_rate|floatformat:1 }}% click rate
             </div>
         </div>
         
@@ -202,66 +228,254 @@
             </div>
         </div>
         
-        <div class="status-card">
+        <div class="status-card" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
             <div class="status-indicator">
-                <div class="status-dot inactive"></div>
+                <div class="status-dot {% if stats.pending_count > 0 %}active{% else %}inactive{% endif %}"></div>
                 <h3 style="margin: 0; color: #1f2937;">Upcoming</h3>
             </div>
             <div style="font-size: 2rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
-                {{ stats.upcoming_count }}
+                {{ stats.upcoming_count|default:upcoming_sequence_sends|length }}
             </div>
             <div style="color: #6b7280; font-size: 0.875rem;">
-                Sequence emails scheduled
+                scheduled Emails
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="status-dot {% if stats.total_replied > 0 %}active{% else %}inactive{% endif %}"></div>
+                <h3 style="margin: 0; color: #1f2937;">Bounced</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #ef4444; margin-bottom: 0.5rem;">
+                {{ stats.total_bounced }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                Failed deliveries
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="status-dot {% if stats.total_replied > 0 %}active{% else %}inactive{% endif %}"></div>
+                <h3 style="margin: 0; color: #1f2937;">Replied</h3>
+            </div>
+            <div style="font-size: 2rem; font-weight: 600; color: #10b981; margin-bottom: 0.5rem;">
+                {{ stats.total_replied }}
+            </div>
+            <div style="color: #6b7280; font-size: 0.875rem;">
+                Leads who responded
             </div>
         </div>
     </div>
     
-    <!-- Recent Sequence Emails -->
+    <!-- Full Email History -->
+    <div class="email-list">
+        <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
+            📧 Full Email History (Last 100)
+        </h2>
+        {% if all_email_history %}
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; background: white;">
+                    <thead>
+                        <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Recipient</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Subject</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Template</th>
+                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Type</th>
+                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Status</th>
+                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Replied</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Sent At</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Opened At</th>
+                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Clicked At</th>
+                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for email_data in all_email_history %}
+                        {% with email=email_data.email %}
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 0.75rem; color: #1f2937;">{{ email.recipient_email }}</td>
+                            <td style="padding: 0.75rem; color: #1f2937; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ email.subject }}</td>
+                            <td style="padding: 0.75rem; color: #1f2937;">
+                                {% if email.email_template %}
+                                    {{ email.email_template.name }}
+                                {% else %}
+                                    <span style="color: #9ca3af;">—</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; text-align: center;">
+                                {% if email_data.is_sub_sequence_email %}
+                                    <span class="email-type-badge badge-sub-sequence" style="background: #ede9fe; color: #5b21b6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                        🔀 Sub-Sequence
+                                    </span>
+                                {% elif email_data.is_sequence_email %}
+                                    <span class="email-type-badge badge-sequence" style="background: #fce7f3; color: #9f1239; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                        🔄 Sequence
+                                    </span>
+                                {% else %}
+                                    <span class="email-type-badge badge-initial" style="background: #dbeafe; color: #1e40af; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                        📧 Initial
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; text-align: center;">
+                                <span class="email-type-badge badge-{{ email.status }}" style="
+                                    background: {% if email.status == 'sent' %}#dbeafe{% elif email.status == 'delivered' %}#d1fae5{% elif email.status == 'opened' %}#fef3c7{% elif email.status == 'clicked' %}#ede9fe{% elif email.status == 'failed' %}#fee2e2{% elif email.status == 'bounced' %}#fce7f3{% else %}#f3f4f6{% endif %};
+                                    color: {% if email.status == 'sent' %}#1e40af{% elif email.status == 'delivered' %}#065f46{% elif email.status == 'opened' %}#92400e{% elif email.status == 'clicked' %}#5b21b6{% elif email.status == 'failed' %}#991b1b{% elif email.status == 'bounced' %}#9f1239{% else %}#6b7280{% endif %};
+                                ">
+                                    {{ email.get_status_display }}
+                                </span>
+                            </td>
+                            <td style="padding: 0.75rem; text-align: center;">
+                                {% if email_data.is_replied and email_data.contact %}
+                                    <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                        ✅ Replied
+                                    </span>
+                                    {% if email_data.contact.reply_interest_level == 'positive' %}
+                                        <div style="font-size: 0.7rem; color: #10b981; margin-top: 0.25rem; font-weight: 500;">✅ Interested</div>
+                                    {% elif email_data.contact.reply_interest_level == 'negative' %}
+                                        <div style="font-size: 0.7rem; color: #ef4444; margin-top: 0.25rem; font-weight: 500;">❌ Not Interested</div>
+                                    {% elif email_data.contact.reply_interest_level == 'neutral' %}
+                                        <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.25rem; font-weight: 500;">➖ Neutral</div>
+                                    {% elif email_data.contact.reply_interest_level == 'requested_info' %}
+                                        <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
+                                    {% elif email_data.contact.reply_interest_level == 'objection' %}
+                                        <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                    {% elif email_data.contact.reply_interest_level == 'unsubscribe' %}
+                                        <div style="font-size: 0.7rem; color: #ef4444; margin-top: 0.25rem; font-weight: 500;">🚫 Unsubscribe</div>
+                                    {% endif %}
+                                {% else %}
+                                    <span style="color: #9ca3af; font-size: 0.75rem;">—</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; color: #6b7280; font-size: 0.875rem;">
+                                {% if email.sent_at %}
+                                    <span class="email-sent-time" data-utc-timestamp="{{ email.sent_at|date:"U" }}">
+                                        {{ email.sent_at|date:"M d, Y H:i" }}
+                                    </span>
+                                {% else %}
+                                    <span style="color: #9ca3af;">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; color: #6b7280; font-size: 0.875rem;">
+                                {% if email.opened_at %}
+                                    <span class="email-sent-time" data-utc-timestamp="{{ email.opened_at|date:"U" }}">
+                                        {{ email.opened_at|date:"M d, Y H:i" }}
+                                    </span>
+                                {% else %}
+                                    <span style="color: #9ca3af;">—</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; color: #6b7280; font-size: 0.875rem;">
+                                {% if email.clicked_at %}
+                                    <span class="email-sent-time" data-utc-timestamp="{{ email.clicked_at|date:"U" }}">
+                                        {{ email.clicked_at|date:"M d, Y H:i" }}
+                                    </span>
+                                {% else %}
+                                    <span style="color: #9ca3af;">—</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.75rem; text-align: center;">
+                                <button onclick="openReplyModal({{ campaign.id }}, {{ email.lead.id }}, '{{ email.lead.email|escapejs }}', '{{ email.subject|escapejs }}')" 
+                                        style="padding: 0.375rem 0.75rem; background: #10b981; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.875rem; font-weight: 500;">
+                                    💬 Mark Reply
+                                </button>
+                            </td>
+                        </tr>
+                        {% if email.error_message %}
+                        <tr>
+                            <td colspan="10" style="padding: 0.5rem 0.75rem; background: #fef2f2; color: #991b1b; font-size: 0.875rem;">
+                                ⚠️ Error: {{ email.error_message }}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endwith %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 1rem; color: #6b7280; font-size: 0.875rem;">
+                Showing last 100 emails. Total sent: <strong>{{ stats.total_sent }}</strong>
+            </div>
+        {% else %}
+            <p style="color: #6b7280; text-align: center; padding: 2rem;">
+                No emails sent yet. Emails will appear here after you launch the campaign.
+            </p>
+        {% endif %}
+    </div>
+    
+    <!-- Recent Sequence Emails (Last 24 Hours) -->
+    {% if sequence_emails %}
     <div class="email-list">
         <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
             🔄 Recent Sequence Emails (Last 24 Hours)
         </h2>
-        {% if sequence_emails %}
-            <div>
-                {% for email in sequence_emails %}
-                <div class="email-item">
-                    <div style="flex: 1;">
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <span class="email-type-badge badge-sequence">Sequence</span>
-                            <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
-                        </div>
-                        <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
-                            {{ email.subject }}
-                            {% if email.email_template.sequence_steps.first %}
-                                - Step {{ email.email_template.sequence_steps.first.step_order }}
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 0.875rem; color: #6b7280;">
-                            {% if email.sent_at %}
-                                <span class="email-sent-time" data-utc-timestamp="{{ email.sent_at|date:"U" }}">
-                                    {{ email.sent_at|date:"M d, Y H:i" }}
-                                </span>
-                            {% else %}
-                                <span class="email-type-badge badge-pending">Pending</span>
-                            {% endif %}
-                        </div>
-                        <div style="margin-top: 0.25rem;">
-                            <span class="email-type-badge badge-{{ email.status }}">
-                                {{ email.get_status_display }}
+        <div>
+            {% for email_data in sequence_emails %}
+            {% with email=email_data.email %}
+            <div class="email-item">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        {% if email_data.is_sub_sequence_email %}
+                            <span class="email-type-badge badge-sub-sequence" style="background: #ede9fe; color: #5b21b6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">🔀 Sub-Sequence</span>
+                        {% else %}
+                            <span class="email-type-badge badge-sequence">🔄 Sequence</span>
+                        {% endif %}
+                        <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
+                        {% if email_data.is_replied and email_data.contact %}
+                            <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                ✅ Replied
                             </span>
-                        </div>
+                            {% if email_data.contact.reply_interest_level == 'positive' %}
+                                <span style="background: #d1fae5; color: #065f46; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">✅ Interested</span>
+                            {% elif email_data.contact.reply_interest_level == 'negative' %}
+                                <span style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">❌ Not Interested</span>
+                            {% elif email_data.contact.reply_interest_level == 'neutral' %}
+                                <span style="background: #f3f4f6; color: #6b7280; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">➖ Neutral</span>
+                            {% elif email_data.contact.reply_interest_level == 'requested_info' %}
+                                <span style="background: #dbeafe; color: #1e40af; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">📋 Requested Info</span>
+                            {% elif email_data.contact.reply_interest_level == 'objection' %}
+                                <span style="background: #fef3c7; color: #92400e; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">⚠️ Objection</span>
+                            {% elif email_data.contact.reply_interest_level == 'unsubscribe' %}
+                                <span style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">🚫 Unsubscribe</span>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
+                        {{ email.subject }}
+                        {% if email.email_template %}
+                            - {{ email.email_template.name }}
+                        {% endif %}
                     </div>
                 </div>
-                {% endfor %}
+                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;">
+                    <div style="font-size: 0.875rem; color: #6b7280;">
+                        {% if email.sent_at %}
+                            <span class="email-sent-time" data-utc-timestamp="{{ email.sent_at|date:"U" }}">
+                                {{ email.sent_at|date:"M d, Y H:i" }}
+                            </span>
+                        {% else %}
+                            <span class="email-type-badge badge-pending">Pending</span>
+                        {% endif %}
+                    </div>
+                    <div style="margin-top: 0.25rem;">
+                        <span class="email-type-badge badge-{{ email.status }}">
+                            {{ email.get_status_display }}
+                        </span>
+                    </div>
+                    {% if email.lead %}
+                    <button onclick="openReplyModal({{ campaign.id }}, {{ email.lead.id }}, '{{ email.lead.email|escapejs }}', '{{ email.subject|escapejs }}')" 
+                            style="padding: 0.375rem 0.75rem; background: #10b981; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.875rem; font-weight: 500; margin-top: 0.25rem;">
+                        💬 Mark Reply
+                    </button>
+                    {% endif %}
+                </div>
             </div>
-        {% else %}
-            <p style="color: #6b7280; text-align: center; padding: 2rem;">
-                No sequence emails sent in the last 24 hours
-            </p>
-        {% endif %}
+            {% endwith %}
+            {% endfor %}
+        </div>
     </div>
+    {% endif %}
     
     <!-- Upcoming Sequence Sends -->
     {% if upcoming_sequence_sends %}
@@ -307,30 +521,120 @@
     {% if pending_emails %}
     <div class="email-list">
         <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
-            ⏳ Pending Emails
+            ⏳ Pending Emails (Ready to Send)
         </h2>
         <div>
             {% for email in pending_emails %}
             <div class="email-item">
                 <div style="flex: 1;">
                     <div style="display: flex; align-items: center; gap: 0.75rem;">
-                        <span class="email-type-badge badge-sequence">
-                            Sequence
-                        </span>
+                        <span class="email-type-badge badge-sequence">Sequence</span>
                         <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
                     </div>
                     <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
-                        {{ email.subject }}
+                        <strong>Subject:</strong> {{ email.subject }}<br>
+                        {% if email.sequence %}
+                        <strong>Sequence:</strong> {{ email.sequence.name }} - Step {{ email.next_step.step_order }}
+                        {% endif %}
                     </div>
                 </div>
                 <div style="text-align: right;">
                     <span class="email-type-badge badge-pending">Pending</span>
+                    <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #6b7280;">
+                        Ready to send
+                    </div>
                 </div>
             </div>
             {% endfor %}
         </div>
     </div>
     {% endif %}
+    
+    <!-- Replied Contacts -->
+    {% if replied_contacts %}
+    <div class="email-list">
+        <h2 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">
+            💬 Replied Contacts (Last 20)
+        </h2>
+        <div>
+            {% for contact in replied_contacts %}
+            <div class="email-item">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                        <span class="email-type-badge" style="background: #d1fae5; color: #065f46;">Replied</span>
+                        <strong style="color: #1f2937;">{{ contact.lead.email }}</strong>
+                        {% if contact.reply_interest_level == 'positive' %}
+                            <span class="email-type-badge" style="background: #d1fae5; color: #065f46;">✅ Interested</span>
+                        {% elif contact.reply_interest_level == 'negative' %}
+                            <span class="email-type-badge" style="background: #fee2e2; color: #991b1b;">❌ Not Interested</span>
+                        {% elif contact.reply_interest_level == 'neutral' %}
+                            <span class="email-type-badge" style="background: #f3f4f6; color: #6b7280;">➖ Neutral</span>
+                        {% endif %}
+                    </div>
+                    <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
+                        {% if contact.lead.first_name or contact.lead.last_name %}
+                            {{ contact.lead.first_name }} {{ contact.lead.last_name }}
+                        {% endif %}
+                        {% if contact.replied_at %}
+                            - Replied on <span class="email-sent-time" data-utc-timestamp="{{ contact.replied_at|date:"U" }}">{{ contact.replied_at|date:"M d, Y H:i" }}</span>
+                        {% endif %}
+                    </div>
+                    {% if contact.reply_subject %}
+                        <div style="color: #374151; font-size: 0.875rem; margin-top: 0.5rem; font-weight: 500;">
+                            Subject: {{ contact.reply_subject }}
+                        </div>
+                    {% endif %}
+                    {% if contact.reply_analysis %}
+                        <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem; padding: 0.5rem; background: #f9fafb; border-radius: 0.375rem; border-left: 3px solid #10b981;">
+                            <strong>AI Analysis:</strong> {{ contact.reply_analysis }}
+                        </div>
+                    {% endif %}
+                </div>
+                <div style="text-align: right;">
+                    <span class="email-type-badge" style="background: #d1fae5; color: #065f46;">✅ Replied</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Reply Modal -->
+<div id="replyModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: white; border-radius: 0.75rem; padding: 2rem; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+        <h2 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.5rem;">💬 Mark Email Reply</h2>
+        <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f3f4f6; border-radius: 0.5rem;">
+            <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Lead Email:</div>
+            <div style="font-weight: 600; color: #1f2937;" id="modalLeadEmail"></div>
+        </div>
+        <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f3f4f6; border-radius: 0.5rem;">
+            <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Original Subject:</div>
+            <div style="font-weight: 600; color: #1f2937;" id="modalOriginalSubject"></div>
+        </div>
+        <form id="replyForm" onsubmit="submitReply(event)">
+            <input type="hidden" id="modalCampaignId">
+            <input type="hidden" id="modalLeadId">
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-weight: 600; color: #374151; margin-bottom: 0.5rem;">Reply Subject:</label>
+                <input type="text" id="modalReplySubject" style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem;" placeholder="e.g., Re: Your email subject">
+            </div>
+            <div style="margin-bottom: 1.5rem;">
+                <label style="display: block; font-weight: 600; color: #374151; margin-bottom: 0.5rem;">Reply Content:</label>
+                <textarea id="modalReplyContent" rows="6" style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem; resize: vertical;" placeholder="Paste the full reply email content here..."></textarea>
+                <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem;">AI will analyze this reply to determine if the lead is interested or not.</div>
+            </div>
+            <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                <button type="button" onclick="closeReplyModal()" style="padding: 0.75rem 1.5rem; background: #f3f4f6; color: #374151; border: none; border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                    Cancel
+                </button>
+                <button type="submit" style="padding: 0.75rem 1.5rem; background: #10b981; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                    🤖 Analyze & Mark Reply
+                </button>
+            </div>
+        </form>
+        <div id="replyAnalysisResult" style="display: none; margin-top: 1.5rem; padding: 1rem; background: #f0fdf4; border-radius: 0.5rem; border-left: 4px solid #10b981;"></div>
+    </div>
 </div>
 
 <script>
@@ -446,6 +750,116 @@ function updateStatusIndicators(data) {
     window.addEventListener('beforeunload', function() {
         clearInterval(autoRefreshInterval);
     });
+});
+
+// Reply Modal Functions
+function openReplyModal(campaignId, leadId, leadEmail, originalSubject) {
+    document.getElementById('modalCampaignId').value = campaignId;
+    document.getElementById('modalLeadId').value = leadId;
+    document.getElementById('modalLeadEmail').textContent = leadEmail;
+    document.getElementById('modalOriginalSubject').textContent = originalSubject;
+    document.getElementById('modalReplySubject').value = 'Re: ' + originalSubject;
+    document.getElementById('modalReplyContent').value = '';
+    document.getElementById('replyAnalysisResult').style.display = 'none';
+    document.getElementById('replyModal').style.display = 'flex';
+}
+
+function closeReplyModal() {
+    document.getElementById('replyModal').style.display = 'none';
+}
+
+function submitReply(event) {
+    event.preventDefault();
+    
+    const campaignId = document.getElementById('modalCampaignId').value;
+    const leadId = document.getElementById('modalLeadId').value;
+    const replySubject = document.getElementById('modalReplySubject').value;
+    const replyContent = document.getElementById('modalReplyContent').value;
+    
+    if (!replyContent && !replySubject) {
+        alert('Please enter at least a reply subject or content.');
+        return;
+    }
+    
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = '🤖 Analyzing...';
+    
+    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch(`/marketing/campaigns/${campaignId}/leads/${leadId}/mark-replied/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrftoken
+        },
+        body: JSON.stringify({
+            reply_subject: replySubject,
+            reply_content: replyContent
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+        
+        if (data.success) {
+            // Show analysis result
+            const resultDiv = document.getElementById('replyAnalysisResult');
+            let interestBadge = '';
+            let bgColor = '#f0fdf4';
+            let borderColor = '#10b981';
+            
+            if (data.interest_level === 'positive') {
+                interestBadge = '<span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.75rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600; margin-right: 0.5rem;">✅ POSITIVE - Lead is Interested</span>';
+            } else if (data.interest_level === 'negative') {
+                interestBadge = '<span style="background: #fee2e2; color: #991b1b; padding: 0.25rem 0.75rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600; margin-right: 0.5rem;">❌ NEGATIVE - Lead is Not Interested</span>';
+                bgColor = '#fef2f2';
+                borderColor = '#ef4444';
+            } else if (data.interest_level === 'neutral') {
+                interestBadge = '<span style="background: #f3f4f6; color: #6b7280; padding: 0.25rem 0.75rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600; margin-right: 0.5rem;">➖ NEUTRAL</span>';
+                bgColor = '#f9fafb';
+                borderColor = '#9ca3af';
+            }
+            
+            resultDiv.innerHTML = `
+                <div style="margin-bottom: 0.75rem;">
+                    ${interestBadge}
+                    <strong style="color: #1f2937;">AI Analysis Complete</strong>
+                </div>
+                <div style="color: #374151; font-size: 0.875rem; line-height: 1.6;">
+                    ${data.analysis || 'Analysis completed.'}
+                </div>
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
+                    <button onclick="closeReplyModal(); location.reload();" style="padding: 0.5rem 1rem; background: #10b981; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                        ✅ Done - Refresh Page
+                    </button>
+                </div>
+            `;
+            resultDiv.style.background = bgColor;
+            resultDiv.style.borderLeftColor = borderColor;
+            resultDiv.style.display = 'block';
+            
+            // Scroll to result
+            resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            alert('Error: ' + (data.error || 'Failed to mark reply'));
+        }
+    })
+    .catch(error => {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+        console.error('Error:', error);
+        alert('Error submitting reply. Please try again.');
+    });
+}
+
+// Close modal when clicking outside
+document.getElementById('replyModal')?.addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeReplyModal();
+    }
 });
 </script>
 

@@ -121,9 +121,9 @@
                 AI Marketing Assistant - Orchestrate your complete marketing lifecycle
             </p>
         </div>
-        <a href="{% url 'marketing_agents_test' %}" class="btn btn-primary">
+        <!-- <a href="{% url 'marketing_agents_test' %}" class="btn btn-primary">
             🤖 Access All Agents
-        </a>
+        </a> -->
     </div>
 
     <!-- Stats Overview -->
@@ -136,14 +136,14 @@
             <h3>Active Campaigns</h3>
             <p class="value">{{ stats.active_campaigns }}</p>
         </div>
-        <div class="stat-card">
+        <!-- <div class="stat-card">
             <h3>Total Budget</h3>
             <p class="value">${{ stats.total_budget|floatformat:2 }}</p>
         </div>
         <div class="stat-card">
             <h3>Budget Remaining</h3>
             <p class="value">${{ stats.budget_remaining|floatformat:2 }}</p>
-        </div>
+        </div> -->
     </div>
 
     <!-- Available Marketing Agents -->
@@ -153,7 +153,7 @@
             Select an agent to perform marketing tasks. Each agent specializes in different aspects of marketing.
         </p>
         
-        <div class="agents-grid">
+        <div class="agents-grid" style="grid-template-columns: repeat(2, 1fr);">
             <!-- Knowledge Q&A + Analytics Agent (Foundation) -->
             <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#qa'">
                 <h3>📊 Knowledge Q&A + Analytics</h3>
@@ -191,7 +191,7 @@
             </div>
 
             <!-- Analytics Dashboard Agent -->
-            <div class="agent-card">
+            <!-- <div class="agent-card">
                 <h3>📈 Analytics & Dashboard</h3>
                 <span class="status coming-soon">Coming Soon</span>
                 <p>
@@ -200,29 +200,29 @@
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
                     ⏳ Phase 3 - Under development
                 </p>
-            </div>
+            </div> -->
 
             <!-- Document Authoring Agent -->
-            <div class="agent-card">
+            <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#document'">
                 <h3>📄 Document Authoring</h3>
-                <span class="status coming-soon">Coming Soon</span>
+                <span class="status">Available</span>
                 <p>
                     Creates marketing strategies, proposals, reports, and presentations automatically.
                 </p>
-                <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    ⏳ Phase 5 - Under development
+                <p style="font-size: 0.85rem; color: var(--primary-color); font-weight: 600;">
+                    ✓ Phase 5 - Ready to use
                 </p>
             </div>
 
             <!-- Notification Agent -->
-            <div class="agent-card">
+            <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#notification'">
                 <h3>🔔 Proactive Notification</h3>
-                <span class="status coming-soon">Coming Soon</span>
+                <span class="status">Available</span>
                 <p>
                     Monitors performance and alerts you about anomalies, opportunities, or required actions.
                 </p>
-                <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    ⏳ Phase 6 - Under development
+                <p style="font-size: 0.85rem; color: var(--primary-color); font-weight: 600;">
+                    ✓ Phase 6 - Ready to use
                 </p>
             </div>
         </div>
@@ -276,7 +276,7 @@
     </div>
 
     <!-- Recent Research -->
-    {% if recent_research %}
+    <!-- {% if recent_research %}
     <div class="recent-section">
         <h3>🔬 Recent Market Research</h3>
         <div style="display: flex; flex-direction: column; gap: 1rem;">
@@ -300,7 +300,7 @@
         </div>
     </div>
     
-    {% endif %}
+    {% endif %} -->
 </div>
 {% endblock %}
 

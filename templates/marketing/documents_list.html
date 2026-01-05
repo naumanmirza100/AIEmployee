@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+{% block title %}Marketing Documents - AI Marketing Assistant{% endblock %}
+{% block content %}
+<style>
+    .documents-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .documents-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .filters {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        padding: 1rem;
+        background: var(--card-background);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-color);
+    }
+    .document-card {
+        background: var(--card-background);
+        padding: 1.5rem;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border-color);
+        margin-bottom: 1rem;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    .document-card:hover {
+        border-color: var(--primary-color);
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+    }
+    .document-type-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: var(--radius-md);
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-right: 0.5rem;
+    }
+    .document-type-badge.strategy { background: #3b82f6; color: white; }
+    .document-type-badge.proposal { background: #10b981; color: white; }
+    .document-type-badge.report { background: #f59e0b; color: white; }
+    .document-type-badge.presentation { background: #8b5cf6; color: white; }
+    .document-type-badge.brief { background: #ec4899; color: white; }
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: var(--radius-md);
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .status-badge.completed { background: var(--success-color); color: white; }
+    .status-badge.draft { background: var(--text-secondary); color: white; }
+    .status-badge.in_progress { background: #f59e0b; color: white; }
+</style>
+
+<div class="documents-container">
+    <div class="documents-header">
+        <div>
+            <h1>📄 Marketing Documents</h1>
+            <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0;">
+                View and manage all your marketing documents
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'marketing_agents_test' %}#document" class="btn btn-primary" style="text-decoration: none; margin-right: 1rem;">
+                ➕ Create New Document
+            </a>
+            <!-- <a href="{% url 'marketing_dashboard' %}" class="btn btn-secondary" style="text-decoration: none;">
+                ← Back to Dashboard
+            </a> -->
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters">
+        <form method="get" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap; width: 100%;">
+            <div style="flex: 1; min-width: 200px;">
+                <label for="type" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Document Type</label>
+                <select id="type" name="type" style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md);">
+                    <option value="">All Types</option>
+                    {% for type_code, type_name in document_types %}
+                    <option value="{{ type_code }}" {% if selected_type == type_code %}selected{% endif %}>{{ type_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="flex: 1; min-width: 200px;">
+                <label for="campaign_id" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Campaign</label>
+                <select id="campaign_id" name="campaign_id" style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md);">
+                    <option value="">All Campaigns</option>
+                    {% for campaign in campaigns %}
+                    <option value="{{ campaign.id }}" {% if selected_campaign_id == campaign.id|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="width: 20%; display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary" style="padding: 0.75rem 1.5rem;">🔍 Filter</button>
+                <a href="{% url 'documents_list' %}" class="btn btn-secondary" style="padding: 0.75rem 1.5rem; text-decoration: none; margin-left: 0.5rem;">Clear</a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Documents List -->
+    {% if documents %}
+    <div>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+            Found <strong>{{ documents.count }}</strong> document{{ documents.count|pluralize }}
+        </p>
+        {% for document in documents %}
+        <div class="document-card" onclick="window.location.href='{% url 'document_detail' document.id %}'">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                <div style="flex: 1;">
+                    <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary);">
+                        {{ document.title }}
+                    </h3>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+                        <span class="document-type-badge {{ document.document_type }}">
+                            {{ document.get_document_type_display }}
+                        </span>
+                        <span class="status-badge {{ document.status }}">
+                            {{ document.get_status_display }}
+                        </span>
+                        {% if document.campaign %}
+                        <span style="padding: 0.25rem 0.75rem; background: var(--background-color); border-radius: var(--radius-md); font-size: 0.8rem;">
+                            🎯 {{ document.campaign.name }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;">
+                        Created: {{ document.created_at|date:"M d, Y H:i" }}
+                        {% if document.updated_at != document.created_at %}
+                        • Updated: {{ document.updated_at|date:"M d, Y H:i" }}
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+            {% if document.content %}
+            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem; max-height: 3em; overflow: hidden;">
+                    {{ document.content|truncatewords:30 }}
+                </p>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 4rem 2rem; background: var(--card-background); border-radius: var(--radius-lg); border: 1px solid var(--border-color);">
+        <h3 style="color: var(--text-secondary); margin-bottom: 1rem;">No documents found</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 2rem;">
+            {% if selected_type or selected_campaign_id %}
+            Try adjusting your filters or create a new document.
+            {% else %}
+            Create your first marketing document to get started.
+            {% endif %}
+        </p>
+        <a href="{% url 'marketing_agents_test' %}#document" class="btn btn-primary" style="text-decoration: none;">
+            ➕ Create New Document
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+

@@ -811,42 +811,40 @@
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Total Sent</div>
                 <div style="font-size: 1.5rem; font-weight: 600; color: #1e40af;">{{ email_stats.total_sent }}</div>
             </div>
-            <div style="padding: 1rem; background: #d1fae5; border-radius: 0.5rem; border-left: 4px solid #10b981;">
+            <!-- <div style="padding: 1rem; background: #d1fae5; border-radius: 0.5rem; border-left: 4px solid #10b981;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Delivered</div>
                 <div style="font-size: 1.5rem; font-weight: 600; color: #065f46;">{{ email_stats.total_delivered }}</div>
-            </div>
+            </div> -->
             <div style="padding: 1rem; background: #fef3c7; border-radius: 0.5rem; border-left: 4px solid #f59e0b;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Opened</div>
                 <div style="font-size: 1.5rem; font-weight: 600; color: #92400e;">{{ email_stats.total_opened }}</div>
             </div>
-            <div style="padding: 1rem; background: #ede9fe; border-radius: 0.5rem; border-left: 4px solid #8b5cf6;">
+            <!-- <div style="padding: 1rem; background: #ede9fe; border-radius: 0.5rem; border-left: 4px solid #8b5cf6;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Clicked</div>
                 <div style="font-size: 1.5rem; font-weight: 600; color: #5b21b6;">{{ email_stats.total_clicked }}</div>
-            </div>
-            <div style="padding: 1rem; background: #fee2e2; border-radius: 0.5rem; border-left: 4px solid #ef4444;">
+            </div> -->
+            <!-- <div style="padding: 1rem; background: #fee2e2; border-radius: 0.5rem; border-left: 4px solid #ef4444;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Failed</div>
                 <div style="font-size: 1.5rem; font-weight: 600; color: #991b1b;">{{ email_stats.total_failed }}</div>
-            </div>
-            <div style="padding: 1rem; background: #fce7f3; border-radius: 0.5rem; border-left: 4px solid #ec4899;">
-                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Bounced</div>
-                <div style="font-size: 1.5rem; font-weight: 600; color: #9f1239;">{{ email_stats.total_bounced }}</div>
+            </div> -->
+                     <div style="padding: 1rem; background: #fce7f3; border-radius: 0.5rem; border-left: 4px solid #ec4899;">
+                <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Replied</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #9f1239;">{{ email_stats.total_replied|default:0 }}</div>
             </div>
         </div>
         
-        <!-- Email Send History Table -->
+        <!-- Recent Email Sends Summary (Last 10) -->
         {% if email_sends %}
         <div style="margin-top: 1.5rem;">
-            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: #1f2937;">Recent Email Sends</h3>
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: #1f2937;">Recent Email Activity (Last 10)</h3>
             <div style="overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse; background: white;">
                     <thead>
                         <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
                             <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Recipient</th>
                             <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Subject</th>
-                            <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Template</th>
                             <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Status</th>
                             <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Sent At</th>
-                            <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">A/B Variant</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -854,13 +852,6 @@
                         <tr style="border-bottom: 1px solid #e5e7eb;">
                             <td style="padding: 0.75rem; color: #1f2937;">{{ email_send.recipient_email }}</td>
                             <td style="padding: 0.75rem; color: #1f2937; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ email_send.subject }}</td>
-                            <td style="padding: 0.75rem; color: #1f2937;">
-                                {% if email_send.email_template %}
-                                    {{ email_send.email_template.name }}
-                                {% else %}
-                                    <span style="color: #9ca3af;">—</span>
-                                {% endif %}
-                            </td>
                             <td style="padding: 0.75rem; text-align: center;">
                                 <span class="status-badge" style="
                                     background: {% if email_send.status == 'sent' %}#dbeafe{% elif email_send.status == 'delivered' %}#d1fae5{% elif email_send.status == 'opened' %}#fef3c7{% elif email_send.status == 'clicked' %}#ede9fe{% elif email_send.status == 'failed' %}#fee2e2{% elif email_send.status == 'bounced' %}#fce7f3{% else %}#f3f4f6{% endif %};
@@ -879,29 +870,13 @@
                                     <span style="color: #9ca3af;">Pending</span>
                                 {% endif %}
                             </td>
-                            <td style="padding: 0.75rem; text-align: center;">
-                                {% if email_send.is_ab_test and email_send.ab_test_variant %}
-                                    <span style="background: #fef3c7; color: #92400e; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
-                                        {{ email_send.ab_test_variant }}
-                                    </span>
-                                {% else %}
-                                    <span style="color: #9ca3af;">—</span>
-                                {% endif %}
-                            </td>
                         </tr>
-                        {% if email_send.error_message %}
-                        <tr>
-                            <td colspan="6" style="padding: 0.5rem 0.75rem; background: #fef2f2; color: #991b1b; font-size: 0.875rem;">
-                                ⚠️ Error: {{ email_send.error_message }}
-                            </td>
-                        </tr>
-                        {% endif %}
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             <div style="margin-top: 1rem; color: #6b7280; font-size: 0.875rem;">
-                Showing last 50 emails. Total sent: <strong>{{ email_stats.total_sent }}</strong>
+                Showing last 10 emails. <a href="{% url 'email_sending_status' campaign.id %}" style="color: #3b82f6; text-decoration: underline;">View full detailed history →</a>
             </div>
         </div>
         {% else %}

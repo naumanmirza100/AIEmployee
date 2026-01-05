@@ -6,6 +6,8 @@ from django.dispatch import receiver
 import json
 import logging
 
+logger = logging.getLogger(__name__)
+
 
 class Lead(models.Model):
     """Lead Model for Marketing Campaigns"""
@@ -98,6 +100,32 @@ class Campaign(models.Model):
             revenue = float(self.goals.get('revenue', 0))
             return ((revenue - float(self.actual_spend)) / float(self.actual_spend)) * 100
         return None
+    
+    def save(self, *args, **kwargs):
+        """Override save to automatically activate sequences when campaign becomes active"""
+        is_new = self.pk is None
+        old_status = None
+        
+        # Check if status is being changed to 'active' (for existing campaigns)
+        if not is_new:
+            try:
+                old_campaign = Campaign.objects.get(pk=self.pk)
+                old_status = old_campaign.status
+            except Campaign.DoesNotExist:
+                pass  # Shouldn't happen, but handle gracefully
+        
+        # Call parent save first (so self.pk exists and relationships work)
+        super().save(*args, **kwargs)
+        
+        # If status is 'active' (either new campaign or status changed to active), activate all sequences
+        if self.status == 'active':
+            if is_new or (old_status and old_status != 'active'):
+                sequences_updated = self.email_sequences.update(is_active=True)
+                if sequences_updated > 0:
+                    if is_new:
+                        logger.info(f"New campaign '{self.name}' created as active. {sequences_updated} sequence(s) automatically activated.")
+                    else:
+                        logger.info(f"Campaign '{self.name}' status changed to active. {sequences_updated} sequence(s) automatically activated.")
 
 
 class MarketResearch(models.Model):
@@ -221,6 +249,58 @@ class NotificationRule(models.Model):
         return f"{self.get_rule_type_display()}: {self.name}"
 
 
+class MarketingNotification(models.Model):
+    """Marketing Proactive Notifications Model"""
+    NOTIFICATION_TYPE_CHOICES = [
+        ('performance_alert', 'Performance Alert'),
+        ('opportunity', 'Opportunity Alert'),
+        ('anomaly', 'Anomaly Detection'),
+        ('milestone', 'Milestone Reached'),
+        ('budget', 'Budget Alert'),
+        ('campaign_status', 'Campaign Status Change'),
+        ('email_delivery', 'Email Delivery Issue'),
+        ('engagement', 'Engagement Alert'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('critical', 'Critical'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='marketing_notifications')
+    campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPE_CHOICES)
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    action_required = models.BooleanField(default=False)
+    action_url = models.CharField(max_length=500, blank=True, null=True)
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)  # Store additional data (metrics, thresholds, etc.)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['campaign', 'notification_type']),
+            models.Index(fields=['created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.title} - {self.user.username}"
+    
+    def mark_as_read(self):
+        """Mark notification as read"""
+        from django.utils import timezone
+        self.is_read = True
+        self.read_at = timezone.now()
+        self.save()
+
+
 class EmailTemplate(models.Model):
     """Email Template for Campaigns"""
     EMAIL_TYPE_CHOICES = [
@@ -278,6 +358,30 @@ class EmailSequence(models.Model):
     email_account = models.ForeignKey('EmailAccount', on_delete=models.SET_NULL, null=True, blank=True,
                                      related_name='sequences', help_text='Email account to use for sending sequence emails')
     is_active = models.BooleanField(default=True)
+    
+    # Sub-sequence support: link to parent sequence (null = main sequence, not null = sub-sequence)
+    parent_sequence = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True,
+                                        related_name='sub_sequences', 
+                                        help_text='Parent sequence (if this is a sub-sequence triggered by replies)')
+    is_sub_sequence = models.BooleanField(default=False, help_text='Is this a sub-sequence (triggered by replies)?')
+    
+    # Interest level routing for sub-sequences
+    INTEREST_LEVEL_CHOICES = [
+        ('any', 'Any Reply (Default)'),
+        ('positive', 'Interested / Positive'),
+        ('negative', 'Not Interested / Negative'),
+        ('neutral', 'Neutral / Acknowledgment'),
+        ('requested_info', 'Requested More Information'),
+        ('objection', 'Has Objection / Concern'),
+        ('unsubscribe', 'Unsubscribe Request'),
+    ]
+    interest_level = models.CharField(
+        max_length=20,
+        choices=INTEREST_LEVEL_CHOICES,
+        default='any',
+        help_text='Interest level this sub-sequence handles (only for sub-sequences)'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -285,7 +389,8 @@ class EmailSequence(models.Model):
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"{self.name} - {self.campaign.name}"
+        sequence_type = "Sub-Sequence" if self.is_sub_sequence else "Sequence"
+        return f"{sequence_type}: {self.name} - {self.campaign.name}"
 
 
 class EmailSequenceStep(models.Model):
@@ -438,19 +543,42 @@ class CampaignContact(models.Model):
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='campaign_contacts')
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='campaign_contacts')
     sequence = models.ForeignKey('EmailSequence', on_delete=models.SET_NULL, null=True, blank=True,
-                                 related_name='contacts', help_text='Current sequence this contact is in')
+                                 related_name='contacts', help_text='Main sequence this contact is in')
+    
+    # Sub-sequence support
+    sub_sequence = models.ForeignKey('EmailSequence', on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='sub_sequence_contacts',
+                                    help_text='Sub-sequence this contact is in (triggered by reply)')
+    sub_sequence_step = models.IntegerField(default=0, help_text='Current step in sub-sequence (0 = not started)')
+    sub_sequence_last_sent_at = models.DateTimeField(null=True, blank=True, help_text='When the last sub-sequence email was sent')
     
     # Sequence Progress Tracking
     current_step = models.IntegerField(default=0, help_text='Current step number in sequence (0 = not started, 1 = first step, etc.)')
     last_sent_at = models.DateTimeField(null=True, blank=True, help_text='When the last email in sequence was sent')
     
     # Status Flags
-    replied = models.BooleanField(default=False, help_text='Has this contact replied? (stops automation)')
+    replied = models.BooleanField(default=False, help_text='Has this contact replied? (stops main sequence, starts sub-sequence)')
     completed = models.BooleanField(default=False, help_text='Has this contact completed the sequence?')
+    sub_sequence_completed = models.BooleanField(default=False, help_text='Has this contact completed the sub-sequence?')
     
     # Reply Tracking
     replied_at = models.DateTimeField(null=True, blank=True, help_text='When the contact replied')
     reply_subject = models.CharField(max_length=500, blank=True, help_text='Subject of the reply email')
+    reply_content = models.TextField(blank=True, help_text='Full content of the reply email')
+    
+    # AI Analysis of Reply
+    reply_interest_level = models.CharField(
+        max_length=20,
+        choices=[
+            ('positive', 'Positive/Interested'),
+            ('negative', 'Negative/Not Interested'),
+            ('neutral', 'Neutral'),
+            ('not_analyzed', 'Not Analyzed'),
+        ],
+        default='not_analyzed',
+        help_text='AI-determined interest level based on reply content'
+    )
+    reply_analysis = models.TextField(blank=True, help_text='AI analysis of the reply sentiment and interest')
     
     # Metadata
     started_at = models.DateTimeField(null=True, blank=True, help_text='When sequence started for this contact')
@@ -461,23 +589,99 @@ class CampaignContact(models.Model):
     
     class Meta:
         ordering = ['-created_at']
-        unique_together = [('campaign', 'lead', 'sequence')]
+        # Note: Removed unique_together since a contact can be in main sequence and sub-sequence
         indexes = [
             models.Index(fields=['campaign', 'completed', 'replied']),
             models.Index(fields=['campaign', 'sequence', 'current_step']),
+            models.Index(fields=['campaign', 'sub_sequence', 'sub_sequence_step']),
             models.Index(fields=['last_sent_at']),
+            models.Index(fields=['sub_sequence_last_sent_at']),
         ]
     
     def __str__(self):
         status = 'Completed' if self.completed else ('Replied' if self.replied else f'Step {self.current_step}')
         return f"{self.lead.email} - {self.campaign.name} ({status})"
     
-    def mark_replied(self, reply_subject='', reply_at=None):
-        """Mark this contact as having replied - stops automation"""
+    def mark_replied(self, reply_subject='', reply_content='', reply_at=None, interest_level='not_analyzed', analysis='', sub_sequence=None):
+        """
+        Mark this contact as having replied - stops main sequence automation and starts sub-sequence if available
+        
+        Args:
+            reply_subject: Subject of the reply
+            reply_content: Content of the reply
+            reply_at: When the reply was received
+            interest_level: AI-determined interest level
+            analysis: AI analysis of the reply
+            sub_sequence: Optional EmailSequence to use as sub-sequence (if None, looks for sub-sequences of main sequence)
+        """
         self.replied = True
         self.replied_at = reply_at or timezone.now()
         if reply_subject:
             self.reply_subject = reply_subject
+        if reply_content:
+            self.reply_content = reply_content
+        if interest_level:
+            self.reply_interest_level = interest_level
+        if analysis:
+            self.reply_analysis = analysis
+        
+        # Start sub-sequence if available - route based on interest level
+        if not sub_sequence and self.sequence:
+            # Determine interest level from AI analysis
+            detected_interest = interest_level if interest_level and interest_level != 'not_analyzed' else 'neutral'
+            
+            # Map AI interest levels to sub-sequence interest levels
+            # AI returns: 'positive', 'negative', 'neutral'
+            # Sub-sequences can be: 'any', 'positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe'
+            interest_mapping = {
+                'positive': 'positive',
+                'negative': 'negative',
+                'neutral': 'neutral',
+                'not_analyzed': 'any'
+            }
+            target_interest = interest_mapping.get(detected_interest, 'any')
+            
+            # Look for sub-sequences matching the interest level
+            # First try to find exact match
+            sub_sequences = EmailSequence.objects.filter(
+                parent_sequence=self.sequence,
+                is_sub_sequence=True,
+                is_active=True,
+                interest_level=target_interest
+            )
+            
+            # If no exact match, try 'any' (default)
+            if not sub_sequences.exists() and target_interest != 'any':
+                sub_sequences = EmailSequence.objects.filter(
+                    parent_sequence=self.sequence,
+                    is_sub_sequence=True,
+                    is_active=True,
+                    interest_level='any'
+                )
+            
+            # If still no match, get any active sub-sequence as fallback
+            if not sub_sequences.exists():
+                sub_sequences = EmailSequence.objects.filter(
+                    parent_sequence=self.sequence,
+                    is_sub_sequence=True,
+                    is_active=True
+                ).order_by('created_at')
+            
+            if sub_sequences.exists():
+                # Use the first matching sub-sequence
+                sub_sequence = sub_sequences.first()
+                logger.info(
+                    f"Found sub-sequence '{sub_sequence.name}' (interest: {sub_sequence.interest_level}) "
+                    f"for contact {self.lead.email} (detected interest: {detected_interest})"
+                )
+        
+        if sub_sequence:
+            self.sub_sequence = sub_sequence
+            self.sub_sequence_step = 0  # Start from step 0 (will be incremented to 1 when first email is sent)
+            self.sub_sequence_last_sent_at = None
+            self.sub_sequence_completed = False
+            logger.info(f"Started sub-sequence '{sub_sequence.name}' for contact {self.lead.email} after reply")
+        
         self.save()
     
     def mark_completed(self):

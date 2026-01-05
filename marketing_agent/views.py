@@ -7,21 +7,85 @@ from django.urls import reverse
 from core.models import UserProfile
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 import json
+import logging
 from django.conf import settings
 
-from .models import Campaign, MarketResearch, CampaignPerformance, Lead, EmailTemplate, EmailSequence, EmailSequenceStep, EmailSendHistory, EmailAccount
+logger = logging.getLogger(__name__)
+
+from .models import Campaign, MarketResearch, CampaignPerformance, Lead, EmailTemplate, EmailSequence, EmailSequenceStep, EmailSendHistory, EmailAccount, MarketingNotification
 from django.db.models import Sum, Avg, Count, F
 from decimal import Decimal
 from datetime import timedelta, datetime
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 import pandas as pd
 import csv
 from io import StringIO
 
 
+def auto_pause_expired_campaigns(user=None):
+    """
+    Automatically pause campaigns and their sequences when end_date has passed.
+    
+    Args:
+        user: Optional User instance to filter campaigns by owner. If None, checks all campaigns.
+    
+    Returns:
+        dict: Summary of paused campaigns and sequences
+    """
+    today = timezone.now().date()
+    paused_campaigns = []
+    paused_sequences = []
+    
+    # Get campaigns that have passed their end date
+    campaigns_query = Campaign.objects.filter(
+        end_date__lt=today,
+        status__in=['active', 'scheduled']  # Only pause active or scheduled campaigns
+    )
+    
+    if user:
+        campaigns_query = campaigns_query.filter(owner=user)
+    
+    expired_campaigns = campaigns_query.all()
+    
+    for campaign in expired_campaigns:
+        # Pause the campaign
+        old_status = campaign.status
+        campaign.status = 'paused'
+        campaign.save()
+        paused_campaigns.append({
+            'id': campaign.id,
+            'name': campaign.name,
+            'old_status': old_status,
+            'end_date': campaign.end_date
+        })
+        
+        # Pause all email sequences for this campaign
+        sequences = EmailSequence.objects.filter(campaign=campaign, is_active=True)
+        for sequence in sequences:
+            sequence.is_active = False
+            sequence.save()
+            paused_sequences.append({
+                'id': sequence.id,
+                'name': sequence.name,
+                'campaign_id': campaign.id,
+                'campaign_name': campaign.name
+            })
+    
+    return {
+        'campaigns_paused': len(paused_campaigns),
+        'sequences_paused': len(paused_sequences),
+        'paused_campaigns': paused_campaigns,
+        'paused_sequences': paused_sequences
+    }
+
+
 @login_required
 def marketing_dashboard(request):
     """Main marketing agent dashboard - shows available agents"""
+    # Auto-pause expired campaigns when accessing dashboard
+    auto_pause_expired_campaigns(user=request.user)
+    
     # DEBUG: Force output to terminal
     print("\n" + "=" * 60)
     print("🔥🔥🔥 marketing_dashboard VIEW CALLED! 🔥🔥🔥")
@@ -247,8 +311,246 @@ def test_outreach_campaign(request):
 
 
 @login_required
+def documents_list(request):
+    """List all marketing documents for the current user"""
+    from marketing_agent.models import MarketingDocument
+    from project_manager_agent.ai_agents.agents_registry import AgentRegistry
+    
+    documents = MarketingDocument.objects.filter(created_by=request.user).order_by('-created_at')
+    
+    # Get document type filter
+    document_type = request.GET.get('type', '')
+    if document_type:
+        documents = documents.filter(document_type=document_type)
+    
+    # Get campaign filter
+    campaign_id = request.GET.get('campaign_id', '')
+    if campaign_id:
+        try:
+            documents = documents.filter(campaign_id=int(campaign_id))
+        except ValueError:
+            pass
+    
+    return render(request, 'marketing/documents_list.html', {
+        'documents': documents,
+        'document_types': MarketingDocument.DOCUMENT_TYPE_CHOICES,
+        'campaigns': Campaign.objects.filter(owner=request.user),
+        'selected_type': document_type,
+        'selected_campaign_id': campaign_id,
+    })
+
+
+@login_required
+def document_detail(request, document_id):
+    """View a specific marketing document"""
+    from marketing_agent.models import MarketingDocument
+    from marketing_agent.document_generator import DocumentGenerator
+    
+    document = get_object_or_404(MarketingDocument, id=document_id, created_by=request.user)
+    
+    # Get available download formats
+    available_formats = DocumentGenerator.get_available_formats(document.document_type)
+    
+    return render(request, 'marketing/document_detail.html', {
+        'document': document,
+        'available_formats': available_formats,
+    })
+
+
+@login_required
+def document_download(request, document_id, format_type):
+    """Download document in specified format"""
+    from marketing_agent.models import MarketingDocument
+    from marketing_agent.document_generator import DocumentGenerator
+    
+    document = get_object_or_404(MarketingDocument, id=document_id, created_by=request.user)
+    
+    try:
+        if format_type == 'pdf':
+            return DocumentGenerator.generate_pdf(document)
+        elif format_type == 'docx':
+            return DocumentGenerator.generate_docx(document)
+        elif format_type == 'pptx':
+            if document.document_type != 'presentation':
+                return JsonResponse({'error': 'PPTX format is only available for presentations'}, status=400)
+            return DocumentGenerator.generate_pptx(document)
+        else:
+            return JsonResponse({'error': f'Unsupported format: {format_type}'}, status=400)
+    except ImportError as e:
+        return JsonResponse({'error': str(e)}, status=500)
+    except Exception as e:
+        return JsonResponse({'error': f'Error generating document: {str(e)}'}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def test_document_authoring(request):
+    """Test Document Authoring Agent"""
+    try:
+        agent = AgentRegistry.get_agent("document_authoring")
+        data = json.loads(request.body)
+        
+        action = data.get('action', 'create')
+        document_type = data.get('document_type', 'strategy')
+        document_data = data.get('document_data', {})
+        campaign_id = data.get('campaign_id')
+        context = data.get('context', {})
+        
+        if not document_type:
+            return JsonResponse({
+                'success': False,
+                'error': 'document_type is required'
+            }, status=400)
+        
+        # Process with agent
+        result = agent.process(
+            action=action,
+            user_id=request.user.id,
+            document_type=document_type,
+            document_data=document_data,
+            campaign_id=campaign_id,
+            context=context
+        )
+        
+        return JsonResponse(result)
+        
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc() if settings.DEBUG else None
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def test_proactive_notification(request):
+    """Test Proactive Notification Agent"""
+    try:
+        agent = AgentRegistry.get_agent("proactive_notification")
+        data = json.loads(request.body)
+        
+        action = data.get('action', 'monitor')
+        campaign_id = data.get('campaign_id')
+        context = data.get('context', {})
+        
+        # Process with agent
+        result = agent.process(
+            action=action,
+            user_id=request.user.id,
+            campaign_id=campaign_id,
+            context=context
+        )
+        
+        return JsonResponse(result)
+        
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc() if settings.DEBUG else None
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def get_notifications(request):
+    """Get notifications for the current user"""
+    try:
+        agent = AgentRegistry.get_agent("proactive_notification")
+        
+        unread_only = request.GET.get('unread_only', 'false').lower() == 'true'
+        notification_type = request.GET.get('type')
+        campaign_id = request.GET.get('campaign_id')
+        
+        if campaign_id:
+            try:
+                campaign_id = int(campaign_id)
+            except ValueError:
+                campaign_id = None
+        
+        result = agent.get_notifications(
+            user_id=request.user.id,
+            unread_only=unread_only,
+            notification_type=notification_type,
+            campaign_id=campaign_id
+        )
+        
+        return JsonResponse(result)
+        
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc() if settings.DEBUG else None
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def mark_notification_read(request, notification_id):
+    """Mark a notification as read"""
+    try:
+        notification = MarketingNotification.objects.get(
+            id=notification_id,
+            user=request.user
+        )
+        notification.mark_as_read()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Notification marked as read'
+        })
+        
+    except MarketingNotification.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Notification not found'
+        }, status=404)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def delete_notification(request, notification_id):
+    """Delete a notification"""
+    try:
+        notification = MarketingNotification.objects.get(
+            id=notification_id,
+            user=request.user
+        )
+        notification.delete()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Notification deleted successfully'
+        })
+        
+    except MarketingNotification.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Notification not found'
+        }, status=404)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
 def marketing_agents_test(request):
     """Marketing agents testing interface"""
+    # Auto-pause expired campaigns when accessing agents test page
+    auto_pause_expired_campaigns(user=request.user)
+    
     import sys
     print("=" * 50, file=sys.stderr)
     print("marketing_agents_test VIEW CALLED!", file=sys.stderr)
@@ -373,6 +675,9 @@ def get_campaign_details(request, campaign_id):
 @login_required
 def campaigns_list(request):
     """List all campaigns for the current user"""
+    # Auto-pause expired campaigns before listing
+    auto_pause_expired_campaigns(user=request.user)
+    
     campaigns = Campaign.objects.filter(owner=request.user).order_by('-created_at')
     
     # Count active campaigns
@@ -390,6 +695,9 @@ def campaigns_list(request):
 @login_required
 def campaign_detail(request, campaign_id):
     """View campaign details with analytics"""
+    # Auto-pause expired campaigns before showing details
+    auto_pause_expired_campaigns(user=request.user)
+    
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     leads = campaign.leads.all().order_by('-created_at')
     
@@ -499,15 +807,15 @@ def campaign_detail(request, campaign_id):
     
     # Get email send history (recent sends)
     # Order by sent_at for sent emails (newest first), then by created_at for pending emails
-    email_sends = EmailSendHistory.objects.filter(campaign=campaign).order_by(
+    # For campaign detail page: Show only recent emails (last 10) for summary view
+    recent_email_sends = EmailSendHistory.objects.filter(campaign=campaign).order_by(
         '-sent_at',
         '-created_at'
-    )[:50]
+    )[:10]  # Only last 10 for summary
     
-    # Calculate stats - opened/clicked emails are also considered delivered
+    # Calculate stats - 'sent' and 'delivered' are treated the same (emails are set to 'sent' on successful send)
     email_stats = {
         'total_sent': EmailSendHistory.objects.filter(campaign=campaign, status__in=['sent', 'delivered', 'opened', 'clicked']).count(),
-        'total_delivered': EmailSendHistory.objects.filter(campaign=campaign, status__in=['delivered', 'opened', 'clicked']).count(),
         'total_opened': EmailSendHistory.objects.filter(campaign=campaign, status__in=['opened', 'clicked']).count(),
         'total_clicked': EmailSendHistory.objects.filter(campaign=campaign, status='clicked').count(),
         'total_failed': EmailSendHistory.objects.filter(campaign=campaign, status='failed').count(),
@@ -531,7 +839,7 @@ def campaign_detail(request, campaign_id):
         'email_sequences': email_sequences,
         'has_email_templates': has_email_templates,
         'has_active_sequence': has_active_sequence,
-        'email_sends': email_sends,
+        'email_sends': recent_email_sends,  # Only recent 10 for summary
         'email_stats': email_stats,
     })
 
@@ -981,37 +1289,100 @@ def delete_lead(request, campaign_id, lead_id):
 @login_required
 @require_http_methods(["POST"])
 def mark_contact_replied(request, campaign_id, lead_id):
-    """Mark a contact as having replied - stops automation for this contact"""
+    """Mark a contact as having replied - stops automation for this contact and analyzes reply with AI"""
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     lead = get_object_or_404(Lead, id=lead_id, owner=request.user)
     
     try:
         from marketing_agent.models import CampaignContact
+        from marketing_agent.utils.reply_analyzer import ReplyAnalyzer
         
-        # Get or create contact
-        contact, created = CampaignContact.objects.get_or_create(
+        # Get or create contact (handle multiple contacts per campaign/lead - use first one or create)
+        # Note: There can be multiple contacts if lead is in multiple sequences
+        contact = CampaignContact.objects.filter(
             campaign=campaign,
-            lead=lead,
-            defaults={'current_step': 0}
-        )
+            lead=lead
+        ).first()
+        
+        if not contact:
+            # Create new contact
+            contact = CampaignContact.objects.create(
+                campaign=campaign,
+                lead=lead,
+                current_step=0
+            )
+            created = True
+        else:
+            created = False
         
         # Get reply data from request
         if request.content_type == 'application/json':
             data = json.loads(request.body)
             reply_subject = data.get('reply_subject', '')
+            reply_content = data.get('reply_content', '')
         else:
             reply_subject = request.POST.get('reply_subject', '')
+            reply_content = request.POST.get('reply_content', '')
         
-        # Mark as replied
-        contact.mark_replied(reply_subject=reply_subject)
+        # Analyze reply with AI if content is provided
+        interest_level = 'not_analyzed'
+        analysis = ''
+        if reply_content or reply_subject:
+            try:
+                analyzer = ReplyAnalyzer()
+                analysis_result = analyzer.analyze_reply(
+                    reply_subject=reply_subject,
+                    reply_content=reply_content,
+                    campaign_name=campaign.name
+                )
+                interest_level = analysis_result.get('interest_level', 'neutral')
+                analysis = analysis_result.get('analysis', '')
+                logger.info(f"AI analyzed reply for {lead.email}: {interest_level} (confidence: {analysis_result.get('confidence', 0)}%)")
+            except Exception as e:
+                logger.error(f"Error analyzing reply with AI: {str(e)}")
+                interest_level = 'not_analyzed'
+                analysis = f'AI analysis failed: {str(e)}'
+        
+        # Check if there's a sub-sequence available for the main sequence
+        sub_sequence = None
+        if contact.sequence:
+            sub_sequences = EmailSequence.objects.filter(
+                parent_sequence=contact.sequence,
+                is_sub_sequence=True,
+                is_active=True
+            ).order_by('created_at')
+            
+            if sub_sequences.exists():
+                sub_sequence = sub_sequences.first()
+                logger.info(f"Found sub-sequence '{sub_sequence.name}' for contact {lead.email} after reply")
+        
+        # Mark as replied with AI analysis and start sub-sequence if available
+        contact.mark_replied(
+            reply_subject=reply_subject,
+            reply_content=reply_content,
+            interest_level=interest_level,
+            analysis=analysis,
+            sub_sequence=sub_sequence
+        )
+        
+        message = f'Contact {lead.email} marked as replied. Main sequence stopped.'
+        if sub_sequence:
+            message += f' Sub-sequence "{sub_sequence.name}" started.'
+        else:
+            message += ' No sub-sequence found.'
         
         return JsonResponse({
             'success': True,
-            'message': f'Contact {lead.email} marked as replied. Automation stopped.',
-            'contact_id': contact.id
+            'message': message,
+            'contact_id': contact.id,
+            'interest_level': interest_level,
+            'analysis': analysis,
+            'sub_sequence_started': sub_sequence is not None,
+            'sub_sequence_name': sub_sequence.name if sub_sequence else None
         })
         
     except Exception as e:
+        logger.error(f"Error marking contact as replied: {str(e)}")
         return JsonResponse({
             'success': False,
             'error': str(e)

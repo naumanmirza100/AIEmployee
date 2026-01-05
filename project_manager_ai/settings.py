@@ -421,3 +421,11 @@ else:
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HOST_USER else 'noreply@example.com').strip()
 RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
 
+# --------------------
+# Email Tracking Configuration
+# --------------------
+# Base URL for email tracking (opens/clicks)
+# For local testing with ngrok, use your ngrok URL
+# For production, use your actual domain
+SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
+

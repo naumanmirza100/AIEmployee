@@ -326,15 +326,15 @@
         <p style="color: var(--text-secondary);">
             Select and interact with different marketing agents. Each agent specializes in specific marketing tasks.
         </p>
-        <a href="{% url 'marketing_dashboard' %}" class="btn btn-secondary" style="margin-top: 1rem;">
+        <!-- <a href="{% url 'marketing_dashboard' %}" class="btn btn-secondary" style="margin-top: 1rem;">
             ← Back to Dashboard
-        </a>
+        </a> -->
     </div>
 
     <!-- Agent Tabs -->
     <div class="agent-tabs">
         <button class="agent-tab active" onclick="switchTab('qa')" id="tab-qa">
-            📊 Knowledge Q&A + Analytics
+            📊 Knowledge + Analytics
         </button>
         <button class="agent-tab" onclick="switchTab('research')" id="tab-research">
             🔍 Market Research
@@ -342,14 +342,14 @@
         <button class="agent-tab" onclick="switchTab('campaign')" id="tab-campaign">
             🚀 Outreach & Campaign
         </button>
-        <button class="agent-tab" onclick="switchTab('analytics')" id="tab-analytics" disabled>
+        <!-- <button class="agent-tab" onclick="switchTab('analytics')" id="tab-analytics" disabled>
             📈 Analytics (Coming Soon)
+        </button> -->
+        <button class="agent-tab" onclick="switchTab('document')" id="tab-document">
+            📄 Document Authoring 
         </button>
-        <button class="agent-tab" onclick="switchTab('document')" id="tab-document" disabled>
-            📄 Document Authoring (Coming Soon)
-        </button>
-        <button class="agent-tab" onclick="switchTab('notification')" id="tab-notification" disabled>
-            🔔 Notifications (Coming Soon)
+        <button class="agent-tab" onclick="switchTab('notification')" id="tab-notification">
+            🔔 Notifications 
         </button>
     </div>
 
@@ -438,6 +438,21 @@
         <p>
             Design, launch, and manage email marketing campaigns. Create targeted email campaigns with AI assistance.
         </p>
+
+        <!-- View Campaign Dashboard Link -->
+        <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--card-background); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h4 style="margin: 0 0 0.5rem 0;">📊 Campaign Dashboard</h4>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;">
+                        View and manage all your email campaigns
+                    </p>
+                </div>
+                <a href="{% url 'campaigns_list' %}" class="btn btn-primary" style="width: 40%; text-decoration: none;">
+                    📋 View Campaign Dashboard →
+                </a>
+            </div>
+        </div>
 
         <!-- Campaign Form Section -->
         <div class="campaign-card">
@@ -794,20 +809,264 @@
         </p>
     </div>
 
+    <!-- Document Authoring Panel -->
     <div class="agent-panel" id="panel-document">
         <h3>📄 Document Authoring Agent</h3>
-        <p style="color: var(--text-secondary);">
-            This agent will create marketing strategies, proposals, and reports.
-            Coming soon in Phase 5!
+        <p>
+            Creates structured marketing documents such as strategies, proposals, reports, and campaign briefs automatically.
         </p>
+
+        <!-- View Saved Documents Link -->
+        <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--card-background); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h4 style="margin: 0 0 0.5rem 0;">📚 Saved Documents</h4>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;">
+                        View and manage all your saved marketing documents
+                    </p>
+                </div>
+                <a href="{% url 'documents_list' %}" class="btn btn-primary" style="width: 40%; text-decoration: none;">
+                    📋 View All Documents →
+                </a>
+            </div>
     </div>
 
+        <!-- Document Form Section -->
+        <div class="campaign-card">
+            <div class="section-header">
+                <span class="section-icon">📝</span>
+                <h5>Create Marketing Document</h5>
+            </div>
+
+            <!-- Action Selection -->
+            <div class="form-group">
+                <label for="document-action">
+                    <span>⚡</span> Select Action <span class="required-field">*</span>
+                </label>
+                <select id="document-action" name="action" onchange="updateDocumentForm()" required
+                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; background: var(--card-background);">
+                    <option value="">-- Select Action First --</option>
+                    <option value="create">📄 Create & Save Document</option>
+                    <option value="generate">👁️ Generate Preview (No Save)</option>
+                </select>
+            </div>
+
+            <div id="document-form-container" style="display: none;">
+                <form id="document-form" onsubmit="handleDocument(event)">
+                    {% csrf_token %}
+
+                    <!-- Document Type -->
+                    <div class="form-group">
+                        <label for="document-type">
+                            <span>📋</span> Document Type <span class="required-field">*</span>
+                        </label>
+                        <select id="document-type" name="document_type" required
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                            <option value="">-- Select Document Type --</option>
+                            <option value="strategy">📊 Marketing Strategy</option>
+                            <option value="proposal">📝 Campaign Proposal</option>
+                            <option value="report">📈 Performance Report</option>
+                            <!-- <option value="presentation">📽️ Presentation</option> -->
+                            <option value="brief">📋 Campaign Brief</option>
+                        </select>
+                        <div class="field-hint">Choose the type of document you want to create</div>
+                    </div>
+
+                    <!-- Campaign Selection (Optional) -->
+                    <div class="form-group">
+                        <label for="document-campaign-select">
+                            <span>🎯</span> Associate with Campaign (Optional)
+                        </label>
+                        <select id="document-campaign-select" name="campaign_id"
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                            <option value="">-- No Campaign (Standalone Document) --</option>
+                            {% for campaign in campaigns %}
+                            <option value="{{ campaign.id }}">{{ campaign.name }} ({{ campaign.get_status_display }})</option>
+                            {% endfor %}
+                        </select>
+                        <div class="field-hint">Optionally link this document to a campaign for context</div>
+                    </div>
+
+                    <!-- Document Title -->
+                    <div class="form-group">
+                        <label for="document-title">
+                            <span>📝</span> Document Title <span class="required-field">*</span>
+                        </label>
+                        <input 
+                            type="text" 
+                            id="document-title" 
+                            name="title" 
+                            placeholder="e.g., Q1 2024 Marketing Strategy"
+                            required
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                        />
+                    </div>
+
+                    <!-- Document Requirements -->
+                    <div class="form-group">
+                        <label for="document-requirements">
+                            <span>📋</span> Document Requirements / Objectives
+                        </label>
+                        <textarea 
+                            id="document-requirements" 
+                            name="requirements" 
+                            placeholder="Describe what you want in this document. For example: 'Focus on digital marketing channels, target B2B audience, include budget breakdown and ROI projections...'"
+                            rows="4"
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; resize: vertical;"
+                        ></textarea>
+                        <div class="field-hint">Provide detailed requirements to help the AI create a better document</div>
+                    </div>
+
+                    <!-- Additional Context -->
+                    <div class="form-group">
+                        <label for="document-context">
+                            <span>💡</span> Additional Context / Key Points (Optional)
+                        </label>
+                        <textarea 
+                            id="document-context" 
+                            name="key_points" 
+                            placeholder="Any additional information, data points, or context that should be included in the document..."
+                            rows="3"
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; resize: vertical;"
+                        ></textarea>
+                        <div class="field-hint">Optional: Add any specific data, insights, or context</div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="form-group" style="margin-top: 1.5rem;">
+                        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 1rem; font-size: 1rem;">
+                            <span id="document-submit-text">🚀 Create Document</span>
+                            <span id="document-loading" style="display: none;">⏳ Generating...</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Results Section -->
+            <div id="document-results" style="display: none; margin-top: 2rem;">
+                <div class="section-header">
+                    <span class="section-icon">✅</span>
+                    <h5>Document Generated</h5>
+                </div>
+                <div id="document-results-content" style="background: var(--background-color); padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                    <!-- Results will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Proactive Notification Panel -->
     <div class="agent-panel" id="panel-notification">
         <h3>🔔 Proactive Notification Agent</h3>
-        <p style="color: var(--text-secondary);">
-            This agent will monitor performance and send proactive alerts.
-            Coming soon in Phase 6!
+        <p>
+            Monitors campaign performance continuously and alerts you about anomalies, opportunities, or required actions.
         </p>
+
+        <!-- Monitoring Actions -->
+        <div class="campaign-card" style="margin-bottom: 1.5rem;">
+            <div class="section-header">
+                <span class="section-icon">📊</span>
+                <h5>Monitor Campaigns</h5>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <span>🎯</span> Select Campaign (Optional)
+                </label>
+                <select id="notification-campaign-select" style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                    <option value="">-- Monitor All Campaigns --</option>
+                    {% for campaign in campaigns %}
+                    <option value="{{ campaign.id }}">{{ campaign.name }} ({{ campaign.get_status_display }})</option>
+                    {% endfor %}
+                </select>
+                <div class="field-hint">Leave empty to monitor all active campaigns</div>
+            </div>
+
+            <button onclick="monitorCampaigns()" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                🔍 Monitor Campaigns
+            </button>
+        </div>
+
+        <!-- Recent Notifications (Unread) -->
+        <div class="campaign-card" style="margin-bottom: 1.5rem;">
+            <div class="section-header">
+                <span class="section-icon">🔔</span>
+                <h5>Recent Notifications</h5>
+                <button onclick="loadNotifications()" class="btn btn-secondary" style="width: 40%; margin-left: auto;">
+                    🔄 Refresh
+                </button>
+            </div>
+            <div id="notifications-container" style="max-height: 400px; overflow-y: auto;">
+                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                    Click "Monitor Campaigns" to check for alerts
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification History (Read) -->
+        <div class="campaign-card">
+            <div class="section-header">
+                <span class="section-icon">📜</span>
+                <h5>Notification History</h5>
+                <button onclick="loadNotificationHistory()" class="btn btn-secondary" style="width: 40%; margin-left: auto;">
+                    🔄 Refresh
+                </button>
+            </div>
+            <div id="notification-history-container" style="max-height: 400px; overflow-y: auto;">
+                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                    No history yet. Read notifications will appear here.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Proactive Notification Panel -->
+    <div class="agent-panel" id="panel-notification">
+        <h3>🔔 Proactive Notification Agent</h3>
+        <p>
+            Monitors campaign performance continuously and alerts you about anomalies, opportunities, or required actions.
+        </p>
+
+        <!-- Notifications Display -->
+        <div class="campaign-card" style="margin-bottom: 1.5rem;">
+            <div class="section-header">
+                <span class="section-icon">🔔</span>
+                <h5>Your Notifications</h5>
+                <button onclick="loadNotifications()" class="btn btn-secondary" style="width: 40%; margin-left: auto;">
+                    🔄 Refresh
+                </button>
+            </div>
+            <div id="notifications-container" style="max-height: 400px; overflow-y: auto;">
+                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                    Click "Monitor Campaigns" to check for alerts
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitoring Actions -->
+        <div class="campaign-card">
+            <div class="section-header">
+                <span class="section-icon">📊</span>
+                <h5>Monitor Campaigns</h5>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <span>🎯</span> Select Campaign (Optional)
+                </label>
+                <select id="notification-campaign-select" style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                    <option value="">-- Monitor All Campaigns --</option>
+                    {% for campaign in campaigns %}
+                    <option value="{{ campaign.id }}">{{ campaign.name }} ({{ campaign.get_status_display }})</option>
+                    {% endfor %}
+                </select>
+                <div class="field-hint">Leave empty to monitor all active campaigns</div>
+            </div>
+
+            <button onclick="monitorCampaigns()" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                🔍 Monitor Campaigns
+            </button>
+        </div>
     </div>
 </div>
 
@@ -1798,13 +2057,426 @@
         }
     }
 
-    // Handle hash in URL (e.g., #qa, #campaign)
-    window.addEventListener('DOMContentLoaded', () => {
+    // Handle hash in URL (e.g., #qa, #campaign, #document-authoring)
+    function handleHashChange() {
         const hash = window.location.hash.substring(1);
         if (hash) {
-            switchTab(hash);
+            // Map URL-friendly hash names to tab names
+            const hashMap = {
+                'document-authoring': 'document',
+                'document': 'document',
+                'outreach-campaign': 'campaign',
+                'campaign': 'campaign',
+                'market-research': 'research',
+                'research': 'research'
+            };
+            const tabName = hashMap[hash] || hash;
+            if (tabName) {
+                switchTab(tabName);
+                // Scroll to top of agents container
+                const container = document.querySelector('.agents-container');
+                if (container) {
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
         }
+    }
+
+    // Handle hash on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        handleHashChange();
     });
 
+    // Also handle hash changes (when clicking links with hash)
+    window.addEventListener('hashchange', () => {
+        handleHashChange();
+    });
+
+    // Format presentation content with slide breaks
+    // function formatPresentation(content) {
+    //     if (!content) return '';
+        
+    //     // Split by slide markers
+    //     const slides = content.split(/(?=#\s*Slide\s+\d+:|Slide\s+\d+:|##\s*Slide\s+\d+)/i);
+    //     let formatted = '';
+        
+    //     slides.forEach((slide, index) => {
+    //         if (slide.trim()) {
+    //             // Add slide container
+    //             formatted += `\n\n<div class="presentation-slide" style="margin: 2rem 0; padding: 1.5rem; background: #f8f9fa; border-left: 4px solid var(--primary-color); border-radius: var(--radius-md);">\n`;
+    //             formatted += slide.trim();
+    //             formatted += `\n</div>\n`;
+    //         }
+    //     });
+        
+    //     return formatted || content;
+    // }
+
+    // Document Authoring Functions
+    function updateDocumentForm() {
+        const action = document.getElementById('document-action').value;
+        const formContainer = document.getElementById('document-form-container');
+        
+        if (action) {
+            formContainer.style.display = 'block';
+            const submitText = document.getElementById('document-submit-text');
+            if (action === 'create') {
+                submitText.textContent = '📄 Create & Save Document';
+            } else if (action === 'generate') {
+                submitText.textContent = '👁️ Generate Preview';
+            }
+        } else {
+            formContainer.style.display = 'none';
+        }
+        
+        // Hide results when form changes
+        document.getElementById('document-results').style.display = 'none';
+    }
+
+    async function handleDocument(event) {
+        event.preventDefault();
+
+        const action = document.getElementById('document-action').value;
+        if (!action) {
+            alert('Please select an action first.');
+            return;
+        }
+
+        const documentType = document.getElementById('document-type').value;
+        if (!documentType) {
+            alert('Please select a document type.');
+            return;
+        }
+
+        const loading = document.getElementById('document-loading');
+        const submitText = document.getElementById('document-submit-text');
+        const results = document.getElementById('document-results');
+        const resultsContent = document.getElementById('document-results-content');
+
+        // Show loading
+        loading.style.display = 'inline';
+        submitText.style.display = 'none';
+        results.style.display = 'none';
+
+        try {
+            // Build document data
+            const documentData = {
+                title: document.getElementById('document-title').value,
+                requirements: document.getElementById('document-requirements').value,
+                key_points: document.getElementById('document-context').value
+            };
+
+            const campaignId = document.getElementById('document-campaign-select').value;
+            
+            const requestData = {
+                action: action,
+                document_type: documentType,
+                document_data: documentData,
+                campaign_id: campaignId ? parseInt(campaignId) : null,
+                context: {}
+            };
+
+            const response = await fetch('{% url "test_document_authoring" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    throw new Error(errorJson.error || `HTTP ${response.status}`);
+                } catch {
+                    throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+                }
+            }
+
+            const data = await response.json();
+
+            if (data.success) {
+                let output = '';
+
+                if (action === 'create') {
+                    output = `## ✅ Document Created Successfully\n\n`;
+                    output += `**Document ID**: ${data.document_id}\n`;
+                    output += `**Title**: ${data.title}\n`;
+                    output += `**Type**: ${data.document_type}\n`;
+                    output += `**Status**: ${data.status}\n\n`;
+                    output += `${data.message || 'Document created successfully!'}\n\n`;
+                    // output += `📍 **Saved Location**: Database (MarketingDocument model)\n\n`;
+                    // output += `<div style="margin: 1rem 0; padding: 1rem; background: #e8f4f8; border-radius: var(--radius-md); border-left: 4px solid var(--primary-color);">`;
+                    // output += `<strong>🔗 Quick Links:</strong><br>`;
+                    // output += `• <a href="/marketing/documents/" style="color: var(--primary-color); text-decoration: underline;">View All Documents</a><br>`;
+                    // output += `• <a href="/marketing/documents/${data.document_id}/" style="color: var(--primary-color); text-decoration: underline;">View This Document</a>`;
+                    // output += `</div>\n\n`;
+                    
+                    // Add download buttons based on document type
+                    output += `<div style="margin: 1rem 0; padding: 1rem; background: #f0f9ff; border-radius: var(--radius-md); border: 1px solid var(--primary-color);">`;
+                    output += `<strong>📥 Download Document:</strong><br><br>`;
+                    
+                    // PDF for all types
+                    output += `<a href="/marketing/documents/${data.document_id}/download/pdf/" style="display: inline-block; padding: 0.5rem 1rem; margin: 0.25rem; background: #dc2626; color: white; text-decoration: none; border-radius: var(--radius-md); font-size: 0.9rem;">📄 PDF</a>`;
+                    
+                    // DOCX for all types
+                    output += `<a href="/marketing/documents/${data.document_id}/download/docx/" style="display: inline-block; padding: 0.5rem 1rem; margin: 0.25rem; background: #2563eb; color: white; text-decoration: none; border-radius: var(--radius-md); font-size: 0.9rem;">📝 Word (DOCX)</a>`;
+                    
+                    // PPTX only for presentations
+                    // if (data.document_type === 'presentation') {
+                    //     output += `<a href="/marketing/documents/${data.document_id}/download/pptx/" style="display: inline-block; padding: 0.5rem 1rem; margin: 0.25rem; background: #ea580c; color: white; text-decoration: none; border-radius: var(--radius-md); font-size: 0.9rem;">📊 PowerPoint (PPTX)</a>`;
+                    // }
+                    
+                    output += `</div>\n\n`;
+                    
+                    if (data.content) {
+                        output += `---\n\n## 📄 Document Content\n\n`;
+                        // Format content based on document type
+                        // if (data.document_type === 'presentation') {
+                        //     output += formatPresentation(data.content);
+                        // } else {
+                            output += data.content;
+                        // }
+                    }
+                } else if (action === 'generate') {
+                    output = `## 👁️ Document Preview\n\n`;
+                    output += `**Title**: ${data.title}\n`;
+                    output += `**Type**: ${data.document_type}\n\n`;
+                    output += `---\n\n## 📄 Generated Content\n\n`;
+                    if (data.content) {
+                        // if (data.document_type === 'presentation') {
+                        //     output += formatPresentation(data.content);
+                        // } else {
+                            output += data.content;
+                        // }
+                    } else {
+                        output += 'No content generated.';
+                    }
+                    output += `\n\n💡 **Note:** This is a preview. Use "Create & Save Document" to save it to the database.`;
+                }
+
+                // Convert markdown to HTML and display
+                resultsContent.innerHTML = markdownToHtml(output);
+                results.style.display = 'block';
+                
+                // Scroll to results
+                results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                throw new Error(data.error || 'Unknown error occurred');
+            }
+        } catch (error) {
+            resultsContent.innerHTML = `<div style="color: #e74c3c; padding: 1rem; background: #fee; border-radius: var(--radius-md); border: 1px solid #e74c3c;">
+                <strong>❌ Error:</strong> ${error.message}
+            </div>`;
+            results.style.display = 'block';
+        } finally {
+            loading.style.display = 'none';
+            submitText.style.display = 'inline';
+        }
+    }
+
+    // Proactive Notification Functions
+    async function monitorCampaigns() {
+        const campaignId = document.getElementById('notification-campaign-select').value;
+        const container = document.getElementById('notifications-container');
+        
+        container.innerHTML = '<div style="text-align: center; padding: 2rem;"><div class="spinner"></div><p>Monitoring campaigns...</p></div>';
+        
+        try {
+            const action = campaignId ? 'check_campaign' : 'monitor';
+            const requestData = {
+                action: action,
+                campaign_id: campaignId ? parseInt(campaignId) : null,
+                context: {}
+            };
+            
+            const response = await fetch('{% url "test_proactive_notification" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Show summary first
+                let summary = `<div style="padding: 1rem; background: #f0f9ff; border-radius: var(--radius-md); margin-bottom: 1rem; border-left: 4px solid var(--primary-color);">`;
+                summary += `<strong>✅ Monitoring Complete</strong><br>`;
+                summary += `Campaigns Monitored: ${data.campaigns_monitored || 1}<br>`;
+                summary += `New Notifications Created: ${data.notifications_created || 0}<br>`;
+                summary += `Issues Found: ${data.issues_found || 0}<br>`;
+                summary += `Opportunities Found: ${data.opportunities_found || 0}`;
+                if (data.notifications_created === 0 && (data.issues_found > 0 || data.opportunities_found > 0)) {
+                    summary += `<br><small style="color: var(--text-secondary);">Note: Similar notifications may already exist from previous monitoring.</small>`;
+                }
+                summary += `</div>`;
+                
+                // Load recent notifications and history
+                await loadNotifications();
+                await loadNotificationHistory();
+                
+                // Prepend summary to notifications
+                const currentContent = container.innerHTML;
+                container.innerHTML = summary + currentContent;
+            } else {
+                container.innerHTML = `<div style="padding: 1rem; background: #fee; border-radius: var(--radius-md); color: #c00;">Error: ${data.error || 'Unknown error'}</div>`;
+            }
+        } catch (error) {
+            container.innerHTML = `<div style="padding: 1rem; background: #fee; border-radius: var(--radius-md); color: #c00;">Error: ${error.message}</div>`;
+        }
+    }
+    
+    async function loadNotifications() {
+        const container = document.getElementById('notifications-container');
+        
+        try {
+            const response = await fetch('{% url "get_notifications" %}?unread_only=true');
+            const data = await response.json();
+            
+            if (data.success) {
+                if (data.count === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">No unread notifications. All caught up! 🎉</div>';
+                } else {
+                    let html = `<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: #f0f9ff; border-radius: var(--radius-md); font-size: 0.9rem;">`;
+                    html += `<strong>Unread: ${data.count}</strong>`;
+                    html += `</div>`;
+                    
+                    data.notifications.forEach(notif => {
+                        html += renderNotification(notif, false);
+                    });
+                    
+                    container.innerHTML = html;
+                }
+            } else {
+                container.innerHTML = `<div style="padding: 1rem; background: #fee; border-radius: var(--radius-md); color: #c00;">Error: ${data.error || 'Unknown error'}</div>`;
+            }
+        } catch (error) {
+            container.innerHTML = `<div style="padding: 1rem; background: #fee; border-radius: var(--radius-md); color: #c00;">Error: ${error.message}</div>`;
+        }
+    }
+    
+    async function loadNotificationHistory() {
+        const container = document.getElementById('notification-history-container');
+        
+        try {
+            const response = await fetch('{% url "get_notifications" %}?unread_only=false');
+            const data = await response.json();
+            
+            if (data.success) {
+                // Filter to only show read notifications
+                const readNotifications = data.notifications.filter(n => n.is_read);
+                
+                if (readNotifications.length === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">No notification history yet.</div>';
+                } else {
+                    let html = `<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: #f9fafb; border-radius: var(--radius-md); font-size: 0.9rem;">`;
+                    html += `<strong>History: ${readNotifications.length} read notifications</strong>`;
+                    html += `</div>`;
+                    
+                    readNotifications.forEach(notif => {
+                        html += renderNotification(notif, true);
+                    });
+                    
+                    container.innerHTML = html;
+                }
+            } else {
+                container.innerHTML = `<div style="padding: 1rem; background: #fee; border-radius: var(--radius-md); color: #c00;">Error: ${data.error || 'Unknown error'}</div>`;
+            }
+        } catch (error) {
+            container.innerHTML = `<div style="padding: 1rem; background: #fee; border-radius: var(--radius-md); color: #c00;">Error: ${error.message}</div>`;
+        }
+    }
+    
+    function renderNotification(notif, isHistory) {
+        const priorityColors = {
+            'low': '#6b7280',
+            'medium': '#3b82f6',
+            'high': '#f59e0b',
+            'critical': '#ef4444'
+        };
+        const priorityColor = priorityColors[notif.priority] || '#6b7280';
+        
+        let html = `<div style="padding: 1rem; margin-bottom: 0.75rem; background: ${notif.is_read ? '#f9fafb' : '#fff'}; border-radius: var(--radius-md); border-left: 4px solid ${priorityColor}; border: 1px solid var(--border-color);">`;
+        html += `<div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">`;
+        html += `<div style="flex: 1;">`;
+        html += `<strong style="color: ${priorityColor}; ${notif.is_read ? 'opacity: 0.7;' : ''}">${notif.title}</strong>`;
+        if (notif.campaign_name) {
+            html += `<br><small style="color: var(--text-secondary);">Campaign: ${notif.campaign_name}</small>`;
+        }
+        html += `</div>`;
+        html += `<div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">`;
+        html += `<span style="padding: 0.25rem 0.5rem; background: ${priorityColor}; color: white; border-radius: var(--radius-sm); font-size: 0.75rem;">${notif.priority}</span>`;
+        if (!notif.is_read && !isHistory) {
+            html += `<button onclick="markRead(${notif.id})" style="padding: 0.25rem 0.5rem; background: var(--primary-color); color: white; border: none; border-radius: var(--radius-sm); font-size: 0.75rem; cursor: pointer;">Mark Read</button>`;
+        }
+        html += `<button onclick="deleteNotification(${notif.id})" style="padding: 0.25rem 0.5rem; background: #ef4444; color: white; border: none; border-radius: var(--radius-sm); font-size: 0.75rem; cursor: pointer;" title="Delete notification">🗑️</button>`;
+        html += `</div>`;
+        html += `</div>`;
+        html += `<p style="margin: 0.5rem 0; color: var(--text-secondary); ${notif.is_read ? 'opacity: 0.7;' : ''}">${notif.message}</p>`;
+        if (notif.action_url) {
+            html += `<a href="${notif.action_url}" style="color: var(--primary-color); text-decoration: underline; font-size: 0.9rem;">View Campaign →</a>`;
+        }
+        html += `<div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">${new Date(notif.created_at).toLocaleString()}</div>`;
+        html += `</div>`;
+        
+        return html;
+    }
+    
+    async function markRead(notificationId) {
+        try {
+            const response = await fetch(`/marketing/api/notifications/${notificationId}/read/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            });
+            
+            if (response.ok) {
+                await loadNotifications();
+                await loadNotificationHistory();
+            }
+        } catch (error) {
+            console.error('Error marking notification as read:', error);
+        }
+    }
+    
+    async function deleteNotification(notificationId) {
+        if (!confirm('Are you sure you want to delete this notification?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/marketing/api/notifications/${notificationId}/delete/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            });
+            
+            if (response.ok) {
+                await loadNotifications();
+                await loadNotificationHistory();
+            } else {
+                const data = await response.json();
+                alert('Error: ' + (data.error || 'Failed to delete notification'));
+            }
+        } catch (error) {
+            console.error('Error deleting notification:', error);
+            alert('Error deleting notification: ' + error.message);
+        }
+    }
+    
+    // Load notifications on page load if notification tab is active
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.location.hash === '#notification') {
+            loadNotifications();
+            loadNotificationHistory();
+        }
+    });
 </script>
 {% endblock %}

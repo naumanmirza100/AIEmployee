@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+{% block title %}{{ document.title }} - Marketing Document{% endblock %}
+{% block content %}
+<style>
+    .document-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .document-header {
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .document-meta {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+    .meta-item {
+        padding: 0.5rem 1rem;
+        background: var(--background-color);
+        border-radius: var(--radius-md);
+        font-size: 0.9rem;
+    }
+    .document-content {
+        background: var(--card-background);
+        padding: 2rem;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border-color);
+        line-height: 1.8;
+    }
+    .document-content h1,
+    .document-content h2,
+    .document-content h3 {
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        color: var(--text-primary);
+    }
+    .document-content h1 { font-size: 2rem; border-bottom: 2px solid var(--border-color); padding-bottom: 0.5rem; }
+    .document-content h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; }
+    .document-content h3 { font-size: 1.25rem; }
+    .document-content p { margin-bottom: 1rem; }
+    .document-content ul,
+    .document-content ol { margin: 1rem 0; padding-left: 2rem; }
+    .document-content li { margin-bottom: 0.5rem; }
+    .document-content code {
+        background: var(--background-color);
+        padding: 0.2rem 0.4rem;
+        border-radius: var(--radius-sm);
+        font-family: monospace;
+    }
+    .document-content pre {
+        background: var(--background-color);
+        padding: 1rem;
+        border-radius: var(--radius-md);
+        overflow-x: auto;
+        margin: 1rem 0;
+    }
+    .presentation-slide {
+        margin: 2rem 0;
+        padding: 1.5rem;
+        background: #f8f9fa;
+        border-left: 4px solid var(--primary-color);
+        border-radius: var(--radius-md);
+    }
+    .document-type-badge {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        border-radius: var(--radius-md);
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-right: 0.5rem;
+    }
+    .document-type-badge.strategy { background: #3b82f6; color: white; }
+    .document-type-badge.proposal { background: #10b981; color: white; }
+    .document-type-badge.report { background: #f59e0b; color: white; }
+    .document-type-badge.presentation { background: #8b5cf6; color: white; }
+    .document-type-badge.brief { background: #ec4899; color: white; }
+</style>
+
+<div class="document-container">
+    <div class="document-header">
+        <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 1rem;">
+            <div style="flex: 1;">
+                <h1 style="margin: 0 0 0.5rem 0;">{{ document.title }}</h1>
+                <div class="document-meta">
+                    <span class="document-type-badge {{ document.document_type }}">
+                        {{ document.get_document_type_display }}
+                    </span>
+                    <span class="meta-item">
+                        📅 Created: {{ document.created_at|date:"M d, Y H:i" }}
+                    </span>
+                    {% if document.updated_at != document.created_at %}
+                    <span class="meta-item">
+                        ✏️ Updated: {{ document.updated_at|date:"M d, Y H:i" }}
+                    </span>
+                    {% endif %}
+                    <span class="meta-item">
+                        📊 Status: {{ document.get_status_display }}
+                    </span>
+                    {% if document.campaign %}
+                    <span class="meta-item">
+                        🎯 Campaign: <a href="{% url 'campaign_detail' document.campaign.id %}" style="color: var(--primary-color);">{{ document.campaign.name }}</a>
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                <!-- <a href="{% url 'documents_list' %}" class="btn btn-secondary" style="text-decoration: none;">
+                    ← Back to Documents
+                </a> -->
+                <!-- <a href="{% url 'marketing_agents_test' %}#document" class="btn btn-primary" style="width: 40%; text-decoration: none;">
+                    ➕ Create New
+                </a> -->
+                {% if available_formats %}
+                <div style="width: 100%; margin-left: 1rem; padding-left: 1rem; border-left: 2px solid var(--border-color);">
+                    <span style="font-weight: 600; margin-right: 0.5rem; display: block; margin-bottom: 0.5rem;">📥 Download:</span>
+                    {% for format_code, format_name in available_formats %}
+                    <div style="margin-bottom: 0.5rem;">
+                    <a href="{% url 'document_download' document.id format_code %}" 
+                       class="btn" 
+                       style="text-decoration: none; padding: 0.5rem 1rem; margin: 0 0.25rem; background: var(--primary-color); color: white; border-radius: var(--radius-md); font-size: 0.9rem;"
+                       download>
+                        {{ format_name }}
+                    </a>
+                </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="document-content" id="document-content">
+        {{ document.content|linebreaks }}
+    </div>
+</div>
+
+<script>
+    // Format document content with markdown-like formatting
+    document.addEventListener('DOMContentLoaded', function() {
+        const content = document.getElementById('document-content');
+        if (!content) return;
+        
+        let html = content.innerHTML;
+        
+        // Convert markdown headers
+        html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+        html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+        html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+        
+        // Convert bold
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // Convert lists
+        html = html.replace(/^\- (.*$)/gim, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+        
+        // Format presentation slides
+        {% if document.document_type == 'presentation' %}
+        html = html.replace(/(#\s*Slide\s+\d+:.*?)(?=#\s*Slide\s+\d+:|$)/gis, function(match) {
+            return '<div class="presentation-slide">' + match + '</div>';
+        });
+        {% endif %}
+        
+        // Preserve line breaks
+        html = html.replace(/\n/g, '<br>');
+        
+        content.innerHTML = html;
+    });
+</script>
+{% endblock %}
+

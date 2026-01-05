@@ -26,3 +26,15 @@ class MarketingAgentConfig(AppConfig):
             AgentRegistry.register("outreach_campaign", OutreachCampaignAgent)
         except ImportError:
             pass  # Agent not implemented yet
+        
+        try:
+            from .agents.document_authoring_agent import DocumentAuthoringAgent
+            AgentRegistry.register("document_authoring", DocumentAuthoringAgent)
+        except ImportError:
+            pass  # Agent not implemented yet
+        
+        try:
+            from .agents.proactive_notification_agent import ProactiveNotificationAgent
+            AgentRegistry.register("proactive_notification", ProactiveNotificationAgent)
+        except ImportError:
+            pass  # Agent not implemented yet

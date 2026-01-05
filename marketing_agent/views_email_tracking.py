@@ -26,8 +26,17 @@ def track_email_open(request, tracking_token):
     try:
         send_history = get_object_or_404(EmailSendHistory, tracking_token=tracking_token)
         
+        # Debug: Log tracking attempt
+        logger.info(
+            f"[EMAIL OPEN TRACKING] Token: {tracking_token[:20]}..., "
+            f"Email: {send_history.recipient_email}, "
+            f"Current Status: {send_history.status}, "
+            f"Campaign: {send_history.campaign.name if send_history.campaign else 'N/A'}"
+        )
+        
         # Update status to 'opened' if not already opened or clicked
         if send_history.status not in ['opened', 'clicked']:
+            old_status = send_history.status
             # First mark as delivered if not already sent
             if send_history.status == 'sent' and not send_history.delivered_at:
                 send_history.status = 'delivered'
@@ -38,7 +47,19 @@ def track_email_open(request, tracking_token):
             send_history.opened_at = timezone.now()
             send_history.save()
             
-            logger.info(f"Email opened: {send_history.recipient_email} (Campaign: {send_history.campaign.name})")
+            logger.info(
+                f"✅ [EMAIL OPENED] Email: {send_history.recipient_email}, "
+                f"Campaign: {send_history.campaign.name if send_history.campaign else 'N/A'}, "
+                f"Status changed: {old_status} → opened, "
+                f"Token: {tracking_token[:10]}..., "
+                f"Opened At: {send_history.opened_at}"
+            )
+        else:
+            logger.debug(
+                f"[EMAIL ALREADY TRACKED] Email: {send_history.recipient_email}, "
+                f"Current Status: {send_history.status}, "
+                f"Token: {tracking_token[:10]}..."
+            )
         
         # Return 1x1 transparent GIF pixel
         # This is a standard 1x1 transparent GIF
@@ -86,11 +107,26 @@ def track_email_click(request, tracking_token):
             if send_history.status in ['sent', 'delivered'] and not send_history.opened_at:
                 send_history.opened_at = timezone.now()
             
+            old_status = send_history.status
             send_history.status = 'clicked'
             send_history.clicked_at = timezone.now()
             send_history.save()
             
-            logger.info(f"Email link clicked: {send_history.recipient_email} -> {original_url} (Campaign: {send_history.campaign.name})")
+            logger.info(
+                f"✅ [EMAIL CLICKED] Email: {send_history.recipient_email}, "
+                f"Campaign: {send_history.campaign.name if send_history.campaign else 'N/A'}, "
+                f"Status changed: {old_status} → clicked, "
+                f"URL: {original_url[:100]}..., "
+                f"Token: {tracking_token[:10]}..., "
+                f"Clicked At: {send_history.clicked_at}"
+            )
+        else:
+            logger.debug(
+                f"[EMAIL ALREADY CLICKED] Email: {send_history.recipient_email}, "
+                f"Current Status: {send_history.status}, "
+                f"URL: {original_url[:100]}..., "
+                f"Token: {tracking_token[:10]}..."
+            )
         
         # Redirect to original URL
         return HttpResponseRedirect(original_url)
@@ -104,6 +140,7 @@ def track_email_click(request, tracking_token):
             return HttpResponseRedirect(original_url)
         except:
             return HttpResponseRedirect('/')
+
 
 
 

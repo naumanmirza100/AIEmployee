@@ -266,9 +266,37 @@ class EmailService:
         
         try:
             # Get base URL for tracking endpoints
-            # For now, we'll use a relative URL that will be resolved by the view
-            base_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
+            # Try multiple methods to get the correct base URL
+            base_url = None
+            
+            # Method 1: Check SITE_URL setting (recommended)
+            base_url = getattr(settings, 'SITE_URL', None)
+            
+            # Method 2: Try to get from ALLOWED_HOSTS
+            if not base_url and hasattr(settings, 'ALLOWED_HOSTS') and settings.ALLOWED_HOSTS:
+                host = settings.ALLOWED_HOSTS[0]
+                if host != '*':
+                    protocol = 'https' if getattr(settings, 'USE_HTTPS', False) else 'http'
+                    # Add port for development if not specified
+                    if ':' not in host and protocol == 'http':
+                        base_url = f"{protocol}://{host}:8000"
+                    else:
+                        base_url = f"{protocol}://{host}"
+            
+            # Method 3: Final fallback to localhost (for development only)
+            if not base_url:
+                base_url = 'http://127.0.0.1:8000'  # Default for local development
+                logger.warning(
+                    f"SITE_URL not configured in settings. Using {base_url}. "
+                    "Tracking URLs may not work from external email clients. "
+                    "To fix: Add SITE_URL = 'http://your-domain.com' to settings.py or .env file"
+                )
+            
             tracking_token = send_history.tracking_token
+            
+            if not tracking_token:
+                logger.error(f"No tracking token for EmailSendHistory {send_history.id}")
+                return html_content
             
             # Add tracking pixel before </body> tag or at the end
             tracking_pixel_url = f"{base_url}/marketing/track/email/{tracking_token}/open/"
