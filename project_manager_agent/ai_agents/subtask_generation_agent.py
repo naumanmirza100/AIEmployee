@@ -45,6 +45,13 @@ Task Information:
 
 Your goal is to break down this task into 4-8 detailed, actionable subtasks that help someone understand exactly what they need to do to complete this task.
 
+IMPORTANT: You must also provide a DETAILED reasoning explaining:
+- WHY this task should be broken down in this specific way
+- HOW the subtasks relate to each other and the overall task goal
+- WHAT approach or methodology should be used to complete this task
+- WHAT potential challenges or considerations need to be addressed
+- HOW to execute these subtasks effectively
+
 Guidelines for creating subtasks:
 1. Make each subtask specific and actionable (someone should be able to understand what to do)
 2. Cover all aspects of the task (planning, implementation, testing, documentation if needed)
@@ -58,26 +65,30 @@ For each subtask, provide:
 - description: A detailed explanation (2-3 sentences) of what needs to be done, why it's important, and expected outcomes
 - order: The sequence number (1, 2, 3, etc.) indicating when this subtask should be done
 
-Return a JSON array with this structure:
-[
-  {{
-    "title": "Specific subtask title",
-    "description": "Detailed description of what needs to be done, why it's important, and expected outcomes. This should help someone understand exactly what to do.",
-    "order": 1
-  }},
-  {{
-    "title": "Next subtask title",
-    "description": "Detailed description...",
-    "order": 2
-  }}
-]
+Return a JSON object with this structure:
+{{
+  "subtasks": [
+    {{
+      "title": "Specific subtask title",
+      "description": "Detailed description of what needs to be done, why it's important, and expected outcomes. This should help someone understand exactly what to do.",
+      "order": 1
+    }},
+    {{
+      "title": "Next subtask title",
+      "description": "Detailed description...",
+      "order": 2
+    }}
+  ],
+  "task_reasoning": "DETAILED explanation (4-6 sentences): WHY this task should be broken down in this specific way, HOW the subtasks relate to each other and the overall task goal, WHAT approach or methodology should be used to complete this task, WHAT potential challenges or considerations need to be addressed, and HOW to execute these subtasks effectively."
+}}
 
 Rules:
-- Return ONLY the JSON array, no explanations
+- Return ONLY the JSON object, no explanations
 - Create 4-8 subtasks (adjust based on task complexity)
 - Make subtasks specific to this task (not generic)
 - Order subtasks logically (order field: 1, 2, 3, etc.)
-- Each subtask should be actionable and clear"""
+- Each subtask should be actionable and clear
+- Include detailed task_reasoning explaining the breakdown strategy"""
 
         try:
             response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=2048)
@@ -93,23 +104,41 @@ Rules:
                 response = response[json_start:json_end].strip()
             
             # Parse JSON response
-            subtasks_data = json.loads(response)
-            if not isinstance(subtasks_data, list):
-                subtasks_data = [subtasks_data]
+            parsed_data = json.loads(response)
             
-            return subtasks_data
+            # Handle both old format (array) and new format (object with subtasks and task_reasoning)
+            if isinstance(parsed_data, dict):
+                subtasks_data = parsed_data.get('subtasks', [])
+                task_reasoning = parsed_data.get('task_reasoning', '')
+                # Store reasoning in the return dict for later use
+                return {
+                    'subtasks': subtasks_data,
+                    'task_reasoning': task_reasoning
+                }
+            elif isinstance(parsed_data, list):
+                # Old format - just return the list
+                return parsed_data
+            else:
+                return []
             
         except json.JSONDecodeError as e:
             self.log_action("Error parsing subtasks JSON", {"error": str(e), "response": response[:200]})
             # Try to extract JSON from markdown code blocks
             try:
                 import re
-                json_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', response, re.DOTALL)
+                # Try to match both array and object formats
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```', response, re.DOTALL)
                 if json_match:
-                    subtasks_data = json.loads(json_match.group(1))
-                    if not isinstance(subtasks_data, list):
-                        subtasks_data = [subtasks_data]
-                    return subtasks_data
+                    parsed_data = json.loads(json_match.group(1))
+                    if isinstance(parsed_data, dict):
+                        return {
+                            'subtasks': parsed_data.get('subtasks', []),
+                            'task_reasoning': parsed_data.get('task_reasoning', '')
+                        }
+                    elif isinstance(parsed_data, list):
+                        return parsed_data
+                    else:
+                        return []
             except:
                 pass
             
@@ -118,7 +147,7 @@ Rules:
             self.log_action("Error generating subtasks", {"error": str(e)})
             return []
     
-    def generate_subtasks_for_project(self, tasks: List[Dict]) -> Dict[int, List[Dict]]:
+    def generate_subtasks_for_project(self, tasks: List[Dict]) -> Dict[int, Dict]:
         """
         Generate subtasks for all tasks in a project.
         
@@ -126,14 +155,22 @@ Rules:
             tasks (List[Dict]): List of tasks
             
         Returns:
-            Dict[int, List[Dict]]: Dictionary mapping task_id to list of subtasks
+            Dict[int, Dict]: Dictionary mapping task_id to dict with 'subtasks' list and 'task_reasoning' string
         """
         self.log_action("Generating subtasks for project", {"task_count": len(tasks)})
         
         result = {}
         for task in tasks:
-            subtasks = self.generate_subtasks(task)
-            result[task.get('id')] = subtasks
+            subtask_result = self.generate_subtasks(task)
+            # Handle both old format (list) and new format (dict)
+            if isinstance(subtask_result, dict):
+                result[task.get('id')] = subtask_result
+            else:
+                # Old format - wrap in dict
+                result[task.get('id')] = {
+                    'subtasks': subtask_result,
+                    'task_reasoning': ''
+                }
         
         return result
     
@@ -158,12 +195,22 @@ Rules:
                 if not task:
                     return {"success": False, "error": "Task is required"}
                 
-                subtasks = self.generate_subtasks(task)
-                return {
-                    "success": True,
-                    "task_id": task.get('id'),
-                    "subtasks": subtasks
-                }
+                subtask_result = self.generate_subtasks(task)
+                # Handle both old format (list) and new format (dict)
+                if isinstance(subtask_result, dict):
+                    return {
+                        "success": True,
+                        "task_id": task.get('id'),
+                        "subtasks": subtask_result.get('subtasks', []),
+                        "task_reasoning": subtask_result.get('task_reasoning', '')
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "task_id": task.get('id'),
+                        "subtasks": subtask_result,
+                        "task_reasoning": ''
+                    }
             
             elif action == "generate_for_project":
                 tasks = kwargs.get('tasks', [])

@@ -265,8 +265,6 @@ INSTALLED_APPS = [
     'recruitment_agent',
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
-    
-   
     'api',  # API app
 ]
 
@@ -302,32 +300,9 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 
 
 # --------------------
-# Database Configuration
+# Database (SQL Server Express)
 # --------------------
-# Use SQLite for development (no setup required)
-# To use SQL Server instead, set USE_SQL_SERVER=True in .env
-USE_SQL_SERVER = os.getenv('USE_SQL_SERVER', 'False').lower() == 'true'
 
-if USE_SQL_SERVER:
-    # SQL Server Configuration
-    DATABASES = {
-        'default': {
-            'ENGINE': 'mssql',
-            'NAME': os.getenv('DB_NAME', 'project_manager_db'),
-            'HOST': os.getenv('DB_HOST', 'localhost'),
-            'OPTIONS': {
-                'driver': 'ODBC Driver 17 for SQL Server',
-                'trusted_connection': 'yes',
-            },
-        }
-    }
-else:
-    # SQLite Configuration (default for development)
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }}
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
@@ -337,7 +312,9 @@ DATABASES = {
             'driver': 'ODBC Driver 17 for SQL Server',
             'trusted_connection': 'yes',
         },
+
     }}
+
 
 
 # --------------------

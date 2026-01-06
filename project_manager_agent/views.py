@@ -97,16 +97,23 @@ def test_task_prioritization(request):
             task=data.get('task', {})
         )
         
-        # If action is 'prioritize' and we have results, save the priorities to database
+        # If action is 'prioritize' and we have results, save the priorities and reasoning to database
         if action == 'prioritize' and result.get('success') and result.get('tasks'):
             updated_count = 0
             for task_data in result['tasks']:
                 task_id = task_data.get('id')
                 new_priority = task_data.get('ai_priority')  # The recommended priority
+                reasoning = task_data.get('ai_reasoning', '')  # The AI reasoning
                 if task_id and new_priority and new_priority in ['low', 'medium', 'high']:
                     try:
                         task = Task.objects.get(id=task_id, project__owner=request.user)
                         task.priority = new_priority
+                        # Update or append reasoning
+                        if reasoning:
+                            if task.ai_reasoning:
+                                task.ai_reasoning = task.ai_reasoning + "\n\n" + reasoning
+                            else:
+                                task.ai_reasoning = reasoning
                         task.save()
                         updated_count += 1
                     except Task.DoesNotExist:
@@ -118,6 +125,94 @@ def test_task_prioritization(request):
             if updated_count > 0:
                 result['updated_count'] = updated_count
                 result['message'] = f'Successfully updated priorities for {updated_count} task(s)'
+        
+        # If action is 'order' and we have results, save the reasoning to database
+        if action == 'order' and result.get('success') and result.get('tasks'):
+            updated_count = 0
+            for task_data in result['tasks']:
+                task_id = task_data.get('id')
+                reasoning = task_data.get('order_reasoning') or task_data.get('ai_reasoning', '')
+                if task_id and reasoning:
+                    try:
+                        task = Task.objects.get(id=task_id, project__owner=request.user)
+                        # Update or append reasoning
+                        if reasoning:
+                            if task.ai_reasoning:
+                                task.ai_reasoning = task.ai_reasoning + "\n\n" + reasoning
+                            else:
+                                task.ai_reasoning = reasoning
+                        task.save()
+                        updated_count += 1
+                    except Task.DoesNotExist:
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error updating reasoning for task {task_id}: {str(e)}")
+                        continue
+            
+            if updated_count > 0:
+                result['updated_reasoning_count'] = updated_count
+        
+        # If action is 'bottlenecks' and we have results, save reasoning for affected tasks
+        if action == 'bottlenecks' and result.get('success') and result.get('analysis'):
+            analysis = result.get('analysis', {})
+            bottlenecks = analysis.get('bottlenecks', [])
+            updated_count = 0
+            for bottleneck in bottlenecks:
+                affected_tasks = bottleneck.get('affected_tasks', [])
+                bottleneck_reasoning = bottleneck.get('reasoning', '')
+                if bottleneck_reasoning:
+                    reasoning_prefix = f"[Bottleneck Analysis: {bottleneck.get('type', 'unknown')}] "
+                    full_reasoning = reasoning_prefix + bottleneck_reasoning
+                    for task_info in affected_tasks:
+                        task_id = task_info.get('task_id') if isinstance(task_info, dict) else task_info
+                        task_reasoning = task_info.get('task_reasoning', '') if isinstance(task_info, dict) else ''
+                        try:
+                            task = Task.objects.get(id=task_id, project__owner=request.user)
+                            # Combine bottleneck reasoning with task-specific reasoning
+                            combined_reasoning = full_reasoning
+                            if task_reasoning:
+                                combined_reasoning += "\n\n" + task_reasoning
+                            if task.ai_reasoning:
+                                task.ai_reasoning = task.ai_reasoning + "\n\n" + combined_reasoning
+                            else:
+                                task.ai_reasoning = combined_reasoning
+                            task.save()
+                            updated_count += 1
+                        except Task.DoesNotExist:
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error updating bottleneck reasoning for task {task_id}: {str(e)}")
+                            continue
+            
+            if updated_count > 0:
+                result['updated_reasoning_count'] = updated_count
+        
+        # If action is 'delegation' and we have results, save reasoning for suggested tasks
+        if action == 'delegation' and result.get('success') and result.get('suggestions'):
+            suggestions = result.get('suggestions', {}).get('suggestions', [])
+            updated_count = 0
+            for suggestion in suggestions:
+                task_id = suggestion.get('task_id')
+                reasoning = suggestion.get('reasoning', '')
+                if task_id and reasoning:
+                    try:
+                        task = Task.objects.get(id=task_id, project__owner=request.user)
+                        reasoning_prefix = "[Delegation Suggestion] "
+                        full_reasoning = reasoning_prefix + reasoning
+                        if task.ai_reasoning:
+                            task.ai_reasoning = task.ai_reasoning + "\n\n" + full_reasoning
+                        else:
+                            task.ai_reasoning = full_reasoning
+                        task.save()
+                        updated_count += 1
+                    except Task.DoesNotExist:
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error updating delegation reasoning for task {task_id}: {str(e)}")
+                        continue
+            
+            if updated_count > 0:
+                result['updated_reasoning_count'] = updated_count
         
         return JsonResponse(result)
         
@@ -176,24 +271,45 @@ def generate_subtasks(request):
         if not result.get('success'):
             return JsonResponse(result, status=500)
         
-        # Save subtasks to database
+        # Save subtasks to database and update task reasoning
         subtasks_by_task = result.get('subtasks_by_task', {})
         saved_count = 0
+        reasoning_updated_count = 0
         
-        for task_id, subtasks_list in subtasks_by_task.items():
+        for task_id, subtask_data in subtasks_by_task.items():
             try:
                 task = Task.objects.get(id=task_id, project__owner=request.user)
+                
+                # Handle both old format (list) and new format (dict with subtasks and task_reasoning)
+                if isinstance(subtask_data, dict):
+                    subtasks_list = subtask_data.get('subtasks', [])
+                    task_reasoning = subtask_data.get('task_reasoning', '')
+                else:
+                    # Old format - assume it's a list
+                    subtasks_list = subtask_data
+                    task_reasoning = ''
+                
+                # Save reasoning to task
+                if task_reasoning:
+                    reasoning_prefix = "[Subtask Generation Strategy] "
+                    full_reasoning = reasoning_prefix + task_reasoning
+                    if task.ai_reasoning:
+                        task.ai_reasoning = task.ai_reasoning + "\n\n" + full_reasoning
+                    else:
+                        task.ai_reasoning = full_reasoning
+                    task.save()
+                    reasoning_updated_count += 1
                 
                 # Delete existing subtasks for this task (optional - you might want to keep them)
                 # Subtask.objects.filter(task=task).delete()
                 
                 # Create new subtasks
-                for subtask_data in subtasks_list:
+                for subtask_item in subtasks_list:
                     Subtask.objects.create(
                         task=task,
-                        title=subtask_data.get('title', 'Untitled Subtask'),
-                        description=subtask_data.get('description', ''),
-                        order=subtask_data.get('order', 0),
+                        title=subtask_item.get('title', 'Untitled Subtask'),
+                        description=subtask_item.get('description', ''),
+                        order=subtask_item.get('order', 0),
                         status='todo'
                     )
                     saved_count += 1
@@ -1192,6 +1308,36 @@ def test_timeline_gantt(request):
         
         # Process with agent
         result = agent.process(action=action, **kwargs)
+        
+        # If action is 'generate_gantt_chart' or 'create_timeline' and we have results, save reasoning to tasks
+        if action in ['generate_gantt_chart', 'create_timeline'] and result.get('success'):
+            # Check if result has gantt_data with tasks
+            gantt_data = result.get('gantt_data', {})
+            tasks_data = gantt_data.get('tasks', [])
+            
+            updated_count = 0
+            for task_item in tasks_data:
+                task_id = task_item.get('id')
+                reasoning = task_item.get('ai_reasoning') or task_item.get('reasoning', '')
+                if task_id and reasoning:
+                    try:
+                        task = Task.objects.get(id=task_id, project__owner=request.user)
+                        reasoning_prefix = "[Timeline & Scheduling Analysis] "
+                        full_reasoning = reasoning_prefix + reasoning
+                        if task.ai_reasoning:
+                            task.ai_reasoning = task.ai_reasoning + "\n\n" + full_reasoning
+                        else:
+                            task.ai_reasoning = full_reasoning
+                        task.save()
+                        updated_count += 1
+                    except Task.DoesNotExist:
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error updating timeline reasoning for task {task_id}: {str(e)}")
+                        continue
+            
+            if updated_count > 0:
+                result['updated_reasoning_count'] = updated_count
         
         return JsonResponse(result)
         
