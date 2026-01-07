@@ -91,17 +91,38 @@ class InterviewSchedulingAgent:
         max_followups = 3
         min_between = 24
         
+        print("\n⚙️  APPLYING RECRUITER EMAIL SETTINGS TO INTERVIEW")
+        print(f"   Recruiter ID: {recruiter_id}")
+        
         if recruiter_id:
             try:
                 from django.contrib.auth.models import User
                 recruiter = User.objects.get(id=recruiter_id)
+                print(f"   Recruiter: {recruiter.username}")
                 settings = recruiter.recruiter_email_settings
                 followup_delay = settings.followup_delay_hours
                 reminder_hours = settings.reminder_hours_before
                 max_followups = settings.max_followup_emails
                 min_between = settings.min_hours_between_followups
-            except (User.DoesNotExist, RecruiterEmailSettings.DoesNotExist):
-                pass  # Use defaults
+                print(f"   ✅ Using recruiter custom settings:")
+                print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+                print(f"      • Reminder hours before: {reminder_hours} hours")
+                print(f"      • Max follow-ups: {max_followups}")
+                print(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
+            except User.DoesNotExist:
+                print(f"   ⚠️  Recruiter not found (ID: {recruiter_id}), using defaults")
+            except RecruiterEmailSettings.DoesNotExist:
+                print(f"   ⚠️  No email settings found for recruiter, using defaults")
+            except Exception as e:
+                print(f"   ⚠️  Error getting recruiter settings: {str(e)}, using defaults")
+        else:
+            print(f"   ⚠️  No recruiter ID provided, using defaults")
+        
+        print(f"   📝 Final settings to apply:")
+        print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+        print(f"      • Reminder hours before: {reminder_hours} hours")
+        print(f"      • Max follow-ups: {max_followups}")
+        print(f"      • Min hours between follow-ups: {min_between} hours ({min_between * 60} minutes)")
         
         # Create interview record with recruiter preferences
         interview = Interview.objects.create(
@@ -122,9 +143,29 @@ class InterviewSchedulingAgent:
             max_followup_emails=max_followups,
             min_hours_between_followups=min_between,
         )
+        
+        print(f"   ✅ Interview created with ID: {interview.id}")
+        print(f"   ✅ Email settings saved to interview record")
+        print(f"   📋 Interview will be checked for follow-ups after {followup_delay} hours ({followup_delay * 60} minutes)")
 
         # Send invitation email
         email_sent = self.send_invitation_email(interview, available_slots)
+        
+        # Trigger an immediate follow-up check (for testing - will skip if not enough time has passed)
+        try:
+            print(f"\n🔄 Triggering immediate follow-up check (for testing)...")
+            from recruitment_agent.tasks import check_and_send_followup_emails
+            import threading
+            def run_check():
+                import time
+                time.sleep(2)  # Wait 2 seconds to ensure interview is saved
+                stats = check_and_send_followup_emails()
+                print(f"✅ Immediate check completed: {stats}")
+            thread = threading.Thread(target=run_check)
+            thread.daemon = True
+            thread.start()
+        except Exception as e:
+            print(f"⚠️  Could not trigger immediate check: {str(e)}")
 
         if not email_sent:
             self._log_error("invitation_email_failed", {
@@ -710,8 +751,11 @@ class InterviewSchedulingAgent:
             })
             
             print(f"\n🚀 Sending follow-up reminder email...")
+            print(f"   From: {from_email}")
+            print(f"   To: {to_email}")
+            print(f"   Subject: {subject[:60]}...")
             try:
-                send_mail(
+                result = send_mail(
                     subject=subject,
                     message=message,
                     from_email=from_email,
@@ -719,7 +763,10 @@ class InterviewSchedulingAgent:
                     html_message=html_message,
                     fail_silently=False,
                 )
-                print("✅ Follow-up reminder email sent successfully!")
+                print(f"✅ Follow-up reminder email sent successfully!")
+                print(f"   Django send_mail returned: {result} (1 = success)")
+                print(f"   📧 Email should be delivered to: {to_email}")
+                print(f"   ⚠️  If email not received, check spam folder or email provider settings")
             except Exception as send_error:
                 print(f"❌ ERROR: Follow-up reminder email failed: {send_error}")
                 print(f"   Error Type: {type(send_error).__name__}")
@@ -728,7 +775,7 @@ class InterviewSchedulingAgent:
                 print(traceback.format_exc())
                 raise
             
-            print(f"✓ Timestamp will be updated by management command")
+            print(f"✓ Timestamp will be updated by caller")
             print("="*60 + "\n")
             
             self._log_step("followup_reminder_sent", {

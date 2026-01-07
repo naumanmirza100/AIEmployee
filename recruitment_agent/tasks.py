@@ -39,6 +39,12 @@ def check_and_send_followup_emails():
             'errors': 0,
         }
         
+        print("\n" + "="*70)
+        print("🤖 AUTOMATIC FOLLOW-UP EMAIL CHECK")
+        print("="*70)
+        print(f"⏰ Current time: {now}")
+        logger.info(f"Starting follow-up email check at {now}")
+        
         # 1. Check PENDING interviews for follow-up emails
         pending_interviews = Interview.objects.filter(
             status='PENDING',
@@ -47,10 +53,20 @@ def check_and_send_followup_emails():
             status__in=['COMPLETED', 'CANCELLED']
         )
         
+        print(f"📋 Found {pending_interviews.count()} PENDING interview(s) to check")
+        logger.info(f"Found {pending_interviews.count()} PENDING interviews to check")
+        
         for interview in pending_interviews:
             try:
+                print(f"\n📧 Checking Interview #{interview.id} ({interview.candidate_name})")
+                print(f"   Status: {interview.status}")
+                print(f"   Invitation sent at: {interview.invitation_sent_at}")
+                print(f"   Follow-up count: {interview.followup_count}")
+                print(f"   Last follow-up sent at: {interview.last_followup_sent_at}")
+                
                 # Skip if interview is in the past
                 if interview.scheduled_datetime and interview.scheduled_datetime < now:
+                    print(f"   ⏭️  Skipped: Interview is in the past")
                     continue
                 
                 # Get recruiter settings for timing
@@ -58,22 +74,38 @@ def check_and_send_followup_emails():
                 max_followups = interview.get_max_followup_emails()
                 min_between = interview.get_min_hours_between_followups()
                 
+                print(f"   ⚙️  Settings:")
+                print(f"      • Follow-up delay: {followup_delay} hours ({followup_delay * 60} minutes)")
+                print(f"      • Max follow-ups: {max_followups}")
+                print(f"      • Min between follow-ups: {min_between} hours ({min_between * 60} minutes)")
+                
                 # Check if enough hours have passed (using recruiter preference)
                 time_since_invitation = now - interview.invitation_sent_at
+                time_since_invitation_hours = time_since_invitation.total_seconds() / 3600
+                print(f"   ⏱️  Time since invitation: {time_since_invitation_hours:.2f} hours ({time_since_invitation.total_seconds() / 60:.1f} minutes)")
+                
                 if time_since_invitation < timedelta(hours=followup_delay):
+                    print(f"   ⏭️  Skipped: Not enough time passed ({time_since_invitation_hours:.2f}h < {followup_delay}h)")
                     continue
                 
                 # Check if we've sent max follow-ups (using recruiter preference)
                 if interview.followup_count >= max_followups:
+                    print(f"   ⏭️  Skipped: Max follow-ups reached ({interview.followup_count}/{max_followups})")
                     continue
                 
                 # Check if enough time has passed since last follow-up (using recruiter preference)
                 if interview.last_followup_sent_at:
                     time_since_last = now - interview.last_followup_sent_at
+                    time_since_last_hours = time_since_last.total_seconds() / 3600
+                    print(f"   ⏱️  Time since last follow-up: {time_since_last_hours:.2f} hours ({time_since_last.total_seconds() / 60:.1f} minutes)")
                     if time_since_last < timedelta(hours=min_between):
+                        print(f"   ⏭️  Skipped: Not enough time since last follow-up ({time_since_last_hours:.2f}h < {min_between}h)")
                         continue
+                else:
+                    print(f"   ℹ️  No previous follow-up sent (this will be the first)")
                 
                 # Send follow-up email
+                print(f"   ✅ All conditions met! Sending follow-up #{interview.followup_count + 1}...")
                 logger.info(f"Auto-sending follow-up #{interview.followup_count + 1} for interview #{interview.id}")
                 result = agent.send_followup_reminder(interview.id)
                 if result.get('success'):
@@ -81,13 +113,16 @@ def check_and_send_followup_emails():
                     interview.last_followup_sent_at = now
                     interview.save(update_fields=['followup_count', 'last_followup_sent_at'])
                     stats['followups_sent'] += 1
+                    print(f"   ✅ Follow-up email sent successfully!")
                     logger.info(f"Follow-up email sent successfully for interview #{interview.id}")
                 else:
                     stats['errors'] += 1
+                    print(f"   ❌ Failed to send follow-up: {result.get('error')}")
                     logger.error(f"Failed to send follow-up for interview #{interview.id}: {result.get('error')}")
                     
             except Exception as e:
                 stats['errors'] += 1
+                print(f"   ❌ ERROR: {str(e)}")
                 logger.error(f"Error processing interview #{interview.id}: {str(e)}", exc_info=True)
         
         # 2. Check SCHEDULED interviews for pre-interview reminders
@@ -139,6 +174,15 @@ def check_and_send_followup_emails():
             interview.save(update_fields=['status'])
             completed_count += 1
             logger.info(f"Auto-marked interview #{interview.id} as COMPLETED")
+        
+        print("\n" + "="*70)
+        print("📊 FOLLOW-UP CHECK SUMMARY")
+        print("="*70)
+        print(f"   ✅ Follow-ups sent: {stats['followups_sent']}")
+        print(f"   ✅ Reminders sent: {stats['reminders_sent']}")
+        print(f"   ❌ Errors: {stats['errors']}")
+        print(f"   ✅ Interviews marked as completed: {completed_count}")
+        print("="*70 + "\n")
         
         logger.info(f"Follow-up email check completed: {stats['followups_sent']} follow-ups, "
                    f"{stats['reminders_sent']} reminders, {stats['errors']} errors, "

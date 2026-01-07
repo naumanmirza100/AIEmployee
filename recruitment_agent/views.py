@@ -1,4 +1,5 @@
 import json
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,6 +22,9 @@ from recruitment_agent.core import GroqClient
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
 from recruitment_agent.models import Interview, CVRecord, JobDescription
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Initialize agents (singleton pattern for efficiency)
 _log_service = None
@@ -642,21 +646,39 @@ def auto_check_interview_followups(request):
     This can be called by cron jobs, scheduled tasks, or automatically.
     No authentication required for automated systems (can be secured with API key if needed).
     """
+    print("\n" + "="*70)
+    print("🔧 MANUAL FOLLOW-UP CHECK TRIGGERED")
+    print("="*70)
     try:
         from recruitment_agent.tasks import check_and_send_followup_emails
+        from recruitment_agent.models import Interview
+        
+        # Show current pending interviews
+        pending = Interview.objects.filter(status='PENDING', invitation_sent_at__isnull=False)
+        print(f"📋 Found {pending.count()} PENDING interview(s)")
+        for interview in pending:
+            print(f"   • Interview #{interview.id}: {interview.candidate_name} - Invited: {interview.invitation_sent_at}")
         
         # Run the automatic check
         stats = check_and_send_followup_emails()
         
+        print("="*70 + "\n")
+        
         return JsonResponse({
             "success": True,
             "message": "Follow-up email check completed",
-            "stats": stats
+            "stats": stats,
+            "pending_interviews_count": pending.count()
         })
     except Exception as e:
+        import traceback
+        print(f"❌ ERROR: {str(e)}")
+        print(traceback.format_exc())
+        print("="*70 + "\n")
         return JsonResponse({
             "success": False,
-            "error": str(e)
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }, status=500)
 
 
@@ -678,12 +700,34 @@ def recruiter_email_settings(request):
             is_recruitment_agent = True
     
     if not is_recruitment_agent:
+        logger.warning(f"❌ Unauthorized email settings access attempt by user: {request.user.username}")
         return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
     
     if request.method == 'GET':
         # Get current settings or return defaults
+        print("\n" + "="*70)
+        print("📧 EMAIL SETTINGS API CALLED (GET)")
+        print("="*70)
+        print(f"👤 User: {request.user.username} (ID: {request.user.id})")
+        logger.info(f"Email settings GET request by user: {request.user.username}")
+        
         try:
             settings = request.user.recruiter_email_settings
+            print("✅ Found existing email settings:")
+            print(f"   • Follow-up delay: {settings.followup_delay_hours} hours")
+            print(f"   • Min hours between follow-ups: {settings.min_hours_between_followups} hours")
+            print(f"   • Max follow-up emails: {settings.max_followup_emails}")
+            print(f"   • Reminder hours before: {settings.reminder_hours_before} hours")
+            print(f"   • Auto send follow-ups: {settings.auto_send_followups}")
+            print(f"   • Auto send reminders: {settings.auto_send_reminders}")
+            print("="*70 + "\n")
+            
+            logger.info(f"Retrieved email settings for {request.user.username}: "
+                       f"followup_delay={settings.followup_delay_hours}h, "
+                       f"min_between={settings.min_hours_between_followups}h, "
+                       f"max_followups={settings.max_followup_emails}, "
+                       f"reminder_before={settings.reminder_hours_before}h")
+            
             return JsonResponse({
                 "success": True,
                 "settings": {
@@ -696,6 +740,17 @@ def recruiter_email_settings(request):
                 }
             })
         except RecruiterEmailSettings.DoesNotExist:
+            print("ℹ️  No custom settings found, returning defaults:")
+            print(f"   • Follow-up delay: 48 hours")
+            print(f"   • Min hours between follow-ups: 24 hours")
+            print(f"   • Max follow-up emails: 3")
+            print(f"   • Reminder hours before: 24 hours")
+            print(f"   • Auto send follow-ups: True")
+            print(f"   • Auto send reminders: True")
+            print("="*70 + "\n")
+            
+            logger.info(f"Returned default email settings for {request.user.username} (no custom settings)")
+            
             # Return defaults
             return JsonResponse({
                 "success": True,
@@ -711,6 +766,12 @@ def recruiter_email_settings(request):
     
     elif request.method == 'POST':
         # Update settings
+        print("\n" + "="*70)
+        print("📧 EMAIL SETTINGS API CALLED (POST - UPDATE)")
+        print("="*70)
+        print(f"👤 User: {request.user.username} (ID: {request.user.id})")
+        logger.info(f"Email settings POST request by user: {request.user.username}")
+        
         try:
             data = json.loads(request.body) if request.body else {}
             
@@ -727,21 +788,80 @@ def recruiter_email_settings(request):
                 }
             )
             
+            if created:
+                print("✅ Created new email settings record")
+            else:
+                print("📝 Updating existing email settings:")
+            
+            # Store old values for comparison
+            old_values = {
+                'followup_delay_hours': settings.followup_delay_hours,
+                'min_hours_between_followups': settings.min_hours_between_followups,
+                'max_followup_emails': settings.max_followup_emails,
+                'reminder_hours_before': settings.reminder_hours_before,
+                'auto_send_followups': settings.auto_send_followups,
+                'auto_send_reminders': settings.auto_send_reminders,
+            }
+            
+            # Track what's being updated
+            updates = []
+            
             # Update fields if provided
             if 'followup_delay_hours' in data:
-                settings.followup_delay_hours = float(data['followup_delay_hours'])
+                new_value = float(data['followup_delay_hours'])
+                if old_values['followup_delay_hours'] != new_value:
+                    updates.append(f"followup_delay_hours: {old_values['followup_delay_hours']} → {new_value} hours")
+                settings.followup_delay_hours = new_value
+                
             if 'min_hours_between_followups' in data:
-                settings.min_hours_between_followups = float(data['min_hours_between_followups'])
+                new_value = float(data['min_hours_between_followups'])
+                if old_values['min_hours_between_followups'] != new_value:
+                    updates.append(f"min_hours_between_followups: {old_values['min_hours_between_followups']} → {new_value} hours")
+                settings.min_hours_between_followups = new_value
+                
             if 'max_followup_emails' in data:
-                settings.max_followup_emails = int(data['max_followup_emails'])
+                new_value = int(data['max_followup_emails'])
+                if old_values['max_followup_emails'] != new_value:
+                    updates.append(f"max_followup_emails: {old_values['max_followup_emails']} → {new_value}")
+                settings.max_followup_emails = new_value
+                
             if 'reminder_hours_before' in data:
-                settings.reminder_hours_before = float(data['reminder_hours_before'])
+                new_value = float(data['reminder_hours_before'])
+                if old_values['reminder_hours_before'] != new_value:
+                    updates.append(f"reminder_hours_before: {old_values['reminder_hours_before']} → {new_value} hours")
+                settings.reminder_hours_before = new_value
+                
             if 'auto_send_followups' in data:
-                settings.auto_send_followups = bool(data['auto_send_followups'])
+                new_value = bool(data['auto_send_followups'])
+                if old_values['auto_send_followups'] != new_value:
+                    updates.append(f"auto_send_followups: {old_values['auto_send_followups']} → {new_value}")
+                settings.auto_send_followups = new_value
+                
             if 'auto_send_reminders' in data:
-                settings.auto_send_reminders = bool(data['auto_send_reminders'])
+                new_value = bool(data['auto_send_reminders'])
+                if old_values['auto_send_reminders'] != new_value:
+                    updates.append(f"auto_send_reminders: {old_values['auto_send_reminders']} → {new_value}")
+                settings.auto_send_reminders = new_value
+            
+            if updates:
+                print("\n📋 Settings Changed:")
+                for update in updates:
+                    print(f"   • {update}")
+            else:
+                print("ℹ️  No changes detected (values unchanged)")
             
             settings.save()
+            
+            print("\n✅ Final Settings Saved:")
+            print(f"   • Follow-up delay: {settings.followup_delay_hours} hours")
+            print(f"   • Min hours between follow-ups: {settings.min_hours_between_followups} hours")
+            print(f"   • Max follow-up emails: {settings.max_followup_emails}")
+            print(f"   • Reminder hours before: {settings.reminder_hours_before} hours")
+            print(f"   • Auto send follow-ups: {settings.auto_send_followups}")
+            print(f"   • Auto send reminders: {settings.auto_send_reminders}")
+            print("="*70 + "\n")
+            
+            logger.info(f"Email settings updated for {request.user.username}: {', '.join(updates) if updates else 'No changes'}")
             
             return JsonResponse({
                 "success": True,
@@ -757,6 +877,9 @@ def recruiter_email_settings(request):
             })
             
         except Exception as e:
+            print(f"\n❌ ERROR updating email settings: {str(e)}")
+            print("="*70 + "\n")
+            logger.error(f"Error updating email settings for {request.user.username}: {str(e)}", exc_info=True)
             return JsonResponse({
                 "success": False,
                 "error": str(e)
