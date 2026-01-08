@@ -238,7 +238,16 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+BASE_DIR = Path(__file__).resolve().parent.parent
 
+SECRET_KEY = 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45'
+DEBUG = True
+ALLOWED_HOSTS = []
+
+
+# --------------------
+# Applications
+# --------------------
 def _startup_print(*args, **kwargs):
     """Print once when Django's autoreloader is enabled."""
     if os.environ.get('RUN_MAIN') == 'true':
@@ -321,25 +330,22 @@ if USE_SQL_SERVER:
 
     # For named instances, set DB_HOST like: localhost\\SQLEXPRESS
     # For a default instance, set DB_HOST=localhost and (optionally) DB_PORT=1433
-    db_host = os.getenv('DB_HOST', r'localhost\\SQLEXPRESS').strip()
+    db_host = os.getenv('DB_HOST', r'localhost').strip()
     db_port = os.getenv('DB_PORT', '').strip()
 
     extra_params_parts: list[str] = []
     if USE_WINDOWS_AUTH:
         extra_params_parts.append('Trusted_Connection=yes')
-    # Common dev-friendly setting; remove/adjust for production SSL.
-    extra_params_parts.append('TrustServerCertificate=yes')
-    extra_params = ';'.join(extra_params_parts)
-    if extra_params and not extra_params.endswith(';'):
-        extra_params += ';'
-
+    
+    extra_params = ';'.join(extra_params_parts) if extra_params_parts else ''
+    
     db_config = {
         'ENGINE': 'mssql',
         'NAME': os.getenv('DB_NAME', 'project_manager_db'),
         'HOST': r'localhost',
         'OPTIONS': {
-            'driver': os.getenv('DB_DRIVER', 'ODBC Driver 17 for SQL Server').strip(),
-            'extra_params': extra_params,
+            'driver': 'ODBC Driver 17 for SQL Server',
+            'trusted_connection': 'yes',
         },
     }
 
@@ -460,16 +466,6 @@ else:
     _startup_print("  EMAIL_HOST_PASSWORD=your-app-password")
     _startup_print("="*60 + "\n")
 
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HOST_USER else 'noreply@example.com').strip()
-RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
-
-
-# --------------------
-# Email Tracking Configuration
-# --------------------
-# Base URL for email tracking (opens/clicks)
-# For local testing with ngrok, use your ngrok URL
-# For production, use your actual domain
 SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 
 
@@ -521,6 +517,8 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-company-user-id',  # Custom header for company user authentication
+    'x-company-id',  # Custom header for company authentication
 ]
 
 # Allow all methods

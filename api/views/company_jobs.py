@@ -1,39 +1,58 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 
 from recruitment_agent.models import JobDescription, CareerApplication
 from api.serializers.career import JobDescriptionSerializer, CareerApplicationSerializer
 from api.permissions import IsCompanyUser
+from core.models import CompanyUser, Company
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def create_company_job(request):
     """Create job position (Company only)"""
     try:
-        user = request.user
+        # Get company user from request headers or data
+        company_user_id = request.META.get('HTTP_X_COMPANY_USER_ID') or request.data.get('company_user_id')
+        company_id = request.META.get('HTTP_X_COMPANY_ID') or request.data.get('company_id')
         
-        # Check if user belongs to a company
-        if not hasattr(user, 'profile') or not user.profile.company:
+        if not company_user_id or not company_id:
             return Response({
                 'status': 'error',
-                'message': 'User must be associated with a company'
-            }, status=status.HTTP_403_FORBIDDEN)
+                'message': 'Company user ID and company ID are required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
-        company = user.profile.company
+        try:
+            company = Company.objects.get(id=company_id)
+            company_user = CompanyUser.objects.get(id=company_user_id, company=company)
+            
+            if not company_user.is_active:
+                return Response({
+                    'status': 'error',
+                    'message': 'Company user account is inactive'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+            return Response({
+                'status': 'error',
+                'message': 'Invalid company user credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        company = company_user.company
         
         data = request.data.copy()
         data['company'] = company.id
-        data['created_by'] = user.id
+        # Note: created_by expects a User, but we have CompanyUser
+        # We'll set it to None or use a system user if needed
         data['is_active'] = True
         
         serializer = JobDescriptionSerializer(data=data)
         
         if serializer.is_valid():
-            job = serializer.save(created_by=user, company=company)
+            # Save without created_by since CompanyUser is not a User
+            job = serializer.save(company=company)
             
             return Response({
                 'status': 'success',
@@ -56,20 +75,36 @@ def create_company_job(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def list_company_jobs(request):
     """Get company's job positions (Company only)"""
     try:
-        user = request.user
+        # Get company user from request headers or query params
+        company_user_id = request.META.get('HTTP_X_COMPANY_USER_ID') or request.GET.get('company_user_id')
+        company_id = request.META.get('HTTP_X_COMPANY_ID') or request.GET.get('company_id')
         
-        # Check if user belongs to a company
-        if not hasattr(user, 'profile') or not user.profile.company:
+        if not company_user_id or not company_id:
             return Response({
                 'status': 'error',
-                'message': 'User must be associated with a company'
-            }, status=status.HTTP_403_FORBIDDEN)
+                'message': 'Company user ID and company ID are required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
-        company = user.profile.company
+        try:
+            company = Company.objects.get(id=company_id)
+            company_user = CompanyUser.objects.get(id=company_user_id, company=company)
+            
+            if not company_user.is_active:
+                return Response({
+                    'status': 'error',
+                    'message': 'Company user account is inactive'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+            return Response({
+                'status': 'error',
+                'message': 'Invalid company user credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        company = company_user.company
         
         jobs = JobDescription.objects.filter(company=company).order_by('-created_at')
         
@@ -95,20 +130,36 @@ def list_company_jobs(request):
 
 
 @api_view(['PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def update_company_job(request, id):
     """Update job position (Company only)"""
     try:
-        user = request.user
+        # Get company user from request headers or data
+        company_user_id = request.META.get('HTTP_X_COMPANY_USER_ID') or request.data.get('company_user_id')
+        company_id = request.META.get('HTTP_X_COMPANY_ID') or request.data.get('company_id')
         
-        # Check if user belongs to a company
-        if not hasattr(user, 'profile') or not user.profile.company:
+        if not company_user_id or not company_id:
             return Response({
                 'status': 'error',
-                'message': 'User must be associated with a company'
-            }, status=status.HTTP_403_FORBIDDEN)
+                'message': 'Company user ID and company ID are required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
-        company = user.profile.company
+        try:
+            company = Company.objects.get(id=company_id)
+            company_user = CompanyUser.objects.get(id=company_user_id, company=company)
+            
+            if not company_user.is_active:
+                return Response({
+                    'status': 'error',
+                    'message': 'Company user account is inactive'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+            return Response({
+                'status': 'error',
+                'message': 'Invalid company user credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        company = company_user.company
         job = get_object_or_404(JobDescription, id=id, company=company)
         
         serializer = JobDescriptionSerializer(job, data=request.data, partial=True)
@@ -137,20 +188,36 @@ def update_company_job(request, id):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def get_company_job_applications(request, jobId):
     """Get job applications for a specific job (Company only)"""
     try:
-        user = request.user
+        # Get company user from request headers or query params
+        company_user_id = request.META.get('HTTP_X_COMPANY_USER_ID') or request.GET.get('company_user_id')
+        company_id = request.META.get('HTTP_X_COMPANY_ID') or request.GET.get('company_id')
         
-        # Check if user belongs to a company
-        if not hasattr(user, 'profile') or not user.profile.company:
+        if not company_user_id or not company_id:
             return Response({
                 'status': 'error',
-                'message': 'User must be associated with a company'
-            }, status=status.HTTP_403_FORBIDDEN)
+                'message': 'Company user ID and company ID are required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
-        company = user.profile.company
+        try:
+            company = Company.objects.get(id=company_id)
+            company_user = CompanyUser.objects.get(id=company_user_id, company=company)
+            
+            if not company_user.is_active:
+                return Response({
+                    'status': 'error',
+                    'message': 'Company user account is inactive'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+            return Response({
+                'status': 'error',
+                'message': 'Invalid company user credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        company = company_user.company
         job = get_object_or_404(JobDescription, id=jobId, company=company)
         
         applications = CareerApplication.objects.filter(position=job).order_by('-created_at')
@@ -170,20 +237,36 @@ def get_company_job_applications(request, jobId):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def update_company_application_status(request, id):
     """Update application status (Company only)"""
     try:
-        user = request.user
+        # Get company user from request headers or data
+        company_user_id = request.META.get('HTTP_X_COMPANY_USER_ID') or request.data.get('company_user_id')
+        company_id = request.META.get('HTTP_X_COMPANY_ID') or request.data.get('company_id')
         
-        # Check if user belongs to a company
-        if not hasattr(user, 'profile') or not user.profile.company:
+        if not company_user_id or not company_id:
             return Response({
                 'status': 'error',
-                'message': 'User must be associated with a company'
-            }, status=status.HTTP_403_FORBIDDEN)
+                'message': 'Company user ID and company ID are required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
-        company = user.profile.company
+        try:
+            company = Company.objects.get(id=company_id)
+            company_user = CompanyUser.objects.get(id=company_user_id, company=company)
+            
+            if not company_user.is_active:
+                return Response({
+                    'status': 'error',
+                    'message': 'Company user account is inactive'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except (CompanyUser.DoesNotExist, Company.DoesNotExist):
+            return Response({
+                'status': 'error',
+                'message': 'Invalid company user credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        company = company_user.company
         application = get_object_or_404(CareerApplication, id=id, company_id=company.id)
         
         new_status = request.data.get('status')
