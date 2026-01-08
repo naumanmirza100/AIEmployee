@@ -248,7 +248,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45'
 DEBUG = True
-ALLOWED_HOSTS = []
+# Allow ngrok domains and localhost for development
+ALLOWED_HOSTS = ['*']  # For development - allows all hosts including ngrok
+# For production, use specific domains:
+# ALLOWED_HOSTS = ['your-domain.com', 'www.your-domain.com', 'fiddly-uncouth-ryan.ngrok-free.dev']
 
 
 # --------------------
@@ -467,7 +470,7 @@ RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
 # Base URL for email tracking (opens/clicks)
 # For local testing with ngrok, use your ngrok URL
 # For production, use your actual domain
-SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
+SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev/marketing/')
 
 
 # --------------------

@@ -300,7 +300,12 @@ class EmailService:
             
             # Add tracking pixel before </body> tag or at the end
             tracking_pixel_url = f"{base_url}/marketing/track/email/{tracking_token}/open/"
-            tracking_pixel = f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none;" alt="" />'
+            # Use multiple pixel methods for better email client compatibility
+            # Some email clients block display:none, so we use multiple approaches
+            tracking_pixel = (
+                f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />'
+                f'<img src="{tracking_pixel_url}" width="1" height="1" border="0" alt="" style="position:absolute; visibility:hidden; width:1px; height:1px;" />'
+            )
             
             # Try to inject before </body>
             if '</body>' in html_content.lower():
@@ -315,11 +320,14 @@ class EmailService:
                 href = match.group(3)  # The URL part (group 3 in the regex below)
                 
                 # Skip if already a tracking URL or mailto/tel/javascript/data links
+                # Also skip anchor-only links (href="#") as they don't lead anywhere useful
                 if ('track/email' in href or 
                     href.startswith('mailto:') or 
                     href.startswith('tel:') or 
                     href.startswith('javascript:') or
-                    href.startswith('data:')):
+                    href.startswith('data:') or
+                    href == '#' or
+                    href.strip() == ''):
                     return full_tag
                 
                 # URL encode the original href

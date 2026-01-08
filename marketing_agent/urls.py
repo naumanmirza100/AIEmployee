@@ -55,6 +55,7 @@ urlpatterns = [
     # Email tracking
     path('track/email/<str:tracking_token>/open/', views_email_tracking.track_email_open, name='track_email_open'),
     path('track/email/<str:tracking_token>/click/', views_email_tracking.track_email_click, name='track_email_click'),
+    path('track/test/<str:tracking_token>/', views_email_tracking.test_tracking, name='test_tracking'),
     # Email sending status
     path('campaigns/<int:campaign_id>/email-status/', views_email_status.email_sending_status, name='email_sending_status'),
     path('campaigns/<int:campaign_id>/email-status/api/', views_email_status.email_status_api, name='email_status_api'),

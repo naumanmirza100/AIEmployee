@@ -34,7 +34,7 @@ def track_email_open(request, tracking_token):
             f"Campaign: {send_history.campaign.name if send_history.campaign else 'N/A'}"
         )
         
-        # Update status to 'opened' if not already opened or clicked
+        # Update status to 'opened' (always update opened_at even if already clicked)
         if send_history.status not in ['opened', 'clicked']:
             old_status = send_history.status
             # First mark as delivered if not already sent
@@ -55,6 +55,10 @@ def track_email_open(request, tracking_token):
                 f"Opened At: {send_history.opened_at}"
             )
         else:
+            # Still update opened_at timestamp even if already tracked (for analytics)
+            if not send_history.opened_at:
+                send_history.opened_at = timezone.now()
+                send_history.save()
             logger.debug(
                 f"[EMAIL ALREADY TRACKED] Email: {send_history.recipient_email}, "
                 f"Current Status: {send_history.status}, "
@@ -87,17 +91,10 @@ def track_email_click(request, tracking_token):
     try:
         send_history = get_object_or_404(EmailSendHistory, tracking_token=tracking_token)
         
-        # Get the original URL from query parameters
-        original_url = request.GET.get('url', '')
-        if not original_url:
-            logger.warning(f"No URL parameter in click tracking for token {tracking_token}")
-            # Redirect to campaign or homepage
-            return HttpResponseRedirect('/')
+        # ALWAYS update click status first (even if URL is invalid)
+        old_status = send_history.status
+        status_updated = False
         
-        # Decode the URL
-        original_url = unquote(original_url)
-        
-        # Update status to 'clicked'
         if send_history.status != 'clicked':
             # First mark as delivered/opened if not already
             if send_history.status == 'sent' and not send_history.delivered_at:
@@ -107,39 +104,195 @@ def track_email_click(request, tracking_token):
             if send_history.status in ['sent', 'delivered'] and not send_history.opened_at:
                 send_history.opened_at = timezone.now()
             
-            old_status = send_history.status
             send_history.status = 'clicked'
             send_history.clicked_at = timezone.now()
             send_history.save()
+            status_updated = True
             
             logger.info(
                 f"✅ [EMAIL CLICKED] Email: {send_history.recipient_email}, "
                 f"Campaign: {send_history.campaign.name if send_history.campaign else 'N/A'}, "
                 f"Status changed: {old_status} → clicked, "
-                f"URL: {original_url[:100]}..., "
                 f"Token: {tracking_token[:10]}..., "
                 f"Clicked At: {send_history.clicked_at}"
             )
         else:
+            # Update clicked_at timestamp even if already clicked (for analytics)
+            if not send_history.clicked_at:
+                send_history.clicked_at = timezone.now()
+                send_history.save()
             logger.debug(
                 f"[EMAIL ALREADY CLICKED] Email: {send_history.recipient_email}, "
                 f"Current Status: {send_history.status}, "
-                f"URL: {original_url[:100]}..., "
                 f"Token: {tracking_token[:10]}..."
             )
         
-        # Redirect to original URL
-        return HttpResponseRedirect(original_url)
+        # Get the original URL from query parameters
+        original_url = request.GET.get('url', '')
+        logger.info(f"[CLICK TRACKING] Token: {tracking_token[:10]}..., URL param: {original_url}")
+        
+        if not original_url or original_url == '#' or original_url == '%23':
+            logger.warning(f"No valid URL parameter in click tracking for token {tracking_token}, URL was: {original_url}")
+            # If no URL or just anchor, redirect to campaign detail page or homepage
+            if send_history.campaign:
+                original_url = f'/marketing/campaigns/{send_history.campaign.id}/'
+            else:
+                original_url = '/marketing/'
+        else:
+            # Decode the URL
+            try:
+                original_url = unquote(original_url)
+            except Exception as e:
+                logger.error(f"Error decoding URL: {e}, using as-is: {original_url}")
+            
+            # Handle anchor links - if decoded URL is just '#', redirect to campaign
+            if original_url == '#' or not original_url or original_url.startswith('#'):
+                if send_history.campaign:
+                    original_url = f'/marketing/campaigns/{send_history.campaign.id}/'
+                else:
+                    original_url = '/marketing/'
+        
+        # Build redirect URL
+        # If URL is relative, make it absolute using SITE_URL
+        if original_url.startswith('/'):
+            from django.conf import settings
+            base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+            # Remove trailing slash from base_url if present
+            base_url = base_url.rstrip('/')
+            redirect_url = f"{base_url}{original_url}"
+        elif original_url.startswith('http://') or original_url.startswith('https://'):
+            # Already absolute URL
+            redirect_url = original_url
+        else:
+            # If it's not a full URL and not relative, treat as relative
+            from django.conf import settings
+            base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+            base_url = base_url.rstrip('/')
+            redirect_url = f"{base_url}/{original_url}"
+        
+        logger.info(f"[CLICK TRACKING] Redirecting to: {redirect_url}")
+        
+        # Use HTML meta refresh as backup in case redirect fails
+        # This ensures the redirect works even if HttpResponseRedirect has issues
+        html_response = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta http-equiv="refresh" content="0;url={redirect_url}">
+            <script>window.location.href = "{redirect_url}";</script>
+            <title>Redirecting...</title>
+        </head>
+        <body>
+            <p>Redirecting... <a href="{redirect_url}">Click here if you are not redirected</a></p>
+        </body>
+        </html>
+        """
+        response = HttpResponse(html_response)
+        response['Location'] = redirect_url
+        response.status_code = 302
+        return response
         
     except Exception as e:
-        logger.error(f"Error tracking email click: {str(e)}")
-        # Try to redirect to original URL anyway
-        original_url = request.GET.get('url', '/')
+        import traceback
+        logger.error(f"❌ Error tracking email click: {str(e)}", exc_info=True)
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Try to update status even on error
         try:
-            original_url = unquote(original_url)
-            return HttpResponseRedirect(original_url)
-        except:
-            return HttpResponseRedirect('/')
+            send_history = EmailSendHistory.objects.filter(tracking_token=tracking_token).first()
+            if send_history and send_history.status != 'clicked':
+                send_history.status = 'clicked'
+                send_history.clicked_at = timezone.now()
+                send_history.save()
+                logger.info(f"✅ [ERROR RECOVERY] Updated status to clicked for token {tracking_token[:10]}...")
+        except Exception as save_error:
+            logger.error(f"Failed to update status on error: {save_error}")
+        
+        # Try to redirect to original URL anyway
+        original_url = request.GET.get('url', '')
+        if original_url:
+            try:
+                original_url = unquote(original_url)
+                if original_url.startswith('http://') or original_url.startswith('https://'):
+                    return HttpResponseRedirect(original_url)
+                elif original_url.startswith('/'):
+                    from django.conf import settings
+                    base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+                    return HttpResponseRedirect(f"{base_url.rstrip('/')}{original_url}")
+            except Exception as redirect_error:
+                logger.error(f"Error in redirect fallback: {redirect_error}")
+        
+        # Final fallback - redirect to marketing dashboard with message
+        from django.conf import settings
+        base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+        fallback_url = f"{base_url.rstrip('/')}/marketing/"
+        html_response = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta http-equiv="refresh" content="0;url={fallback_url}">
+            <script>window.location.href = "{fallback_url}";</script>
+            <title>Redirecting...</title>
+        </head>
+        <body>
+            <p>Redirecting... <a href="{fallback_url}">Click here if you are not redirected</a></p>
+        </body>
+        </html>
+        """
+        response = HttpResponse(html_response)
+        response['Location'] = fallback_url
+        response.status_code = 302
+        return response
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def test_tracking(request, tracking_token):
+    """Test endpoint to verify tracking token exists and show email info"""
+    try:
+        send_history = get_object_or_404(EmailSendHistory, tracking_token=tracking_token)
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Email Tracking Test</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; }}
+                .info {{ background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0; }}
+                .status {{ font-weight: bold; padding: 0.5rem; border-radius: 0.25rem; display: inline-block; }}
+                .sent {{ background: #dbeafe; color: #1e40af; }}
+                .opened {{ background: #d1fae5; color: #065f46; }}
+                .clicked {{ background: #ede9fe; color: #5b21b6; }}
+            </style>
+        </head>
+        <body>
+            <h1>📧 Email Tracking Test</h1>
+            <div class="info">
+                <p><strong>Email:</strong> {send_history.recipient_email}</p>
+                <p><strong>Subject:</strong> {send_history.subject}</p>
+                <p><strong>Campaign:</strong> {send_history.campaign.name if send_history.campaign else 'N/A'}</p>
+                <p><strong>Status:</strong> 
+                    <span class="status {'clicked' if send_history.status == 'clicked' else 'opened' if send_history.status == 'opened' else 'sent'}">
+                        {send_history.status.upper()}
+                    </span>
+                </p>
+                <p><strong>Sent At:</strong> {send_history.sent_at or 'Not sent yet'}</p>
+                <p><strong>Opened At:</strong> {send_history.opened_at or 'Not opened yet'}</p>
+                <p><strong>Clicked At:</strong> {send_history.clicked_at or 'Not clicked yet'}</p>
+                <p><strong>Tracking Token:</strong> <code>{tracking_token}</code></p>
+            </div>
+            <div class="info">
+                <h3>Test Links:</h3>
+                <p><a href="/marketing/track/email/{tracking_token}/open/">Test Open Tracking</a></p>
+                <p><a href="/marketing/track/email/{tracking_token}/click/?url=https://example.com">Test Click Tracking</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        return HttpResponse(html)
+    except Exception as e:
+        return HttpResponse(f"Error: {str(e)}", status=404)
 
 
 

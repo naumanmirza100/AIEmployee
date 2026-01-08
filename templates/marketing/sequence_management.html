@@ -227,9 +227,15 @@
             <button onclick="showCreateTemplateModal()" class="btn btn-secondary">
                 ✏️ Create Email Template
             </button>
-            <button onclick="showCreateSequenceModal()" class="btn btn-primary">
-                ➕ Create New Sequence
-            </button>
+            {% if has_main_sequence %}
+                <button onclick="showCreateSequenceModal()" class="btn btn-primary" disabled style="opacity: 0.5; cursor: not-allowed;" title="Only 1 main sequence allowed per campaign. Please edit or delete existing sequence first.">
+                    ➕ Create New Sequence (Disabled)
+                </button>
+            {% else %}
+                <button onclick="showCreateSequenceModal()" class="btn btn-primary">
+                    ➕ Create New Sequence
+                </button>
+            {% endif %}
             <!-- <button onclick="debugSequenceStats()" class="btn btn-secondary" title="Debug stats in console" style="font-size: 0.875rem; padding: 0.5rem 0.75rem;">
                 🐛 Debug Stats
             </button> -->
@@ -920,6 +926,20 @@
         let currentParentSequenceId = null;
         
         function showCreateSequenceModal() {
+            // Check if main sequence already exists
+            const existingMainSequences = {{ sequences|length|default:0 }};
+            if (existingMainSequences > 0) {
+                alert('Only 1 main sequence is allowed per campaign. Please edit or delete the existing sequence first.');
+                return;
+            }
+            
+            // Check if main sequence already exists
+            const hasMainSequence = {{ has_main_sequence|yesno:"true,false" }};
+            if (hasMainSequence) {
+                alert('Only 1 main sequence is allowed per campaign. Please edit or delete the existing sequence first.');
+                return;
+            }
+            
             currentSequenceId = null;
             currentParentSequenceId = null;
             console.log('showCreateSequenceModal called');
