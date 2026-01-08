@@ -126,11 +126,29 @@ def list_contact_messages(request):
         
         query = query.order_by('-created_at')
         
-        serializer = ContactMessageSerializer(query, many=True)
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        limit = int(request.GET.get('limit', 20))
+        
+        total = query.count()
+        total_pages = (total + limit - 1) // limit if limit > 0 else 1
+        
+        # Apply pagination
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_query = query[start:end]
+        
+        serializer = ContactMessageSerializer(paginated_query, many=True)
         
         return Response({
             'status': 'success',
-            'data': serializer.data
+            'data': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'totalPages': total_pages
+            }
         }, status=status.HTTP_200_OK)
     
     except Exception as e:

@@ -84,11 +84,29 @@ def list_ai_predictions(request):
         if project_type:
             predictions = predictions.filter(project_type=project_type)
         
-        serializer = AIPredictorSubmissionSerializer(predictions, many=True)
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        limit = int(request.GET.get('limit', 20))
+        
+        total = predictions.count()
+        total_pages = (total + limit - 1) // limit if limit > 0 else 1
+        
+        # Apply pagination
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_predictions = predictions[start:end]
+        
+        serializer = AIPredictorSubmissionSerializer(paginated_predictions, many=True)
         
         return Response({
             'status': 'success',
-            'data': serializer.data
+            'data': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'totalPages': total_pages
+            }
         }, status=status.HTTP_200_OK)
     
     except Exception as e:

@@ -151,3 +151,6 @@ desktop.ini
 *.pid
 *.seed
 *.pid.lock
+
+# Frontend directory
+PaPerProjectFront/

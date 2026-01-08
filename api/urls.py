@@ -23,6 +23,7 @@ from api.views import ai_predictor
 from api.views import chatbot
 from api.views import white_label
 from api.views import company_jobs
+from api.views import pm_agent
 from api.views.health import health_check
 
 app_name = 'api'
@@ -133,6 +134,13 @@ urlpatterns = [
     re_path(r'^ai-predictor/?$', ai_predictor.submit_ai_predictor, name='submit_ai_predictor'),  # POST
     re_path(r'^ai-predictor/admin/?$', ai_predictor.list_ai_predictions, name='list_ai_predictions'),  # GET (admin)
     re_path(r'^ai-predictor/admin/(?P<id>\d+)/?$', ai_predictor.get_ai_prediction, name='get_ai_prediction'),  # GET (admin)
+
+    # Project Manager AI Agent endpoints (token-auth friendly)
+    re_path(r'^project-manager/ai/project-pilot/?$', pm_agent.project_pilot, name='pm_project_pilot'),
+    re_path(r'^project-manager/ai/task-prioritization/?$', pm_agent.task_prioritization, name='pm_task_prioritization'),
+    re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),
+    re_path(r'^project-manager/ai/timeline-gantt/?$', pm_agent.timeline_gantt, name='pm_timeline_gantt'),
+    re_path(r'^project-manager/ai/knowledge-qa/?$', pm_agent.knowledge_qa, name='pm_knowledge_qa'),
     
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST

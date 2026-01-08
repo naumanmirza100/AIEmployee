@@ -156,11 +156,29 @@ def list_career_applications(request):
         if company_id:
             applications = applications.filter(company_id=company_id)
         
-        serializer = CareerApplicationSerializer(applications, many=True)
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        limit = int(request.GET.get('limit', 20))
+        
+        total = applications.count()
+        total_pages = (total + limit - 1) // limit if limit > 0 else 1
+        
+        # Apply pagination
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_applications = applications[start:end]
+        
+        serializer = CareerApplicationSerializer(paginated_applications, many=True)
         
         return Response({
             'status': 'success',
-            'data': serializer.data
+            'data': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'totalPages': total_pages
+            }
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
