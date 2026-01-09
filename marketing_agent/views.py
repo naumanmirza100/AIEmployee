@@ -13,7 +13,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 from .models import Campaign, MarketResearch, CampaignPerformance, Lead, EmailTemplate, EmailSequence, EmailSequenceStep, EmailSendHistory, EmailAccount, MarketingNotification
-from django.db.models import Sum, Avg, Count, F
+from django.db.models import Sum, Avg, Count, F, Q
 from decimal import Decimal
 from datetime import timedelta, datetime
 from django.utils import timezone
@@ -701,31 +701,65 @@ def campaign_detail(request, campaign_id):
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     leads = campaign.leads.all().order_by('-created_at')
     
-    # Get performance metrics
-    performance_metrics = campaign.performance_metrics.all()
+    # Get all email send history for this campaign (for real analytics)
+    all_email_sends = EmailSendHistory.objects.filter(campaign=campaign)
     
-    # Calculate key analytics
+    # Calculate REAL analytics from EmailSendHistory (not CampaignPerformance which may be empty)
+    total_sent = all_email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
+    total_opened = all_email_sends.filter(status__in=['opened', 'clicked']).count()
+    total_clicked = all_email_sends.filter(status='clicked').count()
+    total_failed = all_email_sends.filter(status='failed').count()
+    total_bounced = all_email_sends.filter(status='bounced').count()
+    
+    # Get replied count from CampaignContact with detailed breakdown
+    from marketing_agent.models import CampaignContact
+    total_replied = CampaignContact.objects.filter(campaign=campaign, replied=True).count()
+    # Get positive/neutral replies (excluding negative)
+    positive_replies = CampaignContact.objects.filter(
+        campaign=campaign,
+        replied=True,
+        reply_interest_level__in=['positive', 'neutral']
+    ).count()
+    # Get negative replies
+    negative_replies = CampaignContact.objects.filter(
+        campaign=campaign,
+        replied=True,
+        reply_interest_level='negative'
+    ).count()
+    
+    # Calculate rates based on actual email data
+    # Impressions = emails sent (equivalent to impressions in email marketing)
+    total_impressions = total_sent
+    total_clicks = total_clicked
+    total_conversions = total_clicked  # For email, clicks can be considered conversions
+    
+    # Calculate rates
+    open_rate = (total_opened / total_sent * 100) if total_sent > 0 else 0
+    click_rate = (total_clicked / total_sent * 100) if total_sent > 0 else 0
+    click_through_rate = (total_clicked / total_opened * 100) if total_opened > 0 else 0  # CTR from opens
+    reply_rate = (total_replied / total_sent * 100) if total_sent > 0 else 0
+    
+    # Build analytics dict
     analytics = {
-        'impressions': performance_metrics.filter(metric_name='impressions').aggregate(total=Sum('metric_value'))['total'] or Decimal('0'),
-        'clicks': performance_metrics.filter(metric_name='clicks').aggregate(total=Sum('metric_value'))['total'] or Decimal('0'),
-        'conversions': performance_metrics.filter(metric_name='conversions').aggregate(total=Sum('metric_value'))['total'] or Decimal('0'),
-        'revenue': performance_metrics.filter(metric_name='revenue').aggregate(total=Sum('metric_value'))['total'] or Decimal('0'),
-        'open_rate': performance_metrics.filter(metric_name='open_rate').aggregate(avg=Avg('metric_value'))['avg'],
-        'click_through_rate': performance_metrics.filter(metric_name='click_through_rate').aggregate(avg=Avg('metric_value'))['avg'],
-        'engagement_rate': performance_metrics.filter(metric_name='engagement').aggregate(avg=Avg('metric_value'))['avg'],
-        'cac': performance_metrics.filter(metric_name='cac').aggregate(avg=Avg('metric_value'))['avg'],
+        'impressions': total_impressions,
+        'clicks': total_clicks,
+        'conversions': total_conversions,
+        'revenue': Decimal('0'),  # Revenue not tracked yet
+        'open_rate': open_rate,
+        'click_through_rate': click_through_rate,
+        'engagement_rate': open_rate,  # Engagement = open rate for emails
+        'ctr': click_rate,  # Click rate (clicks/sent)
+        'open_rate_percent': open_rate,
+        'click_rate_percent': click_rate,
+        'reply_rate': reply_rate,
     }
     
     # Calculate derived metrics
-    total_impressions = float(analytics['impressions']) if analytics['impressions'] else 0
-    total_clicks = float(analytics['clicks']) if analytics['clicks'] else 0
-    total_conversions = float(analytics['conversions']) if analytics['conversions'] else 0
-    total_revenue = float(analytics['revenue']) if analytics['revenue'] else 0
+    total_revenue = 0  # Not tracked yet
     
-    # Calculate rates (use actual metrics if available, otherwise calculate from totals)
-    analytics['ctr'] = float(analytics['click_through_rate']) if analytics['click_through_rate'] else (total_clicks / total_impressions * 100 if total_impressions > 0 else 0)
-    analytics['conversion_rate'] = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
-    analytics['engagement'] = float(analytics['engagement_rate']) if analytics['engagement_rate'] else analytics['ctr']
+    # Calculate rates (already calculated above)
+    analytics['conversion_rate'] = click_rate  # Same as click rate for emails
+    analytics['engagement'] = open_rate  # Engagement = open rate
     
     # Calculate ROI
     roi = campaign.get_roi()
@@ -757,33 +791,70 @@ def campaign_detail(request, campaign_id):
     else:
         analytics['leads_progress'] = None
     
-    # Get recent performance data for charts (last 30 days)
-    thirty_days_ago = timezone.now().date() - timedelta(days=30)
-    recent_metrics = performance_metrics.filter(date__gte=thirty_days_ago).order_by('date')
+    # Get recent performance data for charts (last 30 days) from EmailSendHistory
+    thirty_days_ago = timezone.now() - timedelta(days=30)
     
-    # Prepare chart data
+    # Get all emails sent in last 30 days (use sent_at if available, otherwise created_at)
+    recent_email_sends = all_email_sends.filter(
+        Q(sent_at__gte=thirty_days_ago) | 
+        Q(created_at__gte=thirty_days_ago, sent_at__isnull=True)
+    )
+    
+    # Prepare chart data grouped by date
     metrics_by_date = {}
-    for metric in recent_metrics:
-        date_str = metric.date.strftime('%Y-%m-%d')
-        if date_str not in metrics_by_date:
-            metrics_by_date[date_str] = {'impressions': 0, 'clicks': 0, 'conversions': 0, 'revenue': 0}
-        
-        if metric.metric_name == 'impressions':
-            metrics_by_date[date_str]['impressions'] += float(metric.metric_value)
-        elif metric.metric_name == 'clicks':
-            metrics_by_date[date_str]['clicks'] += float(metric.metric_value)
-        elif metric.metric_name == 'conversions':
-            metrics_by_date[date_str]['conversions'] += float(metric.metric_value)
-        elif metric.metric_name == 'revenue':
-            metrics_by_date[date_str]['revenue'] += float(metric.metric_value)
     
-    # Convert to arrays for chart (JSON serializable)
+    # Initialize all dates in the last 30 days (fill gaps with zeros)
+    for i in range(30):
+        date_obj = (timezone.now().date() - timedelta(days=i))
+        date_str = date_obj.strftime('%Y-%m-%d')
+        if date_str not in metrics_by_date:
+            metrics_by_date[date_str] = {
+                'sent': 0,
+                'opened': 0,
+                'clicked': 0,
+                'replied': 0
+            }
+    
+    # Count emails sent per day
+    for email_send in recent_email_sends:
+        # Use sent_at if available, otherwise use created_at
+        email_date = email_send.sent_at.date() if email_send.sent_at else email_send.created_at.date()
+        date_str = email_date.strftime('%Y-%m-%d')
+        
+        if date_str in metrics_by_date:
+            # Count sent emails
+            if email_send.status in ['sent', 'delivered', 'opened', 'clicked']:
+                metrics_by_date[date_str]['sent'] += 1
+            
+            # Count opened emails (use opened_at if available)
+            if email_send.status in ['opened', 'clicked']:
+                metrics_by_date[date_str]['opened'] += 1
+            
+            # Count clicked emails (use clicked_at if available)
+            if email_send.status == 'clicked':
+                metrics_by_date[date_str]['clicked'] += 1
+    
+    # Count replies per day
+    recent_replies = CampaignContact.objects.filter(
+        campaign=campaign,
+        replied=True,
+        replied_at__isnull=False,
+        replied_at__gte=thirty_days_ago
+    )
+    for contact in recent_replies:
+        if contact.replied_at:
+            reply_date = contact.replied_at.date()
+            date_str = reply_date.strftime('%Y-%m-%d')
+            if date_str in metrics_by_date:
+                metrics_by_date[date_str]['replied'] += 1
+    
+    # Convert to arrays for chart (JSON serializable) - sorted by date (oldest first for proper chart display)
     sorted_dates = sorted(metrics_by_date.keys())
     dates_formatted = []
-    impressions_list = []
-    clicks_list = []
-    conversions_list = []
-    revenue_list = []
+    impressions_list = []  # Sent emails
+    clicks_list = []  # Clicked emails
+    conversions_list = []  # Opened emails (or can use clicked)
+    replied_list = []  # Replied emails
     
     for date_str in sorted_dates:
         # Format date for display (short format)
@@ -792,15 +863,30 @@ def campaign_detail(request, campaign_id):
             dates_formatted.append(date_obj.strftime('%b %d'))
         except:
             dates_formatted.append(date_str)
-        impressions_list.append(metrics_by_date[date_str]['impressions'])
-        clicks_list.append(metrics_by_date[date_str]['clicks'])
-        conversions_list.append(metrics_by_date[date_str]['conversions'])
-        revenue_list.append(metrics_by_date[date_str]['revenue'])
+        
+        impressions_list.append(metrics_by_date[date_str]['sent'])
+        clicks_list.append(metrics_by_date[date_str]['clicked'])
+        conversions_list.append(metrics_by_date[date_str]['opened'])
+        replied_list.append(metrics_by_date[date_str]['replied'])
+    
+    # If no data, ensure we have at least empty arrays with some dates for chart
+    if not dates_formatted:
+        # Generate last 7 days for default display
+        for i in range(6, -1, -1):  # Last 7 days
+            date_obj = timezone.now().date() - timedelta(days=i)
+            dates_formatted.append(date_obj.strftime('%b %d'))
+            impressions_list.append(0)
+            clicks_list.append(0)
+            conversions_list.append(0)
+            replied_list.append(0)
     
     # Get email templates and sequences
     email_templates = EmailTemplate.objects.filter(campaign=campaign).order_by('followup_sequence_number', 'created_at')
     email_sequences = EmailSequence.objects.filter(campaign=campaign, is_active=True)
     has_active_sequence = email_sequences.exists()
+    
+    # Check if main sequence exists (for validation)
+    has_main_sequence = EmailSequence.objects.filter(campaign=campaign, is_sub_sequence=False).exists()
     
     # Check if campaign has email templates (required for launch)
     has_email_templates = email_templates.filter(is_active=True).exists()
@@ -815,20 +901,26 @@ def campaign_detail(request, campaign_id):
     
     # Calculate stats - 'sent' and 'delivered' are treated the same (emails are set to 'sent' on successful send)
     email_stats = {
-        'total_sent': EmailSendHistory.objects.filter(campaign=campaign, status__in=['sent', 'delivered', 'opened', 'clicked']).count(),
-        'total_opened': EmailSendHistory.objects.filter(campaign=campaign, status__in=['opened', 'clicked']).count(),
-        'total_clicked': EmailSendHistory.objects.filter(campaign=campaign, status='clicked').count(),
-        'total_failed': EmailSendHistory.objects.filter(campaign=campaign, status='failed').count(),
-        'total_bounced': EmailSendHistory.objects.filter(campaign=campaign, status='bounced').count(),
+        'total_sent': total_sent,
+        'total_opened': total_opened,
+        'total_clicked': total_clicked,
+        'total_failed': total_failed,
+        'total_bounced': total_bounced,
+        'total_replied': total_replied,
+        'positive_replies': positive_replies,  # Positive + neutral replies
+        'negative_replies': negative_replies,  # Negative replies
+        'total_leads': leads.count(),  # Total uploaded leads
     }
     
     # Convert chart data to JSON for template
+    # Use actual email data (sent, opened, clicked, replied)
     analytics['chart_data'] = {
         'dates': json.dumps(dates_formatted),
-        'impressions': json.dumps(impressions_list),
-        'clicks': json.dumps(clicks_list),
-        'conversions': json.dumps(conversions_list),
-        'revenue': json.dumps(revenue_list),
+        'impressions': json.dumps(impressions_list),  # Sent emails
+        'clicks': json.dumps(clicks_list),  # Clicked emails
+        'conversions': json.dumps(conversions_list),  # Opened emails
+        'replied': json.dumps(replied_list),  # Replied emails
+        'revenue': json.dumps([0] * len(dates_formatted)),  # Revenue not tracked yet
     }
     
     return render(request, 'marketing/campaign_detail.html', {
@@ -839,6 +931,7 @@ def campaign_detail(request, campaign_id):
         'email_sequences': email_sequences,
         'has_email_templates': has_email_templates,
         'has_active_sequence': has_active_sequence,
+        'has_main_sequence': has_main_sequence,
         'email_sends': recent_email_sends,  # Only recent 10 for summary
         'email_stats': email_stats,
     })
@@ -1384,11 +1477,63 @@ def mark_contact_replied(request, campaign_id, lead_id):
         
         try:
             from marketing_agent.models import Reply, EmailSendHistory
-            # Try to find the most recent email sent to this lead (the one likely triggering this reply)
-            triggering_email = EmailSendHistory.objects.filter(
+            
+            # Get reply subject for matching (remove "Re:" prefix if present)
+            reply_subject_clean = reply_subject.replace('Re:', '').replace('RE:', '').replace('re:', '').strip() if reply_subject else ''
+            
+            # Get all emails sent to this lead (recent ones first, but check all)
+            all_sent_emails = EmailSendHistory.objects.filter(
                 campaign=campaign,
-                lead=lead
-            ).order_by('-sent_at').first()
+                lead=lead,
+                sent_at__isnull=False
+            ).order_by('-sent_at').select_related('email_template')
+            
+            # Try to match reply subject with sent email subjects
+            triggering_email = None
+            best_match_score = 0
+            
+            for email in all_sent_emails:
+                if email.email_template and email.email_template.subject:
+                    email_subject = email.email_template.subject.strip()
+                    # Check if reply subject matches this email's subject
+                    if reply_subject_clean:
+                        # Simple matching: check if reply subject contains email subject or vice versa
+                        if reply_subject_clean.lower() in email_subject.lower() or email_subject.lower() in reply_subject_clean.lower():
+                            # Calculate match score (longer matches = better, recent emails = better)
+                            match_score = len(email_subject) if email_subject.lower() in reply_subject_clean.lower() else len(reply_subject_clean)
+                            # Bonus for recent emails (within last 7 days)
+                            if email.sent_at and (timezone.now() - email.sent_at) < timedelta(days=7):
+                                match_score += 10
+                            if match_score > best_match_score:
+                                best_match_score = match_score
+                                triggering_email = email
+            
+            # If no subject match found, use most recent email (but with time-based logic)
+            if not triggering_email:
+                most_recent_email = all_sent_emails.first()
+                if most_recent_email:
+                    # Check if most recent email is sub-sequence and was sent recently (within 48 hours)
+                    # If it's old, it might not be the one being replied to
+                    is_recent = most_recent_email.sent_at and (timezone.now() - most_recent_email.sent_at) < timedelta(hours=48)
+                    
+                    if is_recent:
+                        # Recent email - likely the one being replied to
+                        triggering_email = most_recent_email
+                    else:
+                        # Old sub-sequence email - check if there are main sequence emails that might be the actual target
+                        # Look for main sequence emails sent in the last 14 days
+                        main_seq_emails = [
+                            e for e in all_sent_emails[:10]  # Check last 10 emails
+                            if e.email_template and e.email_template.sequence_steps.exists() and
+                            not e.email_template.sequence_steps.first().sequence.is_sub_sequence and
+                            e.sent_at and (timezone.now() - e.sent_at) < timedelta(days=14)
+                        ]
+                        if main_seq_emails:
+                            # Use the most recent main sequence email if available
+                            triggering_email = main_seq_emails[0]
+                        else:
+                            # Fallback to most recent
+                            triggering_email = most_recent_email
             
             if triggering_email and triggering_email.email_template:
                 # Find which sequence this email template belongs to
@@ -1402,20 +1547,33 @@ def mark_contact_replied(request, campaign_id, lead_id):
                         is_sub_sequence_reply = True
                         reply_sub_sequence = reply_sequence
                         reply_sequence = reply_sequence.parent_sequence  # Main sequence
+                        logger.info(f"Reply detected as sub-sequence reply. Matched email: {triggering_email.email_template.subject} (sent at {triggering_email.sent_at})")
+                    else:
+                        logger.info(f"Reply detected as main sequence reply. Matched email: {triggering_email.email_template.subject} (sent at {triggering_email.sent_at})")
                 else:
                     # Fallback: use contact's current sequence
                     reply_sequence = contact.sequence
                     # Check if contact is currently in a sub-sequence
                     if contact.sub_sequence:
-                        is_sub_sequence_reply = True
-                        reply_sub_sequence = contact.sub_sequence
+                        # Only mark as sub-sequence reply if most recent email was actually sub-sequence
+                        if triggering_email.email_template.sequence_steps.exists():
+                            seq_step = triggering_email.email_template.sequence_steps.first()
+                            if seq_step and seq_step.sequence and seq_step.sequence.is_sub_sequence:
+                                is_sub_sequence_reply = True
+                                reply_sub_sequence = contact.sub_sequence
             else:
                 # Fallback: use contact's current sequence
                 reply_sequence = contact.sequence
-                # Check if contact is currently in a sub-sequence
-                if contact.sub_sequence:
-                    is_sub_sequence_reply = True
-                    reply_sub_sequence = contact.sub_sequence
+                # Only mark as sub-sequence reply if contact is in sub-sequence AND most recent email was sub-sequence
+                if contact.sub_sequence and all_sent_emails.exists():
+                    most_recent = all_sent_emails.first()
+                    if most_recent and most_recent.email_template and most_recent.email_template.sequence_steps.exists():
+                        seq_step = most_recent.email_template.sequence_steps.first()
+                        if seq_step and seq_step.sequence and seq_step.sequence.is_sub_sequence:
+                            # Check if it's recent (within 48 hours)
+                            if most_recent.sent_at and (timezone.now() - most_recent.sent_at) < timedelta(hours=48):
+                                is_sub_sequence_reply = True
+                                reply_sub_sequence = contact.sub_sequence
         except (ImportError, AttributeError, Exception) as e:
             logger.warning(f'Could not determine reply sequence: {str(e)}')
             reply_sequence = contact.sequence
@@ -1444,22 +1602,28 @@ def mark_contact_replied(request, campaign_id, lead_id):
             # Reply model doesn't exist yet or migration not applied - skip creating Reply record
             logger.warning(f'Could not create Reply record (model may not exist yet): {str(e)}')
         
-        # ONLY start sub-sequence if:
+        # Find sub-sequence for main sequence replies (even if already in one - will restart it)
+        # ONLY if:
         # 1. This is NOT a reply to a sub-sequence email (is_sub_sequence_reply == False)
-        # 2. Contact is NOT already in a sub-sequence
-        # 3. This is a reply to a main sequence email
-        if not is_sub_sequence_reply and not contact.sub_sequence and contact.sequence:
+        # 2. This is a reply to a main sequence email
+        # NOTE: We allow finding sub-sequence even if already in one - this will restart it for the new reply
+        if not is_sub_sequence_reply and contact.sequence:
             # First try to find sub-sequence matching the detected interest level
             target_interest = interest_level if interest_level and interest_level != 'not_analyzed' else 'neutral'
             
             # Map AI interest levels to sub-sequence interest levels
+            # Include ALL possible interest levels from INTEREST_LEVEL_CHOICES
             interest_mapping = {
                 'positive': 'positive',
                 'negative': 'negative',
                 'neutral': 'neutral',
+                'requested_info': 'requested_info',
+                'objection': 'objection',
+                'unsubscribe': 'unsubscribe',
                 'not_analyzed': 'any'
             }
-            target_interest = interest_mapping.get(target_interest, 'any')
+            # Use the mapping, but if not found, use the original interest_level directly (don't default to 'any')
+            target_interest = interest_mapping.get(target_interest, target_interest if target_interest in ['positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe'] else 'any')
             
             # Look for sub-sequences matching the interest level
             sub_sequences = EmailSequence.objects.filter(
@@ -1469,7 +1633,7 @@ def mark_contact_replied(request, campaign_id, lead_id):
                 interest_level=target_interest
             )
             
-            # If no exact match, try 'any'
+            # If no exact match, try 'any' (but only if target_interest is not 'any')
             if not sub_sequences.exists() and target_interest != 'any':
                 sub_sequences = EmailSequence.objects.filter(
                     parent_sequence=contact.sequence,
@@ -1477,22 +1641,25 @@ def mark_contact_replied(request, campaign_id, lead_id):
                     is_active=True,
                     interest_level='any'
                 )
+                logger.info(f"No exact match for interest '{target_interest}'. Trying 'any' sub-sequence...")
             
-            # If still no match, get any active sub-sequence as fallback
-            if not sub_sequences.exists():
-                sub_sequences = EmailSequence.objects.filter(
-                    parent_sequence=contact.sequence,
-                    is_sub_sequence=True,
-                    is_active=True
-                ).order_by('created_at')
-            
+            # DON'T fall back to any random sub-sequence - this causes wrong sub-sequence assignment
+            # Only use exact match or 'any' - if neither exists, don't assign a sub-sequence
             if sub_sequences.exists():
                 sub_sequence = sub_sequences.first()
-                logger.info(f"Found sub-sequence '{sub_sequence.name}' (interest: {sub_sequence.interest_level}) for contact {lead.email} after main sequence reply (detected interest: {target_interest})")
+                logger.info(f"Found sub-sequence '{sub_sequence.name}' (interest: {sub_sequence.interest_level}) for contact {lead.email} after main sequence reply (detected interest: {target_interest}, mapped to: {target_interest})")
+            else:
+                logger.warning(f"No matching sub-sequence found for contact {lead.email} with interest level '{target_interest}' (original: '{interest_level}'). No sub-sequence will be assigned.")
+                sub_sequence = None
+        
+        # Check if contact was already in a sub-sequence BEFORE calling mark_replied (for message)
+        was_already_in_sub_sequence = bool(contact.sub_sequence)
+        existing_sub_sequence_id = contact.sub_sequence.id if contact.sub_sequence else None
         
         # Mark as replied - but don't start sub-sequence if it's a sub-sequence reply
         # This updates CampaignContact with the latest reply info (for backward compatibility)
         # BUT won't start a new sub-sequence if replying to sub-sequence email
+        # NOTE: If already in sub-sequence and this is a main sequence reply, mark_replied will RESTART it
         contact.mark_replied(
             reply_subject=reply_subject,
             reply_content=reply_content,
@@ -1506,7 +1673,12 @@ def mark_contact_replied(request, campaign_id, lead_id):
         else:
             message = f'Contact {lead.email} marked as replied. Main sequence stopped.'
             if sub_sequence:
-                message += f' Sub-sequence "{sub_sequence.name}" started.'
+                if was_already_in_sub_sequence and existing_sub_sequence_id == sub_sequence.id:
+                    # Already in this sub-sequence - restarting for new reply
+                    message += f' Sub-sequence "{sub_sequence.name}" restarted for this new reply (will send emails again).'
+                else:
+                    # New sub-sequence started
+                    message += f' Sub-sequence "{sub_sequence.name}" started.'
             else:
                 message += ' No sub-sequence found.'
         

@@ -205,18 +205,21 @@ def track_email_click(request, tracking_token):
         
         # Final fallback - redirect to marketing dashboard with message
         from django.conf import settings
+        from django.utils.html import escape
         base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
         fallback_url = f"{base_url.rstrip('/')}/marketing/"
+        # Escape URL to prevent XSS attacks
+        escaped_fallback_url = escape(fallback_url)
         html_response = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <meta http-equiv="refresh" content="0;url={fallback_url}">
-            <script>window.location.href = "{fallback_url}";</script>
+            <meta http-equiv="refresh" content="0;url={escaped_fallback_url}">
+            <script>window.location.href = {repr(fallback_url)};</script>
             <title>Redirecting...</title>
         </head>
         <body>
-            <p>Redirecting... <a href="{fallback_url}">Click here if you are not redirected</a></p>
+            <p>Redirecting... <a href="{escaped_fallback_url}">Click here if you are not redirected</a></p>
         </body>
         </html>
         """

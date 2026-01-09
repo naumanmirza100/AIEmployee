@@ -229,7 +229,7 @@
             </button>
             {% if has_main_sequence %}
                 <button onclick="showCreateSequenceModal()" class="btn btn-primary" disabled style="opacity: 0.5; cursor: not-allowed;" title="Only 1 main sequence allowed per campaign. Please edit or delete existing sequence first.">
-                    ➕ Create New Sequence (Disabled)
+                    ➕ Create New Sequence 
                 </button>
             {% else %}
                 <button onclick="showCreateSequenceModal()" class="btn btn-primary">
@@ -889,26 +889,26 @@
 
     <script>
         // Debug: Log page load stats
-        try {
-            console.log('=== SEQUENCE MANAGEMENT PAGE LOADED ===');
-            console.log('Campaign ID:', {{ campaign.id }});
-            console.log('Sequences count:', {{ sequences|length }});
+        // try {
+        //     console.log('=== SEQUENCE MANAGEMENT PAGE LOADED ===');
+        //     console.log('Campaign ID:', {{ campaign.id }});
+        //     console.log('Sequences count:', {{ sequences|length }});
             
-            // Debug: Log backend data
-            {% for seq_data in sequences %}
-            console.log('Sequence "{{ seq_data.sequence.name|escapejs }}" (ID: {{ seq_data.sequence.id }}):', {
-                sent: {{ seq_data.total_sent|default:0 }},
-                opened: {{ seq_data.total_opened|default:0 }},
-                clicked: {{ seq_data.total_clicked|default:0 }},
-                open_rate: {{ seq_data.open_rate|default:0 }},
-                click_rate: {{ seq_data.click_rate|default:0 }},
-                status_breakdown: {{ seq_data.debug_status_breakdown|safe|default:"{}" }}
-            });
-            {% endfor %}
-            console.log('========================================');
-        } catch(e) {
-            console.error('Error in page load logging:', e);
-        }
+        //     // Debug: Log backend data
+        //     {% for seq_data in sequences %}
+        //     console.log('Sequence "{{ seq_data.sequence.name|escapejs }}" (ID: {{ seq_data.sequence.id }}):', {
+        //         sent: {{ seq_data.total_sent|default:0 }},
+        //         opened: {{ seq_data.total_opened|default:0 }},
+        //         clicked: {{ seq_data.total_clicked|default:0 }},
+        //         open_rate: {{ seq_data.open_rate|default:0 }},
+        //         click_rate: {{ seq_data.click_rate|default:0 }},
+        //         status_breakdown: {{ seq_data.debug_status_breakdown|safe|default:"{}" }}
+        //     });
+        //     {% endfor %}
+        //     console.log('========================================');
+        // } catch(e) {
+        //     console.error('Error in page load logging:', e);
+        // }
         
         let currentSequenceId = null;
         let stepCounter = 0;
@@ -926,14 +926,7 @@
         let currentParentSequenceId = null;
         
         function showCreateSequenceModal() {
-            // Check if main sequence already exists
-            const existingMainSequences = {{ sequences|length|default:0 }};
-            if (existingMainSequences > 0) {
-                alert('Only 1 main sequence is allowed per campaign. Please edit or delete the existing sequence first.');
-                return;
-            }
-            
-            // Check if main sequence already exists
+            // Check if main sequence already exists (using has_main_sequence as single source of truth)
             const hasMainSequence = {{ has_main_sequence|yesno:"true,false" }};
             if (hasMainSequence) {
                 alert('Only 1 main sequence is allowed per campaign. Please edit or delete the existing sequence first.');
@@ -1009,7 +1002,7 @@
         };
 
         function showEditSequenceModal(sequenceId) {
-            console.log('showEditSequenceModal called with sequenceId:', sequenceId);
+            // console.log('showEditSequenceModal called with sequenceId:', sequenceId);
             currentSequenceId = sequenceId;
             currentParentSequenceId = null; // Reset parent for edit
             document.getElementById('modalTitle').textContent = 'Edit Email Sequence';
@@ -1019,18 +1012,18 @@
 
             // Load sequence data
             const url = `{% url 'get_sequence_details' campaign.id 0 %}`.replace('0', sequenceId);
-            console.log('Fetching from URL:', url);
+            // console.log('Fetching from URL:', url);
 
             fetch(url)
                 .then(r => {
-                    console.log('Response status:', r.status);
+                    //console.log('Response status:', r.status);
                     if (!r.ok) {
                         throw new Error(`HTTP error! status: ${r.status}`);
                     }
                     return r.json();
                 })
                 .then(data => {
-                    console.log('Received data:', data);
+                    //console.log('Received data:', data);
                     if (data.success) {
                         const seq = data.sequence;
                         document.getElementById('sequence-name').value = seq.name || '';
@@ -1217,11 +1210,11 @@
                 return;
             }
 
-            console.log('Form found, attaching submit listener');
+            //console.log('Form found, attaching submit listener');
 
             form.addEventListener('submit', async function (e) {
                 e.preventDefault();
-                console.log('Form submit event triggered');
+                //console.log('Form submit event triggered');
 
                 try {
                     const formData = new FormData(e.target);
@@ -1229,12 +1222,12 @@
 
                     // Collect steps - get values directly from DOM elements
                     const stepItems = document.querySelectorAll('.step-item');
-                    console.log('Found step items:', stepItems.length);
+                    //console.log('Found step items:', stepItems.length);
 
                     stepItems.forEach((item, index) => {
                         const templateSelect = item.querySelector('.step-template-select');
                         if (!templateSelect) {
-                            console.log('No template select found in step', index);
+                            //console.log('No template select found in step', index);
                             return;
                         }
 
@@ -1260,7 +1253,7 @@
                         }
                     });
 
-                    console.log('Collected steps:', steps);
+                    //console.log('Collected steps:', steps);
 
                     if (steps.length === 0) {
                         alert('Please add at least one step to the sequence');
@@ -1294,9 +1287,9 @@
                         interest_level: isSubSequence && interestLevelSelect ? interestLevelSelect.value : 'any'
                     };
                     
-                    console.log('Creating sequence with data:', data);
+                    //console.log('Creating sequence with data:', data);
 
-                    console.log('Sending data:', data);
+                    //console.log('Sending data:', data);
 
                     const url = currentSequenceId
                         ? `{% url 'update_sequence' campaign.id 0 %}`.replace('0', currentSequenceId)
@@ -1326,7 +1319,7 @@
                         body: JSON.stringify(data)
                     });
 
-                    console.log('Response status:', response.status);
+                    //console.log('Response status:', response.status);
 
                     if (!response.ok) {
                         const errorText = await response.text();
@@ -1335,7 +1328,7 @@
                     }
 
                     const result = await response.json();
-                    console.log('Result:', result);
+                    //console.log('Result:', result);
 
                     if (result.success) {
                         alert(result.message || 'Sequence saved successfully!');
@@ -1380,40 +1373,40 @@
         }
 
         function showSequenceDetails(sequenceId) {
-            console.log('showSequenceDetails called with sequenceId:', sequenceId);
+            //console.log('showSequenceDetails called with sequenceId:', sequenceId);
             const url = `{% url 'get_sequence_details' campaign.id 0 %}`.replace('0', sequenceId);
-            console.log('Fetching from URL:', url);
+            //console.log('Fetching from URL:', url);
 
             fetch(url)
                 .then(r => {
-                    console.log('Response status:', r.status);
+                    //console.log('Response status:', r.status);
                     if (!r.ok) {
                         throw new Error(`HTTP error! status: ${r.status}`);
                     }
                     return r.json();
                 })
                 .then(data => {
-                    console.log('=== SEQUENCE DETAILS API RESPONSE ===');
-                    console.log('Full response:', data);
+                    //console.log('=== SEQUENCE DETAILS API RESPONSE ===');
+                    //console.log('Full response:', data);
                     if (data.success) {
                         const seq = data.sequence;
                         const stats = seq.stats || {};
                         
                         // Debug logging
-                        console.log('=== SEQUENCE STATS DEBUG ===');
-                        console.log('Sequence:', seq.name);
-                        console.log('Total Sent:', stats.total_sent);
-                        console.log('Total Opened:', stats.total_opened);
-                        console.log('Total Clicked:', stats.total_clicked);
-                        console.log('Open Rate:', stats.open_rate, '%');
-                        console.log('Click Rate:', stats.click_rate, '%');
-                        console.log('Status Breakdown:', stats.debug_status_breakdown || 'N/A');
-                        console.log('Calculation Check:');
-                        console.log('  - Open Rate = (', stats.total_opened, '/', stats.total_sent, ') * 100 =', 
-                            stats.total_sent > 0 ? ((stats.total_opened / stats.total_sent) * 100).toFixed(2) : 0, '%');
-                        console.log('  - Click Rate = (', stats.total_clicked, '/', stats.total_sent, ') * 100 =', 
-                            stats.total_sent > 0 ? ((stats.total_clicked / stats.total_sent) * 100).toFixed(2) : 0, '%');
-                        console.log('===========================');
+                        // console.log('=== SEQUENCE STATS DEBUG ===');
+                        // console.log('Sequence:', seq.name);
+                        // console.log('Total Sent:', stats.total_sent);
+                        // console.log('Total Opened:', stats.total_opened);
+                        // console.log('Total Clicked:', stats.total_clicked);
+                        // console.log('Open Rate:', stats.open_rate, '%');
+                        // console.log('Click Rate:', stats.click_rate, '%');
+                        // console.log('Status Breakdown:', stats.debug_status_breakdown || 'N/A');
+                        // console.log('Calculation Check:');
+                        // console.log('  - Open Rate = (', stats.total_opened, '/', stats.total_sent, ') * 100 =', 
+                        //     stats.total_sent > 0 ? ((stats.total_opened / stats.total_sent) * 100).toFixed(2) : 0, '%');
+                        // console.log('  - Click Rate = (', stats.total_clicked, '/', stats.total_sent, ') * 100 =', 
+                        //     stats.total_sent > 0 ? ((stats.total_clicked / stats.total_sent) * 100).toFixed(2) : 0, '%');
+                        // console.log('===========================');
 
                         let html = `
                     <h3 style="margin-bottom: 1rem;">${seq.name || 'Unnamed Sequence'}</h3>
@@ -1498,7 +1491,7 @@
 
         // View Template Functions
         async function showViewTemplateModal(templateId) {
-            console.log('showViewTemplateModal called with templateId:', templateId);
+            //console.log('showViewTemplateModal called with templateId:', templateId);
             const url = `{% url 'email_template_detail' campaign.id 0 %}`.replace('0', templateId);
 
             try {
@@ -1692,7 +1685,7 @@
 
         // Edit Template Functions
         async function showEditTemplateModal(templateId) {
-            console.log('showEditTemplateModal called with templateId:', templateId);
+            //console.log('showEditTemplateModal called with templateId:', templateId);
             const url = `{% url 'email_template_detail' campaign.id 0 %}`.replace('0', templateId);
             
             try {
@@ -1807,15 +1800,15 @@
 
         // Refresh sequence statistics - Make sure it's in global scope
         window.refreshSequenceStats = function refreshSequenceStats() {
-            console.log('🔄 Refreshing sequence statistics...');
+            //console.log('🔄 Refreshing sequence statistics...');
             location.reload();
         };
         
         // Debug function to log sequence stats - Make sure it's in global scope
         window.debugSequenceStats = function debugSequenceStats() {
-            console.log('=== SEQUENCE STATS DEBUG (Manual) ===');
+            //console.log('=== SEQUENCE STATS DEBUG (Manual) ===');
             const sequences = document.querySelectorAll('[data-sequence-id]');
-            console.log('Found sequences:', sequences.length);
+            //console.log('Found sequences:', sequences.length);
             
             sequences.forEach(seqEl => {
                 const seqId = seqEl.getAttribute('data-sequence-id');
@@ -1825,20 +1818,20 @@
                 const openRate = sent > 0 ? ((opened / sent) * 100).toFixed(2) : 0;
                 const clickRate = sent > 0 ? ((clicked / sent) * 100).toFixed(2) : 0;
                 
-                console.log(`Sequence ID ${seqId}:`);
-                console.log(`  Sent: ${sent}, Opened: ${opened}, Clicked: ${clicked}`);
-                console.log(`  Open Rate: ${openRate}%, Click Rate: ${clickRate}%`);
+                //console.log(`Sequence ID ${seqId}:`);
+                //console.log(`  Sent: ${sent}, Opened: ${opened}, Clicked: ${clicked}`);
+                //console.log(`  Open Rate: ${openRate}%, Click Rate: ${clickRate}%`);
             });
-            console.log('========================================');
+            //console.log('========================================');
         };
         
         // Verify functions are accessible
-        console.log('Functions defined:', {
-            refreshSequenceStats: typeof window.refreshSequenceStats,
-            debugSequenceStats: typeof window.debugSequenceStats,
-            showCreateTemplateModal: typeof window.showCreateTemplateModal,
-            showCreateSequenceModal: typeof window.showCreateSequenceModal
-        });
+        //console.log('Functions defined:', {
+        //     refreshSequenceStats: typeof window.refreshSequenceStats,
+        //     debugSequenceStats: typeof window.debugSequenceStats,
+        //     showCreateTemplateModal: typeof window.showCreateTemplateModal,
+        //     showCreateSequenceModal: typeof window.showCreateSequenceModal
+        // });
 
         // Trigger sequence emails manually
         async function triggerSequenceEmails() {

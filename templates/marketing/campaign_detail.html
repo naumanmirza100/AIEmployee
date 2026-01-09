@@ -496,21 +496,26 @@
         </div>
 
         <!-- Key Performance Metrics -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
+            <div class="metric-card">
+                <div class="metric-icon">📧</div>
+                <div class="metric-label">Emails Sent</div>
+                <div class="metric-value" style="font-size: 1.7rem; font-weight: 700; margin-bottom: 0.9rem;" >{{ email_stats.total_sent|default:0 }}</div>
+                <div class="metric-subtext">Total emails delivered</div>
+            </div>
+            
             <div class="metric-card">
                 <div class="metric-icon">👁️</div>
-                <div class="metric-label">Impressions</div>
-                <div class="metric-value">{{ analytics.impressions|floatformat:0 }}</div>
-                {% if analytics.target_revenue %}
-                <div class="metric-subtext">Target: N/A</div>
-                {% endif %}
+                <div class="metric-label">Opened</div>
+                <div class="metric-value" style="font-size: 1.7rem; font-weight: 700; margin-bottom: 0.9rem;" >{{ email_stats.total_opened|default:0 }}</div>
+                <div class="metric-subtext">Open Rate: {{ analytics.open_rate_percent|floatformat:2 }}%</div>
             </div>
             
             <div class="metric-card">
                 <div class="metric-icon">🖱️</div>
-                <div class="metric-label">Clicks</div>
-                <div class="metric-value">{{ analytics.clicks|floatformat:0 }}</div>
-                <div class="metric-subtext">CTR: {{ analytics.ctr|floatformat:2 }}%</div>
+                <div class="metric-label">Clicked</div>
+                <div class="metric-value" style="font-size: 1.7rem; font-weight: 700; margin-bottom: 0.9rem;">{{ email_stats.total_clicked|default:0 }}</div>
+                <div class="metric-subtext">Click Rate: {{ analytics.click_rate_percent|floatformat:2 }}%</div>
             </div>
             
             <!-- <div class="metric-card">
@@ -534,6 +539,21 @@
             </div> -->
             
             <div class="metric-card">
+                <div class="metric-icon">💬</div>
+                <div class="metric-label">Replied</div>
+                <div class="metric-value" style="font-size: 1.7rem; font-weight: 700; margin-bottom: 0.9rem;">{{ email_stats.total_replied|default:0 }}</div>
+                <div class="metric-subtext">Reply Rate: {{ analytics.reply_rate|floatformat:2 }}%</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">💚</div>
+                <div class="metric-label">Engagement</div>
+                <div class="metric-value" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.9rem;">{{ analytics.engagement|floatformat:2 }}%</div>
+                <div class="metric-subtext">Overall Engagement Rate</div>
+            </div>
+            
+            {% if analytics.roi %}
+            <div class="metric-card">
                 <div class="metric-icon">📊</div>
                 <div class="metric-label">ROI</div>
                 <div class="metric-value {% if analytics.roi > 0 %}positive{% elif analytics.roi < 0 %}negative{% endif %}">
@@ -541,13 +561,7 @@
                 </div>
                 <div class="metric-subtext">Return on Investment</div>
             </div>
-            
-            <div class="metric-card">
-                <div class="metric-icon">💚</div>
-                <div class="metric-label">Engagement</div>
-                <div class="metric-value">{{ analytics.engagement|floatformat:2 }}%</div>
-                <div class="metric-subtext">Customer Engagement Rate</div>
-            </div>
+            {% endif %}
         </div>
 
         <!-- Budget & Spending -->
@@ -610,15 +624,52 @@
                 {% endif %}
                 
                 {% if analytics.target_leads %}
-                <div>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                        <span style="font-weight: 600; color: #374151;">Leads Target</span>
-                        <span style="font-weight: 600; color: #1f2937;">{{ leads|length }} / {{ analytics.target_leads }}</span>
+                <div style="background: #f9fafb; padding: 1.25rem; border-radius: 12px; border: 1px solid #e5e7eb;">
+                    <!-- Leads Target Header with Inline Metrics -->
+                    <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 1.5rem; margin-bottom: 0.75rem;">
+                        <span style="font-weight: 600; color: #374151; font-size: 1rem;">Leads Target:</span>
+                        
+                        <!-- Uploaded Leads -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 0.813rem; color: #6b7280;">Uploaded:</span>
+                            <span style="font-weight: 700; font-size: 1rem; color: #1f2937;">{{ email_stats.total_leads|default:0 }}</span>
+                        </div>
+                        
+                        <!-- Clicked Emails -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 0.813rem; color: #6b7280;">Clicked:</span>
+                            <span style="font-weight: 700; font-size: 1rem; color: #3b82f6;">{{ email_stats.total_clicked|default:0 }}</span>
+                        </div>
+                        
+                        <!-- Positive Replies -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 0.813rem; color: #6b7280;">Positive Replies:</span>
+                            <span style="font-weight: 700; font-size: 1rem; color: #10b981;">{{ email_stats.positive_replies|default:0 }}</span>
+                        </div>
+                        
+                        <!-- Target -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 0.813rem; color: #6b7280;">Target:</span>
+                            <span style="font-weight: 700; font-size: 1rem; color: #f59e0b;">{{ analytics.target_leads }}</span>
+                        </div>
                     </div>
-                    <div style="width: 100%; height: 16px; background: #e5e7eb; border-radius: 8px; overflow: hidden;">
-                        <div style="width: {% if analytics.leads_progress > 100 %}100{% else %}{{ analytics.leads_progress|floatformat:0 }}{% endif %}%; height: 100%; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                    
+                    <!-- Progress Bar -->
+                    <div style="width: 100%; height: 18px; background: #e5e7eb; border-radius: 9px; overflow: hidden; margin-bottom: 0.5rem;">
+                        <div style="width: {% if analytics.leads_progress > 100 %}100{% else %}{{ analytics.leads_progress|floatformat:0 }}{% endif %}%; height: 100%; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%); transition: width 0.3s;"></div>
                     </div>
-                    <div style="text-align: right; margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">{{ analytics.leads_progress|floatformat:1 }}% Complete</div>
+                    
+                    <!-- Progress Percentage -->
+                    <div style="text-align: right; font-size: 0.875rem; color: #6b7280; font-weight: 500;">
+                        {{ analytics.leads_progress|floatformat:1 }}% Complete
+                        {% if email_stats.total_replied > 0 %}
+                        <span style="margin-left: 1rem; padding-left: 1rem; border-left: 1px solid #e5e7eb;">
+                            <span style="color: #92400e;">Total Replies: <strong style="color: #78350f;">{{ email_stats.total_replied|default:0 }}</strong></span>
+                            <span style="margin-left: 0.75rem; color: #10b981;">Positive/Neutral: <strong>{{ email_stats.positive_replies|default:0 }}</strong></span>
+                            <span style="margin-left: 0.75rem; color: #ef4444;">Negative: <strong>{{ email_stats.negative_replies|default:0 }}</strong></span>
+                        </span>
+                        {% endif %}
+                    </div>
                 </div>
                 {% endif %}
             </div>
@@ -626,9 +677,8 @@
         {% endif %}
 
         <!-- Performance Chart -->
-        {% if analytics.chart_data.dates and analytics.chart_data.dates != "[]" %}
         <div style="margin: 2rem 0; padding: 1.5rem; background: white; border: 1px solid #e5e7eb; border-radius: 0.5rem;">
-            <h3 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.25rem;">Performance Over Time (Last 30 Days)</h3>
+            <h3 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.25rem;">📈 Performance Over Time (Last 30 Days)</h3>
             <div style="height: 300px; position: relative;">
                 <canvas id="performanceChart"></canvas>
             </div>
@@ -637,47 +687,46 @@
         <script>
             document.addEventListener('DOMContentLoaded', function() {
                 const dates = {{ analytics.chart_data.dates|safe }};
-                const impressions = {{ analytics.chart_data.impressions|safe }};
-                const clicks = {{ analytics.chart_data.clicks|safe }};
-                const conversions = {{ analytics.chart_data.conversions|safe }};
-                // const revenue = {{ analytics.chart_data.revenue|safe }};
+                const sent = {{ analytics.chart_data.impressions|safe }};  // Sent emails (impressions)
+                const opened = {{ analytics.chart_data.conversions|safe }};  // Opened emails (conversions)
+                const clicked = {{ analytics.chart_data.clicks|safe }};  // Clicked emails (clicks)
+                const replied = {{ analytics.chart_data.replied|safe }};  // Replied emails
                 
                 const chartData = {
                     labels: dates,
                     datasets: [
                         {
-                            label: 'Impressions',
-                            data: impressions,
+                            label: 'Sent',
+                            data: sent,
                             borderColor: '#3b82f6',
                             backgroundColor: 'rgba(59, 130, 246, 0.1)',
                             tension: 0.4,
                             fill: true
                         },
                         {
-                            label: 'Clicks',
-                            data: clicks,
+                            label: 'Opened',
+                            data: opened,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Clicked',
+                            data: clicked,
                             borderColor: '#10b981',
                             backgroundColor: 'rgba(16, 185, 129, 0.1)',
                             tension: 0.4,
                             fill: true
                         },
                         {
-                            label: 'Conversions',
-                            data: conversions,
-                            borderColor: '#f59e0b',
-                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            label: 'Replied',
+                            data: replied,
+                            borderColor: '#ec4899',
+                            backgroundColor: 'rgba(236, 72, 153, 0.1)',
                             tension: 0.4,
                             fill: true
-                        },
-                        // {
-                        //     label: 'Revenue ($)',
-                        //     data: revenue,
-                        //     borderColor: '#8b5cf6',
-                        //     backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                        //     tension: 0.4,
-                        //     fill: true,
-                        //     yAxisID: 'y1'
-                        // }
+                        }
                     ]
                 };
                 
@@ -720,14 +769,15 @@
                             }
                         }
                     });
+                } else {
+                    // No chart element found - show message
+                    const chartContainer = document.getElementById('performanceChart');
+                    if (chartContainer && chartContainer.parentElement) {
+                        chartContainer.parentElement.innerHTML = '<div style="padding: 2rem; text-align: center; color: #6b7280;">📊 Performance data will appear here once emails are sent and tracked.</div>';
+                    }
                 }
             });
         </script>
-        {% else %}
-        <div style="margin: 2rem 0; padding: 2rem; text-align: center; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">
-            <p style="color: #6b7280; margin: 0;">📊 Performance data will appear here once the campaign is active and metrics are recorded.</p>
-        </div>
-        {% endif %}
 
         <!-- Actionable Insights -->
         <div style="margin: 2rem 0; padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 0.75rem; color: white;">
@@ -809,7 +859,7 @@
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
             <div style="padding: 1rem; background: #eff6ff; border-radius: 0.5rem; border-left: 4px solid #3b82f6;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Total Sent</div>
-                <div style="font-size: 1.5rem; font-weight: 600; color: #1e40af;">{{ email_stats.total_sent }}</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #1e40af;">{{ email_stats.total_sent|default:0 }}</div>
             </div>
             <!-- <div style="padding: 1rem; background: #d1fae5; border-radius: 0.5rem; border-left: 4px solid #10b981;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Delivered</div>
@@ -817,12 +867,12 @@
             </div> -->
             <div style="padding: 1rem; background: #fef3c7; border-radius: 0.5rem; border-left: 4px solid #f59e0b;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Opened</div>
-                <div style="font-size: 1.5rem; font-weight: 600; color: #92400e;">{{ email_stats.total_opened }}</div>
+                <div style="font-size: 1.5rem; font-weight: 600; color: #92400e;">{{ email_stats.total_opened|default:0 }}</div>
             </div>
-            <!-- <div style="padding: 1rem; background: #ede9fe; border-radius: 0.5rem; border-left: 4px solid #8b5cf6;">
+            <div style="padding: 1rem; background: #ede9fe; border-radius: 0.5rem; border-left: 4px solid #8b5cf6;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Clicked</div>
-                <div style="font-size: 1.5rem; font-weight: 600; color: #5b21b6;">{{ email_stats.total_clicked }}</div>
-            </div> -->
+                <div style="font-size: 1.5rem; font-weight: 600; color: #5b21b6;">{{ email_stats.total_clicked|default:0 }}</div>
+            </div>
             <!-- <div style="padding: 1rem; background: #fee2e2; border-radius: 0.5rem; border-left: 4px solid #ef4444;">
                 <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Failed</div>
                 <div style="font-size: 1.5rem; font-weight: 600; color: #991b1b;">{{ email_stats.total_failed }}</div>
@@ -878,6 +928,35 @@
             <div style="margin-top: 1rem; color: #6b7280; font-size: 0.875rem;">
                 Showing last 10 emails. <a href="{% url 'email_sending_status' campaign.id %}" style="color: #3b82f6; text-decoration: underline;">View full detailed history →</a>
             </div>
+            
+            <!-- Email Performance Summary -->
+            {% if email_stats.total_sent > 0 %}
+            <div style="margin-top: 1.5rem; padding: 1.5rem; background: #f9fafb; border-radius: 0.5rem;">
+                <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: #1f2937;">Email Performance Summary</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                    <div>
+                        <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Open Rate</div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #1f2937;">{{ analytics.open_rate_percent|floatformat:2 }}%</div>
+                        <div style="font-size: 0.75rem; color: #9ca3af;">{{ email_stats.total_opened }} / {{ email_stats.total_sent }} emails</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Click Rate</div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #1f2937;">{{ analytics.click_rate_percent|floatformat:2 }}%</div>
+                        <div style="font-size: 0.75rem; color: #9ca3af;">{{ email_stats.total_clicked }} / {{ email_stats.total_sent }} emails</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Click-Through Rate (CTR)</div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #1f2937;">{{ analytics.click_through_rate|floatformat:2 }}%</div>
+                        <div style="font-size: 0.75rem; color: #9ca3af;">{{ email_stats.total_clicked }} / {{ email_stats.total_opened }} opened</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">Reply Rate</div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #1f2937;">{{ analytics.reply_rate|floatformat:2 }}%</div>
+                        <div style="font-size: 0.75rem; color: #9ca3af;">{{ email_stats.total_replied }} / {{ email_stats.total_sent }} emails</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% else %}
         <div style="margin: 2rem 0; padding: 2rem; text-align: center; background: #f9fafb; border-radius: 0.5rem; border: 2px dashed #e5e7eb;">

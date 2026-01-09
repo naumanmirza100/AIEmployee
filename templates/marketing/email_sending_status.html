@@ -305,7 +305,7 @@
                             <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
                                 <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Recipient</th>
                                 <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Subject</th>
-                                <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Template</th>
+                                <!-- <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151; font-size: 0.875rem;">Template</th> -->
                                 <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Type</th>
                                 <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Status</th>
                                 <th style="padding: 0.75rem; text-align: center; font-weight: 600; color: #374151; font-size: 0.875rem;">Replied</th>
@@ -319,13 +319,13 @@
                             <tr style="border-bottom: 1px solid #e5e7eb;">
                                 <td style="padding: 0.75rem; color: #1f2937;">{{ email.recipient_email }}</td>
                                 <td style="padding: 0.75rem; color: #1f2937; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ email.subject }}</td>
-                                <td style="padding: 0.75rem; color: #1f2937; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                <!-- <td style="padding: 0.75rem; color: #1f2937; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                     {% if email.email_template %}
                                         {{ email.email_template.name }}
                                     {% else %}
                                         <span style="color: #9ca3af;">—</span>
                                     {% endif %}
-                                </td>
+                                </td> -->
                                 <td style="padding: 0.75rem; text-align: center;">
                                     {% if email_data.is_sub_sequence_email %}
                                         <span class="email-type-badge badge-sub-sequence" style="background: #ede9fe; color: #5b21b6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
@@ -625,7 +625,7 @@
             </h3>
             <div>
                 {% for upcoming in seq_data.emails %}
-                <div class="upcoming-item">
+                <div class="upcoming-item" style="margin-bottom: 1rem;">
                     <div style="display: flex; justify-content: space-between; align-items: start;">
                         <div style="flex: 1;">
                             <div style="font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
