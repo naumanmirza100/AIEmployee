@@ -26,6 +26,11 @@ def generate_registration_token():
 def create_company(request):
     """Create company and generate registration token (Admin only)"""
     try:
+        # Debug: Log received data
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Received company data: {request.data}")
+        
         serializer = CompanySerializer(data=request.data)
         
         if serializer.is_valid():
@@ -55,6 +60,9 @@ def create_company(request):
                 }
             }, status=status.HTTP_201_CREATED)
         
+        # Debug: Log validation errors
+        logger.error(f"Validation errors: {serializer.errors}")
+        
         return Response({
             'status': 'error',
             'message': 'Validation error',
@@ -82,11 +90,29 @@ def list_companies(request):
             is_active = is_active.lower() == 'true'
             companies = companies.filter(is_active=is_active)
         
-        serializer = CompanySerializer(companies, many=True)
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        limit = int(request.GET.get('limit', 20))
+        
+        total = companies.count()
+        total_pages = (total + limit - 1) // limit if limit > 0 else 1
+        
+        # Apply pagination
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_companies = companies[start:end]
+        
+        serializer = CompanySerializer(paginated_companies, many=True)
         
         return Response({
             'status': 'success',
-            'data': serializer.data
+            'data': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'totalPages': total_pages
+            }
         }, status=status.HTTP_200_OK)
     
     except Exception as e:

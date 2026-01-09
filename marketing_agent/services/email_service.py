@@ -292,15 +292,29 @@ class EmailService:
                     "To fix: Add SITE_URL = 'http://your-domain.com' to settings.py or .env file"
                 )
             
+            # Clean up base_url - remove trailing slashes and any path components
+            # SITE_URL should be just the domain (e.g., https://example.com), not https://example.com/marketing/
+            base_url = base_url.rstrip('/')
+            # If base_url ends with /marketing, remove it (tracking URLs are at root level)
+            if base_url.endswith('/marketing'):
+                base_url = base_url[:-9]  # Remove '/marketing'
+            logger.info(f"[EMAIL TRACKING] Using base URL: {base_url}")
+            
             tracking_token = send_history.tracking_token
             
             if not tracking_token:
                 logger.error(f"No tracking token for EmailSendHistory {send_history.id}")
                 return html_content
             
-            # Add tracking pixel before </body> tag or at the end
-            tracking_pixel_url = f"{base_url}/marketing/track/email/{tracking_token}/open/"
-            tracking_pixel = f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none;" alt="" />'
+            # Add tracking pixel using simple token URL format: /token?t=TOKEN
+            # This is simpler and works better with email clients
+            tracking_pixel_url = f"{base_url}/token?t={tracking_token}"
+            # Use multiple pixel methods for better email client compatibility
+            # Some email clients block display:none, so we use multiple approaches
+            tracking_pixel = (
+                f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />'
+                f'<img src="{tracking_pixel_url}" width="1" height="1" border="0" alt="" style="position:absolute; visibility:hidden; width:1px; height:1px;" />'
+            )
             
             # Try to inject before </body>
             if '</body>' in html_content.lower():
@@ -314,25 +328,80 @@ class EmailService:
                 full_tag = match.group(0)
                 href = match.group(3)  # The URL part (group 3 in the regex below)
                 
+                logger.info(f"[EMAIL TRACKING] Processing link: {full_tag[:100]}... href={href}")
+                
                 # Skip if already a tracking URL or mailto/tel/javascript/data links
-                if ('track/email' in href or 
+                if ('/token?' in href or 'track/email' in href or 
                     href.startswith('mailto:') or 
                     href.startswith('tel:') or 
                     href.startswith('javascript:') or
                     href.startswith('data:')):
+                    logger.info(f"[EMAIL TRACKING] Skipping link (already tracked or special): {href}")
                     return full_tag
                 
-                # URL encode the original href
+                # Handle anchor links (#) - convert to default campaign page
+                original_href = href
+                if href == '#' or href.strip() == '' or href.startswith('#'):
+                    logger.warning(f"[EMAIL TRACKING] Found anchor link (href='{href}') - converting to campaign page")
+                    # Default to campaign page if available
+                    if send_history.campaign:
+                        href = f'/marketing/campaigns/{send_history.campaign.id}/'
+                    else:
+                        href = '/marketing/'
+                    logger.info(f"[EMAIL TRACKING] Converted anchor link: {original_href} -> {href}")
+                
+                # Make sure href is absolute if it's relative
+                if not href.startswith('http://') and not href.startswith('https://'):
+                    if href.startswith('/'):
+                        # Already absolute path, keep as is for encoding
+                        pass
+                    else:
+                        # Relative path, make it absolute
+                        href = f'/{href}'
+                
+                # URL encode the href for the tracking URL
                 from urllib.parse import quote as url_quote
                 encoded_href = url_quote(href, safe=':/?#[]@!$&\'()*+,;=')
                 
-                # Create tracked URL
-                tracked_url = f"{base_url}/marketing/track/email/{tracking_token}/click/?url={encoded_href}"
-                return full_tag.replace(href, tracked_url)
+                # Create tracked URL using simple token format: /token?t=TOKEN&url=ORIGINAL_URL
+                tracked_url = f"{base_url}/token?t={tracking_token}&url={encoded_href}"
+                logger.info(f"[EMAIL TRACKING] Wrapping link: {original_href} -> {tracked_url}")
+                
+                # Replace the href in the full tag - use regex for reliable replacement
+                # Match: href="original" or href='original' or href=original
+                pattern = r'(href=)(["\']?)' + re.escape(original_href) + r'(\2)'
+                replacement = r'\1\2' + tracked_url + r'\3'
+                result = re.sub(pattern, replacement, full_tag, flags=re.IGNORECASE)
+                
+                logger.info(f"[EMAIL TRACKING] Link replaced: {full_tag[:80]}... -> {result[:80]}...")
+                return result
             
-            # Find all <a href="..."> tags and wrap them (handles both single and double quotes)
-            # Pattern: (<a...href=)(" or ')(url)(" or ')
-            html_content = re.sub(r'(<a\s+[^>]*href=)(["\'])([^"\']+)\2', wrap_link, html_content, flags=re.IGNORECASE)
+            # Find all <a href="..."> tags and wrap them
+            # Pattern handles: href="url", href='url', and href=url (without quotes)
+            # Match: <a ... href="value" ...> or <a ... href='value' ...> or <a ... href=value ...>
+            # Use non-greedy matching and handle special characters in href values
+            html_content = re.sub(
+                r'(<a\s+[^>]*?href\s*=\s*)(["\']?)([^"\'\s>]+?)(\2)',
+                wrap_link,
+                html_content,
+                flags=re.IGNORECASE
+            )
+            
+            # Also handle cases where href might have spaces or special formatting
+            # Second pass for any links that might have been missed
+            html_content = re.sub(
+                r'(<a\s+[^>]*?href\s*=\s*)(["\'])([^"\']+?)(\2)',
+                wrap_link,
+                html_content,
+                flags=re.IGNORECASE
+            )
+            
+            # Log tracking info
+            logger.info(
+                f"[EMAIL TRACKING] Added tracking to email {send_history.id}, "
+                f"Token: {tracking_token[:10]}..., "
+                f"Pixel: {tracking_pixel_url}"
+            )
             
         except Exception as e:
             logger.error(f"Error adding tracking to email: {str(e)}")

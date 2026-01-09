@@ -215,16 +215,13 @@ class Command(BaseCommand):
                     )
             
             # Now get contacts with sub-sequences assigned
+            # Get all replied contacts with sub-sequences (don't filter by interest level here - that's handled in _process_sub_sequence_contact)
             sub_sequence_contacts = CampaignContact.objects.filter(
                 campaign=campaign,
                 replied=True,
                 sub_sequence__is_active=True,
                 sub_sequence__isnull=False,
                 sub_sequence_completed=False
-            ).filter(
-                # Match if: sub-sequence accepts 'any' OR contact's interest level matches sub-sequence's interest level
-                Q(sub_sequence__interest_level='any') | 
-                Q(reply_interest_level__isnull=False, sub_sequence__interest_level=F('reply_interest_level'))
             ).select_related('lead', 'sub_sequence').prefetch_related('sub_sequence__steps')
             
             main_contact_count = main_contacts.count()
@@ -378,13 +375,58 @@ class Command(BaseCommand):
         # Verify that the contact's reply interest level matches the sub-sequence's interest level
         if sub_sequence.interest_level != 'any':
             if not contact.reply_interest_level or contact.reply_interest_level != sub_sequence.interest_level:
+                # Wrong sub-sequence assigned - clear it and try to find the correct one
                 self.stdout.write(
                     self.style.WARNING(
-                        f'   Skipping {lead.email}: Reply interest level "{contact.reply_interest_level or "N/A"}" '
-                        f'does not match sub-sequence interest level "{sub_sequence.interest_level}"'
+                        f'   Wrong sub-sequence assigned to {lead.email}: Reply interest level "{contact.reply_interest_level or "N/A"}" '
+                        f'does not match sub-sequence interest level "{sub_sequence.interest_level}". Clearing and searching for correct one...'
                     )
                 )
-                return 'skipped'
+                
+                # Clear the wrong sub-sequence
+                contact.sub_sequence = None
+                contact.sub_sequence_step = 0
+                contact.sub_sequence_last_sent_at = None
+                contact.sub_sequence_completed = False
+                
+                # Try to find the correct sub-sequence
+                target_interest = contact.reply_interest_level or 'neutral'
+                correct_sub_sequences = EmailSequence.objects.filter(
+                    parent_sequence=contact.sequence,
+                    is_sub_sequence=True,
+                    is_active=True,
+                    interest_level=target_interest
+                )
+                
+                # If no exact match, try 'any'
+                if not correct_sub_sequences.exists() and target_interest != 'any':
+                    correct_sub_sequences = EmailSequence.objects.filter(
+                        parent_sequence=contact.sequence,
+                        is_sub_sequence=True,
+                        is_active=True,
+                        interest_level='any'
+                    )
+                
+                if correct_sub_sequences.exists():
+                    correct_sub_sequence = correct_sub_sequences.first()
+                    contact.sub_sequence = correct_sub_sequence
+                    contact.save()
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f'   [FIXED] Assigned correct sub-sequence "{correct_sub_sequence.name}" '
+                            f'(interest: {correct_sub_sequence.interest_level}) to {lead.email}'
+                        )
+                    )
+                    # Continue processing with the correct sub-sequence
+                    sub_sequence = correct_sub_sequence
+                else:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f'   No matching sub-sequence found for {lead.email} with interest level "{target_interest}"'
+                        )
+                    )
+                    contact.save()
+                    return 'skipped'
         
         self.stdout.write(
             f'\n   Sub-Sequence Contact: {lead.email} '

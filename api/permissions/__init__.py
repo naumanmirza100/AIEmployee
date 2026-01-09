@@ -5,7 +5,30 @@ class IsAdmin(permissions.BasePermission):
     """Allow access only to admin users."""
     
     def has_permission(self, request, view):
-        return request.user and request.user.is_staff
+        # Basic checks
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        # Get fresh user data from database to ensure we have latest is_staff status
+        # This is important because user permissions might have changed after token was issued
+        try:
+            # Refresh from database to get latest user data
+            user_id = request.user.id
+            from django.contrib.auth.models import User
+            fresh_user = User.objects.get(id=user_id)
+            
+            # Check if user is staff or superuser
+            if fresh_user.is_staff or fresh_user.is_superuser:
+                # Update request.user with fresh data
+                request.user.is_staff = fresh_user.is_staff
+                request.user.is_superuser = fresh_user.is_superuser
+                return True
+        except Exception:
+            # Fallback to request.user if refresh fails
+            if request.user.is_staff or request.user.is_superuser:
+                return True
+        
+        return False
 
 
 class IsOwnerOrAdmin(permissions.BasePermission):

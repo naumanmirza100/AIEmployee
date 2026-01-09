@@ -132,10 +132,14 @@ def register_company_user(request):
             'status': 'success',
             'message': 'Company account registered successfully',
             'data': {
-                'id': company_user.id,
-                'email': company_user.email,
-                'companyId': company.id,
-                'companyName': company.name
+                'user': {
+                    'id': company_user.id,
+                    'email': company_user.email,
+                    'fullName': company_user.full_name,
+                    'role': company_user.role,
+                    'companyId': company.id,
+                    'companyName': company.name
+                }
             }
         }, status=status.HTTP_201_CREATED)
     

@@ -295,9 +295,9 @@
                     <span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600;">
                         Sequence: {{ seq_data.sequence_name }}
                     </span>
-                    {% if seq_data.sequence %}
+                    <!-- {% if seq_data.sequence %}
                     <span style="color: #6b7280; font-size: 0.875rem;">(ID: {{ seq_data.sequence.id }})</span>
-                    {% endif %}
+                    {% endif %} -->
                 </h3>
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse; background: white;">
@@ -350,7 +350,23 @@
                                     </span>
                                 </td>
                                 <td style="padding: 0.75rem; text-align: center;">
-                                    {% if email_data.is_replied and email_data.contact %}
+                                    {% if email_data.is_replied and email_data.latest_reply %}
+                                        <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                            ✅ Replied
+                                        </span>
+                                        {% if email_data.latest_reply.interest_level == 'positive' %}
+                                            <div style="font-size: 0.7rem; color: #10b981; margin-top: 0.25rem; font-weight: 500;">✅ Interested</div>
+                                        {% elif email_data.latest_reply.interest_level == 'negative' %}
+                                            <div style="font-size: 0.7rem; color: #ef4444; margin-top: 0.25rem; font-weight: 500;">❌ Not Interested</div>
+                                        {% elif email_data.latest_reply.interest_level == 'neutral' %}
+                                            <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.25rem; font-weight: 500;">➖ Neutral</div>
+                                        {% elif email_data.latest_reply.interest_level == 'requested_info' %}
+                                            <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
+                                        {% elif email_data.latest_reply.interest_level == 'objection' %}
+                                            <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                        {% endif %}
+                                    {% elif email_data.is_replied and email_data.contact %}
+                                        {# Fallback to contact if latest_reply not available #}
                                         <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; display: inline-block;">
                                             ✅ Replied
                                         </span>
@@ -444,7 +460,23 @@
                                 </span>
                             </td>
                             <td style="padding: 0.75rem; text-align: center;">
-                                {% if email_data.is_replied and email_data.contact %}
+                                {% if email_data.is_replied and email_data.latest_reply %}
+                                    <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                        ✅ Replied
+                                    </span>
+                                    {% if email_data.latest_reply.interest_level == 'positive' %}
+                                        <div style="font-size: 0.7rem; color: #10b981; margin-top: 0.25rem; font-weight: 500;">✅ Interested</div>
+                                    {% elif email_data.latest_reply.interest_level == 'negative' %}
+                                        <div style="font-size: 0.7rem; color: #ef4444; margin-top: 0.25rem; font-weight: 500;">❌ Not Interested</div>
+                                    {% elif email_data.latest_reply.interest_level == 'neutral' %}
+                                        <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.25rem; font-weight: 500;">➖ Neutral</div>
+                                    {% elif email_data.latest_reply.interest_level == 'requested_info' %}
+                                        <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
+                                    {% elif email_data.latest_reply.interest_level == 'objection' %}
+                                        <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                    {% endif %}
+                                {% elif email_data.is_replied and email_data.contact %}
+                                    {# Fallback #}
                                     <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; display: inline-block;">
                                         ✅ Replied
                                     </span>
@@ -508,7 +540,25 @@
                             <span class="email-type-badge badge-sequence">🔄 Sequence</span>
                         {% endif %}
                         <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
-                        {% if email_data.is_replied and email_data.contact %}
+                        {% if email_data.is_replied and email_data.latest_reply %}
+                            <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                ✅ Replied
+                            </span>
+                            {% if email_data.latest_reply.interest_level == 'positive' %}
+                                <span style="background: #d1fae5; color: #065f46; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">✅ Interested</span>
+                            {% elif email_data.latest_reply.interest_level == 'negative' %}
+                                <span style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">❌ Not Interested</span>
+                            {% elif email_data.latest_reply.interest_level == 'neutral' %}
+                                <span style="background: #f3f4f6; color: #6b7280; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">➖ Neutral</span>
+                            {% elif email_data.latest_reply.interest_level == 'requested_info' %}
+                                <span style="background: #dbeafe; color: #1e40af; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">📋 Requested Info</span>
+                            {% elif email_data.latest_reply.interest_level == 'objection' %}
+                                <span style="background: #fef3c7; color: #92400e; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">⚠️ Objection</span>
+                            {% elif email_data.latest_reply.interest_level == 'unsubscribe' %}
+                                <span style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">🚫 Unsubscribe</span>
+                            {% endif %}
+                        {% elif email_data.is_replied and email_data.contact %}
+                            {# Fallback #}
                             <span style="background: #d1fae5; color: #065f46; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
                                 ✅ Replied
                             </span>
@@ -518,12 +568,6 @@
                                 <span style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">❌ Not Interested</span>
                             {% elif email_data.contact.reply_interest_level == 'neutral' %}
                                 <span style="background: #f3f4f6; color: #6b7280; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">➖ Neutral</span>
-                            {% elif email_data.contact.reply_interest_level == 'requested_info' %}
-                                <span style="background: #dbeafe; color: #1e40af; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">📋 Requested Info</span>
-                            {% elif email_data.contact.reply_interest_level == 'objection' %}
-                                <span style="background: #fef3c7; color: #92400e; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">⚠️ Objection</span>
-                            {% elif email_data.contact.reply_interest_level == 'unsubscribe' %}
-                                <span style="background: #fee2e2; color: #991b1b; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 500;">🚫 Unsubscribe</span>
                             {% endif %}
                         {% endif %}
                     </div>
@@ -575,9 +619,9 @@
                 <span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600;">
                     Sequence: {{ seq_data.sequence_name }}
                 </span>
-                {% if seq_data.sequence %}
+                <!-- {% if seq_data.sequence %}
                 <span style="color: #6b7280; font-size: 0.875rem;">(ID: {{ seq_data.sequence.id }})</span>
-                {% endif %}
+                {% endif %} -->
             </h3>
             <div>
                 {% for upcoming in seq_data.emails %}
@@ -676,22 +720,32 @@
                 <span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600;">
                     Sequence: {{ seq_data.sequence_name }}
                 </span>
-                {% if seq_data.sequence %}
+                <!-- {% if seq_data.sequence %}
                 <span style="color: #6b7280; font-size: 0.875rem;">(ID: {{ seq_data.sequence.id }})</span>
-                {% endif %}
+                {% endif %} -->
             </h3>
             <div>
                 {% for email in seq_data.emails %}
                 <div class="email-item">
                     <div style="flex: 1;">
                         <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <span class="email-type-badge badge-sequence">Sequence</span>
+                            {% if email.is_sub_sequence %}
+                            <span class="email-type-badge badge-sub-sequence" style="background: #ede9fe; color: #5b21b6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                🔀 Sub-Sequence
+                            </span>
+                            {% else %}
+                            <span class="email-type-badge badge-sequence">🔄 Sequence</span>
+                            {% endif %}
                             <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
                         </div>
                         <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
                             <strong>Subject:</strong> {{ email.subject }}<br>
                             {% if email.sequence %}
+                            {% if email.is_sub_sequence %}
+                            <strong>Sequence:</strong> {{ email.sequence.name }} - {{ email.sub_sequence.name }} - Step {{ email.next_step.step_order }}
+                            {% else %}
                             <strong>Sequence:</strong> {{ email.sequence.name }} - Step {{ email.next_step.step_order }}
+                            {% endif %}
                             {% endif %}
                             {% if email.is_retry %}
                             <br><span style="color: #f59e0b; font-weight: 600;">⚠️ Retry (Previous status: {{ email.previous_status|title }})</span>
@@ -725,13 +779,23 @@
             <div class="email-item">
                 <div style="flex: 1;">
                     <div style="display: flex; align-items: center; gap: 0.75rem;">
-                        <span class="email-type-badge badge-sequence">Sequence</span>
+                        {% if email.is_sub_sequence %}
+                        <span class="email-type-badge badge-sub-sequence" style="background: #ede9fe; color: #5b21b6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                            🔀 Sub-Sequence
+                        </span>
+                        {% else %}
+                        <span class="email-type-badge badge-sequence">🔄 Sequence</span>
+                        {% endif %}
                         <strong style="color: #1f2937;">{{ email.recipient_email }}</strong>
                     </div>
                     <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">
                         <strong>Subject:</strong> {{ email.subject }}<br>
                         {% if email.sequence %}
+                        {% if email.is_sub_sequence %}
+                        <strong>Sequence:</strong> {{ email.sequence.name }} - {{ email.sub_sequence.name }} - Step {{ email.next_step.step_order }}
+                        {% else %}
                         <strong>Sequence:</strong> {{ email.sequence.name }} - Step {{ email.next_step.step_order }}
+                        {% endif %}
                         {% endif %}
                         {% if email.is_retry %}
                         <br><span style="color: #f59e0b; font-weight: 600;">⚠️ Retry (Previous status: {{ email.previous_status|title }})</span>
@@ -767,17 +831,20 @@
                     <span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.875rem; font-weight: 600;">
                         Sequence: {{ seq_data.sequence_name }}
                     </span>
-                    {% if seq_data.sequence %}
+                    <!-- {% if seq_data.sequence %}
                     <span style="color: #6b7280; font-size: 0.875rem;">(ID: {{ seq_data.sequence.id }})</span>
-                    {% endif %}
+                    {% endif %} -->
                 </h3>
                 <div>
                     {% for reply in seq_data.replies %}
                     <div class="email-item">
                         <div style="flex: 1;">
-                            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
                                 <span class="email-type-badge" style="background: #d1fae5; color: #065f46;">Replied</span>
                                 <strong style="color: #1f2937;">{{ reply.lead.email }}</strong>
+                                {% if reply.sub_sequence %}
+                                    <span class="email-type-badge" style="background: #ede9fe; color: #7c3aed; font-size: 0.75rem;">🔀 Sub-Seq Reply</span>
+                                {% endif %}
                                 {% if reply.interest_level == 'positive' %}
                                     <span class="email-type-badge" style="background: #d1fae5; color: #065f46;">✅ Interested</span>
                                 {% elif reply.interest_level == 'negative' %}
@@ -803,6 +870,11 @@
                             {% if reply.reply_subject %}
                                 <div style="color: #374151; font-size: 0.875rem; margin-top: 0.5rem; font-weight: 500;">
                                     Subject: {{ reply.reply_subject }}
+                                </div>
+                            {% endif %}
+                            {% if reply.sub_sequence %}
+                                <div style="color: #6b7280; font-size: 0.75rem; margin-top: 0.25rem; font-style: italic;">
+                                    Reply to: {{ reply.sub_sequence.name }} (Sub-Sequence)
                                 </div>
                             {% endif %}
                             {% if reply.analysis %}

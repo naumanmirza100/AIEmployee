@@ -133,11 +133,41 @@ def logout(request):
 @permission_classes([IsAuthenticated])
 def get_current_user(request):
     """Get current authenticated user"""
-    serializer = UserSerializer(request.user)
-    return Response({
-        'status': 'success',
-        'data': {
-            'user': serializer.data
+    try:
+        # Refresh user to get latest data
+        request.user.refresh_from_db()
+        
+        serializer = UserSerializer(request.user)
+        
+        # Debug info - check permission too
+        try:
+            from api.permissions import IsAdmin
+            permission = IsAdmin()
+            has_admin_permission = permission.has_permission(request, None)
+        except Exception as e:
+            has_admin_permission = False
+        
+        debug_info = {
+            'email': request.user.email,
+            'username': request.user.username,
+            'id': request.user.id,
+            'is_staff': request.user.is_staff,
+            'is_superuser': request.user.is_superuser,
+            'is_active': request.user.is_active,
+            'has_admin_permission': has_admin_permission,
         }
-    }, status=status.HTTP_200_OK)
+        
+        return Response({
+            'status': 'success',
+            'data': {
+                'user': serializer.data,
+                'debug': debug_info  # Remove this in production
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'Failed to get current user',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
