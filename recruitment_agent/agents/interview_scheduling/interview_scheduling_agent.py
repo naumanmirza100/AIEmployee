@@ -75,11 +75,9 @@ class InterviewSchedulingAgent:
             "interview_type": interview_type,
         })
 
-        # Generate available time slots
-        if custom_slots:
-            available_slots = custom_slots
-        else:
-            available_slots = self.generate_available_slots()
+        # No longer generate pre-selected slots - candidates will use date-time picker
+        # Store empty array for backward compatibility
+        available_slots = []
 
         # Generate unique secure token for candidate slot selection
         confirmation_token = secrets.token_urlsafe(32)
@@ -194,6 +192,7 @@ class InterviewSchedulingAgent:
         slots_per_day: int = 3,
         start_hour: Optional[int] = None,
         end_hour: Optional[int] = None,
+        recruiter_id: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         """
         Generate a list of available interview time slots.
@@ -201,37 +200,102 @@ class InterviewSchedulingAgent:
         Args:
             days_ahead: Number of days ahead to generate slots (default: 14)
             slots_per_day: Number of slots per day (default: 3)
-            start_hour: Start hour (default: from default_working_hours)
-            end_hour: End hour (default: from default_working_hours)
+            start_hour: Start hour (default: from default_working_hours or recruiter settings)
+            end_hour: End hour (default: from default_working_hours or recruiter settings)
+            recruiter_id: Optional recruiter ID to use their interview settings
         
         Returns:
             List of dicts with 'datetime' (ISO format) and 'display' (human-readable)
         """
+        # Get recruiter interview settings if available
+        schedule_from_date = None
+        schedule_to_date = None
+        start_time_obj = None
+        end_time_obj = None
+        
+        if recruiter_id:
+            try:
+                from django.contrib.auth.models import User
+                from recruitment_agent.models import RecruiterInterviewSettings
+                recruiter = User.objects.get(id=recruiter_id)
+                try:
+                    interview_settings = recruiter.recruiter_interview_settings
+                    schedule_from_date = interview_settings.schedule_from_date
+                    schedule_to_date = interview_settings.schedule_to_date
+                    start_time_obj = interview_settings.start_time
+                    end_time_obj = interview_settings.end_time
+                    slots_per_day = interview_settings.interviews_per_day
+                    
+                    # Convert time objects to hours for compatibility
+                    if start_time_obj:
+                        start_hour = start_time_obj.hour
+                    if end_time_obj:
+                        end_hour = end_time_obj.hour
+                    
+                    print(f"\n📅 Using recruiter interview settings:")
+                    print(f"   • Schedule from: {schedule_from_date or 'Today'}")
+                    print(f"   • Schedule to: {schedule_to_date or 'No limit'}")
+                    print(f"   • Time range: {start_time_obj} - {end_time_obj}")
+                    print(f"   • Interviews per day: {slots_per_day}")
+                except RecruiterInterviewSettings.DoesNotExist:
+                    print(f"   ⚠️  No interview settings found for recruiter, using defaults")
+            except User.DoesNotExist:
+                pass
+        
+        # Use defaults if not set from settings
         start_hour = start_hour or self.default_working_hours['start']
         end_hour = end_hour or self.default_working_hours['end']
         
         slots = []
         now = timezone.now()
         
-        # Generate slots for the next N days (excluding weekends by default)
-        current_date = now.date()
+        # Determine start date
+        if schedule_from_date:
+            current_date = max(now.date(), schedule_from_date)
+        else:
+            current_date = now.date()
+        
         days_generated = 0
-        day_offset = 1  # Start from tomorrow
+        day_offset = 1  # Start from tomorrow (or from schedule_from_date if set)
+        
+        # Calculate max days to generate based on date range
+        if schedule_to_date:
+            max_days = (schedule_to_date - current_date).days
+            if max_days < 0:
+                print(f"⚠️  schedule_to_date is in the past, no slots generated")
+                return []
+            days_ahead = min(days_ahead, max_days)
         
         while days_generated < days_ahead and len(slots) < (days_ahead * slots_per_day):
             target_date = current_date + timedelta(days=day_offset)
+            
+            # Check if date is within allowed range
+            if schedule_to_date and target_date > schedule_to_date:
+                break
+            
             day_of_week = target_date.weekday()  # 0 = Monday, 6 = Sunday
             
             # Skip weekends (optional - can be made configurable)
             if day_of_week < 5:  # Monday to Friday
                 # Generate slots for this day
                 hours_between = end_hour - start_hour
+                if hours_between <= 0:
+                    day_offset += 1
+                    continue
+                    
                 slot_interval = hours_between / (slots_per_day + 1)
                 
                 for i in range(slots_per_day):
                     slot_hour = start_hour + (i + 1) * slot_interval
+                    
+                    # Use time object if available (for minute precision), otherwise use hour only
+                    if start_time_obj:
+                        slot_minute = start_time_obj.minute if i == 0 else 0
+                    else:
+                        slot_minute = 0
+                    
                     slot_datetime = timezone.make_aware(
-                        datetime.combine(target_date, datetime.min.time().replace(hour=int(slot_hour), minute=0))
+                        datetime.combine(target_date, datetime.min.time().replace(hour=int(slot_hour), minute=slot_minute))
                     )
                     
                     # Only add future slots
@@ -422,26 +486,95 @@ class InterviewSchedulingAgent:
                     "error": f"Invalid datetime format: {str(e)}",
                 }
             
-            # Validate slot is in available slots
-            available_slots = json.loads(interview.available_slots_json)
-            slot_found = False
-            selected_slot_display = None
+            # Get recruiter interview settings
+            from recruitment_agent.models import RecruiterInterviewSettings
+            recruiter = interview.recruiter
+            schedule_from_date = None
+            schedule_to_date = None
+            start_time = None
+            end_time = None
+            interviews_per_day = 3  # Default
             
-            for slot in available_slots:
-                slot_dt = datetime.fromisoformat(slot['datetime'].replace('Z', '+00:00'))
-                if timezone.is_naive(slot_dt):
-                    slot_dt = timezone.make_aware(slot_dt)
-                
-                if abs((slot_dt - selected_datetime).total_seconds()) < 60:  # Within 1 minute
-                    slot_found = True
-                    selected_slot_display = slot.get('display', slot['datetime'])
-                    break
+            if recruiter:
+                try:
+                    settings = recruiter.recruiter_interview_settings
+                    schedule_from_date = settings.schedule_from_date
+                    schedule_to_date = settings.schedule_to_date
+                    start_time = settings.start_time
+                    end_time = settings.end_time
+                    interviews_per_day = settings.interviews_per_day
+                except RecruiterInterviewSettings.DoesNotExist:
+                    # Use defaults
+                    from datetime import time as dt_time
+                    start_time = dt_time(9, 0)
+                    end_time = dt_time(17, 0)
             
-            if not slot_found:
+            # Validate date range
+            selected_date = selected_datetime.date()
+            now = timezone.now()
+            
+            if schedule_from_date:
+                if selected_date < schedule_from_date:
+                    return {
+                        "success": False,
+                        "error": f"Selected date is before the allowed start date ({schedule_from_date})",
+                    }
+            else:
+                # Default: can't select past dates
+                if selected_date < now.date():
+                    return {
+                        "success": False,
+                        "error": "Cannot select a date in the past",
+                    }
+            
+            if schedule_to_date:
+                if selected_date > schedule_to_date:
+                    return {
+                        "success": False,
+                        "error": f"Selected date is after the allowed end date ({schedule_to_date})",
+                    }
+            
+            # Validate time range
+            selected_time = selected_datetime.time()
+            if start_time and selected_time < start_time:
                 return {
                     "success": False,
-                    "error": "Selected slot is not in the available slots list",
+                    "error": f"Selected time is before the allowed start time ({start_time.strftime('%H:%M')})",
                 }
+            if end_time and selected_time > end_time:
+                return {
+                    "success": False,
+                    "error": f"Selected time is after the allowed end time ({end_time.strftime('%H:%M')})",
+                }
+            
+            # Check for double-booking (same datetime already scheduled)
+            existing_interview = Interview.objects.filter(
+                recruiter=recruiter,
+                status='SCHEDULED',
+                scheduled_datetime=selected_datetime
+            ).exclude(id=interview_id).first()
+            
+            if existing_interview:
+                return {
+                    "success": False,
+                    "error": "This time slot is already taken by another candidate. Please select a different time.",
+                }
+            
+            # Check interviews per day limit
+            interviews_on_date = Interview.objects.filter(
+                recruiter=recruiter,
+                status='SCHEDULED',
+                scheduled_datetime__date=selected_date
+            ).exclude(id=interview_id).count()
+            
+            if interviews_on_date >= interviews_per_day:
+                return {
+                    "success": False,
+                    "error": f"Maximum interviews per day ({interviews_per_day}) has been reached for this date. Please select another date.",
+                }
+            
+            # Format display string
+            selected_slot_display = selected_datetime.strftime('%A, %B %d, %Y at %I:%M %p')
             
             # Update interview
             interview.status = 'SCHEDULED'

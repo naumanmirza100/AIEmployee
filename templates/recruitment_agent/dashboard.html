@@ -3,96 +3,383 @@
 
 {% block title %}Recruiter Dashboard - AI Recruitment{% endblock %}
 
-{% block content %}
+{% block extra_css %}
 <style>
+  /* Dark Theme with Purple Accents - Matching Pay Per Project Theme */
   :root {
-    --bg: #0f172a;
-    --panel: #0b1021;
-    --card: #ffffff;
-    --text: #0f172a;
-    --muted: #6b7280;
-    --accent: #2563eb;
-    --accent-2: #10b981;
-    --border: #e5e7eb;
-    --shadow: 0 10px 35px rgba(15, 23, 42, 0.12);
-    --danger: #ef4444;
-    --warning: #f59e0b;
+    --bg-dark: #0f172a;
+    --bg-panel: #1e293b;
+    --bg-card: #1e293b;
+    --bg-card-hover: #334155;
+    --text-primary: #ffffff;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --purple-primary: #6366f1;
+    --purple-secondary: #8b5cf6;
+    --purple-light: #a78bfa;
+    --purple-dark: #4f46e5;
+    --accent-success: #10b981;
+    --accent-warning: #f59e0b;
+    --accent-danger: #ef4444;
+    --border-color: #334155;
+    --border-light: #475569;
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Override body and html background for dark theme */
+  html {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+    height: 100% !important;
+  }
+
+  body {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+    background-image: none !important;
+    color: var(--text-primary) !important;
+    min-height: 100vh !important;
+    height: 100% !important;
+  }
+
+  /* Make sure all page areas are dark */
+  body > * {
+    background: var(--bg-dark) !important;
+  }
+
+  /* Override navbar for dark theme */
+  .navbar {
+    background: var(--bg-panel) !important;
+    background-color: var(--bg-panel) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    box-shadow: var(--shadow-md) !important;
+  }
+
+  .navbar .nav-links a {
+    color: var(--text-secondary) !important;
+    transition: color 0.2s ease;
+  }
+
+  .navbar .nav-links a:hover {
+    color: var(--purple-light) !important;
+  }
+
+  .nav-brand {
+    color: var(--text-primary) !important;
+  }
+
+  .nav-brand::before {
+    background: var(--purple-primary) !important;
+  }
+
+  /* Override container backgrounds */
+  .container {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+  }
+
+  /* Override messages container */
+  .messages {
+    background: var(--bg-panel) !important;
+    color: var(--text-primary) !important;
+  }
+
+  /* Ensure all wrapper elements are dark */
+  #wrapper,
+  .wrapper,
+  .main-content,
+  .content-wrapper {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+  }
+
+  /* Override any default white backgrounds */
+  div:not(.dashboard-section):not(.status-section):not(.job-item):not(.candidate-item):not(.modal-content):not(.summary-card) {
+    background-color: transparent !important;
+  }
+
+  /* Override navbar buttons for dark theme */
+  .navbar .btn-primary {
+    background: linear-gradient(135deg, var(--purple-primary), var(--purple-secondary)) !important;
+    color: white !important;
+    border: none !important;
+  }
+
+  .navbar .btn-primary:hover {
+    background: linear-gradient(135deg, var(--purple-dark), var(--purple-primary)) !important;
+  }
+
+  /* Override any remaining white elements */
+  * {
+    scrollbar-color: var(--purple-primary) var(--bg-panel);
+  }
+
+  /* Ensure no white backgrounds leak through */
+  .nav-container {
+    background: transparent !important;
+  }
+
+  /* Force all side areas and margins to be dark */
+  body::before,
+  body::after {
+    background: var(--bg-dark) !important;
+  }
+
+  /* Make sure viewport background is dark */
+  :root {
+    background: var(--bg-dark) !important;
+  }
+
+  /* Override any potential white backgrounds from base template */
+  main,
+  section,
+  article,
+  aside {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+  }
+
+  /* Ensure padding/margin areas are dark */
+  .dashboard-container::before,
+  .dashboard-container::after {
+    background: var(--bg-dark) !important;
+  }
+
+  /* Make sure the entire viewport is dark */
+  html, body {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+    background-image: none !important;
+  }
+
+  /* Ensure all page-level containers are dark */
+  body > *:not(.navbar):not(.modal) {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
+  }
+
+  /* Override any potential white backgrounds in content areas */
+  #content,
+  .content,
+  .main,
+  .page-content {
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
   }
 
   .dashboard-container {
     max-width: 1400px;
-    margin: 32px auto;
-    padding: 0 16px;
+    margin: 0 auto;
+    padding: 40px 32px;
+    min-height: calc(100vh - 80px);
+    background: var(--bg-dark) !important;
+    background-color: var(--bg-dark) !important;
   }
 
   .dashboard-header {
-    margin-bottom: 32px;
+    margin-bottom: 48px;
+    text-align: center;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border-color);
   }
 
   .dashboard-header h1 {
-    margin: 0 0 8px 0;
-    font-size: 32px;
-    color: var(--text);
+    margin: 0 0 16px 0;
+    font-size: 44px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--purple-primary), var(--purple-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.8px;
+    line-height: 1.2;
   }
 
   .dashboard-header p {
-    color: var(--muted);
+    color: var(--text-secondary);
+    font-size: 16px;
     margin: 0;
+    font-weight: 400;
+    letter-spacing: 0.1px;
   }
 
   .dashboard-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px;
-    margin-bottom: 24px;
+    gap: 28px;
+    margin-bottom: 36px;
   }
 
   .dashboard-section {
-    background: var(--card);
-    border-radius: 16px;
-    padding: 24px;
-    box-shadow: var(--shadow);
-    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 20px;
+    padding: 32px;
+    box-shadow: var(--shadow-lg);
+    border: 2px solid var(--border-color);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 0;
+    isolation: isolate;
+  }
+
+  .dashboard-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--purple-primary), var(--purple-secondary));
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .dashboard-section:hover {
+    border-color: var(--purple-primary);
+    box-shadow: var(--shadow-xl);
+    transform: translateY(-4px);
+  }
+
+  .dashboard-section:hover::before {
+    opacity: 1;
   }
 
   .section-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 2px solid var(--border);
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--border-color);
+    gap: 16px;
   }
 
   .section-header h2 {
     margin: 0;
-    font-size: 24px;
-    color: var(--text);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    letter-spacing: -0.3px;
+    flex: 1;
+  }
+
+  .section-header h2::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 24px;
+    background: linear-gradient(135deg, var(--purple-primary), var(--purple-secondary));
+    border-radius: 2px;
+    margin-right: -4px;
   }
 
   .full-width-section {
     grid-column: 1 / -1;
+    margin-top: 0;
+    margin-bottom: 40px;
+    clear: both;
+    display: block;
+    width: 100%;
   }
 
-  /* Form Styles */
+  .full-width-section:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Ensure proper separation between full-width cards */
+  .dashboard-section.full-width-section {
+    margin-top: 0;
+    margin-bottom: 40px;
+    display: block;
+    width: 100%;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Add extra spacing after dashboard-grid */
+  .dashboard-grid + .dashboard-section.full-width-section {
+    margin-top: 40px;
+  }
+
+  /* Ensure cards are visually separated */
+  .dashboard-section.full-width-section + .dashboard-section.full-width-section {
+    margin-top: 40px;
+  }
+
+  /* Settings Row Container - Flex Layout */
+  .settings-row-container {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+
+  .settings-row-container .dashboard-section {
+    flex: 1;
+    min-width: 500px;
+    margin-bottom: 0;
+  }
+
+  .settings-row-container .dashboard-section.full-width-section {
+    grid-column: auto;
+    margin-bottom: 0;
+  }
+
+  /* Form Styles - Dark Theme */
   label {
     display: block;
-    margin: 12px 0 6px;
+    margin: 20px 0 10px;
     font-weight: 600;
-    color: var(--text);
+    color: var(--text-primary);
+    font-size: 14px;
+    letter-spacing: 0.1px;
+  }
+
+  label:first-child {
+    margin-top: 0;
   }
 
   input[type="text"],
   input[type="file"],
-  textarea {
+  input[type="date"],
+  input[type="time"],
+  input[type="number"],
+  textarea,
+  select {
     width: 100%;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
     font-size: 14px;
-    background: #f8fafc;
+    background: var(--bg-panel);
+    color: var(--text-primary);
     font-family: inherit;
     box-sizing: border-box;
+    transition: all 0.2s ease;
+  }
+
+  input[type="text"]:focus,
+  input[type="date"]:focus,
+  input[type="time"]:focus,
+  input[type="number"]:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--purple-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    background: var(--bg-card);
+  }
+
+  input[type="text"]::placeholder,
+  textarea::placeholder {
+    color: var(--text-muted);
   }
 
   textarea {
@@ -102,47 +389,104 @@
 
   input[type="file"] {
     cursor: pointer;
+    padding: 12px;
   }
 
+  select {
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a78bfa' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+    padding-right: 40px;
+  }
+
+  /* Buttons - Purple Gradient */
   .btn {
-    background: linear-gradient(135deg, var(--accent), #1d4ed8);
+    background: linear-gradient(135deg, var(--purple-primary), var(--purple-secondary));
     color: #fff;
     border: none;
-    padding: 12px 18px;
+    padding: 12px 28px;
     border-radius: 10px;
     cursor: pointer;
     font-size: 14px;
     font-weight: 600;
-    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
-    transition: transform 0.05s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     text-decoration: none;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    letter-spacing: 0.2px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+  }
+
+  .btn:hover::before {
+    width: 300px;
+    height: 300px;
   }
 
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.28);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.45);
+    background: linear-gradient(135deg, var(--purple-dark), var(--purple-primary));
+  }
+
+  .btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
   }
 
   .btn-secondary {
-    background: linear-gradient(135deg, var(--muted), #4b5563);
-    box-shadow: 0 8px 20px rgba(107, 114, 128, 0.25);
+    background: linear-gradient(135deg, #475569, #64748b);
+    box-shadow: 0 8px 20px rgba(71, 85, 105, 0.3);
+  }
+
+  .btn-secondary:hover {
+    background: linear-gradient(135deg, #64748b, #475569);
+    box-shadow: 0 12px 28px rgba(71, 85, 105, 0.4);
   }
 
   .btn-danger {
-    background: linear-gradient(135deg, var(--danger), #dc2626);
-    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.25);
+    background: linear-gradient(135deg, var(--accent-danger), #dc2626);
+    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+  }
+
+  .btn-danger:hover {
+    box-shadow: 0 12px 28px rgba(239, 68, 68, 0.4);
   }
 
   .btn-small {
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 8px 16px;
+    font-size: 13px;
+    border-radius: 8px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: auto;
+    width: auto;
   }
 
   .btn:disabled {
-    background: #9eb5ef;
+    background: #475569;
     cursor: not-allowed;
     box-shadow: none;
+    opacity: 0.6;
   }
 
   /* Job Description List */
@@ -152,43 +496,65 @@
     gap: 12px;
     max-height: 600px;
     overflow-y: auto;
+    padding-right: 8px;
+  }
+
+  .job-list::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .job-list::-webkit-scrollbar-track {
+    background: var(--bg-panel);
+    border-radius: 4px;
+  }
+
+  .job-list::-webkit-scrollbar-thumb {
+    background: var(--purple-primary);
+    border-radius: 4px;
   }
 
   .job-item {
-    background: #f8fafc;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-    transition: all 0.2s ease;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 22px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border-left: 3px solid transparent;
   }
 
   .job-item:hover {
-    border-color: var(--accent);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    border-color: var(--purple-primary);
+    border-left-color: var(--purple-primary);
+    background: var(--bg-card-hover);
+    box-shadow: var(--shadow-md);
+    transform: translateX(6px);
   }
 
   .job-item-header {
     display: flex;
     justify-content: space-between;
     align-items: start;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
   }
 
   .job-item-title {
     font-weight: 600;
-    font-size: 16px;
-    color: var(--text);
-    margin: 0 0 4px 0;
+    font-size: 17px;
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+    letter-spacing: -0.2px;
   }
 
   .job-item-description {
-    color: var(--muted);
+    color: var(--text-secondary);
     font-size: 14px;
     margin: 8px 0;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    line-height: 1.5;
   }
 
   .job-item-meta {
@@ -198,25 +564,30 @@
     flex-wrap: wrap;
     margin-top: 12px;
     font-size: 12px;
-    color: var(--muted);
+    color: var(--text-muted);
   }
 
   .badge {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: 20px;
     font-size: 12px;
     font-weight: 600;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
   }
 
   .badge-active {
-    background: #d1fae5;
-    color: #065f46;
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--accent-success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
   }
 
   .badge-inactive {
-    background: #fee2e2;
-    color: #991b1b;
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--accent-danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
   }
 
   .job-item-actions {
@@ -228,120 +599,181 @@
   .candidate-status-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 16px;
+    gap: 24px;
   }
 
   .status-section {
-    background: #f8fafc;
-    border-radius: 12px;
-    padding: 16px;
-    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+  }
+
+  .status-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--purple-primary), var(--purple-secondary));
+    border-radius: 16px 16px 0 0;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .status-section:hover {
+    border-color: var(--purple-primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  .status-section:hover::before {
+    opacity: 1;
   }
 
   .status-section-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border-color);
   }
 
   .status-section-title {
     font-weight: 600;
     font-size: 16px;
     margin: 0;
+    color: var(--text-primary);
+    letter-spacing: 0.1px;
   }
 
   .status-count {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--purple-primary), var(--purple-secondary));
     color: white;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+    min-width: 32px;
+    text-align: center;
+    letter-spacing: 0.2px;
   }
 
   .candidate-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     max-height: 400px;
     overflow-y: auto;
+    padding-right: 8px;
+  }
+
+  .candidate-list::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .candidate-list::-webkit-scrollbar-track {
+    background: var(--bg-panel);
+    border-radius: 4px;
+  }
+
+  .candidate-list::-webkit-scrollbar-thumb {
+    background: var(--purple-primary);
+    border-radius: 4px;
   }
 
   .candidate-item {
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px;
-    transition: all 0.2s ease;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border-left: 3px solid transparent;
   }
 
   .candidate-item:hover {
-    border-color: var(--accent);
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    border-color: var(--purple-primary);
+    border-left-color: var(--purple-primary);
+    background: var(--bg-card-hover);
+    box-shadow: var(--shadow-sm);
+    transform: translateX(4px);
   }
 
   .candidate-name {
     font-weight: 600;
-    font-size: 14px;
-    margin: 0 0 4px 0;
-    color: var(--text);
+    font-size: 15px;
+    margin: 0 0 8px 0;
+    color: var(--text-primary);
+    letter-spacing: -0.1px;
   }
 
   .candidate-email {
     font-size: 12px;
-    color: var(--muted);
-    margin: 0 0 4px 0;
+    color: var(--text-secondary);
+    margin: 0 0 6px 0;
   }
 
   .candidate-meta {
     font-size: 11px;
-    color: var(--muted);
+    color: var(--text-muted);
     margin-top: 8px;
+    line-height: 1.5;
   }
 
   .interview-slot {
-    background: #dbeafe;
-    color: #1e40af;
-    padding: 4px 8px;
-    border-radius: 6px;
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--purple-light);
+    padding: 6px 12px;
+    border-radius: 8px;
     font-size: 11px;
     margin-top: 8px;
     display: inline-block;
+    border: 1px solid rgba(99, 102, 241, 0.3);
   }
 
   /* Upload Section */
   .upload-section {
-    background: #f8fafc;
-    padding: 16px;
-    border-radius: 10px;
-    border: 2px dashed var(--border);
+    background: var(--bg-panel);
+    padding: 24px;
+    border-radius: 12px;
+    border: 2px dashed var(--border-light);
     margin-top: 8px;
+    transition: all 0.3s ease;
+    text-align: center;
   }
 
   .upload-section.has-file {
-    border-color: var(--accent-2);
-    background: #f0fdf4;
+    border-color: var(--purple-primary);
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+    border-style: solid;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
   }
 
   .file-info {
-    margin-top: 8px;
-    padding: 8px;
-    background: white;
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--bg-card);
     border-radius: 8px;
     font-size: 12px;
-    color: var(--muted);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
   }
 
   .hint {
     font-size: 12px;
-    color: var(--muted);
-    margin-top: 4px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.5;
+    font-style: italic;
+    opacity: 0.85;
   }
 
-  /* Modal Styles */
+  /* Modal Styles - Dark Theme */
   .modal {
     display: none;
     position: fixed;
@@ -350,12 +782,12 @@
     top: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
   }
 
   .modal-content {
-    background-color: white;
+    background-color: var(--bg-card);
     margin: 5% auto;
     padding: 32px;
     border-radius: 16px;
@@ -363,7 +795,22 @@
     max-width: 600px;
     max-height: 80vh;
     overflow-y: auto;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-xl);
+    border: 1px solid var(--border-color);
+  }
+
+  .modal-content::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .modal-content::-webkit-scrollbar-track {
+    background: var(--bg-panel);
+    border-radius: 4px;
+  }
+
+  .modal-content::-webkit-scrollbar-thumb {
+    background: var(--purple-primary);
+    border-radius: 4px;
   }
 
   .modal-header {
@@ -371,28 +818,31 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 2px solid var(--border);
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--border-color);
   }
 
   .modal-header h3 {
     margin: 0;
     font-size: 24px;
+    color: var(--text-primary);
+    font-weight: 600;
   }
 
   .close {
-    color: var(--muted);
-    font-size: 28px;
+    color: var(--text-secondary);
+    font-size: 32px;
     font-weight: bold;
     cursor: pointer;
     background: none;
     border: none;
     padding: 0;
     line-height: 1;
+    transition: color 0.2s ease;
   }
 
   .close:hover {
-    color: var(--text);
+    color: var(--text-primary);
   }
 
   .form-actions {
@@ -406,15 +856,166 @@
   .empty-state {
     text-align: center;
     padding: 40px 20px;
-    color: var(--muted);
+    color: var(--text-muted);
   }
 
   .empty-state-icon {
     font-size: 48px;
     margin-bottom: 16px;
+    opacity: 0.6;
+  }
+
+  /* Processing Results */
+  .results-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .summary-card {
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+  }
+
+  .summary-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .summary-card.interview {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.3);
+  }
+
+  .summary-card.hold {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.3);
+  }
+
+  .summary-card.reject {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+
+  .summary-count {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .summary-card.interview .summary-count {
+    color: var(--accent-success);
+  }
+
+  .summary-card.hold .summary-count {
+    color: var(--accent-warning);
+  }
+
+  .summary-card.reject .summary-count {
+    color: var(--accent-danger);
+  }
+
+  .summary-label {
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .summary-card.interview .summary-label {
+    color: var(--accent-success);
+  }
+
+  .summary-card.hold .summary-label {
+    color: var(--accent-warning);
+  }
+
+  .summary-card.reject .summary-label {
+    color: var(--accent-danger);
+  }
+
+  /* Info Boxes */
+  .info-box {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    border-left: 4px solid var(--purple-primary);
+  }
+
+  .info-box p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+    letter-spacing: 0.1px;
+  }
+
+  /* Checkbox Styling */
+  input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: var(--purple-primary);
+  }
+
+  /* Filter Badge */
+  .filter-badge {
+    background: rgba(99, 102, 241, 0.2);
+    border-left: 4px solid var(--purple-primary);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    color: var(--text-secondary);
+  }
+
+  .filter-badge strong {
+    color: var(--text-primary);
+  }
+
+  /* Status Messages */
+  #status,
+  #emailSettingsStatus,
+  #interviewSettingsStatus {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  /* Responsive Design */
+  @media (max-width: 1024px) {
+    .dashboard-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .candidate-status-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .results-summary {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .dashboard-container {
+      padding: 20px 16px;
+    }
+
+    .dashboard-header h1 {
+      font-size: 32px;
+    }
+
+    .dashboard-section {
+      padding: 20px;
+    }
   }
 </style>
+{% endblock %}
 
+{% block content %}
 <div class="dashboard-container">
   <div class="dashboard-header">
     <h1>📋 Recruiter Dashboard</h1>
@@ -425,8 +1026,8 @@
   <div class="dashboard-grid">
     <!-- CV Upload Section -->
     <div class="dashboard-section">
-      <div class="section-header">
-        <h2>📤 Upload CVs</h2>
+        <div class="section-header">
+        <h2><span style="font-size: 24px; margin-right: 4px;">📤</span> Upload CVs</h2>
       </div>
       <form id="cv-form">
         <label>Upload CV files (multiple allowed)</label>
@@ -436,7 +1037,7 @@
         </div>
 
         <label>Select Job Description (Optional)</label>
-        <select id="jobDescriptionSelect" style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; background: #f8fafc;">
+        <select id="jobDescriptionSelect">
           <option value="">-- Select a job description --</option>
           {% for jd in job_descriptions %}
             <option value="{{ jd.id }}" data-keywords="{{ jd.keywords_json|default:''|escape }}">{{ jd.title }}</option>
@@ -444,7 +1045,7 @@
         </select>
         <div class="hint">Select an existing job description to use for candidate evaluation</div>
         <div id="jobKeywordsDisplay" style="margin-top: 12px; display: none;">
-          <strong>Extracted Keywords:</strong>
+          <strong style="color: var(--text-primary);">Extracted Keywords:</strong>
           <div id="keywordsList" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;"></div>
         </div>
 
@@ -454,31 +1055,31 @@
         <label>Job Keywords (Optional)</label>
         <input id="jobKeywords" type="text" placeholder="e.g., react,node,api,aws" />
 
-        <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center;">
-          <button type="submit" id="submitBtn" class="btn">Process CVs</button>
+        <div style="margin-top: 20px; display: flex; gap: 12px; align-items: center;">
+          <button type="submit" id="submitBtn" class="btn">🚀 Process CVs</button>
           <span id="status" class="hint"></span>
         </div>
       </form>
 
       <!-- Processing Results Section -->
-      <div id="processingResults" style="display: none; margin-top: 24px;">
-        <div class="section-header" style="margin-bottom: 16px;">
-          <h3 style="margin: 0; font-size: 20px;">📊 Processing Results</h3>
+      <div id="processingResults" style="display: none; margin-top: 28px;">
+        <div class="section-header" style="margin-bottom: 20px;">
+          <h3 style="margin: 0; font-size: 20px; color: var(--text-primary);">📊 Processing Results</h3>
         </div>
         
         <!-- Results Summary -->
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
-          <div style="background: #d1fae5; padding: 16px; border-radius: 10px; text-align: center;">
-            <div style="font-size: 32px; font-weight: 700; color: #065f46;" id="interviewCount">0</div>
-            <div style="color: #065f46; font-weight: 600;">✅ Selected for Interview</div>
+        <div class="results-summary">
+          <div class="summary-card interview">
+            <div class="summary-count" id="interviewCount">0</div>
+            <div class="summary-label">✅ Selected for Interview</div>
           </div>
-          <div style="background: #fef3c7; padding: 16px; border-radius: 10px; text-align: center;">
-            <div style="font-size: 32px; font-weight: 700; color: #92400e;" id="holdCount">0</div>
-            <div style="color: #92400e; font-weight: 600;">⏸️ On Hold</div>
+          <div class="summary-card hold">
+            <div class="summary-count" id="holdCount">0</div>
+            <div class="summary-label">⏸️ On Hold</div>
           </div>
-          <div style="background: #fee2e2; padding: 16px; border-radius: 10px; text-align: center;">
-            <div style="font-size: 32px; font-weight: 700; color: #991b1b;" id="rejectCount">0</div>
-            <div style="color: #991b1b; font-weight: 600;">❌ Rejected</div>
+          <div class="summary-card reject">
+            <div class="summary-count" id="rejectCount">0</div>
+            <div class="summary-label">❌ Rejected</div>
           </div>
         </div>
 
@@ -486,19 +1087,19 @@
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
           <!-- Interview Candidates -->
           <div>
-            <h4 style="margin: 0 0 12px 0; color: #065f46;">✅ Interview</h4>
+            <h4 style="margin: 0 0 12px 0; color: var(--accent-success); font-size: 16px;">✅ Interview</h4>
             <div id="interviewCandidates" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;"></div>
           </div>
           
           <!-- Hold Candidates -->
           <div>
-            <h4 style="margin: 0 0 12px 0; color: #92400e;">⏸️ Hold</h4>
+            <h4 style="margin: 0 0 12px 0; color: var(--accent-warning); font-size: 16px;">⏸️ Hold</h4>
             <div id="holdCandidates" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;"></div>
           </div>
           
           <!-- Rejected Candidates -->
           <div>
-            <h4 style="margin: 0 0 12px 0; color: #991b1b;">❌ Rejected</h4>
+            <h4 style="margin: 0 0 12px 0; color: var(--accent-danger); font-size: 16px;">❌ Rejected</h4>
             <div id="rejectCandidates" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;"></div>
           </div>
         </div>
@@ -508,7 +1109,7 @@
     <!-- Job Description Section -->
     <div class="dashboard-section">
       <div class="section-header">
-        <h2>📝 Job Descriptions</h2>
+        <h2><span style="font-size: 24px; margin-right: 4px;">📝</span> Job Descriptions</h2>
         <button class="btn btn-small" onclick="openJobDescriptionModal()">+ Add New</button>
       </div>
       <div class="job-list" id="jobDescriptionList">
@@ -544,44 +1145,118 @@
     </div>
   </div>
 
+  <!-- Interview Settings Section -->
+  <div class="dashboard-section full-width-section" id="interviewSettingsSection">
+    <div class="section-header">
+      <h2>📅 Interview Settings</h2>
+      <button class="btn btn-small" onclick="toggleInterviewSettings()" id="toggleInterviewSettingsBtn">Show Settings</button>
+    </div>
+    <div id="interviewSettingsForm" style="display: none;">
+      <div class="info-box">
+        <p>
+          Configure your interview scheduling preferences. Set the date range, time window, and daily capacity for interviews.
+        </p>
+      </div>
+      
+      <form id="interviewSettingsFormElement">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+          <!-- Date Range Settings -->
+          <div>
+            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 12px; font-weight: 600;">
+              📆 Date Range
+            </h3>
+            
+            <label for="scheduleFromDate">
+              Schedule From Date
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Start date for scheduling interviews</span>
+            </label>
+            <input type="date" id="scheduleFromDate" name="schedule_from_date" />
+            <div class="hint">Leave empty to start from today. Format: YYYY-MM-DD</div>
+            
+            <label for="scheduleToDate" style="margin-top: 20px;">
+              Schedule To Date
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - End date for scheduling interviews</span>
+            </label>
+            <input type="date" id="scheduleToDate" name="schedule_to_date" />
+            <div class="hint">Leave empty for no end date. Format: YYYY-MM-DD</div>
+          </div>
+          
+          <!-- Time Range and Capacity Settings -->
+          <div>
+            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 12px; font-weight: 600;">
+              ⏰ Time Range & Capacity
+            </h3>
+            
+            <label for="startTime">
+              Start Time
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Daily start time for interviews</span>
+            </label>
+            <input type="time" id="startTime" name="start_time" value="09:00" required />
+            <div class="hint">Default: 09:00 (9 AM). Format: HH:MM (24-hour)</div>
+            
+            <label for="endTime" style="margin-top: 20px;">
+              End Time
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Daily end time for interviews</span>
+            </label>
+            <input type="time" id="endTime" name="end_time" value="17:00" required />
+            <div class="hint">Default: 17:00 (5 PM). Format: HH:MM (24-hour)</div>
+            
+            <label for="interviewsPerDay" style="margin-top: 20px;">
+              Interviews Per Day
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Maximum interviews per day</span>
+            </label>
+            <input type="number" id="interviewsPerDay" name="interviews_per_day" min="1" max="20" value="3" required />
+            <div class="hint">Default: 3 interviews per day. Maximum: 20</div>
+          </div>
+        </div>
+        
+        <div style="margin-top: 28px; display: flex; gap: 12px; align-items: center;">
+          <button type="submit" class="btn" id="saveInterviewSettingsBtn">💾 Save Interview Settings</button>
+          <button type="button" class="btn btn-secondary" onclick="loadInterviewSettings()">🔄 Reset to Current</button>
+          <span id="interviewSettingsStatus" class="hint"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Email Settings Section -->
   <div class="dashboard-section full-width-section" id="emailSettingsSection">
     <div class="section-header">
-      <h2>⚙️ Email Settings</h2>
+      <h2><span style="font-size: 24px; margin-right: 4px;">⚙️</span> Email Settings</h2>
       <button class="btn btn-small" onclick="toggleEmailSettings()" id="toggleEmailSettingsBtn">Show Settings</button>
     </div>
     <div id="emailSettingsForm" style="display: none;">
-      <div style="background: #f8fafc; padding: 16px; border-radius: 10px; margin-bottom: 20px;">
-        <p style="margin: 0; color: var(--muted); font-size: 14px;">
+      <div class="info-box">
+        <p>
           Configure your email timing preferences. These settings will be applied to all new interviews you create.
         </p>
       </div>
       
       <form id="emailSettingsFormElement">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
           <!-- Follow-up Settings -->
           <div>
-            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text); border-bottom: 2px solid var(--border); padding-bottom: 8px;">
+            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 12px; font-weight: 600;">
               📧 Follow-up Email Settings (PENDING Interviews)
             </h3>
             
             <label for="followupDelayHours">
               Follow-up Delay (Hours)
-              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Kitne hours baad pehli follow-up email bhejni hai (0.1 = 6 min)</span>
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Hours before sending first follow-up email (0.1 = 6 min)</span>
             </label>
             <input type="number" id="followupDelayHours" name="followup_delay_hours" min="0.1" max="168" step="0.1" value="48" required />
             <div class="hint">Default: 48 hours (2 days). Use 0.1 for 6 minutes, 0.5 for 30 minutes</div>
             
-            <label for="minHoursBetweenFollowups" style="margin-top: 16px;">
+            <label for="minHoursBetweenFollowups" style="margin-top: 20px;">
               Minimum Hours Between Follow-ups
-              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Do follow-up emails ke beech minimum gap (0.1 = 6 min)</span>
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Minimum gap between follow-up emails (0.1 = 6 min)</span>
             </label>
             <input type="number" id="minHoursBetweenFollowups" name="min_hours_between_followups" min="0.1" max="72" step="0.1" value="24" required />
             <div class="hint">Default: 24 hours. Use 0.1 for 6 minutes</div>
             
-            <label for="maxFollowupEmails" style="margin-top: 16px;">
+            <label for="maxFollowupEmails" style="margin-top: 20px;">
               Maximum Follow-up Emails
-              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Maximum kitne follow-up emails bhejne hain</span>
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Maximum number of follow-up emails to send</span>
             </label>
             <input type="number" id="maxFollowupEmails" name="max_followup_emails" min="1" max="10" value="3" required />
             <div class="hint">Default: 3 emails</div>
@@ -589,36 +1264,36 @@
           
           <!-- Reminder Settings -->
           <div>
-            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text); border-bottom: 2px solid var(--border); padding-bottom: 8px;">
+            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 12px; font-weight: 600;">
               🔔 Reminder Email Settings (SCHEDULED Interviews)
             </h3>
             
             <label for="reminderHoursBefore">
               Reminder Hours Before Interview
-              <span style="color: var(--muted); font-weight: normal; font-size: 12px;"> - Interview se kitne hours pehle reminder bhejni hai (0.5 = 30 min)</span>
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Hours before interview to send reminder (0.5 = 30 min)</span>
             </label>
             <input type="number" id="reminderHoursBefore" name="reminder_hours_before" min="0.1" max="168" step="0.1" value="24" required />
             <div class="hint">Default: 24 hours (1 day before). Use 0.5 for 30 minutes</div>
             
-            <div style="margin-top: 24px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--border);">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" id="autoSendFollowups" name="auto_send_followups" checked style="width: auto; cursor: pointer;" />
+            <div style="margin-top: 24px; padding: 20px; background: var(--bg-panel); border-radius: 12px; border: 1px solid var(--border-color);">
+              <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; color: var(--text-primary);">
+                <input type="checkbox" id="autoSendFollowups" name="auto_send_followups" checked />
                 <span>Automatically send follow-up emails</span>
               </label>
-              <div class="hint" style="margin-top: 4px; margin-left: 24px;">If unchecked, you'll need to send follow-ups manually</div>
+              <div class="hint" style="margin-top: 8px; margin-left: 32px;">If unchecked, you'll need to send follow-ups manually</div>
             </div>
             
-            <div style="margin-top: 16px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--border);">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" id="autoSendReminders" name="auto_send_reminders" checked style="width: auto; cursor: pointer;" />
+            <div style="margin-top: 16px; padding: 20px; background: var(--bg-panel); border-radius: 12px; border: 1px solid var(--border-color);">
+              <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; color: var(--text-primary);">
+                <input type="checkbox" id="autoSendReminders" name="auto_send_reminders" checked />
                 <span>Automatically send reminder emails</span>
               </label>
-              <div class="hint" style="margin-top: 4px; margin-left: 24px;">If unchecked, you'll need to send reminders manually</div>
+              <div class="hint" style="margin-top: 8px; margin-left: 32px;">If unchecked, you'll need to send reminders manually</div>
             </div>
           </div>
         </div>
         
-        <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
+        <div style="margin-top: 28px; display: flex; gap: 12px; align-items: center;">
           <button type="submit" class="btn" id="saveEmailSettingsBtn">💾 Save Email Settings</button>
           <button type="button" class="btn btn-secondary" onclick="loadEmailSettings()">🔄 Reset to Current</button>
           <span id="emailSettingsStatus" class="hint"></span>
@@ -632,20 +1307,20 @@
     <div class="section-header">
       <h2>👥 Candidate Status</h2>
       <div style="display: flex; gap: 12px; align-items: center;">
-        <label for="statusJobFilter" style="margin: 0; font-weight: 500; font-size: 14px;">Filter by Job:</label>
-        <select id="statusJobFilter" onchange="filterByJob(this.value)" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: white; cursor: pointer;">
+        <label for="statusJobFilter" style="margin: 0; font-weight: 500; font-size: 14px; color: var(--text-secondary);">Filter by Job:</label>
+        <select id="statusJobFilter" onchange="filterByJob(this.value)">
           <option value="">-- All Jobs --</option>
           {% for jd in job_descriptions %}
             <option value="{{ jd.id }}" {% if filter_job and filter_job.id == jd.id %}selected{% endif %}>{{ jd.title }}</option>
           {% endfor %}
         </select>
         {% if filter_job %}
-        <button class="btn btn-small btn-secondary" onclick="filterByJob('')" style="padding: 8px 12px; font-size: 12px;">Clear Filter</button>
+        <button class="btn btn-small btn-secondary" onclick="filterByJob('')">Clear Filter</button>
         {% endif %}
       </div>
     </div>
     {% if filter_job %}
-    <div style="background: #eef2ff; border-left: 4px solid var(--accent); padding: 12px; margin-bottom: 20px; border-radius: 8px;">
+    <div class="filter-badge">
       <strong>📌 Filtered by:</strong> {{ filter_job.title }}
     </div>
     {% endif %}
@@ -773,7 +1448,7 @@
       <textarea id="jobDescriptionTextModal" required></textarea>
       <div class="hint">The full job description text. Keywords will be automatically extracted.</div>
 
-      <label style="display: flex; align-items: center; gap: 8px; margin-top: 16px;">
+      <label style="display: flex; align-items: center; gap: 12px; margin-top: 20px; color: var(--text-primary); cursor: pointer;">
         <input type="checkbox" id="jobIsActive" checked />
         <span>Active (currently being used)</span>
       </label>
@@ -851,7 +1526,6 @@
     try {
       let response;
       if (id) {
-        // Update
         response = await fetch(`{% url 'update_job_description' 0 %}`.replace('0', id), {
           method: 'POST',
           body: formData,
@@ -860,7 +1534,6 @@
           }
         });
       } else {
-        // Create
         response = await fetch('{% url "create_job_description" %}', {
           method: 'POST',
           body: formData,
@@ -875,7 +1548,6 @@
         throw new Error(error.error || 'Failed to save job description');
       }
 
-      // Reload page to show updated list
       window.location.reload();
     } catch (error) {
       alert('Error: ' + error.message);
@@ -901,7 +1573,6 @@
         throw new Error(error.error || 'Failed to delete job description');
       }
 
-      // Reload page to show updated list
       window.location.reload();
     } catch (error) {
       alert('Error: ' + error.message);
@@ -924,7 +1595,7 @@
         
         if (keywords.length > 0) {
           keywordsList.innerHTML = keywords.map(kw => 
-            `<span class="chip matched" style="background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 999px; font-size: 12px;">${kw}</span>`
+            `<span style="background: rgba(99, 102, 241, 0.2); color: var(--purple-light); padding: 6px 12px; border-radius: 20px; font-size: 12px; border: 1px solid rgba(99, 102, 241, 0.3);">${kw}</span>`
           ).join('');
           jobKeywordsDisplay.style.display = 'block';
         } else {
@@ -956,7 +1627,7 @@
     }
   });
 
-  // CV Form Submit (reuse existing process_cvs functionality)
+  // CV Form Submit
   document.getElementById('cv-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const files = cvFileInput.files;
@@ -973,12 +1644,6 @@
     Array.from(files).forEach((f) => fd.append('files', f));
     
     if (jobDescriptionId) {
-      // Fetch job description text from selected option
-      const selectedOption = jobDescriptionSelect.options[jobDescriptionSelect.selectedIndex];
-      // Get job description details via API or use stored data
-      // For now, we'll fetch the full job description via an API call if needed
-      // But first, try to get it from the job descriptions data
-      // Note: We'll append job_description_id for linking purposes
       fd.append('job_description_id', jobDescriptionId);
     }
     if (jobDescriptionText) {
@@ -994,6 +1659,7 @@
     
     submitBtn.disabled = true;
     statusEl.textContent = 'Processing...';
+    statusEl.style.color = 'var(--text-secondary)';
     processingResults.style.display = 'none';
 
     try {
@@ -1011,17 +1677,16 @@
       }
 
       const data = await res.json();
-      statusEl.textContent = `Processed ${data.length} CV(s) successfully!`;
+      statusEl.textContent = `✅ Processed ${data.length} CV(s) successfully!`;
+      statusEl.style.color = 'var(--accent-success)';
       
-      // Display results
       displayProcessingResults(data);
       processingResults.style.display = 'block';
-      
-      // Scroll to results
       processingResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       
     } catch (err) {
-      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.textContent = '❌ Error: ' + err.message;
+      statusEl.style.color = 'var(--accent-danger)';
       alert('Error processing CVs: ' + err.message);
     } finally {
       submitBtn.disabled = false;
@@ -1037,7 +1702,6 @@
     const holdCount = document.getElementById('holdCount');
     const rejectCount = document.getElementById('rejectCount');
     
-    // Clear previous results
     interviewCandidates.innerHTML = '';
     holdCandidates.innerHTML = '';
     rejectCandidates.innerHTML = '';
@@ -1057,13 +1721,12 @@
       const score = insights.role_fit_score ?? 'N/A';
       const confidence = qualification.confidence_score ?? 'N/A';
       const matchedSkills = qualification.matched_skills || [];
-      const missingSkills = qualification.missing_skills || [];
       
       const candidateCard = `
-        <div class="candidate-item" style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
+        <div class="candidate-item">
           <div class="candidate-name">${candidateName}</div>
           <div class="candidate-email">${candidateEmail}</div>
-          <div class="candidate-meta" style="margin-top: 8px; font-size: 11px; color: var(--muted);">
+          <div class="candidate-meta">
             Score: ${score} | Confidence: ${confidence}%<br>
             Matched: ${matchedSkills.length} skills
             ${item.rank ? `| Rank: #${item.rank}` : ''}
@@ -1083,20 +1746,18 @@
       }
     });
     
-    // Update counts
     interviewCount.textContent = interviewCountVal;
     holdCount.textContent = holdCountVal;
     rejectCount.textContent = rejectCountVal;
     
-    // Show empty state if no candidates in a category
     if (interviewCountVal === 0) {
-      interviewCandidates.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">No candidates selected for interview</div>';
+      interviewCandidates.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">No candidates selected for interview</div>';
     }
     if (holdCountVal === 0) {
-      holdCandidates.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">No candidates on hold</div>';
+      holdCandidates.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">No candidates on hold</div>';
     }
     if (rejectCountVal === 0) {
-      rejectCandidates.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">No candidates rejected</div>';
+      rejectCandidates.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">No candidates rejected</div>';
     }
   }
 
@@ -1126,14 +1787,13 @@
     if (form.style.display === 'none') {
       form.style.display = 'block';
       btn.textContent = 'Hide Settings';
-      loadEmailSettings(); // Load current settings when showing
+      loadEmailSettings();
     } else {
       form.style.display = 'none';
       btn.textContent = 'Show Settings';
     }
   }
 
-  // Load current email settings
   async function loadEmailSettings() {
     try {
       const response = await fetch('{% url "recruiter_email_settings" %}', {
@@ -1162,7 +1822,6 @@
     }
   }
 
-  // Save email settings
   document.getElementById('emailSettingsFormElement').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -1171,7 +1830,7 @@
     
     btn.disabled = true;
     status.textContent = 'Saving...';
-    status.style.color = 'var(--muted)';
+    status.style.color = 'var(--text-secondary)';
     
     const settings = {
       followup_delay_hours: parseFloat(document.getElementById('followupDelayHours').value),
@@ -1200,9 +1859,7 @@
       const data = await response.json();
       if (data.success) {
         status.textContent = '✅ Settings saved successfully!';
-        status.style.color = '#10b981';
-        
-        // Show success message for 3 seconds
+        status.style.color = 'var(--accent-success)';
         setTimeout(() => {
           status.textContent = '';
         }, 3000);
@@ -1211,12 +1868,126 @@
       }
     } catch (error) {
       status.textContent = '❌ Error: ' + error.message;
-      status.style.color = 'var(--danger)';
+      status.style.color = 'var(--accent-danger)';
       alert('Error saving email settings: ' + error.message);
     } finally {
       btn.disabled = false;
     }
   });
 
+  // Interview Settings Functions
+  function toggleInterviewSettings() {
+    const form = document.getElementById('interviewSettingsForm');
+    const btn = document.getElementById('toggleInterviewSettingsBtn');
+    if (form.style.display === 'none') {
+      form.style.display = 'block';
+      btn.textContent = 'Hide Settings';
+      loadInterviewSettings();
+    } else {
+      form.style.display = 'none';
+      btn.textContent = 'Show Settings';
+    }
+  }
+
+  async function loadInterviewSettings() {
+    try {
+      const response = await fetch('{% url "recruiter_interview_settings" %}', {
+        method: 'GET',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken')
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to load settings');
+      }
+      
+      const data = await response.json();
+      if (data.success && data.settings) {
+        const settings = data.settings;
+        document.getElementById('scheduleFromDate').value = settings.schedule_from_date || '';
+        document.getElementById('scheduleToDate').value = settings.schedule_to_date || '';
+        document.getElementById('startTime').value = settings.start_time || '09:00';
+        document.getElementById('endTime').value = settings.end_time || '17:00';
+        document.getElementById('interviewsPerDay').value = settings.interviews_per_day || 3;
+      }
+    } catch (error) {
+      console.error('Error loading interview settings:', error);
+    }
+  }
+
+  document.getElementById('interviewSettingsFormElement').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const btn = document.getElementById('saveInterviewSettingsBtn');
+    const status = document.getElementById('interviewSettingsStatus');
+    
+    btn.disabled = true;
+    status.textContent = 'Saving...';
+    status.style.color = 'var(--text-secondary)';
+    
+    const scheduleFromDate = document.getElementById('scheduleFromDate').value || null;
+    const scheduleToDate = document.getElementById('scheduleToDate').value || null;
+    const startTime = document.getElementById('startTime').value || '09:00';
+    const endTime = document.getElementById('endTime').value || '17:00';
+    const interviewsPerDay = parseInt(document.getElementById('interviewsPerDay').value) || 3;
+    
+    if (scheduleFromDate && scheduleToDate) {
+      if (new Date(scheduleFromDate) > new Date(scheduleToDate)) {
+        status.textContent = '❌ Error: Start date cannot be after end date';
+        status.style.color = 'var(--accent-danger)';
+        btn.disabled = false;
+        return;
+      }
+    }
+    
+    if (startTime >= endTime) {
+      status.textContent = '❌ Error: Start time must be before end time';
+      status.style.color = 'var(--accent-danger)';
+      btn.disabled = false;
+      return;
+    }
+    
+    const settings = {
+      schedule_from_date: scheduleFromDate,
+      schedule_to_date: scheduleToDate,
+      start_time: startTime,
+      end_time: endTime,
+      interviews_per_day: interviewsPerDay
+    };
+    
+    try {
+      const response = await fetch('{% url "recruiter_interview_settings" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify(settings)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save settings');
+      }
+      
+      const data = await response.json();
+      if (data.success) {
+        status.textContent = '✅ Settings saved successfully!';
+        status.style.color = 'var(--accent-success)';
+        setTimeout(() => {
+          status.textContent = '';
+        }, 3000);
+      } else {
+        throw new Error(data.error || 'Failed to save settings');
+      }
+    } catch (error) {
+      status.textContent = '❌ Error: ' + error.message;
+      status.style.color = 'var(--accent-danger)';
+      alert('Error saving interview settings: ' + error.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 </script>
 {% endblock %}

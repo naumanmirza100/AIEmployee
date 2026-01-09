@@ -175,20 +175,157 @@
             <div class="info-item"><strong>Type:</strong> {{ interview.get_interview_type_display }}</div>
         </div>
 
-        <form method="post">
+        <form method="post" id="slotSelectionForm">
             {% csrf_token %}
             <div class="slots-container">
-                <h3>Available Time Slots:</h3>
-                {% for slot in available_slots %}
-                <div class="slot-option">
-                    <input type="radio" id="slot_{{ forloop.counter }}" name="selected_slot" value="{{ slot.datetime }}" required>
-                    <label for="slot_{{ forloop.counter }}">{{ slot.display }}</label>
+                <h3>Select Your Preferred Date & Time:</h3>
+                <div style="margin-bottom: 20px;">
+                    <label for="selected_slot_datetime" style="display: block; margin-bottom: 10px; font-weight: 600; color: #333;">
+                        Date & Time:
+                    </label>
+                    <input 
+                        type="datetime-local" 
+                        id="selected_slot_datetime" 
+                        name="selected_slot_datetime" 
+                        required
+                        style="width: 100%; padding: 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; background: #f8f9fa;"
+                    />
+                    <div id="datetimeHint" style="margin-top: 8px; font-size: 14px; color: #666;">
+                        Please select a date and time within the available range
+                    </div>
+                    <div id="datetimeError" style="margin-top: 8px; color: #c33; font-size: 14px; display: none;"></div>
                 </div>
-                {% endfor %}
+                
+                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #555;">
+                    <strong>📋 Available Range:</strong>
+                    <div id="availableRange" style="margin-top: 8px;">
+                        Loading...
+                    </div>
+                </div>
             </div>
 
-            <button type="submit" class="submit-btn">✅ Confirm This Time Slot</button>
+            <button type="submit" class="submit-btn" id="confirmBtn">✅ Confirm This Time Slot</button>
         </form>
+        
+        <script>
+            // Load available slots and constraints
+            async function loadAvailableSlots() {
+                try {
+                    const response = await fetch('{% url "get_available_slots_for_interview" token %}');
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const constraints = data.constraints;
+                        const scheduledSlots = data.scheduled_slots || [];
+                        const scheduledDatesCount = data.scheduled_dates_count || {};
+                        
+                        // Set min and max for datetime input
+                        const datetimeInput = document.getElementById('selected_slot_datetime');
+                        const minDate = constraints.min_date;
+                        const maxDate = constraints.max_date;
+                        const startTime = constraints.start_time;
+                        const endTime = constraints.end_time;
+                        
+                        // Set min datetime (date + start time)
+                        datetimeInput.min = `${minDate}T${startTime}`;
+                        // Set max datetime (date + end time)
+                        datetimeInput.max = `${maxDate}T${endTime}`;
+                        
+                        // Update hint
+                        document.getElementById('availableRange').innerHTML = `
+                            <strong>Date Range:</strong> ${new Date(minDate).toLocaleDateString()} to ${new Date(maxDate).toLocaleDateString()}<br>
+                            <strong>Time Range:</strong> ${startTime} to ${endTime}<br>
+                            <strong>Interviews Per Day:</strong> ${constraints.interviews_per_day}
+                        `;
+                        
+                        // Store constraints for validation
+                        window.interviewConstraints = constraints;
+                        window.scheduledSlots = scheduledSlots;
+                        window.scheduledDatesCount = scheduledDatesCount;
+                        
+                        // Add validation on change
+                        datetimeInput.addEventListener('change', validateSelectedSlot);
+                    } else {
+                        document.getElementById('datetimeError').textContent = 'Error loading available slots. Please refresh the page.';
+                        document.getElementById('datetimeError').style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('Error loading slots:', error);
+                    document.getElementById('datetimeError').textContent = 'Error loading available slots. Please refresh the page.';
+                    document.getElementById('datetimeError').style.display = 'block';
+                }
+            }
+            
+            // Validate selected slot
+            function validateSelectedSlot() {
+                const datetimeInput = document.getElementById('selected_slot_datetime');
+                const errorDiv = document.getElementById('datetimeError');
+                const confirmBtn = document.getElementById('confirmBtn');
+                
+                if (!datetimeInput.value) {
+                    errorDiv.style.display = 'none';
+                    return;
+                }
+                
+                if (!window.interviewConstraints) {
+                    return;
+                }
+                
+                const selectedDatetime = new Date(datetimeInput.value);
+                const selectedDate = selectedDatetime.toISOString().split('T')[0];
+                const selectedTime = selectedDatetime.toTimeString().split(' ')[0].substring(0, 5);
+                const selectedISO = selectedDatetime.toISOString();
+                
+                // Check if slot is already taken
+                if (window.scheduledSlots && window.scheduledSlots.includes(selectedISO)) {
+                    errorDiv.textContent = '❌ This time slot is already taken. Please select another time.';
+                    errorDiv.style.display = 'block';
+                    confirmBtn.disabled = true;
+                    return;
+                }
+                
+                // Check interviews per day limit
+                const dateCount = window.scheduledDatesCount[selectedDate] || 0;
+                if (dateCount >= window.interviewConstraints.interviews_per_day) {
+                    errorDiv.textContent = `❌ Maximum interviews per day (${window.interviewConstraints.interviews_per_day}) reached for this date. Please select another date.`;
+                    errorDiv.style.display = 'block';
+                    confirmBtn.disabled = true;
+                    return;
+                }
+                
+                // Check time range
+                const startTime = window.interviewConstraints.start_time;
+                const endTime = window.interviewConstraints.end_time;
+                if (selectedTime < startTime || selectedTime > endTime) {
+                    errorDiv.textContent = `❌ Selected time must be between ${startTime} and ${endTime}.`;
+                    errorDiv.style.display = 'block';
+                    confirmBtn.disabled = true;
+                    return;
+                }
+                
+                // All validations passed
+                errorDiv.style.display = 'none';
+                confirmBtn.disabled = false;
+            }
+            
+            // Load slots when page loads
+            loadAvailableSlots();
+            
+            // Validate on form submit
+            document.getElementById('slotSelectionForm').addEventListener('submit', function(e) {
+                const datetimeInput = document.getElementById('selected_slot_datetime');
+                if (!datetimeInput.value) {
+                    e.preventDefault();
+                    alert('Please select a date and time.');
+                    return;
+                }
+                validateSelectedSlot();
+                if (document.getElementById('confirmBtn').disabled) {
+                    e.preventDefault();
+                    return;
+                }
+            });
+        </script>
         {% endif %}
     </div>
 </body>

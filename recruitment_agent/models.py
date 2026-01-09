@@ -51,6 +51,55 @@ class RecruiterEmailSettings(models.Model):
         return f"Email Settings for {self.recruiter.username}"
 
 
+class RecruiterInterviewSettings(models.Model):
+    """
+    Recruiter interview scheduling preferences.
+    Each recruiter can set their own preferences for interview scheduling:
+    - Date range for scheduling interviews
+    - Time range for daily interview hours
+    - Number of interviews per day
+    """
+    recruiter = models.OneToOneField(User, on_delete=models.CASCADE, related_name='recruiter_interview_settings')
+    
+    # Date range for scheduling interviews
+    schedule_from_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Start date from which interviews can be scheduled (leave empty to start from today)"
+    )
+    schedule_to_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="End date until which interviews can be scheduled (leave empty for no end date)"
+    )
+    
+    # Time range for daily interview hours
+    start_time = models.TimeField(
+        default='09:00',
+        help_text="Start time of day for interviews (e.g., 09:00 for 9 AM)"
+    )
+    end_time = models.TimeField(
+        default='17:00',
+        help_text="End time of day for interviews (e.g., 17:00 for 5 PM)"
+    )
+    
+    # Number of interviews per day
+    interviews_per_day = models.IntegerField(
+        default=3,
+        help_text="Maximum number of interviews that can be scheduled per day"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Recruiter Interview Settings'
+        verbose_name_plural = 'Recruiter Interview Settings'
+    
+    def __str__(self):
+        return f"Interview Settings for {self.recruiter.username}"
+
+
 class JobDescription(models.Model):
     """
     Model to store job descriptions for recruitment positions.

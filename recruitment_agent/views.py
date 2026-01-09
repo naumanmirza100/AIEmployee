@@ -887,6 +887,230 @@ def recruiter_email_settings(request):
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
+def recruiter_interview_settings(request):
+    """
+    Get or update recruiter interview scheduling preferences.
+    GET: Returns current settings
+    POST: Updates settings
+    """
+    from recruitment_agent.models import RecruiterInterviewSettings
+    from datetime import date, time
+    
+    # Check if user has recruitment_agent role
+    is_recruitment_agent = request.user.profile.is_recruitment_agent()
+    if (request.user.is_superuser or request.user.is_staff):
+        selected_role = request.session.get('selected_role')
+        if selected_role == 'recruitment_agent':
+            is_recruitment_agent = True
+    
+    if not is_recruitment_agent:
+        logger.warning(f"❌ Unauthorized interview settings access attempt by user: {request.user.username}")
+        return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
+    
+    if request.method == 'GET':
+        # Get current settings or return defaults
+        print("\n" + "="*70)
+        print("📅 INTERVIEW SETTINGS API CALLED (GET)")
+        print("="*70)
+        print(f"👤 User: {request.user.username} (ID: {request.user.id})")
+        logger.info(f"Interview settings GET request by user: {request.user.username}")
+        
+        try:
+            settings = request.user.recruiter_interview_settings
+            print("✅ Found existing interview settings:")
+            print(f"   • Schedule from date: {settings.schedule_from_date}")
+            print(f"   • Schedule to date: {settings.schedule_to_date}")
+            print(f"   • Start time: {settings.start_time}")
+            print(f"   • End time: {settings.end_time}")
+            print(f"   • Interviews per day: {settings.interviews_per_day}")
+            print("="*70 + "\n")
+            
+            logger.info(f"Retrieved interview settings for {request.user.username}")
+            
+            return JsonResponse({
+                "success": True,
+                "settings": {
+                    "schedule_from_date": settings.schedule_from_date.isoformat() if settings.schedule_from_date else None,
+                    "schedule_to_date": settings.schedule_to_date.isoformat() if settings.schedule_to_date else None,
+                    "start_time": settings.start_time.strftime('%H:%M') if settings.start_time else '09:00',
+                    "end_time": settings.end_time.strftime('%H:%M') if settings.end_time else '17:00',
+                    "interviews_per_day": settings.interviews_per_day,
+                }
+            })
+        except RecruiterInterviewSettings.DoesNotExist:
+            print("ℹ️  No custom settings found, returning defaults:")
+            print(f"   • Schedule from date: None (starts from today)")
+            print(f"   • Schedule to date: None (no end date)")
+            print(f"   • Start time: 09:00")
+            print(f"   • End time: 17:00")
+            print(f"   • Interviews per day: 3")
+            print("="*70 + "\n")
+            
+            logger.info(f"Returned default interview settings for {request.user.username} (no custom settings)")
+            
+            # Return defaults
+            return JsonResponse({
+                "success": True,
+                "settings": {
+                    "schedule_from_date": None,
+                    "schedule_to_date": None,
+                    "start_time": "09:00",
+                    "end_time": "17:00",
+                    "interviews_per_day": 3,
+                }
+            })
+    
+    elif request.method == 'POST':
+        # Update settings
+        print("\n" + "="*70)
+        print("📅 INTERVIEW SETTINGS API CALLED (POST - UPDATE)")
+        print("="*70)
+        print(f"👤 User: {request.user.username} (ID: {request.user.id})")
+        logger.info(f"Interview settings POST request by user: {request.user.username}")
+        
+        try:
+            data = json.loads(request.body) if request.body else {}
+            
+            # Get or create settings
+            settings, created = RecruiterInterviewSettings.objects.get_or_create(
+                recruiter=request.user,
+                defaults={
+                    'start_time': time(9, 0),  # 9 AM
+                    'end_time': time(17, 0),  # 5 PM
+                    'interviews_per_day': 3,
+                }
+            )
+            
+            if created:
+                print("✅ Created new interview settings record")
+            else:
+                print("📝 Updating existing interview settings:")
+            
+            # Store old values for comparison
+            old_values = {
+                'schedule_from_date': settings.schedule_from_date,
+                'schedule_to_date': settings.schedule_to_date,
+                'start_time': settings.start_time,
+                'end_time': settings.end_time,
+                'interviews_per_day': settings.interviews_per_day,
+            }
+            
+            # Track what's being updated
+            updates = []
+            
+            # Update fields if provided
+            if 'schedule_from_date' in data:
+                new_value = None
+                if data['schedule_from_date']:
+                    try:
+                        new_value = date.fromisoformat(data['schedule_from_date'])
+                    except (ValueError, TypeError):
+                        return JsonResponse({"error": "Invalid schedule_from_date format. Use YYYY-MM-DD."}, status=400)
+                if old_values['schedule_from_date'] != new_value:
+                    updates.append(f"schedule_from_date: {old_values['schedule_from_date']} → {new_value}")
+                settings.schedule_from_date = new_value
+                
+            if 'schedule_to_date' in data:
+                new_value = None
+                if data['schedule_to_date']:
+                    try:
+                        new_value = date.fromisoformat(data['schedule_to_date'])
+                    except (ValueError, TypeError):
+                        return JsonResponse({"error": "Invalid schedule_to_date format. Use YYYY-MM-DD."}, status=400)
+                if old_values['schedule_to_date'] != new_value:
+                    updates.append(f"schedule_to_date: {old_values['schedule_to_date']} → {new_value}")
+                settings.schedule_to_date = new_value
+                
+            if 'start_time' in data:
+                try:
+                    time_str = data['start_time']
+                    if isinstance(time_str, str):
+                        # Parse HH:MM format
+                        hour, minute = map(int, time_str.split(':'))
+                        new_value = time(hour, minute)
+                    else:
+                        return JsonResponse({"error": "Invalid start_time format. Use HH:MM."}, status=400)
+                except (ValueError, TypeError, AttributeError):
+                    return JsonResponse({"error": "Invalid start_time format. Use HH:MM."}, status=400)
+                if old_values['start_time'] != new_value:
+                    updates.append(f"start_time: {old_values['start_time']} → {new_value}")
+                settings.start_time = new_value
+                
+            if 'end_time' in data:
+                try:
+                    time_str = data['end_time']
+                    if isinstance(time_str, str):
+                        # Parse HH:MM format
+                        hour, minute = map(int, time_str.split(':'))
+                        new_value = time(hour, minute)
+                    else:
+                        return JsonResponse({"error": "Invalid end_time format. Use HH:MM."}, status=400)
+                except (ValueError, TypeError, AttributeError):
+                    return JsonResponse({"error": "Invalid end_time format. Use HH:MM."}, status=400)
+                if old_values['end_time'] != new_value:
+                    updates.append(f"end_time: {old_values['end_time']} → {new_value}")
+                settings.end_time = new_value
+                
+            if 'interviews_per_day' in data:
+                new_value = int(data['interviews_per_day'])
+                if new_value < 1:
+                    return JsonResponse({"error": "interviews_per_day must be at least 1."}, status=400)
+                if old_values['interviews_per_day'] != new_value:
+                    updates.append(f"interviews_per_day: {old_values['interviews_per_day']} → {new_value}")
+                settings.interviews_per_day = new_value
+            
+            # Validate date range
+            if settings.schedule_from_date and settings.schedule_to_date:
+                if settings.schedule_from_date > settings.schedule_to_date:
+                    return JsonResponse({"error": "schedule_from_date cannot be after schedule_to_date."}, status=400)
+            
+            # Validate time range
+            if settings.start_time >= settings.end_time:
+                return JsonResponse({"error": "start_time must be before end_time."}, status=400)
+            
+            if updates:
+                print("\n📋 Settings Changed:")
+                for update in updates:
+                    print(f"   • {update}")
+            else:
+                print("ℹ️  No changes detected (values unchanged)")
+            
+            settings.save()
+            
+            print("\n✅ Final Settings Saved:")
+            print(f"   • Schedule from date: {settings.schedule_from_date}")
+            print(f"   • Schedule to date: {settings.schedule_to_date}")
+            print(f"   • Start time: {settings.start_time}")
+            print(f"   • End time: {settings.end_time}")
+            print(f"   • Interviews per day: {settings.interviews_per_day}")
+            print("="*70 + "\n")
+            
+            logger.info(f"Interview settings updated for {request.user.username}: {', '.join(updates) if updates else 'No changes'}")
+            
+            return JsonResponse({
+                "success": True,
+                "message": "Interview settings updated successfully",
+                "settings": {
+                    "schedule_from_date": settings.schedule_from_date.isoformat() if settings.schedule_from_date else None,
+                    "schedule_to_date": settings.schedule_to_date.isoformat() if settings.schedule_to_date else None,
+                    "start_time": settings.start_time.strftime('%H:%M') if settings.start_time else '09:00',
+                    "end_time": settings.end_time.strftime('%H:%M') if settings.end_time else '17:00',
+                    "interviews_per_day": settings.interviews_per_day,
+                }
+            })
+            
+        except Exception as e:
+            print(f"\n❌ ERROR updating interview settings: {str(e)}")
+            print("="*70 + "\n")
+            logger.error(f"Error updating interview settings for {request.user.username}: {str(e)}", exc_info=True)
+            return JsonResponse({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+
+
+@login_required
 @require_http_methods(["GET"])
 def list_interviews(request):
     """List all interviews with optional filtering"""
@@ -928,6 +1152,81 @@ def list_interviews(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@require_http_methods(["GET"])
+@csrf_exempt
+def get_available_slots_for_interview(request, token):
+    """
+    API endpoint to get available slots for an interview based on interview settings.
+    Returns constraints and available slots dynamically.
+    """
+    from recruitment_agent.models import Interview, RecruiterInterviewSettings
+    from django.utils import timezone
+    from datetime import date, time, datetime, timedelta
+    
+    try:
+        interview = Interview.objects.get(confirmation_token=token, status='PENDING')
+    except Interview.DoesNotExist:
+        return JsonResponse({"error": "Invalid or expired interview link"}, status=404)
+    
+    # Get recruiter interview settings
+    recruiter = interview.recruiter
+    schedule_from_date = None
+    schedule_to_date = None
+    start_time = time(9, 0)  # Default
+    end_time = time(17, 0)  # Default
+    interviews_per_day = 3  # Default
+    
+    if recruiter:
+        try:
+            settings = recruiter.recruiter_interview_settings
+            schedule_from_date = settings.schedule_from_date
+            schedule_to_date = settings.schedule_to_date
+            start_time = settings.start_time
+            end_time = settings.end_time
+            interviews_per_day = settings.interviews_per_day
+        except RecruiterInterviewSettings.DoesNotExist:
+            pass
+    
+    # Get already scheduled interviews for the same recruiter
+    now = timezone.now()
+    scheduled_interviews = Interview.objects.filter(
+        recruiter=recruiter,
+        status='SCHEDULED',
+        scheduled_datetime__isnull=False
+    ).exclude(id=interview.id)
+    
+    # Get scheduled dates and times
+    scheduled_datetimes = set()
+    scheduled_dates_count = {}  # Count interviews per date
+    
+    for scheduled_interview in scheduled_interviews:
+        if scheduled_interview.scheduled_datetime:
+            scheduled_datetime = scheduled_interview.scheduled_datetime
+            scheduled_datetimes.add(scheduled_datetime)
+            scheduled_date = scheduled_datetime.date()
+            scheduled_dates_count[scheduled_date] = scheduled_dates_count.get(scheduled_date, 0) + 1
+    
+    # Determine min and max dates
+    min_date = schedule_from_date if schedule_from_date else now.date()
+    if min_date < now.date():
+        min_date = now.date()
+    
+    max_date = schedule_to_date if schedule_to_date else (now.date() + timedelta(days=60))
+    
+    return JsonResponse({
+        "success": True,
+        "constraints": {
+            "min_date": min_date.isoformat(),
+            "max_date": max_date.isoformat(),
+            "start_time": start_time.strftime('%H:%M'),
+            "end_time": end_time.strftime('%H:%M'),
+            "interviews_per_day": interviews_per_day,
+        },
+        "scheduled_slots": [dt.isoformat() for dt in scheduled_datetimes],
+        "scheduled_dates_count": {str(k): v for k, v in scheduled_dates_count.items()},
+    })
+
+
 @require_http_methods(["GET", "POST"])
 def candidate_select_slot(request, token):
     """
@@ -946,17 +1245,13 @@ def candidate_select_slot(request, token):
             'invalid_token': True,
         })
     
-    # Get available slots
-    import json
-    available_slots = json.loads(interview.available_slots_json) if interview.available_slots_json else []
-    
     if request.method == 'POST':
-        selected_slot_datetime = request.POST.get('selected_slot')
+        selected_slot_datetime = request.POST.get('selected_slot_datetime')
         if not selected_slot_datetime:
-            messages.error(request, 'Please select a time slot.')
+            messages.error(request, 'Please select a date and time.')
             return render(request, 'recruitment_agent/candidate_slot_selection.html', {
                 'interview': interview,
-                'available_slots': available_slots,
+                'token': token,
             })
         
         # Confirm the slot
@@ -978,13 +1273,13 @@ def candidate_select_slot(request, token):
             messages.error(request, f"Error: {result.get('error', 'Failed to confirm slot')}")
             return render(request, 'recruitment_agent/candidate_slot_selection.html', {
                 'interview': interview,
-                'available_slots': available_slots,
+                'token': token,
             })
     
     # GET request - show slot selection page
     return render(request, 'recruitment_agent/candidate_slot_selection.html', {
         'interview': interview,
-        'available_slots': available_slots,
+        'token': token,
     })
 
 

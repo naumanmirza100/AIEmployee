@@ -6,16 +6,18 @@ Interview Details:
 - Position: {{ job_role }}
 - Interview Type: {{ interview_type }}
 
-Please select one of the following available time slots that works best for you:
+Please select your preferred date and time for the interview using our scheduling system.
 
-{% for slot in available_slots %}
-{{ forloop.counter }}. {{ slot.display }}
-{% endfor %}
+To schedule your interview:
+1. Visit the link below to access the scheduling page
+2. Select your preferred date and time from the date-time picker
+3. The system will only show available time slots based on our schedule
+4. Confirm your selection to complete the booking
 
-To confirm your preferred time slot, please visit this link:
+Visit this link to select your interview date and time:
 {{ slot_selection_url }}
 
-Click the link above to select your preferred interview time slot.
+Note: Time slots are available on a first-come, first-served basis. Once a slot is selected by another candidate, it will no longer be available.
 
 We look forward to speaking with you!
 

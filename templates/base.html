@@ -11,7 +11,23 @@
 <body>
     <nav class="navbar">
         <div class="nav-container">
-            <a href="{% url 'dashboard' %}" class="nav-brand">Project Manager AI</a>
+            <a href="{% if user.is_authenticated and user.profile.is_recruitment_agent %}{% url 'recruitment_dashboard' %}{% elif user.is_authenticated and user.is_superuser and request.session.selected_role == 'recruitment_agent' %}{% url 'recruitment_dashboard' %}{% else %}{% url 'dashboard' %}{% endif %}" class="nav-brand">
+                {% if user.is_authenticated %}
+                    {% if user.profile.is_recruitment_agent %}
+                        Recruitment AI
+                    {% elif user.is_superuser or user.is_staff %}
+                        {% if request.session.selected_role == 'recruitment_agent' %}
+                            Recruitment AI
+                        {% else %}
+                            Project Manager AI
+                        {% endif %}
+                    {% else %}
+                        Project Manager AI
+                    {% endif %}
+                {% else %}
+                    Project Manager AI
+                {% endif %}
+            </a>
             <ul class="nav-links">
                 {% if user.is_authenticated %}
                     <li><a href="{% url 'dashboard' %}">Dashboard</a></li>

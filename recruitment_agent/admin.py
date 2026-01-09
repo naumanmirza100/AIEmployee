@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import CVRecord, Interview, JobDescription
+from .models import CVRecord, Interview, JobDescription, RecruiterEmailSettings, RecruiterInterviewSettings
 
 
 @admin.register(JobDescription)
@@ -79,5 +79,59 @@ class InterviewAdmin(admin.ModelAdmin):
         }),
         ('Additional', {
             'fields': ('notes',)
+        }),
+    )
+
+
+@admin.register(RecruiterEmailSettings)
+class RecruiterEmailSettingsAdmin(admin.ModelAdmin):
+    list_display = ['recruiter', 'followup_delay_hours', 'min_hours_between_followups', 'max_followup_emails', 'reminder_hours_before', 'auto_send_followups', 'auto_send_reminders', 'updated_at']
+    list_filter = ['auto_send_followups', 'auto_send_reminders', 'updated_at']
+    search_fields = ['recruiter__username', 'recruiter__email']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['-updated_at']
+    
+    fieldsets = (
+        ('Recruiter', {
+            'fields': ('recruiter',)
+        }),
+        ('Follow-up Email Settings', {
+            'fields': ('followup_delay_hours', 'min_hours_between_followups', 'max_followup_emails', 'auto_send_followups')
+        }),
+        ('Reminder Email Settings', {
+            'fields': ('reminder_hours_before', 'auto_send_reminders')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )
+
+
+@admin.register(RecruiterInterviewSettings)
+class RecruiterInterviewSettingsAdmin(admin.ModelAdmin):
+    list_display = ['recruiter', 'schedule_from_date', 'schedule_to_date', 'start_time', 'end_time', 'interviews_per_day', 'updated_at']
+    list_filter = ['updated_at']
+    search_fields = ['recruiter__username', 'recruiter__email']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['-updated_at']
+    
+    fieldsets = (
+        ('Recruiter', {
+            'fields': ('recruiter',)
+        }),
+        ('Date Range', {
+            'fields': ('schedule_from_date', 'schedule_to_date'),
+            'description': 'Set the date range during which interviews can be scheduled. Leave empty for no restrictions.'
+        }),
+        ('Time Range', {
+            'fields': ('start_time', 'end_time'),
+            'description': 'Set the daily time window for scheduling interviews.'
+        }),
+        ('Capacity', {
+            'fields': ('interviews_per_day',),
+            'description': 'Maximum number of interviews that can be scheduled per day.'
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
         }),
     )

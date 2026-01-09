@@ -106,6 +106,7 @@ cython_debug/
 
 # Django
 local_settings.py
+settings.py
 db.sqlite3
 db.sqlite3-journal
 /staticfiles/
