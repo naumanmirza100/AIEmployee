@@ -193,7 +193,6 @@ def email_sequences_list(request, campaign_id):
                 campaign=campaign,
                 name=data.get('name'),
                 is_sub_sequence=is_sub_sequence,
-                is_sub_sequence=is_sub_sequence,
             )
             
             # Add steps if provided

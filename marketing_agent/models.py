@@ -633,8 +633,17 @@ class CampaignContact(models.Model):
         # 2. sub_sequence parameter is provided (explicitly passed from views.py)
         # 3. This is a reply to MAIN sequence email (not sub-sequence email)
         
-        # If already in sub-sequence, don't change it (just record the reply)
-        if self.sub_sequence:
+        # If already in sub-sequence AND this is a reply to MAIN sequence (not sub-sequence),
+        # RESTART the sub-sequence to send emails again for this new reply
+        if self.sub_sequence and sub_sequence is not None:
+            # This is a new reply to main sequence - restart sub-sequence to send emails again
+            self.sub_sequence = sub_sequence
+            self.sub_sequence_step = 0  # Reset to start from beginning
+            self.sub_sequence_last_sent_at = None  # Reset timing
+            self.sub_sequence_completed = False  # Reset completion status
+            logger.info(f"Contact {self.lead.email} replied again to main sequence. Restarting sub-sequence '{sub_sequence.name}' to send emails for this new reply.")
+        elif self.sub_sequence:
+            # This is a reply to sub-sequence email - just record, don't restart
             logger.info(f"Contact {self.lead.email} already in sub-sequence '{self.sub_sequence.name}'. Reply recorded, sub-sequence continues.")
         elif sub_sequence is not None and self.sequence:
             # sub_sequence was explicitly passed from views.py (only happens for main sequence replies)
@@ -649,13 +658,18 @@ class CampaignContact(models.Model):
             detected_interest = interest_level if interest_level and interest_level != 'not_analyzed' else 'neutral'
             
             # Map AI interest levels to sub-sequence interest levels
+            # Include ALL possible interest levels from INTEREST_LEVEL_CHOICES
             interest_mapping = {
                 'positive': 'positive',
                 'negative': 'negative',
                 'neutral': 'neutral',
+                'requested_info': 'requested_info',
+                'objection': 'objection',
+                'unsubscribe': 'unsubscribe',
                 'not_analyzed': 'any'
             }
-            target_interest = interest_mapping.get(detected_interest, 'any')
+            # Use the mapping, but if not found, use the original interest_level directly
+            target_interest = interest_mapping.get(detected_interest, detected_interest if detected_interest in ['positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe'] else 'any')
             
             # Look for sub-sequences matching the interest level
             sub_sequences = EmailSequence.objects.filter(
@@ -665,7 +679,7 @@ class CampaignContact(models.Model):
                 interest_level=target_interest
             )
             
-            # If no exact match, try 'any'
+            # If no exact match, try 'any' (but only if target_interest is not 'any')
             if not sub_sequences.exists() and target_interest != 'any':
                 sub_sequences = EmailSequence.objects.filter(
                     parent_sequence=self.sequence,
@@ -673,15 +687,10 @@ class CampaignContact(models.Model):
                     is_active=True,
                     interest_level='any'
                 )
+                logger.info(f"No exact match for interest '{target_interest}'. Trying 'any' sub-sequence...")
             
-            # If still no match, get any active sub-sequence as fallback
-            if not sub_sequences.exists():
-                sub_sequences = EmailSequence.objects.filter(
-                    parent_sequence=self.sequence,
-                    is_sub_sequence=True,
-                    is_active=True
-                ).order_by('created_at')
-            
+            # DON'T fall back to any random sub-sequence - this causes wrong sub-sequence assignment
+            # Only use exact match or 'any' - if neither exists, don't assign a sub-sequence
             if sub_sequences.exists():
                 found_sub_sequence = sub_sequences.first()
                 self.sub_sequence = found_sub_sequence
@@ -690,8 +699,10 @@ class CampaignContact(models.Model):
                 self.sub_sequence_completed = False
                 logger.info(
                     f"Found sub-sequence '{found_sub_sequence.name}' (interest: {found_sub_sequence.interest_level}) "
-                    f"for contact {self.lead.email} (detected interest: {detected_interest})"
+                    f"for contact {self.lead.email} (detected interest: {detected_interest}, mapped to: {target_interest})"
                 )
+            else:
+                logger.warning(f"No matching sub-sequence found for contact {self.lead.email} with interest level '{target_interest}' (original: '{interest_level}'). No sub-sequence will be assigned.")
         
         self.save()
     

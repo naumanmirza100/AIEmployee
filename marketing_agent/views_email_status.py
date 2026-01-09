@@ -282,6 +282,7 @@ def email_sending_status(request, campaign_id):
 
     # Handle sub-sequences for pending and upcoming emails
     if campaign.status == 'active':
+        # First, get contacts with sub-sequences (existing logic for current sub-sequence progress)
         sub_sequence_contacts = (
             CampaignContact.objects
             .filter(
@@ -292,8 +293,11 @@ def email_sending_status(request, campaign_id):
                 replied=True,  # Sub-sequences only apply to replied contacts
             )
             .select_related('lead', 'sequence', 'sub_sequence', 'sub_sequence__parent_sequence')  # Load sub_sequence and its parent_sequence
-            .prefetch_related('sub_sequence__steps__template')
+            .prefetch_related('sub_sequence__steps__template', 'replies')
         )[:200]
+        
+        # Track which contact+sub-sequence combinations we've already processed
+        processed_contact_subseq = set()
 
         for contact in sub_sequence_contacts:
             sub_sequence = contact.sub_sequence
@@ -416,6 +420,8 @@ def email_sending_status(request, campaign_id):
                     'is_sub_sequence': True,  # This is a sub-sequence email
                     'sub_sequence': sub_sequence,  # Store sub-sequence reference
                 })
+                # Mark this contact+sub-sequence combination as processed
+                processed_contact_subseq.add((contact.id, sub_sequence.id))
             elif next_send_time <= horizon:
                 upcoming_sequence_sends.append({
                     'lead': contact.lead,
@@ -428,6 +434,154 @@ def email_sending_status(request, campaign_id):
                     'is_sub_sequence': True,  # This is a sub-sequence email
                     'sub_sequence': sub_sequence,  # Store sub-sequence reference
                 })
+                processed_contact_subseq.add((contact.id, sub_sequence.id))
+
+        # NOW: Also check Reply records for replies that should trigger sub-sequence emails
+        # This handles cases where a contact replied multiple times - each reply should get sub-sequence emails
+        # IMPORTANT: Only replies to MAIN SEQUENCE emails should trigger sub-sequences
+        # Replies to SUB-SEQUENCE emails should NOT trigger new sub-sequences
+        from marketing_agent.models import Reply
+        
+        # Get all main sequence replies that should trigger sub-sequences
+        # CRITICAL: Exclude replies to sub-sequence emails (reply.sub_sequence should be None)
+        main_sequence_replies = Reply.objects.filter(
+            campaign=campaign,
+            sequence__isnull=False,  # Has a sequence (main sequence)
+            sequence__is_sub_sequence=False,  # Main sequence reply (not sub-sequence reply)
+            sub_sequence__isnull=True,  # CRITICAL: Not a reply to sub-sequence email (only replies to main sequence)
+            interest_level__in=['positive', 'negative', 'neutral', 'requested_info', 'objection'],  # Valid interest levels
+        ).select_related(
+            'contact', 'lead', 'sequence', 'contact__sub_sequence'
+        ).prefetch_related(
+            'sequence__sub_sequences__steps__template'
+        ).order_by('-replied_at')[:100]  # Recent replies first
+        
+        for reply in main_sequence_replies:
+            contact = reply.contact
+            if not contact or not contact.sequence:
+                continue
+            
+            # Find the appropriate sub-sequence for this reply based on interest_level
+            target_interest = reply.interest_level if reply.interest_level != 'not_analyzed' else 'neutral'
+            
+            # Map interest levels (same as in views.py)
+            interest_mapping = {
+                'positive': 'positive',
+                'negative': 'negative',
+                'neutral': 'neutral',
+                'requested_info': 'requested_info',
+                'objection': 'objection',
+                'unsubscribe': 'unsubscribe',
+            }
+            target_interest = interest_mapping.get(target_interest, target_interest)
+            
+            # Find matching sub-sequence
+            sub_sequences = EmailSequence.objects.filter(
+                parent_sequence=contact.sequence,
+                is_sub_sequence=True,
+                is_active=True,
+                interest_level=target_interest
+            )
+            
+            # If no exact match, try 'any'
+            if not sub_sequences.exists() and target_interest != 'any':
+                sub_sequences = EmailSequence.objects.filter(
+                    parent_sequence=contact.sequence,
+                    is_sub_sequence=True,
+                    is_active=True,
+                    interest_level='any'
+                )
+            
+            if not sub_sequences.exists():
+                continue
+                
+            sub_sequence = sub_sequences.first()
+            
+            # Skip if we already processed this contact+sub-sequence combination
+            if (contact.id, sub_sequence.id) in processed_contact_subseq:
+                continue
+            
+            # Get parent sequence
+            parent_sequence = sub_sequence.parent_sequence or contact.sequence
+            if not parent_sequence:
+                continue
+            
+            # Get first step of sub-sequence
+            steps = list(sub_sequence.steps.all().order_by('step_order'))
+            if not steps:
+                continue
+            
+            first_step = steps[0]  # Step 1 (step_order=1, but we get first in order)
+            
+            # Check if first email has already been sent for THIS specific reply
+            # We check if any sub-sequence email was sent AFTER this reply was made
+            reply_time = reply.replied_at or reply.created_at
+            existing_emails = EmailSendHistory.objects.filter(
+                campaign=campaign,
+                lead=contact.lead,
+                email_template=first_step.template,
+                sent_at__gte=reply_time  # Sent after this reply
+            )
+            
+            # Skip if first email was already sent for this reply
+            if existing_emails.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).exists():
+                continue
+            
+            # Check if it's time to send (based on reply time + delay)
+            delay = timedelta(
+                days=first_step.delay_days,
+                hours=first_step.delay_hours,
+                minutes=first_step.delay_minutes
+            )
+            next_send_time = reply_time + delay
+            
+            # If ready to send, add to pending
+            if next_send_time <= now:
+                # Check if this email is already in pending list (avoid duplicates)
+                already_pending = any(
+                    e.get('lead') == contact.lead and 
+                    e.get('template') == first_step.template and
+                    e.get('is_sub_sequence') == True
+                    for e in pending_emails
+                )
+                
+                if not already_pending:
+                    pending_emails.append({
+                        'recipient_email': contact.lead.email,
+                        'subject': first_step.template.subject,
+                        'template': first_step.template,
+                        'lead': contact.lead,
+                        'sequence': parent_sequence,
+                        'next_step': first_step,
+                        'is_retry': False,
+                        'previous_status': None,
+                        'is_sub_sequence': True,
+                        'sub_sequence': sub_sequence,
+                        'reply_id': reply.id,  # Track which reply this is for
+                    })
+                    processed_contact_subseq.add((contact.id, sub_sequence.id))
+            elif next_send_time <= horizon:
+                # Add to upcoming if not already there
+                already_upcoming = any(
+                    e.get('lead') == contact.lead and
+                    e.get('next_step') == first_step and
+                    e.get('is_sub_sequence') == True
+                    for e in upcoming_sequence_sends
+                )
+                
+                if not already_upcoming:
+                    upcoming_sequence_sends.append({
+                        'lead': contact.lead,
+                        'sequence': parent_sequence,
+                        'next_step': first_step,
+                        'next_send_time': next_send_time,
+                        'delay_days': first_step.delay_days,
+                        'delay_hours': first_step.delay_hours,
+                        'delay_minutes': first_step.delay_minutes,
+                        'is_sub_sequence': True,
+                        'sub_sequence': sub_sequence,
+                        'reply_id': reply.id,
+                    })
 
     upcoming_sequence_sends.sort(key=lambda x: x['next_send_time'])
 
@@ -853,6 +1007,8 @@ def email_sending_status(request, campaign_id):
                     if seq_obj.is_sub_sequence and seq_obj.parent_sequence:
                         sequence = seq_obj.parent_sequence
                 except EmailSequence.DoesNotExist:
+                    # If the sequence cannot be reloaded, skip regrouping and keep using
+                    # the original sequence for organizing pending emails.
                     pass
         
         # For regular sequence emails (is_sub_sequence=False), use the sequence directly
@@ -884,7 +1040,11 @@ def email_sending_status(request, campaign_id):
                     if sequence.is_sub_sequence and sequence.parent_sequence:
                         sequence = sequence.parent_sequence
                 except EmailSequence.DoesNotExist:
-                    pass
+                    # If the sequence was deleted or is otherwise missing, continue with the existing sequence.
+                    logger.warning(
+                        "EmailSequence with id %s does not exist while grouping upcoming emails.",
+                        getattr(sequence, "id", None),
+                    )
         
         seq_key = sequence.id if sequence else 'no_sequence'
         if seq_key not in upcoming_by_sequence:
