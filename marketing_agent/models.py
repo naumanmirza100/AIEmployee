@@ -449,6 +449,9 @@ class EmailSendHistory(models.Model):
     # Tracking
     tracking_token = models.CharField(max_length=64, unique=True, null=True, blank=True,
                                      help_text='Unique token for email tracking (opens/clicks)')
+    message_id = models.CharField(max_length=500, null=True, blank=True, 
+                                  help_text='Email Message-ID header for reply detection',
+                                  db_index=True)
     
     # Relationships
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='email_sends')
@@ -508,6 +511,14 @@ class EmailAccount(models.Model):
     
     # Gmail-specific (OAuth or App Password)
     is_gmail_app_password = models.BooleanField(default=False, help_text='Is this using Gmail App Password?')
+    
+    # IMAP Settings (for receiving/reply detection)
+    imap_host = models.CharField(max_length=255, blank=True, help_text='IMAP server host (e.g., imap.hostinger.com)')
+    imap_port = models.IntegerField(null=True, blank=True, help_text='IMAP server port (993 for SSL, 143 for TLS)')
+    imap_use_ssl = models.BooleanField(default=True, help_text='Use SSL for IMAP connection')
+    imap_username = models.CharField(max_length=255, blank=True, help_text='IMAP username (usually same as email)')
+    imap_password = models.CharField(max_length=500, blank=True, help_text='IMAP password')
+    enable_imap_sync = models.BooleanField(default=False, help_text='Enable automatic IMAP sync for reply detection')
     
     # Status
     is_active = models.BooleanField(default=True, help_text='Is this account active and ready to use?')

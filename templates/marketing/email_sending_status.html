@@ -364,6 +364,8 @@
                                             <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
                                         {% elif email_data.latest_reply.interest_level == 'objection' %}
                                             <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                        {% elif email_data.latest_reply.interest_level == 'unsubscribe' %}
+                                            <div style="font-size: 0.7rem; color: #991b1b; margin-top: 0.25rem; font-weight: 500;">🚫 Unsubscribe</div>
                                         {% endif %}
                                     {% elif email_data.is_replied and email_data.contact %}
                                         {# Fallback to contact if latest_reply not available #}
@@ -376,6 +378,12 @@
                                             <div style="font-size: 0.7rem; color: #ef4444; margin-top: 0.25rem; font-weight: 500;">❌ Not Interested</div>
                                         {% elif email_data.contact.reply_interest_level == 'neutral' %}
                                             <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.25rem; font-weight: 500;">➖ Neutral</div>
+                                        {% elif email_data.contact.reply_interest_level == 'requested_info' %}
+                                            <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
+                                        {% elif email_data.contact.reply_interest_level == 'objection' %}
+                                            <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                        {% elif email_data.contact.reply_interest_level == 'unsubscribe' %}
+                                            <div style="font-size: 0.7rem; color: #991b1b; margin-top: 0.25rem; font-weight: 500;">🚫 Unsubscribe</div>
                                         {% endif %}
                                     {% else %}
                                         <span style="color: #9ca3af; font-size: 0.75rem;">—</span>
@@ -474,6 +482,8 @@
                                         <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
                                     {% elif email_data.latest_reply.interest_level == 'objection' %}
                                         <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                    {% elif email_data.latest_reply.interest_level == 'unsubscribe' %}
+                                        <div style="font-size: 0.7rem; color: #991b1b; margin-top: 0.25rem; font-weight: 500;">🚫 Unsubscribe</div>
                                     {% endif %}
                                 {% elif email_data.is_replied and email_data.contact %}
                                     {# Fallback #}
@@ -486,6 +496,12 @@
                                         <div style="font-size: 0.7rem; color: #ef4444; margin-top: 0.25rem; font-weight: 500;">❌ Not Interested</div>
                                     {% elif email_data.contact.reply_interest_level == 'neutral' %}
                                         <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.25rem; font-weight: 500;">➖ Neutral</div>
+                                    {% elif email_data.contact.reply_interest_level == 'requested_info' %}
+                                        <div style="font-size: 0.7rem; color: #3b82f6; margin-top: 0.25rem; font-weight: 500;">📋 Requested Info</div>
+                                    {% elif email_data.contact.reply_interest_level == 'objection' %}
+                                        <div style="font-size: 0.7rem; color: #f59e0b; margin-top: 0.25rem; font-weight: 500;">⚠️ Objection</div>
+                                    {% elif email_data.contact.reply_interest_level == 'unsubscribe' %}
+                                        <div style="font-size: 0.7rem; color: #991b1b; margin-top: 0.25rem; font-weight: 500;">🚫 Unsubscribe</div>
                                     {% endif %}
                                 {% else %}
                                     <span style="color: #9ca3af; font-size: 0.75rem;">—</span>

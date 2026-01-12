@@ -10,10 +10,10 @@ import json
 
 
 @login_required
-@require_http_methods(["GET", "POST"])
 def email_accounts_list(request):
     """List all email accounts for the current user"""
     if request.method == 'POST':
+        # Handle AJAX POST requests (for adding accounts)
         try:
             data = json.loads(request.body)
             account = EmailAccount.objects.create(
@@ -28,6 +28,13 @@ def email_accounts_list(request):
                 use_tls=data.get('use_tls', True),
                 use_ssl=data.get('use_ssl', False),
                 is_gmail_app_password=data.get('is_gmail_app_password', False),
+                # IMAP fields
+                imap_host=data.get('imap_host', ''),
+                imap_port=int(data.get('imap_port')) if data.get('imap_port') else None,
+                imap_use_ssl=data.get('imap_use_ssl', True),
+                imap_username=data.get('imap_username', ''),
+                imap_password=data.get('imap_password', ''),
+                enable_imap_sync=data.get('enable_imap_sync', False),
                 is_active=data.get('is_active', True),
                 is_default=data.get('is_default', False),
             )
@@ -42,19 +49,10 @@ def email_accounts_list(request):
                 'error': str(e)
             }, status=400)
     
+    # GET request - render HTML template
     accounts = EmailAccount.objects.filter(owner=request.user).order_by('-is_default', '-is_active', '-created_at')
-    return JsonResponse({
-        'success': True,
-        'accounts': [{
-            'id': a.id,
-            'name': a.name,
-            'email': a.email,
-            'account_type': a.account_type,
-            'is_active': a.is_active,
-            'is_default': a.is_default,
-            'test_status': a.test_status,
-            'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
-        } for a in accounts]
+    return render(request, 'marketing/email_accounts.html', {
+        'accounts': accounts
     })
 
 
@@ -79,6 +77,13 @@ def email_account_detail(request, account_id):
                 'use_tls': account.use_tls,
                 'use_ssl': account.use_ssl,
                 'is_gmail_app_password': account.is_gmail_app_password,
+                # IMAP fields
+                'imap_host': account.imap_host,
+                'imap_port': account.imap_port,
+                'imap_use_ssl': account.imap_use_ssl,
+                'imap_username': account.imap_username,
+                'imap_password': account.imap_password,
+                'enable_imap_sync': account.enable_imap_sync,
                 'is_active': account.is_active,
                 'is_default': account.is_default,
                 'test_status': account.test_status,
@@ -99,6 +104,19 @@ def email_account_detail(request, account_id):
             account.use_tls = data.get('use_tls', account.use_tls)
             account.use_ssl = data.get('use_ssl', account.use_ssl)
             account.is_gmail_app_password = data.get('is_gmail_app_password', account.is_gmail_app_password)
+            # IMAP fields
+            if 'imap_host' in data:
+                account.imap_host = data.get('imap_host', '')
+            if 'imap_port' in data:
+                account.imap_port = int(data.get('imap_port')) if data.get('imap_port') else None
+            if 'imap_use_ssl' in data:
+                account.imap_use_ssl = data.get('imap_use_ssl', True)
+            if 'imap_username' in data:
+                account.imap_username = data.get('imap_username', '')
+            if 'imap_password' in data:
+                account.imap_password = data.get('imap_password', '')
+            if 'enable_imap_sync' in data:
+                account.enable_imap_sync = data.get('enable_imap_sync', False)
             account.is_active = data.get('is_active', account.is_active)
             account.is_default = data.get('is_default', account.is_default)
             account.save()

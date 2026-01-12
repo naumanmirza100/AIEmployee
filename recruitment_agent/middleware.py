@@ -54,7 +54,10 @@ class AutoInterviewFollowupMiddleware:
             
             def background_check_loop():
                 """Background thread that runs follow-up checks periodically"""
-                print("\n🔄 Starting background follow-up check thread...")
+                try:
+                    print("\n[START] Starting background follow-up check thread...")
+                except (UnicodeEncodeError, UnicodeError):
+                    print("\n[START] Starting background follow-up check thread...")
                 logger.info("Background follow-up check thread started")
                 
                 while _background_thread_running:
@@ -66,26 +69,38 @@ class AutoInterviewFollowupMiddleware:
                             break
                         
                         # Run the follow-up check
-                        print(f"\n🔄 [BACKGROUND THREAD] Running periodic follow-up check at {timezone.now()}")
+                        try:
+                            print(f"\n[THREAD] [BACKGROUND THREAD] Running periodic follow-up check at {timezone.now()}")
+                        except (UnicodeEncodeError, UnicodeError):
+                            print(f"\n[THREAD] Running periodic follow-up check at {timezone.now()}")
                         logger.info(f"Background thread triggered follow-up check at {timezone.now()}")
                         
                         # Import and run the check function directly
                         from recruitment_agent.tasks import check_and_send_followup_emails
                         stats = check_and_send_followup_emails()
-                        logger.info(f"🤖 Background thread follow-up check completed: {stats}")
+                        logger.info(f"Background thread follow-up check completed: {stats}")
                         
                     except Exception as e:
-                        print(f"\n❌ ERROR in background follow-up thread: {str(e)}")
+                        try:
+                            print(f"\n[ERROR] ERROR in background follow-up thread: {str(e)}")
+                        except (UnicodeEncodeError, UnicodeError):
+                            print(f"\n[ERROR] ERROR in background follow-up thread: {str(e)}")
                         logger.error(f"Error in background follow-up thread: {str(e)}", exc_info=True)
                         # Continue running even if there's an error
                         time.sleep(5)  # Wait a bit before retrying
                 
-                print("\n🛑 Background follow-up check thread stopped")
+                try:
+                    print("\n[STOP] Background follow-up check thread stopped")
+                except (UnicodeEncodeError, UnicodeError):
+                    print("\n[STOP] Background follow-up check thread stopped")
                 logger.info("Background follow-up check thread stopped")
             
             _background_thread = threading.Thread(target=background_check_loop, daemon=True)
             _background_thread.start()
-            print("✅ Background thread started successfully")
+            try:
+                print("[OK] Background thread started successfully")
+            except (UnicodeEncodeError, UnicodeError):
+                print("[OK] Background thread started successfully")
     
     def __del__(self):
         """Stop background thread when middleware is destroyed"""
