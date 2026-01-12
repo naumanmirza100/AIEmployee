@@ -52,9 +52,13 @@ urlpatterns = [
     path('email-accounts/', views_email_accounts.email_accounts_list, name='email_accounts_list'),
     path('email-accounts/<int:account_id>/', views_email_accounts.email_account_detail, name='email_account_detail'),
     path('email-accounts/<int:account_id>/test/', views_email_accounts.test_email_account, name='test_email_account'),
-    # Email tracking
+    # Email tracking (old format - kept for backward compatibility)
     path('track/email/<str:tracking_token>/open/', views_email_tracking.track_email_open, name='track_email_open'),
     path('track/email/<str:tracking_token>/click/', views_email_tracking.track_email_click, name='track_email_click'),
+    path('track/test/<str:tracking_token>/', views_email_tracking.test_tracking, name='test_tracking'),
+    # Simple token tracking (new format - /token?t=TOKEN for opens, /token?t=TOKEN&url=... for clicks)
+    path('token/', views_email_tracking.simple_track_open, name='simple_track_open'),
+    path('token/<str:tracking_token>/', views_email_tracking.simple_track_click, name='simple_track_click_path'),
     # Email sending status
     path('campaigns/<int:campaign_id>/email-status/', views_email_status.email_sending_status, name='email_sending_status'),
     path('campaigns/<int:campaign_id>/email-status/api/', views_email_status.email_status_api, name='email_status_api'),

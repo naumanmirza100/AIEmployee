@@ -513,7 +513,7 @@
                 <div class="metric-subtext">CTR: {{ analytics.ctr|floatformat:2 }}%</div>
             </div>
             
-            <div class="metric-card">
+            <!-- <div class="metric-card">
                 <div class="metric-icon">✅</div>
                 <div class="metric-label">Conversions</div>
                 <div class="metric-value">{{ analytics.conversions|floatformat:0 }}</div>
@@ -522,16 +522,16 @@
                 {% else %}
                 <div class="metric-subtext">Rate: {{ analytics.conversion_rate|floatformat:2 }}%</div>
                 {% endif %}
-            </div>
+            </div> -->
             
-            <div class="metric-card">
+            <!-- <div class="metric-card">
                 <div class="metric-icon">💰</div>
                 <div class="metric-label">Revenue</div>
                 <div class="metric-value">${{ analytics.revenue|floatformat:2 }}</div>
                 {% if analytics.target_revenue %}
                 <div class="metric-subtext">Target: ${{ analytics.target_revenue|floatformat:2 }} ({{ analytics.revenue_progress|floatformat:1 }}%)</div>
                 {% endif %}
-            </div>
+            </div> -->
             
             <div class="metric-card">
                 <div class="metric-icon">📊</div>
@@ -551,7 +551,7 @@
         </div>
 
         <!-- Budget & Spending -->
-        <div style="margin: 2rem 0; padding: 1.5rem; background: #f9fafb; border-radius: 0.5rem;">
+        <!-- <div style="margin: 2rem 0; padding: 1.5rem; background: #f9fafb; border-radius: 0.5rem;">
             <h3 style="margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem;">Budget & Spending</h3>
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;">
                 <div>
@@ -576,14 +576,14 @@
                     <div style="width: {{ analytics.budget_utilization|floatformat:0 }}%; height: 100%; background: linear-gradient(90deg, #10b981 0%, #059669 100%); transition: width 0.3s;"></div>
                 </div>
             </div>
-        </div>
+        </div> -->
 
         <!-- Progress Towards Targets -->
         {% if analytics.target_revenue or analytics.target_leads or analytics.target_conversions %}
         <div style="margin: 2rem 0;">
             <h3 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.25rem;">Progress Towards Targets</h3>
             <div style="display: grid; gap: 1.5rem;">
-                {% if analytics.target_revenue %}
+                <!-- {% if analytics.target_revenue %}
                 <div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                         <span style="font-weight: 600; color: #374151;">Revenue Target</span>
@@ -594,7 +594,7 @@
                     </div>
                     <div style="text-align: right; margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">{{ analytics.revenue_progress|floatformat:1 }}% Complete</div>
                 </div>
-                {% endif %}
+                {% endif %} -->
                 
                 {% if analytics.target_conversions %}
                 <div>
@@ -640,7 +640,7 @@
                 const impressions = {{ analytics.chart_data.impressions|safe }};
                 const clicks = {{ analytics.chart_data.clicks|safe }};
                 const conversions = {{ analytics.chart_data.conversions|safe }};
-                const revenue = {{ analytics.chart_data.revenue|safe }};
+                // const revenue = {{ analytics.chart_data.revenue|safe }};
                 
                 const chartData = {
                     labels: dates,
@@ -669,15 +669,15 @@
                             tension: 0.4,
                             fill: true
                         },
-                        {
-                            label: 'Revenue ($)',
-                            data: revenue,
-                            borderColor: '#8b5cf6',
-                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                            tension: 0.4,
-                            fill: true,
-                            yAxisID: 'y1'
-                        }
+                        // {
+                        //     label: 'Revenue ($)',
+                        //     data: revenue,
+                        //     borderColor: '#8b5cf6',
+                        //     backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        //     tension: 0.4,
+                        //     fill: true,
+                        //     yAxisID: 'y1'
+                        // }
                     ]
                 };
                 

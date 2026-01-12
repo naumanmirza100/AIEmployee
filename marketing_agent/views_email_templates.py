@@ -168,9 +168,32 @@ def email_sequences_list(request, campaign_id):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
+            
+            # Get is_sub_sequence from request data (default to False if not provided)
+            is_sub_sequence = data.get('is_sub_sequence', False)
+            
+            # ENFORCE: Only 1 main sequence per campaign
+            # Determine if this is a sub-sequence (defaults to main sequence if not provided)
+            is_sub_sequence = data.get('is_sub_sequence', False)
+            
+            # ENFORCE: Only 1 main sequence per campaign
+            if not is_sub_sequence:
+                existing_main_sequence = EmailSequence.objects.filter(
+                    campaign=campaign,
+                    is_sub_sequence=False
+                ).first()
+                
+                if existing_main_sequence:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'Only 1 main sequence is allowed per campaign. A sequence "{existing_main_sequence.name}" already exists. Please edit or delete it first.'
+                    }, status=400)
+            
             sequence = EmailSequence.objects.create(
                 campaign=campaign,
                 name=data.get('name'),
+                is_sub_sequence=is_sub_sequence,
+                is_sub_sequence=is_sub_sequence,
             )
             
             # Add steps if provided

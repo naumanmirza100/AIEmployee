@@ -9,6 +9,7 @@ from project_manager_agent.views import (
     ai_agents_test, test_task_prioritization, test_knowledge_qa, test_project_pilot, test_timeline_gantt,
     generate_subtasks, view_task_subtasks
 )
+from marketing_agent import views_email_tracking
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -54,6 +55,10 @@ urlpatterns = [
     
     # Marketing Agent
     path('marketing/', include('marketing_agent.urls')),
+    
+    # Simple token tracking (root level - /token?t=TOKEN for opens, /token?t=TOKEN&url=... for clicks)
+    path('token/', views_email_tracking.simple_track_open, name='root_simple_track_open'),
+    path('token/<str:tracking_token>/', views_email_tracking.simple_track_click, name='root_simple_track_click'),
     
     # API Routes
     path('api/', include('api.urls')),

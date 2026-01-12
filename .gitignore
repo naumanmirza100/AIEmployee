@@ -158,5 +158,8 @@ desktop.ini
 *.seed
 *.pid.lock
 
+
+#project_manager_ai
+project_manager_ai/settings.py
 # Frontend directory
 PaPerProjectFront/

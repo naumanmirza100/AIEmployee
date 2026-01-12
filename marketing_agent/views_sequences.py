@@ -98,11 +98,15 @@ def sequence_management(request, campaign_id):
             'effective_is_active': effective_is_active,  # Effective status considering campaign
         })
     
+    # Check if main sequence exists (for UI restrictions)
+    has_main_sequence = any(not seq_data['sequence'].is_sub_sequence for seq_data in sequences_data)
+    
     context = {
         'campaign': campaign,
         'sequences': sequences_data,
         'templates': templates,
         'email_accounts': email_accounts,
+        'has_main_sequence': has_main_sequence,  # Flag to disable "Create Sequence" button
     }
     
     return render(request, 'marketing/sequence_management.html', context)
@@ -111,7 +115,7 @@ def sequence_management(request, campaign_id):
 @login_required
 @require_http_methods(["POST"])
 def create_sequence(request, campaign_id):
-    """Create a new email sequence"""
+    """Create a new email sequence - ONLY 1 MAIN SEQUENCE PER CAMPAIGN"""
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     
     try:
@@ -124,6 +128,19 @@ def create_sequence(request, campaign_id):
         
         if parent_sequence_id and is_sub_sequence:
             parent_sequence = get_object_or_404(EmailSequence, id=parent_sequence_id, campaign=campaign)
+        
+        # ENFORCE: Only 1 main sequence per campaign (sub-sequences are allowed)
+        if not is_sub_sequence:
+            existing_main_sequence = EmailSequence.objects.filter(
+                campaign=campaign,
+                is_sub_sequence=False
+            ).first()
+            
+            if existing_main_sequence:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Only 1 main sequence is allowed per campaign. A sequence "{existing_main_sequence.name}" already exists. Please edit or delete it first.'
+                }, status=400)
         
         # Get interest level for sub-sequences
         interest_level = data.get('interest_level', 'any') if is_sub_sequence else 'any'
