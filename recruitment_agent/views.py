@@ -886,6 +886,62 @@ def recruiter_email_settings(request):
             }, status=500)
 
 
+def generate_time_slots(from_date, to_date, start_time, end_time, gap_minutes):
+    """
+    Generate time slots based on date range, time range, and gap.
+    Returns a list of dictionaries with date, time, and datetime.
+    """
+    from datetime import timedelta, time as dt_time
+    
+    time_slots = []
+    current_date = from_date
+    
+    # Parse start and end times - handle both TimeField objects and string formats
+    if isinstance(start_time, dt_time):
+        start_hour = start_time.hour
+        start_min = start_time.minute
+    else:
+        # Handle string format "HH:MM" or "HH:MM:SS"
+        time_parts = str(start_time).split(':')
+        start_hour = int(time_parts[0])
+        start_min = int(time_parts[1])
+    
+    if isinstance(end_time, dt_time):
+        end_hour = end_time.hour
+        end_min = end_time.minute
+    else:
+        # Handle string format "HH:MM" or "HH:MM:SS"
+        time_parts = str(end_time).split(':')
+        end_hour = int(time_parts[0])
+        end_min = int(time_parts[1])
+    
+    start_minutes = start_hour * 60 + start_min
+    end_minutes = end_hour * 60 + end_min
+    
+    # Generate slots for each date
+    while current_date <= to_date:
+        # Generate time slots for this date
+        current_minutes = start_minutes
+        while current_minutes < end_minutes:
+            hours = current_minutes // 60
+            minutes = current_minutes % 60
+            time_str = f"{hours:02d}:{minutes:02d}"
+            datetime_str = f"{current_date.isoformat()}T{time_str}"
+            
+            time_slots.append({
+                'date': current_date.isoformat(),
+                'time': time_str,
+                'datetime': datetime_str,
+                'available': True  # Default to available
+            })
+            
+            current_minutes += gap_minutes
+        
+        current_date += timedelta(days=1)
+    
+    return time_slots
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def recruiter_interview_settings(request):
@@ -923,7 +979,7 @@ def recruiter_interview_settings(request):
             print(f"   • Schedule to date: {settings.schedule_to_date}")
             print(f"   • Start time: {settings.start_time}")
             print(f"   • End time: {settings.end_time}")
-            print(f"   • Interviews per day: {settings.interviews_per_day}")
+            print(f"   • Interview time gap: {settings.interview_time_gap} minutes")
             print("="*70 + "\n")
             
             logger.info(f"Retrieved interview settings for {request.user.username}")
@@ -935,7 +991,8 @@ def recruiter_interview_settings(request):
                     "schedule_to_date": settings.schedule_to_date.isoformat() if settings.schedule_to_date else None,
                     "start_time": settings.start_time.strftime('%H:%M') if settings.start_time else '09:00',
                     "end_time": settings.end_time.strftime('%H:%M') if settings.end_time else '17:00',
-                    "interviews_per_day": settings.interviews_per_day,
+                    "interview_time_gap": settings.interview_time_gap,
+                    "time_slots": settings.time_slots_json if settings.time_slots_json else [],
                 }
             })
         except RecruiterInterviewSettings.DoesNotExist:
@@ -944,7 +1001,7 @@ def recruiter_interview_settings(request):
             print(f"   • Schedule to date: None (no end date)")
             print(f"   • Start time: 09:00")
             print(f"   • End time: 17:00")
-            print(f"   • Interviews per day: 3")
+            print(f"   • Interview time gap: 30 minutes")
             print("="*70 + "\n")
             
             logger.info(f"Returned default interview settings for {request.user.username} (no custom settings)")
@@ -957,7 +1014,8 @@ def recruiter_interview_settings(request):
                     "schedule_to_date": None,
                     "start_time": "09:00",
                     "end_time": "17:00",
-                    "interviews_per_day": 3,
+                    "interview_time_gap": 30,
+                    "time_slots": [],
                 }
             })
     
@@ -978,7 +1036,7 @@ def recruiter_interview_settings(request):
                 defaults={
                     'start_time': time(9, 0),  # 9 AM
                     'end_time': time(17, 0),  # 5 PM
-                    'interviews_per_day': 3,
+                    'interview_time_gap': 30,  # 30 minutes
                 }
             )
             
@@ -993,7 +1051,7 @@ def recruiter_interview_settings(request):
                 'schedule_to_date': settings.schedule_to_date,
                 'start_time': settings.start_time,
                 'end_time': settings.end_time,
-                'interviews_per_day': settings.interviews_per_day,
+                'interview_time_gap': settings.interview_time_gap,
             }
             
             # Track what's being updated
@@ -1052,13 +1110,15 @@ def recruiter_interview_settings(request):
                     updates.append(f"end_time: {old_values['end_time']} → {new_value}")
                 settings.end_time = new_value
                 
-            if 'interviews_per_day' in data:
-                new_value = int(data['interviews_per_day'])
-                if new_value < 1:
-                    return JsonResponse({"error": "interviews_per_day must be at least 1."}, status=400)
-                if old_values['interviews_per_day'] != new_value:
-                    updates.append(f"interviews_per_day: {old_values['interviews_per_day']} → {new_value}")
-                settings.interviews_per_day = new_value
+            if 'interview_time_gap' in data:
+                new_value = int(data['interview_time_gap'])
+                if new_value < 15:
+                    return JsonResponse({"error": "interview_time_gap must be at least 15 minutes."}, status=400)
+                if new_value > 120:
+                    return JsonResponse({"error": "interview_time_gap cannot exceed 120 minutes."}, status=400)
+                if old_values['interview_time_gap'] != new_value:
+                    updates.append(f"interview_time_gap: {old_values['interview_time_gap']} → {new_value} minutes")
+                settings.interview_time_gap = new_value
             
             # Validate date range
             if settings.schedule_from_date and settings.schedule_to_date:
@@ -1068,6 +1128,45 @@ def recruiter_interview_settings(request):
             # Validate time range
             if settings.start_time >= settings.end_time:
                 return JsonResponse({"error": "start_time must be before end_time."}, status=400)
+            
+            # Handle availability updates
+            if 'update_availability' in data and data.get('update_availability'):
+                availability_data = data.get('availability', [])
+                if settings.time_slots_json:
+                    # Update availability status for existing slots
+                    availability_map = {item['datetime']: item.get('available', True) for item in availability_data}
+                    for slot in settings.time_slots_json:
+                        if slot.get('datetime') in availability_map:
+                            slot['available'] = availability_map[slot['datetime']]
+                    updates.append(f"Updated availability for {len(availability_data)} time slots")
+                else:
+                    return JsonResponse({"error": "No time slots found. Please generate time slots first."}, status=400)
+            # Generate time slots if date range is provided (only if not updating availability)
+            elif settings.schedule_from_date and settings.schedule_to_date:
+                from datetime import timedelta
+                # Preserve existing availability if slots already exist
+                existing_availability = {}
+                if settings.time_slots_json:
+                    existing_availability = {slot.get('datetime'): slot.get('available', True) for slot in settings.time_slots_json}
+                
+                time_slots = generate_time_slots(
+                    settings.schedule_from_date,
+                    settings.schedule_to_date,
+                    settings.start_time,
+                    settings.end_time,
+                    settings.interview_time_gap
+                )
+                
+                # Preserve availability status for existing slots
+                for slot in time_slots:
+                    if slot['datetime'] in existing_availability:
+                        slot['available'] = existing_availability[slot['datetime']]
+                    else:
+                        slot['available'] = True  # Default to available for new slots
+                
+                settings.time_slots_json = time_slots
+                if time_slots:
+                    updates.append(f"Generated {len(time_slots)} time slots")
             
             if updates:
                 print("\n📋 Settings Changed:")
@@ -1083,7 +1182,8 @@ def recruiter_interview_settings(request):
             print(f"   • Schedule to date: {settings.schedule_to_date}")
             print(f"   • Start time: {settings.start_time}")
             print(f"   • End time: {settings.end_time}")
-            print(f"   • Interviews per day: {settings.interviews_per_day}")
+            print(f"   • Interview time gap: {settings.interview_time_gap} minutes")
+            print(f"   • Time slots generated: {len(settings.time_slots_json) if settings.time_slots_json else 0}")
             print("="*70 + "\n")
             
             logger.info(f"Interview settings updated for {request.user.username}: {', '.join(updates) if updates else 'No changes'}")
@@ -1096,7 +1196,8 @@ def recruiter_interview_settings(request):
                     "schedule_to_date": settings.schedule_to_date.isoformat() if settings.schedule_to_date else None,
                     "start_time": settings.start_time.strftime('%H:%M') if settings.start_time else '09:00',
                     "end_time": settings.end_time.strftime('%H:%M') if settings.end_time else '17:00',
-                    "interviews_per_day": settings.interviews_per_day,
+                    "interview_time_gap": settings.interview_time_gap,
+                    "time_slots": settings.time_slots_json if settings.time_slots_json else [],
                 }
             })
             

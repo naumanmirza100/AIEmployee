@@ -956,8 +956,8 @@
 
   /* Checkbox Styling */
   input[type="checkbox"] {
-    width: 20px;
-    height: 20px;
+    width: 14px;
+    height: 14px;
     cursor: pointer;
     accent-color: var(--purple-primary);
   }
@@ -1181,13 +1181,20 @@
             <div class="hint">Leave empty for no end date. Format: YYYY-MM-DD</div>
           </div>
           
-          <!-- Time Range and Capacity Settings -->
+          <!-- Time Range and Gap Settings -->
           <div>
             <h3 style="margin: 0 0 20px 0; font-size: 18px; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 12px; font-weight: 600;">
-              ⏰ Time Range & Capacity
+              ⏰ Time Range & Gap
             </h3>
             
-            <label for="startTime">
+            <label for="interviewTimeGap">
+              Interview Time Gap
+              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Time gap between interview slots in minutes</span>
+            </label>
+            <input type="number" id="interviewTimeGap" name="interview_time_gap" min="15" max="120" step="15" value="30" required />
+            <div class="hint">Default: 30 minutes. Common values: 15, 30, 45, 60 minutes</div>
+            
+            <label for="startTime" style="margin-top: 20px;">
               Start Time
               <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Daily start time for interviews</span>
             </label>
@@ -1200,22 +1207,26 @@
             </label>
             <input type="time" id="endTime" name="end_time" value="17:00" required />
             <div class="hint">Default: 17:00 (5 PM). Format: HH:MM (24-hour)</div>
-            
-            <label for="interviewsPerDay" style="margin-top: 20px;">
-              Interviews Per Day
-              <span style="color: var(--text-muted); font-weight: normal; font-size: 12px;"> - Maximum interviews per day</span>
-            </label>
-            <input type="number" id="interviewsPerDay" name="interviews_per_day" min="1" max="20" value="3" required />
-            <div class="hint">Default: 3 interviews per day. Maximum: 20</div>
           </div>
         </div>
         
         <div style="margin-top: 28px; display: flex; gap: 12px; align-items: center;">
-          <button type="submit" class="btn" id="saveInterviewSettingsBtn">💾 Save Interview Settings</button>
+          <button type="submit" class="btn" id="saveInterviewSettingsBtn">💾 Create Time Slots</button>
           <button type="button" class="btn btn-secondary" onclick="loadInterviewSettings()">🔄 Reset to Current</button>
           <span id="interviewSettingsStatus" class="hint"></span>
         </div>
       </form>
+      
+      <!-- Time Slots Grid Display -->
+      <div id="timeSlotsGridContainer" style="display: none; margin-top: 32px;">
+        <div class="section-header">
+          <h3 style="margin: 0; font-size: 20px; color: var(--text-primary);">📅 Generated Time Slots</h3>
+          <button class="btn btn-small" onclick="updateTimeSlotAvailability()" id="updateTimeSlotsBtn" style="display: none;">💾 Update Availability</button>
+        </div>
+        <div id="timeSlotsGrid" style="margin-top: 24px;">
+          <!-- Time slots grid will be generated here -->
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1299,6 +1310,16 @@
           <span id="emailSettingsStatus" class="hint"></span>
         </div>
       </form>
+      
+      <!-- Time Slots Display in Email Settings -->
+      <div id="emailTimeSlotsGridContainer" style="display: none; margin-top: 32px;">
+        <div class="section-header">
+          <h3 style="margin: 0; font-size: 20px; color: var(--text-primary);">📅 Available Interview Time Slots</h3>
+        </div>
+        <div id="emailTimeSlotsGrid" style="margin-top: 24px;">
+          <!-- Time slots grid will be loaded from database here -->
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1816,9 +1837,74 @@
         document.getElementById('reminderHoursBefore').value = settings.reminder_hours_before || 24;
         document.getElementById('autoSendFollowups').checked = settings.auto_send_followups !== false;
         document.getElementById('autoSendReminders').checked = settings.auto_send_reminders !== false;
+        
+        // Load and display time slots from interview settings
+        loadInterviewTimeSlotsForEmailSettings();
       }
     } catch (error) {
       console.error('Error loading email settings:', error);
+    }
+  }
+
+  // Function to load interview time slots for email settings section
+  async function loadInterviewTimeSlotsForEmailSettings() {
+    try {
+      const response = await fetch('{% url "recruiter_interview_settings" %}', {
+        method: 'GET',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken')
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to load interview settings');
+      }
+      
+      const data = await response.json();
+      if (data.success && data.settings && data.settings.time_slots && data.settings.time_slots.length > 0) {
+        const container = document.getElementById('emailTimeSlotsGrid');
+        const gridContainer = document.getElementById('emailTimeSlotsGridContainer');
+        
+        if (container && gridContainer) {
+          // Use the same display function but with different container IDs
+          displayTimeSlotsFromDatabaseForEmail(
+            data.settings.time_slots,
+            data.settings.schedule_from_date,
+            data.settings.schedule_to_date
+          );
+          gridContainer.style.display = 'block';
+        }
+      } else {
+        const gridContainer = document.getElementById('emailTimeSlotsGridContainer');
+        if (gridContainer) {
+          gridContainer.style.display = 'none';
+        }
+      }
+    } catch (error) {
+      console.error('Error loading interview time slots for email settings:', error);
+    }
+  }
+
+  // Function to display time slots in email settings section
+  function displayTimeSlotsFromDatabaseForEmail(timeSlots, fromDate, toDate) {
+    if (!timeSlots || timeSlots.length === 0 || !fromDate || !toDate) {
+      const gridContainer = document.getElementById('emailTimeSlotsGridContainer');
+      if (gridContainer) {
+        gridContainer.style.display = 'none';
+      }
+      return;
+    }
+
+    const container = document.getElementById('emailTimeSlotsGrid');
+    if (!container) return;
+
+    // Use the same logic as displayTimeSlotsFromDatabase but with emailTimeSlotsGrid container
+    displayTimeSlotsFromDatabase(timeSlots, fromDate, toDate);
+    
+    // Copy the generated HTML to email settings container
+    const interviewContainer = document.getElementById('timeSlotsGrid');
+    if (interviewContainer && interviewContainer.innerHTML) {
+      container.innerHTML = interviewContainer.innerHTML;
     }
   }
 
@@ -1909,7 +1995,15 @@
         document.getElementById('scheduleToDate').value = settings.schedule_to_date || '';
         document.getElementById('startTime').value = settings.start_time || '09:00';
         document.getElementById('endTime').value = settings.end_time || '17:00';
-        document.getElementById('interviewsPerDay').value = settings.interviews_per_day || 3;
+        document.getElementById('interviewTimeGap').value = settings.interview_time_gap || 30;
+        
+        // Load and display time slots from database
+        if (settings.time_slots && settings.time_slots.length > 0) {
+          displayTimeSlotsFromDatabase(settings.time_slots, settings.schedule_from_date, settings.schedule_to_date);
+        } else if (settings.schedule_from_date && settings.schedule_to_date) {
+          // Generate grid if dates exist but no slots
+          generateTimeSlotsGrid(settings.schedule_from_date, settings.schedule_to_date, settings.start_time, settings.end_time, settings.interview_time_gap);
+        }
       }
     } catch (error) {
       console.error('Error loading interview settings:', error);
@@ -1930,7 +2024,7 @@
     const scheduleToDate = document.getElementById('scheduleToDate').value || null;
     const startTime = document.getElementById('startTime').value || '09:00';
     const endTime = document.getElementById('endTime').value || '17:00';
-    const interviewsPerDay = parseInt(document.getElementById('interviewsPerDay').value) || 3;
+    const interviewTimeGap = parseInt(document.getElementById('interviewTimeGap').value) || 30;
     
     if (scheduleFromDate && scheduleToDate) {
       if (new Date(scheduleFromDate) > new Date(scheduleToDate)) {
@@ -1953,7 +2047,7 @@
       schedule_to_date: scheduleToDate,
       start_time: startTime,
       end_time: endTime,
-      interviews_per_day: interviewsPerDay
+      interview_time_gap: interviewTimeGap
     };
     
     try {
@@ -1975,6 +2069,15 @@
       if (data.success) {
         status.textContent = '✅ Settings saved successfully!';
         status.style.color = 'var(--accent-success)';
+        
+        // Display time slots from database response
+        if (data.settings && data.settings.time_slots && data.settings.time_slots.length > 0) {
+          displayTimeSlotsFromDatabase(data.settings.time_slots, scheduleFromDate, scheduleToDate);
+        } else if (scheduleFromDate && scheduleToDate) {
+          // Fallback: generate grid if no slots in response
+          generateTimeSlotsGrid(scheduleFromDate, scheduleToDate, startTime, endTime, interviewTimeGap);
+        }
+        
         setTimeout(() => {
           status.textContent = '';
         }, 3000);
@@ -1989,5 +2092,584 @@
       btn.disabled = false;
     }
   });
+
+  // Function to generate time slots grid
+  function generateTimeSlotsGrid(fromDate, toDate, startTime, endTime, gapMinutes) {
+    if (!fromDate || !toDate) {
+      document.getElementById('timeSlotsGridContainer').style.display = 'none';
+      return;
+    }
+
+    const container = document.getElementById('timeSlotsGrid');
+    const gridContainer = document.getElementById('timeSlotsGridContainer');
+    container.innerHTML = '';
+
+    // Parse dates - ensure proper date handling
+    const startDate = new Date(fromDate + 'T00:00:00');
+    const endDate = new Date(toDate + 'T00:00:00');
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+    
+    // Parse times
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    // Generate dates array - include all dates from start to end (inclusive)
+    const dates = [];
+    const currentDate = new Date(startDate);
+    currentDate.setHours(0, 0, 0, 0);
+    while (currentDate <= endDate) {
+      dates.push(new Date(currentDate));
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Set CSS variable for number of dates
+    document.documentElement.style.setProperty('--num-dates', dates.length);
+
+    // Generate time slots
+    const timeSlots = [];
+    for (let minutes = startMinutes; minutes < endMinutes; minutes += gapMinutes) {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      const timeStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+      const displayTime = formatTime(hours, mins);
+      timeSlots.push({ time: timeStr, display: displayTime });
+    }
+
+    // Create grid HTML
+    let gridHTML = '<div class="time-slots-grid-wrapper">';
+    gridHTML += '<div class="time-slots-calendar">';
+    gridHTML += '<div class="calendar-header">';
+    gridHTML += '<button class="calendar-nav-btn" onclick="changeCalendarMonth(-1)">‹</button>';
+    gridHTML += `<div class="calendar-month-year">${formatMonthYear(startDate)}</div>`;
+    gridHTML += '<button class="calendar-nav-btn" onclick="changeCalendarMonth(1)">›</button>';
+    gridHTML += '</div>';
+    gridHTML += '<div class="calendar-days-header">S M T W T F S</div>';
+    gridHTML += '<div class="calendar-dates" id="calendarDates"></div>';
+    gridHTML += '</div>';
+
+    gridHTML += '<div class="time-slots-columns">';
+    gridHTML += '<div class="time-slots-header-row">';
+    gridHTML += '<div class="time-slot-row-header"></div>';
+    dates.forEach(date => {
+      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+      const dayNum = date.getDate();
+      const isSelected = date.toDateString() === startDate.toDateString();
+      gridHTML += `<div class="time-slot-column-header ${isSelected ? 'selected' : ''}">${dayName} ${dayNum}</div>`;
+    });
+    gridHTML += '</div>';
+
+    timeSlots.forEach(slot => {
+      gridHTML += '<div class="time-slots-row">';
+      gridHTML += `<div class="time-slot-row-label">${slot.display}</div>`;
+      dates.forEach(date => {
+        const dateStr = date.toISOString().split('T')[0];
+        const datetimeStr = `${dateStr}T${slot.time}`;
+        gridHTML += `<div class="time-slot-cell-wrapper">
+          <div class="time-slot-cell">
+            <input type="checkbox" class="time-slot-checkbox" data-datetime="${datetimeStr}" checked />
+            <span class="time-slot-text">${slot.display}</span>
+          </div>
+        </div>`;
+      });
+      gridHTML += '</div>';
+    });
+    gridHTML += '</div>';
+    gridHTML += '</div>';
+
+    container.innerHTML = gridHTML;
+    gridContainer.style.display = 'block';
+    showUpdateButton();
+
+    // Generate calendar dates
+    generateCalendarDates(startDate, dates);
+  }
+
+  function formatTime(hours, mins) {
+    const period = hours >= 12 ? 'pm' : 'am';
+    const displayHour = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
+    return `${displayHour}:${mins.toString().padStart(2, '0')}${period}`;
+  }
+
+  function formatMonthYear(date) {
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+
+  function generateCalendarDates(selectedDate, availableDates) {
+    const container = document.getElementById('calendarDates');
+    if (!container) return;
+
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDay = firstDay.getDay();
+    const daysInMonth = lastDay.getDate();
+
+    let html = '';
+    
+    // Empty cells for days before month starts
+    for (let i = 0; i < startDay; i++) {
+      html += '<div class="calendar-date empty"></div>';
+    }
+
+    // Days of the month
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day);
+      const dateStr = date.toISOString().split('T')[0];
+      const isAvailable = availableDates.some(d => d.toISOString().split('T')[0] === dateStr);
+      const isSelected = date.toDateString() === selectedDate.toDateString();
+      
+      html += `<div class="calendar-date ${isAvailable ? 'available' : ''} ${isSelected ? 'selected' : ''}" data-date="${dateStr}">${day}</div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  // Function to display time slots from database
+  function displayTimeSlotsFromDatabase(timeSlots, fromDate, toDate) {
+    if (!timeSlots || timeSlots.length === 0 || !fromDate || !toDate) {
+      document.getElementById('timeSlotsGridContainer').style.display = 'none';
+      return;
+    }
+
+    const container = document.getElementById('timeSlotsGrid');
+    const gridContainer = document.getElementById('timeSlotsGridContainer');
+    container.innerHTML = '';
+
+    // Parse dates
+    const startDate = new Date(fromDate + 'T00:00:00');
+    const endDate = new Date(toDate + 'T00:00:00');
+
+    // Group time slots by date - normalize date strings
+    const slotsByDate = {};
+    timeSlots.forEach(slot => {
+      // Normalize date string (remove time if present, ensure YYYY-MM-DD format)
+      const normalizedDate = slot.date.split('T')[0];
+      if (!slotsByDate[normalizedDate]) {
+        slotsByDate[normalizedDate] = [];
+      }
+      slotsByDate[normalizedDate].push(slot);
+    });
+
+    // Generate dates array - ensure all dates from start to end are included
+    const dates = [];
+    const currentDate = new Date(startDate);
+    // Set time to midnight to avoid timezone issues
+    currentDate.setHours(0, 0, 0, 0);
+    const endDateNormalized = new Date(endDate);
+    endDateNormalized.setHours(0, 0, 0, 0);
+    
+    while (currentDate <= endDateNormalized) {
+      dates.push(new Date(currentDate));
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Get all unique times
+    const allTimes = new Set();
+    timeSlots.forEach(slot => {
+      allTimes.add(slot.time);
+    });
+    const sortedTimes = Array.from(allTimes).sort();
+
+    // Set CSS variable for number of dates
+    document.documentElement.style.setProperty('--num-dates', dates.length);
+
+    // Create grid HTML
+    let gridHTML = '<div class="time-slots-grid-wrapper">';
+    gridHTML += '<div class="time-slots-calendar">';
+    gridHTML += '<div class="calendar-header">';
+    gridHTML += '<button class="calendar-nav-btn" onclick="changeCalendarMonth(-1)">‹</button>';
+    gridHTML += `<div class="calendar-month-year">${formatMonthYear(startDate)}</div>`;
+    gridHTML += '<button class="calendar-nav-btn" onclick="changeCalendarMonth(1)">›</button>';
+    gridHTML += '</div>';
+    gridHTML += '<div class="calendar-days-header">S M T W T F S</div>';
+    gridHTML += '<div class="calendar-dates" id="calendarDates"></div>';
+    gridHTML += '</div>';
+
+    gridHTML += '<div class="time-slots-columns">';
+    gridHTML += '<div class="time-slots-header-row">';
+    gridHTML += '<div class="time-slot-row-header"></div>';
+    dates.forEach(date => {
+      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+      const dayNum = date.getDate();
+      const isSelected = date.toDateString() === startDate.toDateString();
+      gridHTML += `<div class="time-slot-column-header ${isSelected ? 'selected' : ''}">${dayName} ${dayNum}</div>`;
+    });
+    gridHTML += '</div>';
+
+    sortedTimes.forEach(timeStr => {
+      const [hours, mins] = timeStr.split(':').map(Number);
+      const displayTime = formatTime(hours, mins);
+      gridHTML += '<div class="time-slots-row">';
+      gridHTML += `<div class="time-slot-row-label">${displayTime}</div>`;
+      dates.forEach(date => {
+        // Normalize date string to YYYY-MM-DD format
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        
+        const slot = slotsByDate[dateStr]?.find(s => s.time === timeStr);
+        if (slot) {
+          // Check if slot is available (default: true, unless stored as unavailable)
+          const isAvailable = slot.available !== false;
+          gridHTML += `<div class="time-slot-cell-wrapper">
+            <div class="time-slot-cell ${isAvailable ? '' : 'unavailable'}">
+              <input type="checkbox" class="time-slot-checkbox" data-datetime="${slot.datetime}" ${isAvailable ? 'checked' : ''} />
+              <span class="time-slot-text">${displayTime}</span>
+            </div>
+          </div>`;
+        } else {
+          gridHTML += '<div class="time-slot-cell-wrapper"><div class="time-slot-cell empty-slot"></div></div>';
+        }
+      });
+      gridHTML += '</div>';
+    });
+    gridHTML += '</div>';
+    gridHTML += '</div>';
+
+    container.innerHTML = gridHTML;
+    gridContainer.style.display = 'block';
+    showUpdateButton();
+
+    // Generate calendar dates
+    generateCalendarDates(startDate, dates);
+  }
+</script>
+
+<style>
+  .time-slots-grid-wrapper {
+    display: flex;
+    gap: 24px;
+    background: var(--bg-panel);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid var(--border-color);
+  }
+
+  .time-slots-calendar {
+    min-width: 280px;
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid var(--border-color);
+  }
+
+  .calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .calendar-month-year {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .calendar-nav-btn {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .calendar-nav-btn:hover {
+    background: var(--purple-primary);
+    border-color: var(--purple-primary);
+    color: white;
+  }
+
+  .calendar-days-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+
+  .calendar-dates {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+
+  .calendar-date {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-muted);
+    cursor: default;
+  }
+
+  .calendar-date.available {
+    color: var(--text-primary);
+    background: var(--bg-panel);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .calendar-date.available:hover {
+    background: var(--purple-primary);
+    color: white;
+  }
+
+  .calendar-date.selected {
+    background: var(--purple-primary);
+    color: white;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .calendar-date.empty {
+    visibility: hidden;
+  }
+
+  .time-slots-columns {
+    flex: 1;
+    overflow-x: auto;
+  }
+
+  .time-slots-header-row {
+    display: grid;
+    grid-template-columns: 100px repeat(var(--num-dates, 5), minmax(120px, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: stretch;
+  }
+
+  .time-slot-column-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 8px;
+    text-align: center;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 13px;
+    min-width: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .time-slot-column-header.selected {
+    background: var(--purple-primary);
+    color: white;
+    border-color: var(--purple-primary);
+  }
+
+  .time-slot-row-header {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 12px;
+  }
+
+  .time-slots-row {
+    display: grid;
+    grid-template-columns: 100px repeat(var(--num-dates, 5), minmax(120px, 1fr));
+    gap: 8px;
+    margin-bottom: 4px;
+    align-items: stretch;
+  }
+
+  .time-slot-row-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 12px;
+    font-weight: 500;
+  }
+
+  .time-slot-cell {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 6px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 120px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    white-space: nowrap;
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  .time-slot-cell:hover {
+    background: var(--purple-light);
+    border-color: var(--purple-primary);
+    color: white;
+  }
+
+  .time-slot-text {
+    flex: 1;
+    text-align: center;
+  }
+
+  .time-slot-cell.booked {
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .time-slot-cell.empty-slot {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    opacity: 0.4;
+    cursor: not-allowed;
+    min-width: 120px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .time-slot-cell.empty-slot::after {
+    content: '-';
+    color: var(--text-muted);
+    font-size: 16px;
+  }
+
+  .time-slot-cell-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .time-slot-checkbox {
+    width: 8px;
+    height: 8px;
+    cursor: pointer;
+    accent-color: var(--purple-primary);
+    flex-shrink: 0;
+    margin: 0;
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .time-slot-cell.unavailable {
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    opacity: 0.5;
+    text-decoration: line-through;
+  }
+
+  .time-slot-cell:has(.time-slot-checkbox:checked) {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    opacity: 1;
+  }
+
+  .time-slot-cell:has(.time-slot-checkbox:not(:checked)) {
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+</style>
+
+<script>
+  // Function to update time slot availability
+  async function updateTimeSlotAvailability() {
+    const btn = document.getElementById('updateTimeSlotsBtn');
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Updating...';
+
+    // Collect all checkboxes and their states
+    const checkboxes = document.querySelectorAll('.time-slot-checkbox');
+    const availability = [];
+
+    checkboxes.forEach(checkbox => {
+      const datetime = checkbox.getAttribute('data-datetime');
+      if (datetime) {
+        availability.push({
+          datetime: datetime,
+          available: checkbox.checked
+        });
+      }
+    });
+
+    try {
+      const response = await fetch('{% url "recruiter_interview_settings" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+          update_availability: true,
+          availability: availability
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update availability');
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        btn.textContent = '✅ Updated';
+        setTimeout(() => {
+          btn.textContent = '💾 Update Availability';
+          btn.disabled = false;
+        }, 2000);
+        
+        // Reload the grid to reflect changes
+        loadInterviewSettings();
+      } else {
+        throw new Error(data.error || 'Failed to update availability');
+      }
+    } catch (error) {
+      alert('Error updating availability: ' + error.message);
+      btn.textContent = '💾 Update Availability';
+      btn.disabled = false;
+    }
+  }
+
+  // Show update button when grid is displayed
+  function showUpdateButton() {
+    const btn = document.getElementById('updateTimeSlotsBtn');
+    if (btn) {
+      btn.style.display = 'block';
+    }
+  }
 </script>
 {% endblock %}

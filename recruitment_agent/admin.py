@@ -109,7 +109,7 @@ class RecruiterEmailSettingsAdmin(admin.ModelAdmin):
 
 @admin.register(RecruiterInterviewSettings)
 class RecruiterInterviewSettingsAdmin(admin.ModelAdmin):
-    list_display = ['recruiter', 'schedule_from_date', 'schedule_to_date', 'start_time', 'end_time', 'interviews_per_day', 'updated_at']
+    list_display = ['recruiter', 'schedule_from_date', 'schedule_to_date', 'start_time', 'end_time', 'interview_time_gap', 'updated_at']
     list_filter = ['updated_at']
     search_fields = ['recruiter__username', 'recruiter__email']
     readonly_fields = ['created_at', 'updated_at']
@@ -127,9 +127,9 @@ class RecruiterInterviewSettingsAdmin(admin.ModelAdmin):
             'fields': ('start_time', 'end_time'),
             'description': 'Set the daily time window for scheduling interviews.'
         }),
-        ('Capacity', {
-            'fields': ('interviews_per_day',),
-            'description': 'Maximum number of interviews that can be scheduled per day.'
+        ('Time Gap', {
+            'fields': ('interview_time_gap',),
+            'description': 'Time gap between interview slots in minutes (e.g., 30 for 30 minutes).'
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')
