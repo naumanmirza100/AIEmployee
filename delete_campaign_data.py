@@ -51,7 +51,7 @@ def delete_campaign_data(campaign_name):
         print(f"❌ Error: {str(e)}")
 
 if __name__ == '__main__':
-    campaign_name = "Email Sending2"
+    campaign_name = "Final Approvals"
     print(f"Deleting all email sequences and send history for campaign: {campaign_name}\n")
     confirm = input(f"Are you sure you want to delete all data for '{campaign_name}'? (yes/no): ")
     

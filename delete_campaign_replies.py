@@ -47,7 +47,7 @@ def delete_campaign_replies(campaign_name):
         print(f"❌ Error: {str(e)}")
 
 if __name__ == '__main__':
-    campaign_name = "Email Sending2"
+    campaign_name = "Final Approvals"
     print(f"Deleting all reply data for campaign: {campaign_name}\n")
     confirm = input(f"Are you sure you want to delete all replies for '{campaign_name}'? (yes/no): ")
     
@@ -55,5 +55,6 @@ if __name__ == '__main__':
         delete_campaign_replies(campaign_name)
     else:
         print("Operation cancelled.")
+
 
 

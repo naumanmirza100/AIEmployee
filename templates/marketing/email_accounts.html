@@ -1,0 +1,802 @@
+{% extends 'base.html' %}
+{% block title %}Email Accounts - Marketing Dashboard{% endblock %}
+
+{% block content %}
+<style>
+    .email-accounts-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .page-header h1 {
+        margin: 0;
+        color: #1f2937;
+        font-size: 2rem;
+        font-weight: 700;
+    }
+    
+    .btn {
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        border: none;
+        cursor: pointer;
+        font-size: 0.95rem;
+    }
+    
+    .btn-primary {
+        background: #3b82f6;
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background: #2563eb;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+    }
+    
+    .btn-success {
+        background: #10b981;
+        color: white;
+    }
+    
+    .btn-success:hover {
+        background: #059669;
+    }
+    
+    .btn-danger {
+        background: #ef4444;
+        color: white;
+    }
+    
+    .btn-danger:hover {
+        background: #dc2626;
+    }
+    
+    .btn-warning {
+        background: #f59e0b;
+        color: white;
+    }
+    
+    .btn-warning:hover {
+        background: #d97706;
+    }
+    
+    .btn-secondary {
+        background: #6b7280;
+        color: white;
+    }
+    
+    .btn-secondary:hover {
+        background: #4b5563;
+    }
+    
+    .btn-sm {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+    }
+    
+    .accounts-table {
+        background: white;
+        border-radius: 0.75rem;
+        border: 1px solid #e5e7eb;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .accounts-table table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .accounts-table thead {
+        background: #f9fafb;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .accounts-table th {
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .accounts-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #e5e7eb;
+        color: #1f2937;
+    }
+    
+    .accounts-table tbody tr:hover {
+        background: #f9fafb;
+    }
+    
+    .accounts-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    
+    .badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+    }
+    
+    .badge-success {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .badge-danger {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .badge-warning {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .badge-info {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .badge-default {
+        background: #e0e7ff;
+        color: #3730a3;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: white;
+        border: 2px dashed #e5e7eb;
+        border-radius: 0.75rem;
+    }
+    
+    .empty-state-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+    
+    .empty-state h3 {
+        color: #1f2937;
+        margin-bottom: 0.5rem;
+    }
+    
+    .empty-state p {
+        color: #6b7280;
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        overflow: auto;
+    }
+    
+    .modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .modal-content {
+        background-color: white;
+        margin: auto;
+        padding: 2rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.75rem;
+        width: 90%;
+        max-width: 600px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    }
+    
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .modal-header h2 {
+        margin: 0;
+        color: #1f2937;
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+    
+    .close {
+        color: #6b7280;
+        font-size: 2rem;
+        font-weight: bold;
+        cursor: pointer;
+        border: none;
+        background: none;
+        padding: 0;
+        line-height: 1;
+    }
+    
+    .close:hover {
+        color: #1f2937;
+    }
+    
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #1f2937;
+        font-size: 0.95rem;
+    }
+    
+    .form-group input,
+    .form-group select {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #e5e7eb;
+        border-radius: 0.5rem;
+        font-size: 0.95rem;
+        transition: border-color 0.2s;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+        outline: none;
+        border-color: #3b82f6;
+    }
+    
+    .form-group input[type="checkbox"] {
+        width: auto;
+        margin-right: 0.5rem;
+    }
+    
+    .form-group .checkbox-label {
+        display: flex;
+        align-items: center;
+        font-weight: normal;
+        cursor: pointer;
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 1rem;
+        justify-content: flex-end;
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 2px solid #e5e7eb;
+    }
+    
+    .alert {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .alert-success {
+        background: #d1fae5;
+        color: #065f46;
+        border: 1px solid #10b981;
+    }
+    
+    .alert-error {
+        background: #fee2e2;
+        color: #991b1b;
+        border: 1px solid #ef4444;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+    }
+</style>
+
+<div class="email-accounts-container">
+    <div class="page-header">
+        <h1>📧 Email Accounts</h1>
+        <button class="btn btn-primary" style="width: 400px;" onclick="openAddModal()">
+            ➕ Add Email Account
+        </button>
+    </div>
+    
+    <div id="alert-container"></div>
+    
+    {% if accounts %}
+    <div class="accounts-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Test Status</th>
+                    <th>Default</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in accounts %}
+                <tr>
+                    <td>
+                        <strong>{{ account.name }}</strong>
+                    </td>
+                    <td>{{ account.email }}</td>
+                    <td>
+                        <span class="badge badge-info">{{ account.get_account_type_display }}</span>
+                    </td>
+                    <td>
+                        {% if account.is_active %}
+                            <span class="badge badge-success">Active</span>
+                        {% else %}
+                            <span class="badge badge-danger">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if account.test_status == 'success' %}
+                            <span class="badge badge-success">✓ Success</span>
+                        {% elif account.test_status == 'failed' %}
+                            <span class="badge badge-danger">✗ Failed</span>
+                        {% else %}
+                            <span class="badge badge-warning">Not Tested</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if account.is_default %}
+                            <span class="badge badge-default">Default</span>
+                        {% else %}
+                            <span>-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-success btn-sm" onclick="testAccount({{ account.id }})">
+                                🧪 Test
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="openEditModal({{ account.id }})">
+                                ✏️ Edit
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteAccount({{ account.id }}, '{{ account.name|escapejs }}')">
+                                🗑️ Delete
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📧</div>
+        <h3>No Email Accounts</h3>
+        <p>You haven't added any email accounts yet. Add your first email account to start sending campaign emails.</p>
+        <button class="btn btn-primary" onclick="openAddModal()">
+            ➕ Add Email Account
+        </button>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="accountModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalTitle">Add Email Account</h2>
+            <button class="close" onclick="closeModal()">&times;</button>
+        </div>
+        <form id="accountForm" onsubmit="saveAccount(event)">
+            <input type="hidden" id="accountId" name="account_id">
+            
+            <div class="form-group">
+                <label for="accountName">Account Name *</label>
+                <input type="text" id="accountName" name="name" required placeholder="e.g., Main Gmail Account">
+            </div>
+            
+            <div class="form-group">
+                <label for="accountType">Account Type *</label>
+                <select id="accountType" name="account_type" required onchange="updateSMTPDefaults()">
+                    <option value="gmail">Gmail</option>
+                    <option value="outlook">Outlook</option>
+                    <option value="hostinger">Hostinger</option>
+                    <option value="smtp" selected>Custom SMTP</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="accountEmail">Email Address *</label>
+                <input type="email" id="accountEmail" name="email" required placeholder="your.email@example.com">
+            </div>
+            
+            <div class="form-group">
+                <label for="smtpHost">SMTP Host *</label>
+                <input type="text" id="smtpHost" name="smtp_host" required placeholder="smtp.gmail.com">
+            </div>
+            
+            <div class="form-group">
+                <label for="smtpPort">SMTP Port *</label>
+                <input type="number" id="smtpPort" name="smtp_port" required value="587" min="1" max="65535">
+            </div>
+            
+            <div class="form-group">
+                <label for="smtpUsername">SMTP Username *</label>
+                <input type="text" id="smtpUsername" name="smtp_username" required placeholder="Usually same as email">
+            </div>
+            
+            <div class="form-group">
+                <label for="smtpPassword">SMTP Password / App Password *</label>
+                <input type="password" id="smtpPassword" name="smtp_password" required placeholder="Enter password or app password">
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="useTLS" name="use_tls" checked>
+                    <span>Use TLS</span>
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="useSSL" name="use_ssl">
+                    <span>Use SSL</span>
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="isGmailAppPassword" name="is_gmail_app_password">
+                    <span>Using Gmail App Password (not regular password)</span>
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="isActive" name="is_active" checked>
+                    <span>Active (ready to use)</span>
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="isDefault" name="is_default">
+                    <span>Set as default account</span>
+                </label>
+            </div>
+            
+            <hr style="margin: 2rem 0; border: none; border-top: 2px solid #e5e7eb;">
+            
+            <h3 style="margin: 0 0 1.5rem 0; color: #1f2937; font-size: 1.25rem;">📥 IMAP Settings (For Reply Detection)</h3>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="enableImapSync" name="enable_imap_sync" onchange="toggleImapFields()">
+                    <span>Enable IMAP Sync (Automatically detect replies)</span>
+                </label>
+            </div>
+            
+            <div id="imapFields" style="display: none;">
+                <div class="form-group">
+                    <label for="imapHost">IMAP Host *</label>
+                    <input type="text" id="imapHost" name="imap_host" placeholder="imap.hostinger.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="imapPort">IMAP Port *</label>
+                    <input type="number" id="imapPort" name="imap_port" value="993" min="1" max="65535">
+                </div>
+                
+                <div class="form-group">
+                    <label for="imapUsername">IMAP Username *</label>
+                    <input type="text" id="imapUsername" name="imap_username" placeholder="Usually same as email">
+                </div>
+                
+                <div class="form-group">
+                    <label for="imapPassword">IMAP Password *</label>
+                    <input type="password" id="imapPassword" name="imap_password" placeholder="Enter IMAP password">
+                </div>
+                
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="imapUseSSL" name="imap_use_ssl" checked>
+                        <span>Use SSL (Port 993 requires SSL)</span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save Account</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const CSRF_TOKEN = '{{ csrf_token }}';
+    let editingAccountId = null;
+    
+    // SMTP defaults for different account types
+    const smtpDefaults = {
+        'gmail': { host: 'smtp.gmail.com', port: 587, useTLS: true, useSSL: false, imapHost: 'imap.gmail.com', imapPort: 993 },
+        'outlook': { host: 'smtp-mail.outlook.com', port: 587, useTLS: true, useSSL: false, imapHost: 'imap-mail.outlook.com', imapPort: 993 },
+        'hostinger': { host: 'smtp.hostinger.com', port: 587, useTLS: true, useSSL: false, imapHost: 'imap.hostinger.com', imapPort: 993 },
+        'smtp': { host: '', port: 587, useTLS: true, useSSL: false, imapHost: '', imapPort: 993 }
+    };
+    
+    function updateSMTPDefaults() {
+        const accountType = document.getElementById('accountType').value;
+        const defaults = smtpDefaults[accountType] || smtpDefaults['smtp'];
+        
+        document.getElementById('smtpHost').value = defaults.host;
+        document.getElementById('smtpPort').value = defaults.port;
+        document.getElementById('useTLS').checked = defaults.useTLS;
+        document.getElementById('useSSL').checked = defaults.useSSL;
+        
+        // Update IMAP defaults if hostinger
+        if (accountType === 'hostinger') {
+            document.getElementById('imapHost').value = defaults.imapHost;
+            document.getElementById('imapPort').value = defaults.imapPort;
+        }
+        
+        if (accountType === 'gmail') {
+            document.getElementById('isGmailAppPassword').checked = true;
+        }
+    }
+    
+    function toggleImapFields() {
+        const enableSync = document.getElementById('enableImapSync').checked;
+        const imapFields = document.getElementById('imapFields');
+        imapFields.style.display = enableSync ? 'block' : 'none';
+        
+        // Auto-fill IMAP username if email is filled
+        if (enableSync) {
+            const email = document.getElementById('accountEmail').value;
+            if (email && !document.getElementById('imapUsername').value) {
+                document.getElementById('imapUsername').value = email;
+            }
+        }
+    }
+    
+    function openAddModal() {
+        editingAccountId = null;
+        document.getElementById('modalTitle').textContent = 'Add Email Account';
+        document.getElementById('accountForm').reset();
+        document.getElementById('accountId').value = '';
+        document.getElementById('accountModal').classList.add('show');
+        updateSMTPDefaults();
+    }
+    
+    function openEditModal(accountId) {
+        editingAccountId = accountId;
+        document.getElementById('modalTitle').textContent = 'Edit Email Account';
+        document.getElementById('accountForm').reset();
+        document.getElementById('accountId').value = accountId;
+        document.getElementById('accountModal').classList.add('show');
+        
+        // Fetch account details
+        fetch(`/marketing/email-accounts/${accountId}/`, {
+            method: 'GET',
+            headers: {
+                'X-CSRFToken': CSRF_TOKEN,
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const account = data.account;
+                document.getElementById('accountName').value = account.name || '';
+                document.getElementById('accountType').value = account.account_type || 'smtp';
+                document.getElementById('accountEmail').value = account.email || '';
+                document.getElementById('smtpHost').value = account.smtp_host || '';
+                document.getElementById('smtpPort').value = account.smtp_port || 587;
+                document.getElementById('smtpUsername').value = account.smtp_username || '';
+                document.getElementById('smtpPassword').value = account.smtp_password || '';
+                document.getElementById('useTLS').checked = account.use_tls || false;
+                document.getElementById('useSSL').checked = account.use_ssl || false;
+                document.getElementById('isGmailAppPassword').checked = account.is_gmail_app_password || false;
+                document.getElementById('isActive').checked = account.is_active !== false;
+                document.getElementById('isDefault').checked = account.is_default || false;
+                // IMAP fields
+                document.getElementById('enableImapSync').checked = account.enable_imap_sync || false;
+                toggleImapFields();
+                document.getElementById('imapHost').value = account.imap_host || '';
+                document.getElementById('imapPort').value = account.imap_port || 993;
+                document.getElementById('imapUsername').value = account.imap_username || '';
+                document.getElementById('imapPassword').value = account.imap_password || '';
+                document.getElementById('imapUseSSL').checked = account.imap_use_ssl !== false;
+            } else {
+                showAlert('Error loading account details', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error loading account details', 'error');
+        });
+    }
+    
+    function closeModal() {
+        document.getElementById('accountModal').classList.remove('show');
+        editingAccountId = null;
+    }
+    
+    function saveAccount(event) {
+        event.preventDefault();
+        
+        const formData = {
+            name: document.getElementById('accountName').value,
+            account_type: document.getElementById('accountType').value,
+            email: document.getElementById('accountEmail').value,
+            smtp_host: document.getElementById('smtpHost').value,
+            smtp_port: parseInt(document.getElementById('smtpPort').value),
+            smtp_username: document.getElementById('smtpUsername').value,
+            smtp_password: document.getElementById('smtpPassword').value,
+            use_tls: document.getElementById('useTLS').checked,
+            use_ssl: document.getElementById('useSSL').checked,
+            is_gmail_app_password: document.getElementById('isGmailAppPassword').checked,
+            // IMAP fields
+            enable_imap_sync: document.getElementById('enableImapSync').checked,
+            imap_host: document.getElementById('imapHost').value,
+            imap_port: parseInt(document.getElementById('imapPort').value) || null,
+            imap_username: document.getElementById('imapUsername').value,
+            imap_password: document.getElementById('imapPassword').value,
+            imap_use_ssl: document.getElementById('imapUseSSL').checked,
+            is_active: document.getElementById('isActive').checked,
+            is_default: document.getElementById('isDefault').checked,
+        };
+        
+        const url = editingAccountId 
+            ? `/marketing/email-accounts/${editingAccountId}/`
+            : '/marketing/email-accounts/';
+        const method = editingAccountId ? 'PUT' : 'POST';
+        
+        fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN,
+            },
+            body: JSON.stringify(formData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message || 'Account saved successfully', 'success');
+                closeModal();
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                showAlert(data.error || 'Error saving account', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error saving account', 'error');
+        });
+    }
+    
+    function deleteAccount(accountId, accountName) {
+        if (!confirm(`Are you sure you want to delete "${accountName}"? This action cannot be undone.`)) {
+            return;
+        }
+        
+        fetch(`/marketing/email-accounts/${accountId}/`, {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': CSRF_TOKEN,
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message || 'Account deleted successfully', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                showAlert(data.error || 'Error deleting account', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error deleting account', 'error');
+        });
+    }
+    
+    function testAccount(accountId) {
+        const testEmail = prompt('Enter email address to send test email to:');
+        if (!testEmail) {
+            return;
+        }
+        
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(testEmail)) {
+            showAlert('Please enter a valid email address', 'error');
+            return;
+        }
+        
+        showAlert('Sending test email...', 'success');
+        
+        fetch(`/marketing/email-accounts/${accountId}/test/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN,
+            },
+            body: JSON.stringify({ test_email: testEmail })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message || 'Test email sent successfully!', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                showAlert(data.error || 'Error sending test email', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error sending test email', 'error');
+        });
+    }
+    
+    function showAlert(message, type) {
+        const alertContainer = document.getElementById('alert-container');
+        const alertClass = type === 'success' ? 'alert-success' : 'alert-error';
+        alertContainer.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+        
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+            alertContainer.innerHTML = '';
+        }, 5000);
+    }
+    
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        const modal = document.getElementById('accountModal');
+        if (event.target === modal) {
+            closeModal();
+        }
+    }
+</script>
+{% endblock %}
+

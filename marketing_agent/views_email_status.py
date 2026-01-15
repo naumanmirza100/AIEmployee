@@ -443,18 +443,21 @@ def email_sending_status(request, campaign_id):
         from marketing_agent.models import Reply
         
         # Get all main sequence replies that should trigger sub-sequences
-        # CRITICAL: Exclude replies to sub-sequence emails (reply.sub_sequence should be None)
+        # IMPORTANT: reply.sub_sequence field indicates which sub-sequence email was replied to
+        # If sub_sequence__isnull=True, it means this reply was to a MAIN sequence email
+        # We check ALL such replies, even if matching sub-sequence was created AFTER the reply
+        # We verify if the matching sub-sequence email was actually sent for each reply
         main_sequence_replies = Reply.objects.filter(
             campaign=campaign,
             sequence__isnull=False,  # Has a sequence (main sequence)
             sequence__is_sub_sequence=False,  # Main sequence reply (not sub-sequence reply)
-            sub_sequence__isnull=True,  # CRITICAL: Not a reply to sub-sequence email (only replies to main sequence)
+            sub_sequence__isnull=True,  # CRITICAL: Reply was to MAIN sequence email (not sub-sequence email)
             interest_level__in=['positive', 'negative', 'neutral', 'requested_info', 'objection'],  # Valid interest levels
         ).select_related(
             'contact', 'lead', 'sequence', 'contact__sub_sequence'
         ).prefetch_related(
             'sequence__sub_sequences__steps__template'
-        ).order_by('-replied_at')[:100]  # Recent replies first
+        ).order_by('-replied_at')[:200]  # Check more replies to catch old ones (created before sub-sequence)
         
         for reply in main_sequence_replies:
             contact = reply.contact

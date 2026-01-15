@@ -277,7 +277,6 @@ INSTALLED_APPS = [
     # Third party apps
     'rest_framework',
     'rest_framework.authtoken',
-    'corsheaders',  # CORS support for frontend
 
     'core',
     'project_manager_agent',
@@ -289,7 +288,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be as high as possible)
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -321,53 +319,21 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 
 
 # --------------------
-# Database
+# Database (SQL Server Express)
 # --------------------
 
-# Default to SQLite for local development unless explicitly overridden.
-# Set `USE_SQL_SERVER=true` in your environment to enable SQL Server.
-USE_SQL_SERVER = os.getenv('USE_SQL_SERVER', 'False').strip().lower() == 'true'
 
-if USE_SQL_SERVER:
-    USE_WINDOWS_AUTH = os.getenv('USE_WINDOWS_AUTH', 'True').strip().lower() == 'true'
-
-    # For named instances, set DB_HOST like: localhost\\SQLEXPRESS
-    # For a default instance, set DB_HOST=localhost and (optionally) DB_PORT=1433
-    db_host = os.getenv('DB_HOST', r'localhost').strip()
-    db_port = os.getenv('DB_PORT', '').strip()
-
-    extra_params_parts: list[str] = []
-    if USE_WINDOWS_AUTH:
-        extra_params_parts.append('Trusted_Connection=yes')
-    
-    extra_params = ';'.join(extra_params_parts) if extra_params_parts else ''
-    
-    db_config = {
+DATABASES = {
+    'default': {
         'ENGINE': 'mssql',
         'NAME': os.getenv('DB_NAME', 'project_manager_db'),
-        'HOST': r'localhost',
+        'HOST': r'localhost\SQLEXPRESS',
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
             'trusted_connection': 'yes',
         },
-    }
 
-    # Only set PORT if provided (named instances typically omit PORT)
-    if db_port:
-        db_config['PORT'] = db_port
-
-    if not USE_WINDOWS_AUTH:
-        db_config['USER'] = os.getenv('DB_USER', '').strip()
-        db_config['PASSWORD'] = os.getenv('DB_PASSWORD', '').strip()
-
-    DATABASES = {'default': db_config}
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+    }}
 
 
 
@@ -445,30 +411,40 @@ if email_backend_env and ('smtp' in email_backend_env.lower() or 'EmailBackend' 
     
     # Verify SMTP settings are configured
     if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
-        _startup_print("\n" + "="*60)
-        _startup_print("WARNING: SMTP backend requested but EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set!")
-        _startup_print("Falling back to console backend (emails will print to terminal)")
-        _startup_print("="*60 + "\n")
+        print("\n" + "="*60)
+        print("WARNING: SMTP backend requested but EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set!")
+        print("Falling back to console backend (emails will print to terminal)")
+        print("="*60 + "\n")
         EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
     else:
-        _startup_print("\n" + "="*60)
-        _startup_print("EMAIL CONFIGURATION:")
-        _startup_print(f"  Backend: SMTP")
-        _startup_print(f"  Host: {EMAIL_HOST}")
-        _startup_print(f"  Port: {EMAIL_PORT}")
-        _startup_print(f"  From: {EMAIL_HOST_USER}")
-        _startup_print("="*60 + "\n")
+        print("\n" + "="*60)
+        print("EMAIL CONFIGURATION:")
+        print(f"  Backend: SMTP")
+        print(f"  Host: {EMAIL_HOST}")
+        print(f"  Port: {EMAIL_PORT}")
+        print(f"  From: {EMAIL_HOST_USER}")
+        print("="*60 + "\n")
 else:
     # Console backend (for development - emails print to terminal)
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    _startup_print("\n" + "="*60)
-    _startup_print("INFO: Using console email backend (emails will print to terminal)")
-    _startup_print("To send actual emails, set in .env:")
-    _startup_print("  EMAIL_BACKEND=smtp")
-    _startup_print("  EMAIL_HOST_USER=your-email@gmail.com")
-    _startup_print("  EMAIL_HOST_PASSWORD=your-app-password")
-    _startup_print("="*60 + "\n")
+    print("\n" + "="*60)
+    print("INFO: Using console email backend (emails will print to terminal)")
+    print("To send actual emails, set in .env:")
+    print("  EMAIL_BACKEND=smtp")
+    print("  EMAIL_HOST_USER=your-email@gmail.com")
+    print("  EMAIL_HOST_PASSWORD=your-app-password")
+    print("="*60 + "\n")
 
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HOST_USER else 'noreply@example.com').strip()
+RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
+
+
+# --------------------
+# Email Tracking Configuration
+# --------------------
+# Base URL for email tracking (opens/clicks)
+# For local testing with ngrok, use your ngrok URL
+# For production, use your actual domain
 SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 
 
@@ -495,41 +471,3 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.MultiPartParser',
     ],
 }
-
-# --------------------
-# CORS Settings (for frontend API access)
-# --------------------
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Vite dev server
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",  # Alternative Vite port
-    "http://127.0.0.1:5173",
-]
-
-# Allow credentials (cookies, authorization headers)
-CORS_ALLOW_CREDENTIALS = True
-
-# Allow all headers
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-    'x-company-user-id',  # Custom header for company user authentication
-    'x-company-id',  # Custom header for company authentication
-]
-
-# Allow all methods
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]

@@ -208,6 +208,12 @@ class EmailService:
                 fail_silently=False,
             )
             
+            # Generate Message-ID for reply detection
+            import uuid
+            import socket
+            domain = from_email.split('@')[1] if '@' in from_email else 'localhost'
+            message_id = f"<{uuid.uuid4().hex}@{domain}>"
+            
             # Use EmailMultiAlternatives for HTML emails
             email = EmailMultiAlternatives(
                 subject=subject,
@@ -217,14 +223,18 @@ class EmailService:
                 connection=smtp_backend,
             )
             
+            # Add Message-ID header
+            email.extra_headers['Message-ID'] = message_id
+            
             if html_content:
                 email.attach_alternative(html_content, "text/html")
             
             email.send()
             
-            # Update send history
+            # Update send history with Message-ID
             send_history.status = 'sent'
             send_history.sent_at = timezone.now()
+            send_history.message_id = message_id.strip('<>')  # Store without < >
             send_history.save()
             
             self.sent_count += 1
