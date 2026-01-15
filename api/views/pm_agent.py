@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
@@ -8,6 +8,8 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
+from api.authentication import CompanyUserTokenAuthentication
+from api.permissions import IsCompanyUserOnly
 
 import logging
 from datetime import datetime, timedelta
@@ -130,31 +132,35 @@ def _build_user_assignments(available_users, *, project_id=None, all_tasks=None,
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # Temporarily changed from IsAuthenticated for testing
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def project_pilot(request):
     """
-    Project Pilot Agent API (token-auth friendly).
+    Project Pilot Agent API - Only accessible to company users.
     Body:
       - question: str (required)
       - project_id: int (optional)
     """
-    # Temporarily commented out for testing - allows all access
-    # if not _ensure_project_manager(request.user):
-    #     return Response(
-    #         {"status": "error", "message": "Access denied (project manager only)."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
+    company_user = request.user
     
-    # Get user if available, otherwise use None (for testing)
-    user = getattr(request, 'user', None) if hasattr(request, 'user') and request.user.is_authenticated else None
+    # Check if user can access project manager features (project_manager or company_user role)
+    # Use fallback if method doesn't exist (for server restart issues)
+    can_access = False
+    if hasattr(company_user, 'can_access_project_manager_features'):
+        can_access = company_user.can_access_project_manager_features()
+    else:
+        # Fallback: check role directly
+        can_access = company_user.role in ['project_manager', 'company_user']
     
-    # For testing: if no user, get a default user (first superuser or staff) for project creation
-    default_user = None
-    if user is None:
-        User = get_user_model()
-        default_user = User.objects.filter(is_superuser=True).first() or User.objects.filter(is_staff=True).first()
-        if default_user:
-            user = default_user
+    if not can_access:
+        return Response(
+            {"status": "error", "message": "Access denied. Project manager or company user role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    # Get company from company_user
+    company = company_user.company
 
     try:
         agent = AgentRegistry.get_agent("project_pilot")
@@ -167,22 +173,14 @@ def project_pilot(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Always get all user's projects/tasks for context
-        # Temporarily allow all projects for testing if user is None
-        if user:
-            all_projects = Project.objects.filter(owner=user)
-            all_tasks = Task.objects.filter(project__owner=user).select_related("project")
-        else:
-            all_projects = list(Project.objects.all()[:10])  # Limit for testing - convert to list
-            all_tasks = list(Task.objects.all()[:50].select_related("project"))  # Convert to list to allow filtering
+        # Filter projects created by this company user
+        all_projects = Project.objects.filter(created_by_company_user=company_user)
+        all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project")
 
         context = {}
         project = None
         if project_id:
-            if user:
-                project = get_object_or_404(Project, id=project_id, owner=user)
-            else:
-                project = get_object_or_404(Project, id=project_id)
+            project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
             tasks = Task.objects.filter(project=project).select_related("assignee")
             context = {
                 "project": {
@@ -243,27 +241,34 @@ def project_pilot(request):
 
         available_users = _build_available_users(project_id=project_id, project=project)
         context["user_assignments"] = _build_user_assignments(
-            available_users, project_id=project_id, all_tasks=all_tasks, owner=user if user else None
+            available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
 
         result = agent.process(question=question, context=context, available_users=available_users)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
-        actions = result.get("actions", [])
+        actions = result.get("actions") or []
         if result.get("action"):
             actions = [result["action"]]
+        
+        # Ensure actions is always a list
+        if not isinstance(actions, list):
+            actions = []
 
         created_project_id = None
         action_results = []
+        
+        # Track created project ID across all actions in this batch
+        # This allows tasks created after a project to automatically use that project
 
         # Ensure answer exists for concatenations
         if "answer" not in result or result["answer"] is None:
             result["answer"] = ""
 
+        # Process all actions in order
         for action_data in actions:
             action_type = action_data.get("action")
-
             if action_type == "create_project":
                 try:
                     end_date = None
@@ -295,34 +300,49 @@ def project_pilot(request):
                     budget_max = action_data.get("budget_max")
                     deadline = action_data.get("deadline") or end_date
 
-                    # Ensure we have a user for project creation (required by database)
-                    project_owner = user if user else default_user
-                    if not project_owner:
-                        action_results.append(
-                            {
-                                "action": "create_project",
-                                "success": False,
-                                "error": "Cannot create project: No user available. Please log in or ensure a default user exists.",
-                            }
-                        )
-                        continue
+                    # Create project with company association
+                    # Note: owner field is required but CompanyUser is not a User model
+                    # We'll need to set owner to None or create a dummy owner
+                    # For now, we'll set it to None if the field allows it, otherwise we need to handle it
+                    from django.contrib.auth.models import User
+                    # Try to get the first user as owner (you might want to change this logic)
+                    default_owner = User.objects.first()
                     
-                    project = Project.objects.create(
-                        name=action_data.get("project_name", "New Project"),
-                        description=action_data.get("project_description", ""),
-                        owner=project_owner,
-                        status=action_data.get("project_status", "planning"),
-                        priority=action_data.get("project_priority", "medium"),
-                        end_date=end_date,
-                        project_manager_id=project_manager_id if project_manager_id else None,
-                        industry_id=industry_id if industry_id else None,
-                        project_type=project_type if project_type else "web_app",
-                        budget_min=budget_min if budget_min else None,
-                        budget_max=budget_max if budget_max else None,
-                        deadline=deadline,
-                    )
-
+                    project_data = {
+                        "name": action_data.get("project_name", "New Project"),
+                        "description": action_data.get("project_description", ""),
+                        "company": company,
+                        "created_by_company_user": company_user,
+                        "status": action_data.get("project_status", "planning"),
+                        "priority": action_data.get("project_priority", "medium"),
+                        "project_type": project_type if project_type else "web_app",
+                    }
+                    
+                    # Set owner if we have a default owner
+                    if default_owner:
+                        project_data["owner"] = default_owner
+                    
+                    # Add optional fields
+                    if end_date:
+                        project_data["end_date"] = end_date
+                    if project_manager_id:
+                        project_data["project_manager_id"] = project_manager_id
+                    if industry_id:
+                        project_data["industry_id"] = industry_id
+                    if budget_min:
+                        project_data["budget_min"] = budget_min
+                    if budget_max:
+                        project_data["budget_max"] = budget_max
+                    if deadline:
+                        project_data["deadline"] = deadline
+                    
+                    project = Project.objects.create(**project_data)
+                    
+                    # Store the created project ID for use in subsequent task creation
                     created_project_id = project.id
+                    # Store it in the action_data for reference
+                    action_data["_created_project_id"] = project.id
+
                     action_results.append(
                         {
                             "action": "create_project",
@@ -334,6 +354,14 @@ def project_pilot(request):
                     )
                 except Exception as e:
                     action_results.append({"action": "create_project", "success": False, "error": str(e)})
+
+        # Second pass: Create tasks and other actions, using created project IDs
+        for action_data in actions:
+            action_type = action_data.get("action")
+            
+            if action_type == "create_project":
+                # Already processed in first pass, skip
+                continue
 
             elif action_type == "create_task":
                 try:
@@ -361,12 +389,8 @@ def project_pilot(request):
                         )
                         continue
 
-                    # Use user or default_user for project lookup
-                    project_owner = user if user else default_user
-                    if project_owner:
-                        task_project = get_object_or_404(Project, id=task_project_id, owner=project_owner)
-                    else:
-                        task_project = get_object_or_404(Project, id=task_project_id)
+                    # Get project by company
+                    task_project = get_object_or_404(Project, id=task_project_id, created_by_company_user=company_user)
 
                     estimated_hours = None
                     if action_data.get("estimated_hours") is not None:
@@ -435,10 +459,7 @@ def project_pilot(request):
                             {"action": "delete_project", "success": False, "error": "project_id is required"}
                         )
                         continue
-                    if user:
-                        project_to_delete = get_object_or_404(Project, id=project_id_to_delete, owner=user)
-                    else:
-                        project_to_delete = get_object_or_404(Project, id=project_id_to_delete)
+                    project_to_delete = get_object_or_404(Project, id=project_id_to_delete, created_by_company_user=company_user)
                     project_name = project_to_delete.name
                     project_to_delete.delete()
                     action_results.append(
@@ -463,10 +484,7 @@ def project_pilot(request):
                             {"action": "delete_task", "success": False, "error": "task_id is required"}
                         )
                         continue
-                    if user:
-                        task_to_delete = get_object_or_404(Task, id=task_id_to_delete, project__owner=user)
-                    else:
-                        task_to_delete = get_object_or_404(Task, id=task_id_to_delete)
+                    task_to_delete = get_object_or_404(Task, id=task_id_to_delete, project__created_by_company_user=company_user)
                     task_title = task_to_delete.title
                     task_to_delete.delete()
                     action_results.append(
@@ -498,10 +516,7 @@ def project_pilot(request):
                         )
                         continue
 
-                    if user:
-                        task_to_update = get_object_or_404(Task, id=task_id_to_update, project__owner=user)
-                    else:
-                        task_to_update = get_object_or_404(Task, id=task_id_to_update)
+                    task_to_update = get_object_or_404(Task, id=task_id_to_update, project__created_by_company_user=company_user)
 
                     # Priority
                     if "priority" in updates and updates["priority"] in ["low", "medium", "high"]:
@@ -572,24 +587,36 @@ def project_pilot(request):
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # Temporarily changed from IsAuthenticated for testing
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def task_prioritization(request):
     """
-    Task Prioritization Agent API.
+    Task Prioritization Agent API - Only accessible to company users.
     Body:
       - action: prioritize|order|bottlenecks|delegation (default: prioritize)
       - project_id: int (optional)
       - task: dict (optional, used for some actions)
     """
-    # Temporarily commented out for testing - allows all access
-    # if not _ensure_project_manager(request.user):
-    #     return Response(
-    #         {"status": "error", "message": "Access denied (project manager only)."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
+    company_user = request.user
     
-    # Get user if available, otherwise use None (for testing)
-    user = getattr(request, 'user', None) if hasattr(request, 'user') and request.user.is_authenticated else None
+    # Check if user can access project manager features (project_manager or company_user role)
+    # Use fallback if method doesn't exist (for server restart issues)
+    can_access = False
+    if hasattr(company_user, 'can_access_project_manager_features'):
+        can_access = company_user.can_access_project_manager_features()
+    else:
+        # Fallback: check role directly
+        can_access = company_user.role in ['project_manager', 'company_user']
+    
+    if not can_access:
+        return Response(
+            {"status": "error", "message": "Access denied. Project manager or company user role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Get company from company_user
+    company = company_user.company
 
     try:
         agent = AgentRegistry.get_agent("task_prioritization")
@@ -597,15 +624,9 @@ def task_prioritization(request):
         project_id = request.data.get("project_id")
 
         if project_id:
-            if user:
-                tasks_queryset = Task.objects.filter(project_id=project_id, project__owner=user)
-            else:
-                tasks_queryset = Task.objects.filter(project_id=project_id)
+            tasks_queryset = Task.objects.filter(project_id=project_id, project__created_by_company_user=company_user)
         else:
-            if user:
-                tasks_queryset = Task.objects.filter(project__owner=user)
-            else:
-                tasks_queryset = Task.objects.all()[:50]
+            tasks_queryset = Task.objects.filter(project__created_by_company_user=company_user)[:50]
 
         tasks = [
             {
@@ -624,12 +645,9 @@ def task_prioritization(request):
         team_members = []
         if action in ["bottlenecks", "delegation"]:
             if project_id:
-                members = TeamMember.objects.filter(project_id=project_id).select_related("user")
+                members = TeamMember.objects.filter(project_id=project_id, project__created_by_company_user=company_user).select_related("user")
             else:
-                if user:
-                    members = TeamMember.objects.filter(project__owner=user).select_related("user")
-                else:
-                    members = TeamMember.objects.all()[:20].select_related("user")
+                members = TeamMember.objects.filter(project__created_by_company_user=company_user)[:20].select_related("user")
             team_members = [{"id": m.user.id, "name": m.user.username, "role": m.role} for m in members]
 
         result = agent.process(
@@ -647,10 +665,7 @@ def task_prioritization(request):
                 reasoning = task_data.get("ai_reasoning", "")
                 if task_id and new_priority in ["low", "medium", "high"]:
                     try:
-                        if user:
-                            t = Task.objects.get(id=task_id, project__owner=user)
-                        else:
-                            t = Task.objects.get(id=task_id)
+                        t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
                         t.priority = new_priority
                         if reasoning:
                             t.ai_reasoning = (t.ai_reasoning + "\n\n" + reasoning) if t.ai_reasoning else reasoning
@@ -664,10 +679,7 @@ def task_prioritization(request):
                 reasoning = task_data.get("order_reasoning") or task_data.get("ai_reasoning", "")
                 if task_id and reasoning:
                     try:
-                        if user:
-                            t = Task.objects.get(id=task_id, project__owner=user)
-                        else:
-                            t = Task.objects.get(id=task_id)
+                        t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
                         t.ai_reasoning = (t.ai_reasoning + "\n\n" + reasoning) if t.ai_reasoning else reasoning
                         t.save()
                     except Task.DoesNotExist:
@@ -685,10 +697,7 @@ def task_prioritization(request):
                     task_id = task_info.get("task_id") if isinstance(task_info, dict) else task_info
                     task_reasoning = task_info.get("task_reasoning", "") if isinstance(task_info, dict) else ""
                     try:
-                        if user:
-                            t = Task.objects.get(id=task_id, project__owner=user)
-                        else:
-                            t = Task.objects.get(id=task_id)
+                        t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
                         combined = full_reasoning + (("\n\n" + task_reasoning) if task_reasoning else "")
                         t.ai_reasoning = (t.ai_reasoning + "\n\n" + combined) if t.ai_reasoning else combined
                         t.save()
@@ -703,10 +712,7 @@ def task_prioritization(request):
                 if not (task_id and reasoning):
                     continue
                 try:
-                    if user:
-                        t = Task.objects.get(id=task_id, project__owner=user)
-                    else:
-                        t = Task.objects.get(id=task_id)
+                    t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
                     full_reasoning = "[Delegation Suggestion] " + reasoning
                     t.ai_reasoning = (t.ai_reasoning + "\n\n" + full_reasoning) if t.ai_reasoning else full_reasoning
                     t.save()
@@ -724,22 +730,31 @@ def task_prioritization(request):
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # Temporarily changed from IsAuthenticated for testing
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def generate_subtasks(request):
     """
-    Subtask Generation Agent API.
+    Subtask Generation Agent API - Only accessible to company users.
     Body:
       - project_id: int (required)
     """
-    # Temporarily commented out for testing - allows all access
-    # if not _ensure_project_manager(request.user):
-    #     return Response(
-    #         {"status": "error", "message": "Access denied (project manager only)."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
+    company_user = request.user
     
-    # Get user if available, otherwise use None (for testing)
-    user = getattr(request, 'user', None) if hasattr(request, 'user') and request.user.is_authenticated else None
+    # Check if user can access project manager features (project_manager or company_user role)
+    # Use fallback if method doesn't exist (for server restart issues)
+    can_access = False
+    if hasattr(company_user, 'can_access_project_manager_features'):
+        can_access = company_user.can_access_project_manager_features()
+    else:
+        # Fallback: check role directly
+        can_access = company_user.role in ['project_manager', 'company_user']
+    
+    if not can_access:
+        return Response(
+            {"status": "error", "message": "Access denied. Project manager or company user role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     try:
         project_id = request.data.get("project_id")
@@ -750,12 +765,13 @@ def generate_subtasks(request):
             )
 
         agent = AgentRegistry.get_agent("subtask_generation")
-        if user:
-            get_object_or_404(Project, id=project_id, owner=user)
-        else:
-            get_object_or_404(Project, id=project_id)
+        
+        # Get company from company_user
+        company = company_user.company
+        
+        get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
 
-        tasks_queryset = Task.objects.filter(project_id=project_id)
+        tasks_queryset = Task.objects.filter(project_id=project_id, project__created_by_company_user=company_user)
         tasks = [
             {
                 "id": t.id,
@@ -784,10 +800,7 @@ def generate_subtasks(request):
 
         for task_id, subtask_data in subtasks_by_task.items():
             try:
-                if user:
-                    task = Task.objects.get(id=task_id, project__owner=user)
-                else:
-                    task = Task.objects.get(id=task_id)
+                task = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
 
                 if isinstance(subtask_data, dict):
                     subtasks_list = subtask_data.get("subtasks", [])
@@ -832,24 +845,33 @@ def generate_subtasks(request):
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # Temporarily changed from IsAuthenticated for testing
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def timeline_gantt(request):
     """
-    Timeline/Gantt Agent API.
+    Timeline/Gantt Agent API - Only accessible to company users.
     Body:
       - action: create_timeline|generate_gantt_chart|check_deadlines|suggest_adjustments|calculate_duration|manage_phases
       - project_id: int (required)
       - days_ahead/current_progress/phases: optional depending on action
     """
-    # Temporarily commented out for testing - allows all access
-    # if not _ensure_project_manager(request.user):
-    #     return Response(
-    #         {"status": "error", "message": "Access denied (project manager only)."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
+    company_user = request.user
     
-    # Get user if available, otherwise use None (for testing)
-    user = getattr(request, 'user', None) if hasattr(request, 'user') and request.user.is_authenticated else None
+    # Check if user can access project manager features (project_manager or company_user role)
+    # Use fallback if method doesn't exist (for server restart issues)
+    can_access = False
+    if hasattr(company_user, 'can_access_project_manager_features'):
+        can_access = company_user.can_access_project_manager_features()
+    else:
+        # Fallback: check role directly
+        can_access = company_user.role in ['project_manager', 'company_user']
+    
+    if not can_access:
+        return Response(
+            {"status": "error", "message": "Access denied. Project manager or company user role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     try:
         agent = AgentRegistry.get_agent("timeline_gantt")
@@ -861,12 +883,12 @@ def timeline_gantt(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if user:
-            project = get_object_or_404(Project, id=project_id, owner=user)
-        else:
-            project = get_object_or_404(Project, id=project_id)
+        # Get company from company_user
+        company = company_user.company
+        
+        project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
         tasks_queryset = (
-            Task.objects.filter(project=project)
+            Task.objects.filter(project=project, project__created_by_company_user=company_user)
             .select_related("assignee")
             .prefetch_related("depends_on")
         )
@@ -908,10 +930,7 @@ def timeline_gantt(request):
                 reasoning = task_item.get("ai_reasoning") or task_item.get("reasoning", "")
                 if task_id and reasoning:
                     try:
-                        if user:
-                            t = Task.objects.get(id=task_id, project__owner=user)
-                        else:
-                            t = Task.objects.get(id=task_id)
+                        t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
                         full_reasoning = "[Timeline & Scheduling Analysis] " + reasoning
                         t.ai_reasoning = (t.ai_reasoning + "\n\n" + full_reasoning) if t.ai_reasoning else full_reasoning
                         t.save()
@@ -929,23 +948,35 @@ def timeline_gantt(request):
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # Temporarily changed from IsAuthenticated for testing
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def knowledge_qa(request):
     """
-    Knowledge Q&A Agent API.
+    Knowledge Q&A Agent API - Only accessible to company users.
     Body:
       - question: str (required)
       - project_id: int (optional)
     """
-    # Temporarily commented out for testing - allows all access
-    # if not _ensure_project_manager(request.user):
-    #     return Response(
-    #         {"status": "error", "message": "Access denied (project manager only)."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
+    company_user = request.user
     
-    # Get user if available, otherwise use None (for testing)
-    user = getattr(request, 'user', None) if hasattr(request, 'user') and request.user.is_authenticated else None
+    # Check if user can access project manager features (project_manager or company_user role)
+    # Use fallback if method doesn't exist (for server restart issues)
+    can_access = False
+    if hasattr(company_user, 'can_access_project_manager_features'):
+        can_access = company_user.can_access_project_manager_features()
+    else:
+        # Fallback: check role directly
+        can_access = company_user.role in ['project_manager', 'company_user']
+    
+    if not can_access:
+        return Response(
+            {"status": "error", "message": "Access denied. Project manager or company user role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Get company from company_user
+    company = company_user.company
 
     try:
         agent = AgentRegistry.get_agent("knowledge_qa")
@@ -958,20 +989,14 @@ def knowledge_qa(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if user:
-            all_projects = Project.objects.filter(owner=user)
-            all_tasks = Task.objects.filter(project__owner=user).select_related("project", "assignee")
-        else:
-            all_projects = list(Project.objects.all()[:10])  # Limit for testing - convert to list
-            all_tasks = list(Task.objects.all()[:50].select_related("project", "assignee"))  # Convert to list
+        # Filter projects by company
+        all_projects = Project.objects.filter(created_by_company_user=company_user)
+        all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project", "assignee")
 
         context = {}
         project = None
         if project_id:
-            if user:
-                project = get_object_or_404(Project, id=project_id, owner=user)
-            else:
-                project = get_object_or_404(Project, id=project_id)
+            project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
             tasks = Task.objects.filter(project=project).select_related("assignee")
             context = {
                 "project": {
@@ -1034,7 +1059,7 @@ def knowledge_qa(request):
 
         available_users = _build_available_users(project_id=project_id, project=project)
         context["user_assignments"] = _build_user_assignments(
-            available_users, project_id=project_id, all_tasks=all_tasks, owner=user if user else None
+            available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
 
         result = agent.process(question=question, context=context, available_users=available_users)

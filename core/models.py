@@ -61,6 +61,8 @@ class Project(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_projects')
     # Additional fields from payPerProject
     project_manager = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='managed_projects')
+    company = models.ForeignKey('Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='company_projects', help_text='Company that owns this project')
+    created_by_company_user = models.ForeignKey('CompanyUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_projects', help_text='Company user who created this project')
     industry = models.ForeignKey(Industry, on_delete=models.SET_NULL, null=True, blank=True, related_name='projects')
     project_type = models.CharField(max_length=50, choices=PROJECT_TYPE_CHOICES, default='web_app')
     budget_min = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -513,6 +515,11 @@ class CompanyUser(models.Model):
         ('admin', 'Admin'),
         ('manager', 'Manager'),
         ('recruiter', 'Recruiter'),
+        ('company_user', 'Company User'),
+        ('project_manager', 'Project Manager'),
+        ('recruitment_agent', 'Recruitment Agent'),
+        ('frontline_agent', 'Frontline Agent'),
+        ('marketing_agent', 'Marketing Agent'),
     ]
     
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
@@ -530,6 +537,36 @@ class CompanyUser(models.Model):
     
     def __str__(self):
         return f"{self.full_name} - {self.company.name}"
+    
+    @property
+    def is_authenticated(self):
+        """Compatibility property for Django's authentication system"""
+        return True
+    
+    @property
+    def is_anonymous(self):
+        """Compatibility property for Django's authentication system"""
+        return False
+    
+    def is_project_manager(self):
+        """Check if user is a project manager"""
+        return self.role == 'project_manager'
+    
+    def can_access_project_manager_features(self):
+        """Check if user can access project manager features (project_manager or company_user role)"""
+        return self.role in ['project_manager', 'company_user']
+    
+    def is_recruitment_agent(self):
+        """Check if user is a recruitment agent"""
+        return self.role == 'recruitment_agent'
+    
+    def is_frontline_agent(self):
+        """Check if user is a frontline agent"""
+        return self.role == 'frontline_agent'
+    
+    def is_marketing_agent(self):
+        """Check if user is a marketing agent"""
+        return self.role == 'marketing_agent'
 
 
 class CompanyRegistrationToken(models.Model):
@@ -547,6 +584,26 @@ class CompanyRegistrationToken(models.Model):
     
     def __str__(self):
         return f"Token for {self.company.name if self.company else 'New Company'}"
+
+
+class CompanyUserToken(models.Model):
+    """Authentication tokens for CompanyUser"""
+    company_user = models.OneToOneField(CompanyUser, on_delete=models.CASCADE, related_name='auth_token')
+    key = models.CharField(max_length=40, unique=True, db_index=True)
+    created = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = 'Company User Token'
+        verbose_name_plural = 'Company User Tokens'
+    
+    def save(self, *args, **kwargs):
+        if not self.key:
+            import secrets
+            self.key = secrets.token_urlsafe(40)[:40]
+        return super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return f"Token for {self.company_user.email}"
 
 
 # ============================================================================

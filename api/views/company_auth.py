@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password
 from rest_framework.authtoken.models import Token
 
-from core.models import Company, CompanyUser, CompanyRegistrationToken
+from core.models import Company, CompanyUser, CompanyRegistrationToken, CompanyUserToken
 
 
 @api_view(['GET'])
@@ -113,13 +113,13 @@ def register_company_user(request):
                 'message': 'Email already registered for this company'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Create company user
+        # Create company user with company_user role by default
         company_user = CompanyUser.objects.create(
             company=company,
             email=email,
             password_hash=make_password(password),
             full_name=full_name,
-            role='admin',  # Default role for registered users
+            role='company_user',  # Default role for registered company users
             is_active=True
         )
         
@@ -199,8 +199,9 @@ def login_company_user(request):
         company_user.last_login = timezone.now()
         company_user.save()
         
-        # For company users, we might want to create a token or session
-        # For now, return basic user data
+        # Generate or get token
+        token, created = CompanyUserToken.objects.get_or_create(company_user=company_user)
+        
         return Response({
             'status': 'success',
             'message': 'Login successful',
@@ -212,7 +213,8 @@ def login_company_user(request):
                     'role': company_user.role,
                     'companyId': company.id,
                     'companyName': company.name
-                }
+                },
+                'token': token.key
             }
         }, status=status.HTTP_200_OK)
     

@@ -125,6 +125,7 @@ class JobDescription(models.Model):
     # Metadata
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_job_descriptions')
     company = models.ForeignKey('core.Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='job_positions')
+    company_user = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_jobs', help_text='Company user who created this job')
     is_active = models.BooleanField(default=True, help_text="Whether this job description is currently active/being used")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

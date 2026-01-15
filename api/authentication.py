@@ -3,13 +3,56 @@ Custom authentication for Company Users
 """
 from rest_framework import authentication
 from rest_framework.exceptions import AuthenticationFailed
-from core.models import CompanyUser, Company
-from django.contrib.auth.hashers import check_password
+from core.models import CompanyUser, CompanyUserToken, Company
 
 
+class CompanyUserTokenAuthentication(authentication.BaseAuthentication):
+    """
+    Token-based authentication for CompanyUser.
+    Clients should authenticate by passing the token key in the "Authorization"
+    HTTP header, prepended with the string "Token " or "Bearer ".
+    For example: Authorization: Token 401f7ac837da42b97f613d789819ff93537bee6a
+    """
+    
+    keyword = 'Token'
+    
+    def authenticate(self, request):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        
+        if not auth_header:
+            return None
+        
+        # Support both "Token" and "Bearer" keywords
+        keywords = ['Token', 'Bearer']
+        token_key = None
+        
+        for keyword in keywords:
+            if auth_header.startswith(f'{keyword} '):
+                token_key = auth_header[len(f'{keyword} '):].strip()
+                break
+        
+        if not token_key:
+            return None
+        
+        try:
+            token = CompanyUserToken.objects.select_related('company_user').get(key=token_key)
+            company_user = token.company_user
+            
+            if not company_user.is_active:
+                raise AuthenticationFailed('Company user account is inactive')
+            
+            # Return a tuple (user, auth) where user is the company_user
+            return (company_user, token)
+        except CompanyUserToken.DoesNotExist:
+            raise AuthenticationFailed('Invalid token')
+        except Exception as e:
+            raise AuthenticationFailed(f'Authentication failed: {str(e)}')
+
+
+# Keep old authentication class for backward compatibility (if needed)
 class CompanyUserAuthentication(authentication.BaseAuthentication):
     """
-    Custom authentication for CompanyUser using email and company_id
+    Custom authentication for CompanyUser using email and company_id (deprecated - use CompanyUserTokenAuthentication)
     """
     
     def authenticate(self, request):
