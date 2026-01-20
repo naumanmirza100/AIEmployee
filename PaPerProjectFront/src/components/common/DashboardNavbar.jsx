@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Building2, BrainCircuit, UserCheck } from 'lucide-react';
+import { LogOut, Building2, BrainCircuit, UserCheck, Megaphone } from 'lucide-react';
 
 const DashboardNavbar = ({
   icon: Icon,

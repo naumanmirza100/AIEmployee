@@ -14,12 +14,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
 import { companyApi } from '@/services/companyAuthService';
-import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { 
   Building2, Plus, Briefcase, Users, Eye, 
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
-  ChevronDown, ChevronRight, ListTodo, UserCheck
+  ChevronDown, ChevronRight, ListTodo, UserCheck, Megaphone
 } from 'lucide-react';
 
 const CompanyDashboardPage = () => {
@@ -31,7 +30,7 @@ const CompanyDashboardPage = () => {
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState('dashboard'); // 'dashboard', 'project-manager', 'recruitment'
+  const [activeSection, setActiveSection] = useState('dashboard'); // 'dashboard', 'project-manager'
   const [activeTab, setActiveTab] = useState('jobs');
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
@@ -85,13 +84,17 @@ const CompanyDashboardPage = () => {
         fetchProjects();
       }
 
-      // Check for section parameter in URL
+      // Check for section parameter in URL (legacy support - redirect to new routes)
       const urlParams = new URLSearchParams(window.location.search);
       const section = urlParams.get('section');
       if (section === 'recruitment') {
-        setActiveSection('recruitment');
+        // Redirect to recruitment dashboard
+        navigate('/recruitment/dashboard', { replace: true });
+        return;
       } else if (section === 'project-manager') {
-        setActiveSection('project-manager');
+        // Redirect to project manager dashboard
+        navigate('/project-manager/dashboard', { replace: true });
+        return;
       }
     } catch (error) {
       console.error('Error parsing company user:', error);
@@ -330,7 +333,13 @@ const CompanyDashboardPage = () => {
               label: 'Recruitment Agent',
               icon: UserCheck,
               section: 'recruitment',
-              onClick: () => setActiveSection('recruitment'),
+              onClick: () => navigate('/recruitment/dashboard'),
+            },
+            {
+              label: 'Marketing Agent',
+              icon: Megaphone,
+              section: 'marketing',
+              onClick: () => navigate('/marketing/dashboard'),
             },
           ]}
         />
@@ -681,9 +690,6 @@ const CompanyDashboardPage = () => {
             </div>
           )}
 
-          {activeSection === 'recruitment' && (
-            <RecruitmentDashboard />
-          )}
         </div>
 
         {/* Create Job Modal */}

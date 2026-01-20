@@ -24,7 +24,8 @@ import {
   Building2,
   ArrowLeft,
   UserCheck,
-  Plus
+  Plus,
+  Megaphone
 } from 'lucide-react';
 import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
@@ -171,7 +172,13 @@ const ProjectManagerDashboardPage = () => {
               label: 'Recruitment Agent',
               icon: UserCheck,
               section: 'recruitment',
-              onClick: () => navigate('/company/dashboard?section=recruitment'),
+              onClick: () => navigate('/recruitment/dashboard'),
+            },
+            {
+              label: 'Marketing Agent',
+              icon: Megaphone,
+              section: 'marketing',
+              onClick: () => navigate('/marketing/dashboard'),
             },
           ] : []}
         />

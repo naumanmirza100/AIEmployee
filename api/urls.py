@@ -26,6 +26,7 @@ from api.views import company_jobs
 from api.views import pm_agent
 from api.views import company_dashboard
 from api.views import recruitment_agent
+from api.views import marketing_agent
 from api.views.health import health_check
 
 app_name = 'api'
@@ -183,4 +184,15 @@ urlpatterns = [
     re_path(r'^recruitment/cv-records/?$', recruitment_agent.list_cv_records, name='recruitment_list_cv_records'),  # GET
     re_path(r'^recruitment/settings/email/?$', recruitment_agent.email_settings, name='recruitment_email_settings'),  # GET/POST
     re_path(r'^recruitment/settings/interview/?$', recruitment_agent.interview_settings, name='recruitment_interview_settings'),  # GET/POST
+    
+    # Marketing Agent endpoints (Company User)
+    re_path(r'^marketing/dashboard/?$', marketing_agent.marketing_dashboard, name='marketing_dashboard'),  # GET
+    re_path(r'^marketing/campaigns/?$', marketing_agent.list_campaigns, name='marketing_list_campaigns'),  # GET
+    re_path(r'^marketing/campaigns/create/?$', marketing_agent.create_campaign, name='marketing_create_campaign'),  # POST
+    re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/?$', marketing_agent.get_campaign, name='marketing_get_campaign'),  # GET
+    re_path(r'^marketing/qa/?$', marketing_agent.marketing_qa, name='marketing_qa'),  # POST
+    re_path(r'^marketing/market-research/?$', marketing_agent.market_research, name='marketing_market_research'),  # POST
+    re_path(r'^marketing/outreach-campaign/?$', marketing_agent.outreach_campaign, name='marketing_outreach_campaign'),  # POST
+    re_path(r'^marketing/document-authoring/?$', marketing_agent.document_authoring, name='marketing_document_authoring'),  # POST
+    re_path(r'^marketing/notifications/?$', marketing_agent.get_notifications, name='marketing_get_notifications'),  # GET
 ]

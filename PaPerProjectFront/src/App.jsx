@@ -39,6 +39,8 @@ import CompanyRegisterPage from '@/pages/CompanyRegisterPage';
 import CompanyLoginPage from '@/pages/CompanyLoginPage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
+import MarketingAgentPage from '@/pages/MarketingAgentPage';
+import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import ProtectedRoute from '@/components/common/ProtectedRoute';
 import PublicLayout from '@/components/layout/PublicLayout';
 import ScrollToTop from '@/components/layout/ScrollToTop';
@@ -83,6 +85,12 @@ import { useTranslation } from 'react-i18next';
                 </ProtectedRoute>
               } 
             />
+            
+            {/* Marketing Agent routes without header/footer */}
+            <Route path="/marketing/dashboard" element={<MarketingAgentPage />} />
+            
+            {/* Recruitment Agent routes without header/footer */}
+            <Route path="/recruitment/dashboard" element={<RecruitmentAgentPage />} />
             
             {/* Public routes with header/footer */}
             <Route path="/" element={<PublicLayout><HomePage /></PublicLayout>} />
