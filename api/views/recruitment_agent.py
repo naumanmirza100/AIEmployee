@@ -229,7 +229,30 @@ def process_cvs(request):
             if top_n:
                 ranked = ranked[:top_n]
             
-            # Update CV records with qualification data
+            # Get interview agent for auto-scheduling
+            interview_agent = agents.get('interview_agent')
+            
+            # Get company user email settings for interview defaults
+            try:
+                email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
+                email_settings = {
+                    'followup_delay_hours': email_settings_obj.followup_delay_hours,
+                    'reminder_hours_before': email_settings_obj.reminder_hours_before,
+                    'max_followup_emails': email_settings_obj.max_followup_emails,
+                    'min_hours_between_followups': email_settings_obj.min_hours_between_followups,
+                }
+                followup_delay = email_settings_obj.followup_delay_hours
+                reminder_hours = email_settings_obj.reminder_hours_before
+                max_followups = email_settings_obj.max_followup_emails
+                min_between = email_settings_obj.min_hours_between_followups
+            except RecruiterEmailSettings.DoesNotExist:
+                email_settings = None
+                followup_delay = 48
+                reminder_hours = 24
+                max_followups = 3
+                min_between = 24
+            
+            # Update CV records with qualification data and auto-schedule interviews
             for idx, result in enumerate(ranked):
                 if result['record_id']:
                     try:
@@ -247,6 +270,62 @@ def process_cvs(request):
                         cv_record.save()
                     except CVRecord.DoesNotExist:
                         pass
+                
+                # Auto-schedule interview if decision is INTERVIEW
+                qual_decision = result.get('qualified', {}).get('decision', '') if isinstance(result.get('qualified'), dict) else ''
+                if qual_decision == "INTERVIEW" and interview_agent:
+                    parsed_cv = result.get('parsed', {})
+                    candidate_name = parsed_cv.get('name', 'Candidate') if isinstance(parsed_cv, dict) else 'Candidate'
+                    candidate_email = parsed_cv.get('email') if isinstance(parsed_cv, dict) else None
+                    candidate_phone = parsed_cv.get('phone') if isinstance(parsed_cv, dict) else None
+                    
+                    # Get job role from job description or use default
+                    job_role = "Position"
+                    if job_description_text:
+                        import re
+                        job_role = job_description_text.split('\n')[0][:100] if job_description_text else "Position"
+                        job_role = re.sub(r'[\r\n\t]+', ' ', job_role)
+                        job_role = re.sub(r'\s+', ' ', job_role).strip()
+                    elif job_kw_list and len(job_kw_list) > 0:
+                        job_role = job_kw_list[0]
+                    
+                    if candidate_email:
+                        logger.info(f"Auto-scheduling interview for approved candidate: {candidate_name} ({candidate_email})")
+                        try:
+                            interview_result = interview_agent.schedule_interview(
+                                candidate_name=candidate_name,
+                                candidate_email=candidate_email,
+                                job_role=job_role,
+                                interview_type='ONLINE',  # Default to ONLINE
+                                candidate_phone=candidate_phone,
+                                cv_record_id=result.get('record_id'),
+                                recruiter_id=None,  # Not using Django User
+                                company_user_id=company_user.id,
+                                email_settings=email_settings,
+                                custom_slots=None,
+                            )
+                            
+                            if interview_result.get('invitation_sent'):
+                                logger.info(f"Interview invitation sent successfully for {candidate_email}")
+                                result['interview_scheduled'] = True
+                                result['interview_id'] = interview_result.get('interview_id')
+                            else:
+                                logger.warning(f"Interview created but email failed for {candidate_email}")
+                                result['interview_scheduled'] = False
+                                result['interview_error'] = interview_result.get('message', 'Unknown error')
+                        except Exception as interview_exc:
+                            logger.error(f"Failed to schedule interview for {candidate_email}: {str(interview_exc)}")
+                            log_service.log_error("auto_interview_scheduling_error", {
+                                "record_id": result.get('record_id'),
+                                "candidate_email": candidate_email,
+                                "error": str(interview_exc),
+                            })
+                            result['interview_scheduled'] = False
+                            result['interview_error'] = str(interview_exc)
+                    else:
+                        logger.warning(f"Skipping interview scheduling - no email found for {candidate_name}")
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = "No email address found"
             
             return Response({
                 'status': 'success',
