@@ -8,7 +8,7 @@ from .marketing_base_agent import MarketingBaseAgent
 from typing import Dict, Optional, List
 from marketing_agent.models import (
     Campaign, Lead, EmailSendHistory, CampaignPerformance,
-    MarketingNotification, NotificationRule, EmailSequence
+    MarketingNotification, NotificationRule, EmailSequence, Reply
 )
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -192,6 +192,38 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             if recommendations_result:
                 notifications_created.extend(recommendations_result.get('notifications', []))
                 opportunities.extend(recommendations_result.get('opportunities', []))
+            
+            # Comprehensive checks for ALL campaigns (active, scheduled, paused, draft)
+            # Check all reply types (positive, negative, neutral, objections, unsubscribe)
+            # Works for any campaign that has sent emails
+            all_replies_result = self._check_all_reply_types(campaign, user)
+            if all_replies_result:
+                notifications_created.extend(all_replies_result.get('notifications', []))
+                opportunities.extend(all_replies_result.get('opportunities', []))
+                issues.extend(all_replies_result.get('issues', []))
+            
+            # Check open/click rates and engagement metrics
+            # Works for any campaign that has sent emails
+            engagement_result = self._check_active_campaign_engagement(campaign, user)
+            if engagement_result:
+                notifications_created.extend(engagement_result.get('notifications', []))
+                opportunities.extend(engagement_result.get('opportunities', []))
+                issues.extend(engagement_result.get('issues', []))
+            
+            # Check sequence status and email sending
+            # Works for all campaign statuses
+            sequence_status_result = self._check_active_campaign_sequences(campaign, user)
+            if sequence_status_result:
+                notifications_created.extend(sequence_status_result.get('notifications', []))
+                issues.extend(sequence_status_result.get('issues', []))
+            
+            # Check campaign progress (weekly updates, milestones)
+            # Only for active campaigns (they're the ones running)
+            if campaign.status == 'active':
+                progress_result = self._check_campaign_progress(campaign, user)
+                if progress_result:
+                    notifications_created.extend(progress_result.get('notifications', []))
+                    opportunities.extend(progress_result.get('opportunities', []))
             
             # Filter out None values (duplicates that weren't created) and count actual notifications
             actual_notifications = [n for n in notifications_created if n is not None and hasattr(n, 'id')]
@@ -394,6 +426,81 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     'metric': click_rate,
                     'threshold': 5
                 })
+        
+        # Check for zero engagement: All emails sent but no replies or clicks
+        if total_sent >= 10:  # Only check if significant number of emails sent
+            emails_clicked = email_sends.filter(status='clicked').count()
+            emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
+            
+            # Check for replies (using Reply model)
+            replies_count = Reply.objects.filter(campaign=campaign).count()
+            
+            # If no clicks AND no replies after sending multiple emails
+            if emails_clicked == 0 and replies_count == 0 and total_sent >= 10:
+                # Check if emails were sent at least 24 hours ago (give time for engagement)
+                oldest_email = email_sends.order_by('sent_at').first()
+                if oldest_email and oldest_email.sent_at:
+                    hours_since_first = (timezone.now() - oldest_email.sent_at).total_seconds() / 3600
+                    if hours_since_first >= 24:  # At least 24 hours since first email
+                        notification = self._create_notification(
+                            user=user,
+                            campaign=campaign,
+                            notification_type='engagement',
+                            priority='high',
+                            title=f'⚠️ No Engagement Detected: {campaign.name}',
+                            message=f'Campaign "{campaign.name}" has sent {total_sent} emails but received ZERO clicks and ZERO replies. This indicates low engagement. Consider: 1) Improving subject lines, 2) Personalizing content, 3) Reviewing target audience, 4) Testing different send times.',
+                            action_required=True,
+                            action_url=f'/marketing/campaigns/{campaign.id}/',
+                            metadata={
+                                'action': 'no_engagement_detected',
+                                'total_sent': total_sent,
+                                'clicks': 0,
+                                'replies': 0,
+                                'opens': emails_opened,
+                                'hours_since_first_email': round(hours_since_first, 1)
+                            }
+                        )
+                        if notification:
+                            notifications.append(notification)
+                            issues.append({
+                                'type': 'zero_engagement',
+                                'total_sent': total_sent,
+                                'clicks': 0,
+                                'replies': 0
+                            })
+            
+            # If emails opened but no clicks and no replies
+            elif emails_opened > 0 and emails_clicked == 0 and replies_count == 0 and total_sent >= 15:
+                oldest_email = email_sends.order_by('sent_at').first()
+                if oldest_email and oldest_email.sent_at:
+                    hours_since_first = (timezone.now() - oldest_email.sent_at).total_seconds() / 3600
+                    if hours_since_first >= 48:  # At least 48 hours since first email
+                        notification = self._create_notification(
+                            user=user,
+                            campaign=campaign,
+                            notification_type='engagement',
+                            priority='medium',
+                            title=f'📧 Emails Opened But No Clicks/Replies: {campaign.name}',
+                            message=f'Campaign "{campaign.name}" has {emails_opened} email opens but ZERO clicks and ZERO replies from {total_sent} emails sent. People are opening but not engaging. Improve: 1) Call-to-action buttons, 2) Email content relevance, 3) Offer value, 4) Follow-up sequences.',
+                            action_required=True,
+                            action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                            metadata={
+                                'action': 'opens_but_no_clicks_replies',
+                                'total_sent': total_sent,
+                                'opens': emails_opened,
+                                'clicks': 0,
+                                'replies': 0,
+                                'hours_since_first_email': round(hours_since_first, 1)
+                            }
+                        )
+                        if notification:
+                            notifications.append(notification)
+                            issues.append({
+                                'type': 'opens_no_clicks_replies',
+                                'opens': emails_opened,
+                                'clicks': 0,
+                                'replies': 0
+                            })
         
         if notifications:
             return {
@@ -777,6 +884,57 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 if notification:
                     notifications.append(notification)
                     issues.append({'type': 'scheduled_no_sequences'})
+            
+            # Scheduled campaign ready to launch (has leads and sequences but not launched)
+            elif leads_count > 0 and sequences.count() > 0:
+                # Check if start date has passed but campaign is still scheduled
+                if campaign.start_date and campaign.start_date <= timezone.now().date():
+                    notification = self._create_notification(
+                        user=user,
+                        campaign=campaign,
+                        notification_type='campaign_status',
+                        priority='high',
+                        title=f'⏰ Scheduled Campaign Not Launched: {campaign.name}',
+                        message=f'Campaign "{campaign.name}" is scheduled with start date {campaign.start_date} but has NOT been launched yet! It has {leads_count} leads and {sequences.count()} sequence(s) ready. Launch the campaign now to start sending emails.',
+                        action_required=True,
+                        action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                        metadata={
+                            'action': 'launch_scheduled_campaign',
+                            'status': 'scheduled',
+                            'leads_count': leads_count,
+                            'sequences_count': sequences.count(),
+                            'start_date': campaign.start_date.isoformat(),
+                            'days_past_start': (timezone.now().date() - campaign.start_date).days
+                        }
+                    )
+                    if notification:
+                        notifications.append(notification)
+                        issues.append({'type': 'scheduled_not_launched'})
+                # Check if campaign is scheduled but ready to launch (start date is today or future)
+                elif campaign.start_date and campaign.start_date >= timezone.now().date():
+                    days_until_start = (campaign.start_date - timezone.now().date()).days
+                    if days_until_start <= 1:  # Launch today or tomorrow
+                        notification = self._create_notification(
+                            user=user,
+                            campaign=campaign,
+                            notification_type='campaign_status',
+                            priority='medium',
+                            title=f'🚀 Campaign Ready to Launch: {campaign.name}',
+                            message=f'Campaign "{campaign.name}" is scheduled to start {campaign.start_date.strftime("%B %d, %Y")} ({days_until_start} day{"s" if days_until_start != 0 else ""} away). It has {leads_count} leads and {sequences.count()} sequence(s) ready. You can launch it now or wait for the scheduled date.',
+                            action_required=False,
+                            action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                            metadata={
+                                'action': 'campaign_ready_to_launch',
+                                'status': 'scheduled',
+                                'leads_count': leads_count,
+                                'sequences_count': sequences.count(),
+                                'start_date': campaign.start_date.isoformat(),
+                                'days_until_start': days_until_start
+                            }
+                        )
+                        if notification:
+                            notifications.append(notification)
+                            issues.append({'type': 'scheduled_ready_to_launch'})
         
         # Check if campaign is in draft but ready to activate
         if campaign.status == 'draft':
@@ -1205,6 +1363,629 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             }
         return None
     
+    def _check_all_reply_types(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Check for ALL types of replies (positive, negative, neutral, objections, unsubscribe)"""
+        notifications = []
+        opportunities = []
+        issues = []
+        
+        # Get recent replies (last 7 days)
+        recent_cutoff = timezone.now() - timedelta(days=7)
+        recent_replies = Reply.objects.filter(
+            campaign=campaign,
+            replied_at__gte=recent_cutoff
+        )
+        
+        if recent_replies.exists():
+            # Positive replies
+            positive_replies = recent_replies.filter(interest_level='positive')
+            if positive_replies.exists():
+                reply_count = positive_replies.count()
+                latest_reply = positive_replies.first()
+                unique_leads = positive_replies.values('lead__email').distinct().count()
+                
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='opportunity',
+                    priority='medium',
+                    title=f'🎉 Positive Replies: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" received {reply_count} positive reply/replies from {unique_leads} lead(s) in the last 7 days! Latest from {latest_reply.lead.email}. Follow up to convert them.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'positive_replies', 'count': reply_count, 'unique_leads': unique_leads}
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({'type': 'positive_replies', 'count': reply_count})
+            
+            # Negative replies (not interested)
+            negative_replies = recent_replies.filter(interest_level='negative')
+            if negative_replies.exists():
+                reply_count = negative_replies.count()
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='engagement',
+                    priority='low',
+                    title=f'📉 Negative Replies: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" received {reply_count} negative reply/replies (not interested) in the last 7 days. Consider: 1) Reviewing target audience, 2) Improving messaging, 3) Adjusting value proposition.',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'negative_replies', 'count': reply_count}
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'negative_replies', 'count': reply_count})
+            
+            # Objections/Concerns
+            objection_replies = recent_replies.filter(interest_level='objection')
+            if objection_replies.exists():
+                reply_count = objection_replies.count()
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='engagement',
+                    priority='medium',
+                    title=f'⚠️ Objections Received: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" received {reply_count} reply/replies with objections/concerns. Address these concerns in follow-up emails to improve conversion.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'objection_replies', 'count': reply_count}
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'objections', 'count': reply_count})
+            
+            # Unsubscribe requests
+            unsubscribe_replies = recent_replies.filter(interest_level='unsubscribe')
+            if unsubscribe_replies.exists():
+                reply_count = unsubscribe_replies.count()
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='engagement',
+                    priority='high',
+                    title=f'🚫 Unsubscribe Requests: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" received {reply_count} unsubscribe request(s) in the last 7 days. Review email frequency and content to reduce unsubscribes.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'unsubscribe_requests', 'count': reply_count}
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'unsubscribes', 'count': reply_count})
+            
+            # Information requests
+            info_requests = recent_replies.filter(interest_level='requested_info')
+            if info_requests.exists():
+                reply_count = info_requests.count()
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='opportunity',
+                    priority='medium',
+                    title=f'📧 Information Requests: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" has {reply_count} lead(s) requesting more information! These are highly qualified leads. Respond promptly.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'info_requests', 'count': reply_count}
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({'type': 'info_requests', 'count': reply_count})
+            
+            # Neutral replies
+            neutral_replies = recent_replies.filter(interest_level='neutral')
+            if neutral_replies.exists() and neutral_replies.count() >= 5:
+                reply_count = neutral_replies.count()
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='engagement',
+                    priority='low',
+                    title=f'💬 Neutral Replies: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" received {reply_count} neutral reply/replies. These leads may need more nurturing. Consider creating follow-up sequences.',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'neutral_replies', 'count': reply_count}
+                )
+                if notification:
+                    notifications.append(notification)
+        
+        if notifications:
+            return {
+                'notifications': notifications,
+                'opportunities': opportunities,
+                'issues': issues
+            }
+        return None
+    
+    def _check_active_campaign_engagement(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Check open/click rates and engagement metrics for ALL campaigns (active, scheduled, paused)"""
+        notifications = []
+        opportunities = []
+        issues = []
+        
+        # Get email statistics
+        email_sends = EmailSendHistory.objects.filter(campaign=campaign)
+        total_sent = email_sends.count()
+        
+        if total_sent == 0:
+            return None
+        
+        emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
+        emails_clicked = email_sends.filter(status='clicked').count()
+        emails_delivered = email_sends.filter(status__in=['delivered', 'opened', 'clicked']).count()
+        
+        open_rate = (emails_opened / total_sent * 100) if total_sent > 0 else 0
+        click_rate = (emails_clicked / total_sent * 100) if total_sent > 0 else 0
+        delivery_rate = (emails_delivered / total_sent * 100) if total_sent > 0 else 0
+        
+        # Check for excellent open rate (opportunity)
+        if open_rate >= 30 and total_sent >= 20:
+            existing_notif = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='opportunity',
+                title__icontains='Excellent Open Rate',
+                created_at__gte=timezone.now() - timedelta(days=3)
+            ).exists()
+            
+            if not existing_notif:
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='opportunity',
+                    priority='low',
+                    title=f'⭐ Excellent Open Rate: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" has an excellent open rate of {open_rate:.1f}% ({emails_opened} opens from {total_sent} emails)! This indicates strong subject lines and audience targeting. Consider scaling this campaign.',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'excellent_open_rate', 'open_rate': open_rate, 'total_sent': total_sent}
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({'type': 'excellent_open_rate', 'rate': open_rate})
+        
+        # Check for good click rate (opportunity)
+        if click_rate >= 5 and total_sent >= 20:
+            existing_notif = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='opportunity',
+                title__icontains='Good Click Rate',
+                created_at__gte=timezone.now() - timedelta(days=3)
+            ).exists()
+            
+            if not existing_notif:
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='opportunity',
+                    priority='low',
+                    title=f'🎯 Good Click Rate: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" has a good click rate of {click_rate:.1f}% ({emails_clicked} clicks from {total_sent} emails)! Your CTAs are working well. Consider increasing email frequency.',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'good_click_rate', 'click_rate': click_rate, 'total_sent': total_sent}
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({'type': 'good_click_rate', 'rate': click_rate})
+        
+        # Check for low open rate (issue)
+        if open_rate < 15 and total_sent >= 10:
+            existing_notif = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='performance_alert',
+                title__icontains='Low Open Rate',
+                created_at__gte=timezone.now() - timedelta(days=2)
+            ).exists()
+            
+            if not existing_notif:
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='performance_alert',
+                    priority='high',
+                    title=f'⚠️ Low Open Rate: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" has a low open rate of {open_rate:.1f}% ({emails_opened} opens from {total_sent} emails). Improve: 1) Subject lines, 2) Send times, 3) Personalization, 4) Audience targeting.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                    metadata={'action': 'low_open_rate', 'open_rate': open_rate, 'total_sent': total_sent}
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'low_open_rate', 'rate': open_rate})
+        
+        # Check for low click rate (issue)
+        if open_rate >= 20 and click_rate < 2 and total_sent >= 15:
+            existing_notif = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='performance_alert',
+                title__icontains='Low Click Rate',
+                created_at__gte=timezone.now() - timedelta(days=2)
+            ).exists()
+            
+            if not existing_notif:
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='performance_alert',
+                    priority='medium',
+                    title=f'📉 Low Click Rate: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" has good open rate ({open_rate:.1f}%) but low click rate ({click_rate:.1f}%). Improve: 1) CTA buttons, 2) Email content relevance, 3) Offer value, 4) CTA placement.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                    metadata={'action': 'low_click_rate', 'open_rate': open_rate, 'click_rate': click_rate}
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'low_click_rate', 'open_rate': open_rate, 'click_rate': click_rate})
+        
+        if notifications:
+            return {
+                'notifications': notifications,
+                'opportunities': opportunities,
+                'issues': issues
+            }
+        return None
+    
+    def _check_active_campaign_sequences(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Check sequence status and email sending for ALL campaigns (active, scheduled, paused, draft)"""
+        notifications = []
+        issues = []
+        
+        # Check if campaign has sequences
+        sequences = EmailSequence.objects.filter(campaign=campaign)
+        sequences_count = sequences.count()
+        active_sequences = sequences.filter(is_active=True).count()
+        
+        # No sequences at all
+        if sequences_count == 0:
+            notification = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='campaign_status',
+                priority='high',
+                title=f'📧 No Email Sequences: {campaign.name}',
+                message=f'Active campaign "{campaign.name}" has NO email sequences! Create email sequences to start sending emails to your {campaign.leads.count()} leads.',
+                action_required=True,
+                action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                metadata={'action': 'no_sequences', 'leads_count': campaign.leads.count()}
+            )
+            if notification:
+                notifications.append(notification)
+                issues.append({'type': 'no_sequences'})
+        
+        # Has sequences but none are active (only alert for active/scheduled campaigns)
+        elif sequences_count > 0 and active_sequences == 0 and campaign.status in ['active', 'scheduled']:
+            status_text = campaign.get_status_display()
+            notification = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='campaign_status',
+                priority='high',
+                title=f'⏸️ No Active Sequences: {campaign.name}',
+                message=f'{status_text.capitalize()} campaign "{campaign.name}" has {sequences_count} sequence(s) but NONE are active! Activate sequences to start sending emails.',
+                action_required=True,
+                action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                metadata={'action': 'no_active_sequences', 'total_sequences': sequences_count, 'status': campaign.status}
+            )
+            if notification:
+                notifications.append(notification)
+                issues.append({'type': 'no_active_sequences', 'total': sequences_count})
+        
+        # Check if emails are being sent
+        total_emails_sent = EmailSendHistory.objects.filter(campaign=campaign).count()
+        recent_emails = EmailSendHistory.objects.filter(
+            campaign=campaign,
+            sent_at__gte=timezone.now() - timedelta(days=7)
+        ).count()
+        
+        # Has active sequences but no emails sent (only for active/scheduled campaigns)
+        if active_sequences > 0 and total_emails_sent == 0 and campaign.status in ['active', 'scheduled']:
+            # Check if campaign has leads
+            leads_count = campaign.leads.count()
+            if leads_count > 0:
+                status_text = campaign.get_status_display()
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='campaign_status',
+                    priority='high',
+                    title=f'📬 No Emails Sent Yet: {campaign.name}',
+                    message=f'{status_text.capitalize()} campaign "{campaign.name}" has {active_sequences} active sequence(s) and {leads_count} lead(s) but NO emails have been sent! Check sequence configuration and delays.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    metadata={'action': 'no_emails_sent', 'active_sequences': active_sequences, 'leads_count': leads_count, 'status': campaign.status}
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'no_emails_sent', 'active_sequences': active_sequences})
+        
+        # Low email sending activity (has sent emails before but none recently)
+        # Only alert for active campaigns (paused/scheduled might be intentionally not sending)
+        elif total_emails_sent > 0 and recent_emails == 0 and active_sequences > 0 and campaign.status == 'active':
+            notification = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='campaign_status',
+                priority='medium',
+                title=f'📉 Low Email Activity: {campaign.name}',
+                message=f'Active campaign "{campaign.name}" has sent {total_emails_sent} emails total but NONE in the last 7 days. Check: 1) Sequence delays, 2) Sequence completion, 3) Lead status.',
+                action_required=True,
+                action_url=f'/marketing/campaigns/{campaign.id}/',
+                metadata={'action': 'low_email_activity', 'total_sent': total_emails_sent, 'recent_sent': 0}
+            )
+            if notification:
+                notifications.append(notification)
+                issues.append({'type': 'low_email_activity', 'total_sent': total_emails_sent})
+        
+        if notifications:
+            return {
+                'notifications': notifications,
+                'issues': issues
+            }
+        return None
+    
+    def _check_positive_replies(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Check for positive replies from leads and notify about them"""
+        notifications = []
+        opportunities = []
+        
+        # Get recent positive replies (last 7 days)
+        recent_cutoff = timezone.now() - timedelta(days=7)
+        positive_replies = Reply.objects.filter(
+            campaign=campaign,
+            interest_level='positive',
+            replied_at__gte=recent_cutoff
+        ).order_by('-replied_at')
+        
+        if positive_replies.exists():
+            reply_count = positive_replies.count()
+            latest_reply = positive_replies.first()
+            
+            # Get unique leads who replied positively
+            unique_leads = positive_replies.values('lead__email').distinct().count()
+            
+            notification = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='opportunity',
+                priority='medium',
+                title=f'🎉 Positive Replies Received: {campaign.name}',
+                message=f'Great news! Campaign "{campaign.name}" received {reply_count} positive reply/replies from {unique_leads} lead(s) in the last 7 days! Latest reply from {latest_reply.lead.email}. Follow up with these interested leads to convert them.',
+                action_required=True,
+                action_url=f'/marketing/campaigns/{campaign.id}/',
+                metadata={
+                    'action': 'positive_replies_received',
+                    'reply_count': reply_count,
+                    'unique_leads': unique_leads,
+                    'latest_reply_date': latest_reply.replied_at.isoformat() if latest_reply.replied_at else None,
+                    'latest_reply_from': latest_reply.lead.email
+                }
+            )
+            if notification:
+                notifications.append(notification)
+                opportunities.append({
+                    'type': 'positive_replies',
+                    'count': reply_count,
+                    'unique_leads': unique_leads
+                })
+        
+        # Check for replies requesting more information (also positive signal)
+        info_requests = Reply.objects.filter(
+            campaign=campaign,
+            interest_level='requested_info',
+            replied_at__gte=recent_cutoff
+        ).count()
+        
+        if info_requests > 0:
+            notification = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='opportunity',
+                priority='medium',
+                title=f'📧 Information Requests: {campaign.name}',
+                message=f'Campaign "{campaign.name}" has {info_requests} lead(s) requesting more information! These are highly qualified leads. Respond promptly with detailed information to convert them.',
+                action_required=True,
+                action_url=f'/marketing/campaigns/{campaign.id}/',
+                metadata={
+                    'action': 'info_requests_received',
+                    'request_count': info_requests
+                }
+            )
+            if notification:
+                notifications.append(notification)
+                opportunities.append({
+                    'type': 'info_requests',
+                    'count': info_requests
+                })
+        
+        if notifications:
+            return {
+                'notifications': notifications,
+                'opportunities': opportunities
+            }
+        return None
+    
+    def _check_campaign_progress(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Check campaign progress and provide regular updates for active campaigns"""
+        notifications = []
+        opportunities = []
+        
+        # Get campaign statistics
+        total_emails_sent = EmailSendHistory.objects.filter(campaign=campaign).count()
+        emails_opened = EmailSendHistory.objects.filter(
+            campaign=campaign,
+            status__in=['opened', 'clicked']
+        ).count()
+        emails_clicked = EmailSendHistory.objects.filter(
+            campaign=campaign,
+            status='clicked'
+        ).count()
+        total_replies = Reply.objects.filter(campaign=campaign).count()
+        positive_replies = Reply.objects.filter(
+            campaign=campaign,
+            interest_level='positive'
+        ).count()
+        
+        # Calculate rates
+        open_rate = (emails_opened / total_emails_sent * 100) if total_emails_sent > 0 else 0
+        click_rate = (emails_clicked / total_emails_sent * 100) if total_emails_sent > 0 else 0
+        reply_rate = (total_replies / total_emails_sent * 100) if total_emails_sent > 0 else 0
+        
+        # Only send progress updates if campaign has sent emails
+        if total_emails_sent == 0:
+            return None
+        
+        # Check campaign age (days since start)
+        if campaign.start_date:
+            days_running = (timezone.now().date() - campaign.start_date).days
+        else:
+            # Use first email sent date as proxy
+            first_email = EmailSendHistory.objects.filter(campaign=campaign).order_by('sent_at').first()
+            if first_email and first_email.sent_at:
+                days_running = (timezone.now().date() - first_email.sent_at.date()).days
+            else:
+                days_running = 0
+        
+        # Weekly progress update (every 7 days)
+        if days_running > 0 and days_running % 7 == 0:
+            # Check if we already sent a weekly update today (avoid duplicates)
+            today = timezone.now().date()
+            existing_update = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='milestone',
+                title__icontains='Weekly Progress',
+                created_at__date=today
+            ).exists()
+            
+            if not existing_update:
+                # Calculate weekly stats (last 7 days)
+                week_cutoff = timezone.now() - timedelta(days=7)
+                weekly_sent = EmailSendHistory.objects.filter(
+                    campaign=campaign,
+                    sent_at__gte=week_cutoff
+                ).count()
+                weekly_opened = EmailSendHistory.objects.filter(
+                    campaign=campaign,
+                    status__in=['opened', 'clicked'],
+                    sent_at__gte=week_cutoff
+                ).count()
+                weekly_replies = Reply.objects.filter(
+                    campaign=campaign,
+                    replied_at__gte=week_cutoff
+                ).count()
+                
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='milestone',
+                    priority='low',
+                    title=f'📊 Weekly Progress Update: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" progress after {days_running} days:\n\n📧 Emails: {total_emails_sent} sent ({weekly_sent} this week)\n👁️ Opens: {emails_opened} ({open_rate:.1f}% open rate)\n🖱️ Clicks: {emails_clicked} ({click_rate:.1f}% click rate)\n💬 Replies: {total_replies} ({reply_rate:.1f}% reply rate, {positive_replies} positive)\n\n{"🎉 Great engagement!" if open_rate >= 25 else "💡 Consider optimizing subject lines and content."}',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={
+                        'action': 'weekly_progress_update',
+                        'days_running': days_running,
+                        'total_emails_sent': total_emails_sent,
+                        'weekly_sent': weekly_sent,
+                        'open_rate': open_rate,
+                        'click_rate': click_rate,
+                        'reply_rate': reply_rate,
+                        'positive_replies': positive_replies
+                    }
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({
+                        'type': 'weekly_progress',
+                        'days_running': days_running
+                    })
+        
+        # Milestone: First 100 emails sent
+        if total_emails_sent >= 100 and total_emails_sent < 110:
+            existing_milestone = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='milestone',
+                title__icontains='100 emails',
+                created_at__gte=timezone.now() - timedelta(days=1)
+            ).exists()
+            
+            if not existing_milestone:
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='milestone',
+                    priority='low',
+                    title=f'🎯 Milestone: 100 Emails Sent - {campaign.name}',
+                    message=f'Campaign "{campaign.name}" has reached 100 emails sent! Current stats: {open_rate:.1f}% open rate, {click_rate:.1f}% click rate, {total_replies} replies. Keep up the momentum!',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={
+                        'action': '100_emails_milestone',
+                        'total_emails_sent': total_emails_sent,
+                        'open_rate': open_rate,
+                        'click_rate': click_rate
+                    }
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({
+                        'type': '100_emails_milestone',
+                        'total_sent': total_emails_sent
+                    })
+        
+        # Good performance opportunity: High engagement
+        if open_rate >= 25 and click_rate >= 3 and total_emails_sent >= 20:
+            existing_opportunity = MarketingNotification.objects.filter(
+                user=user,
+                campaign=campaign,
+                notification_type='opportunity',
+                title__icontains='High Performance',
+                created_at__gte=timezone.now() - timedelta(days=3)
+            ).exists()
+            
+            if not existing_opportunity:
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='opportunity',
+                    priority='low',
+                    title=f'🚀 High Performance Campaign: {campaign.name}',
+                    message=f'Campaign "{campaign.name}" is performing excellently! {open_rate:.1f}% open rate and {click_rate:.1f}% click rate. Consider: 1) Scaling this campaign, 2) Applying similar strategies to other campaigns, 3) Increasing email frequency.',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={
+                        'action': 'high_performance_opportunity',
+                        'open_rate': open_rate,
+                        'click_rate': click_rate,
+                        'total_sent': total_emails_sent
+                    }
+                )
+                if notification:
+                    notifications.append(notification)
+                    opportunities.append({
+                        'type': 'high_performance',
+                        'open_rate': open_rate,
+                        'click_rate': click_rate
+                    })
+        
+        if notifications:
+            return {
+                'notifications': notifications,
+                'opportunities': opportunities
+            }
+        return None
+    
     def _create_notification(self, user: User, campaign: Optional[Campaign],
                            notification_type: str, priority: str, title: str,
                            message: str, action_required: bool = False,
@@ -1242,6 +2023,27 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             action_url=action_url or '',
             metadata=metadata or {}
         )
+        
+        # Auto-mark all previous unread notifications as read when new notification is created
+        # This ensures only the newest notifications show as unread in Recent Notifications tab
+        # Strategy: Mark notifications created BEFORE this one as read (within a small time window to handle batch creation)
+        # This way, all notifications created in the same batch (within 1 second) will remain unread
+        batch_window = timezone.now() - timedelta(seconds=2)  # 2 second window for batch
+        
+        previous_unread = MarketingNotification.objects.filter(
+            user=user,
+            is_read=False,
+            created_at__lt=batch_window  # Only mark ones created before this batch window
+        )
+        
+        if previous_unread.exists():
+            # Mark all previous unread notifications as read
+            updated_count = previous_unread.update(
+                is_read=True,
+                read_at=timezone.now()
+            )
+            logger.info(f"Auto-marked {updated_count} previous notifications as read for user {user.id} when new notification {notification.id} was created")
+        
         return notification
     
     def get_notifications(self, user_id: int, unread_only: bool = False,

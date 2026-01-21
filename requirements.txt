@@ -21,9 +21,10 @@ django-cors-headers>=4.3.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 
-# Celery & Redis (Optional - for Celery Beat automation)
-# Uncomment if you want to use Celery Beat instead of cron
-# celery>=5.3.4
-# redis>=5.0.1
-# django-celery-beat>=2.5.0
+# Celery & Redis (for Celery Beat automation - replaces Windows Task Scheduler)
+celery>=5.3.4
+redis>=5.0.1
+django-celery-beat>=2.5.0
+# SQLAlchemy needed if using SQLite broker (development fallback)
+# SQLAlchemy>=2.0.30  # Already in requirements above
 

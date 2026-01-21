@@ -452,7 +452,7 @@ def email_sending_status(request, campaign_id):
             sequence__isnull=False,  # Has a sequence (main sequence)
             sequence__is_sub_sequence=False,  # Main sequence reply (not sub-sequence reply)
             sub_sequence__isnull=True,  # CRITICAL: Reply was to MAIN sequence email (not sub-sequence email)
-            interest_level__in=['positive', 'negative', 'neutral', 'requested_info', 'objection'],  # Valid interest levels
+            interest_level__in=['positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe'],  # Valid interest levels (including unsubscribe)
         ).select_related(
             'contact', 'lead', 'sequence', 'contact__sub_sequence'
         ).prefetch_related(

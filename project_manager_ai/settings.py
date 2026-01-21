@@ -278,6 +278,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',  # CORS headers for cross-origin requests
+    'django_celery_beat',  # Celery Beat for periodic tasks (replaces Windows Task Scheduler)
 
     'core',
     'project_manager_agent',
@@ -321,21 +322,64 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 
 
 # --------------------
-# Database (SQL Server Express)
+# Database Configuration
 # --------------------
+# Set USE_SQL_SERVER=True in .env to use SQL Server, otherwise uses SQLite
+USE_SQL_SERVER = os.getenv('USE_SQL_SERVER', 'False').lower() == 'true'
 
-
-DATABASES = {
-    'default': {
+if USE_SQL_SERVER:
+    # SQL Server Configuration
+    USE_WINDOWS_AUTH = os.getenv('USE_WINDOWS_AUTH', 'True').lower() == 'true'
+    
+    # SQL Server Express default instance is usually 'localhost\SQLEXPRESS'
+    # For default instance, use 'localhost' or 'localhost\MSSQLSERVER'
+    # For named instance, use 'localhost\INSTANCENAME'
+    DB_HOST = os.getenv('DB_HOST', 'localhost\\SQLEXPRESS')  # Default to Express instance
+    DB_NAME = os.getenv('DB_NAME', 'project_manager_db')
+    
+    db_config = {
         'ENGINE': 'mssql',
-        'NAME': os.getenv('DB_NAME', 'project_manager_db'),
-        'HOST': r'localhost',
+        'NAME': DB_NAME,
+        'HOST': DB_HOST,
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
-            'trusted_connection': 'yes',
         },
-
-    }}
+    }
+    
+    if USE_WINDOWS_AUTH:
+        # Windows Authentication (Trusted Connection)
+        db_config['OPTIONS']['trusted_connection'] = 'yes'
+    else:
+        # SQL Server Authentication (username/password)
+        db_config['USER'] = os.getenv('DB_USER', '')
+        db_config['PASSWORD'] = os.getenv('DB_PASSWORD', '')
+        db_config['OPTIONS']['extra_params'] = 'TrustServerCertificate=yes'
+    
+    DATABASES = {
+        'default': db_config
+    }
+    
+    print("\n" + "="*60)
+    print("DATABASE CONFIGURATION:")
+    print(f"  Engine: SQL Server")
+    print(f"  Host: {DB_HOST}")
+    print(f"  Database: {DB_NAME}")
+    print(f"  Authentication: {'Windows (Trusted)' if USE_WINDOWS_AUTH else 'SQL Server'}")
+    print("="*60 + "\n")
+else:
+    # Default SQLite database (for development - no setup required)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+    
+    print("\n" + "="*60)
+    print("DATABASE CONFIGURATION:")
+    print(f"  Engine: SQLite")
+    print(f"  Database: {BASE_DIR / 'db.sqlite3'}")
+    print("="*60 + "\n")
 
 
 
@@ -483,6 +527,116 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
+
+# --------------------
+# Celery Configuration (for Marketing Automation)
+# --------------------
+# Celery replaces Windows Task Scheduler for all automated tasks
+
+# For development: Use SQLite if Redis is not available (slower but works)
+# For production: Use Redis (faster, recommended)
+USE_REDIS = os.getenv('USE_REDIS', 'True').lower() == 'true'
+
+if USE_REDIS:
+    # Production: Use Redis (faster, recommended)
+    CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+    CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+else:
+    # Development: Use SQLite (no Redis needed, but slower)
+    # Requires: pip install sqlalchemy
+    CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'sqla+sqlite:///celery_broker.db')
+    CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'db+sqlite:///celery_results.db')
+
+# Celery settings
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
+# Task execution settings
+CELERY_TASK_ACKS_LATE = True  # Tasks acknowledged after completion
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Prefetch only 1 task at a time
+CELERY_TASK_REJECT_ON_WORKER_LOST = True  # Reject tasks if worker dies
+
+# Windows-specific worker settings (fixes ValueError unpacking issue)
+CELERY_WORKER_POOL = 'solo'  # Use solo pool on Windows (avoids multiprocessing issues)
+CELERY_WORKER_CONCURRENCY = 1  # Single worker process on Windows
+
+# Retry settings
+CELERY_TASK_DEFAULT_RETRY_DELAY = 300  # 5 minutes default retry delay
+CELERY_TASK_MAX_RETRIES = 3  # Max 3 retries
+
+# Celery Beat Schedule (Periodic Tasks)
+# IMPORTANT: Sequence emails run every 5 minutes to check for ready emails
+# Actual email timing respects user-defined delays (delay_days, delay_hours, delay_minutes)
+CELERY_BEAT_SCHEDULE = {
+    # Send sequence emails - runs every 5 minutes
+    # Checks for emails ready to send based on user-defined sequence step delays
+    'send-sequence-emails': {
+        'task': 'marketing_agent.tasks.send_sequence_emails_task',
+        'schedule': 300.0,  # Every 5 minutes (300 seconds)
+        'options': {'expires': 600}  # Task expires after 10 minutes if not picked up
+    },
+    
+    # Sync inbox for replies - runs every 5 minutes
+    'sync-inbox-replies': {
+        'task': 'marketing_agent.tasks.sync_inbox_task',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600}
+    },
+    
+    # Retry failed emails - runs every 15 minutes
+    'retry-failed-emails': {
+        'task': 'marketing_agent.tasks.retry_failed_emails_task',
+        'schedule': 900.0,  # Every 15 minutes (900 seconds)
+        'options': {'expires': 1800}
+    },
+    
+    # Auto-start scheduled campaigns - runs every 15 minutes (backup check)
+    # NOTE: Campaigns are also auto-started immediately when saved with start_date <= today
+    # This task is a backup to catch any campaigns that might have been missed
+    'auto-start-campaigns': {
+        'task': 'marketing_agent.tasks.auto_start_campaigns_task',
+        'schedule': 900.0,  # Every 15 minutes (900 seconds) - more frequent backup check
+        'options': {'expires': 1800}
+    },
+    
+    # Monitor campaigns and send notifications - runs every 30 minutes
+    # Monitors ALL campaigns (active, scheduled, paused, draft) for issues and opportunities
+    'monitor-campaigns': {
+        'task': 'marketing_agent.tasks.monitor_campaigns_task',
+        'schedule': 1800.0,  # Every 30 minutes (1800 seconds)
+        'options': {'expires': 3600}
+    },
+    
+    # Auto-pause expired campaigns - runs daily at midnight
+    'auto-pause-expired-campaigns': {
+        'task': 'marketing_agent.tasks.auto_pause_expired_campaigns_task',
+        'schedule': 86400.0,  # Daily (86400 seconds = 24 hours)
+        'options': {'expires': 172800}  # Expires after 2 days
+    },
+}
+
+# Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+print("\n" + "="*60)
+print("CELERY CONFIGURATION:")
+print(f"  Broker: {CELERY_BROKER_URL}")
+print(f"  Result Backend: {CELERY_RESULT_BACKEND}")
+print(f"  Timezone: {CELERY_TIMEZONE}")
+print(f"  Using Redis: {USE_REDIS}")
+if not USE_REDIS:
+    print("  ⚠️  Using SQLite broker (slower, for development only)")
+    print("  💡 For production, install Redis and set USE_REDIS=True in .env")
+print(f"  Scheduled Tasks: {len(CELERY_BEAT_SCHEDULE)}")
+print("  - Sequence emails: Every 5 minutes")
+print("  - Inbox sync: Every 5 minutes")
+print("  - Retry failed: Every 15 minutes")
+print("  - Auto-start campaigns: Every hour")
+print("  - Monitor campaigns & notifications: Every 30 minutes (FULLY AUTOMATED)")
+print("  - Auto-pause campaigns: Daily")
+print("="*60 + "\n")
 
 # --------------------
 # REST Framework Configuration
