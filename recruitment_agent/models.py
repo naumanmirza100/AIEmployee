@@ -52,6 +52,41 @@ class RecruiterEmailSettings(models.Model):
         return f"Email Settings for {self.recruiter.username}"
 
 
+class RecruiterQualificationSettings(models.Model):
+    """
+    Recruiter qualification/decision threshold settings.
+    Each company can set custom thresholds for INTERVIEW/HOLD/REJECT decisions.
+    """
+    recruiter = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True, related_name='recruiter_qualification_settings')
+    company_user = models.OneToOneField('core.CompanyUser', on_delete=models.CASCADE, null=True, blank=True, related_name='recruiter_qualification_settings_company')
+    
+    # Decision thresholds (0-100)
+    interview_threshold = models.IntegerField(
+        default=65,
+        help_text="Minimum confidence score (0-100) to mark candidate as INTERVIEW. Default: 65"
+    )
+    hold_threshold = models.IntegerField(
+        default=45,
+        help_text="Minimum confidence score (0-100) to mark candidate as HOLD. Default: 45. Scores below this are REJECTED."
+    )
+    
+    # Use custom thresholds flag
+    use_custom_thresholds = models.BooleanField(
+        default=False,
+        help_text="If True, use custom thresholds. If False, use default values (65 for INTERVIEW, 45 for HOLD)"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Recruiter Qualification Settings'
+        verbose_name_plural = 'Recruiter Qualification Settings'
+    
+    def __str__(self):
+        return f"Qualification Settings for {self.recruiter.username if self.recruiter else 'Company User'}"
+
+
 class RecruiterInterviewSettings(models.Model):
     """
     Recruiter interview scheduling preferences.

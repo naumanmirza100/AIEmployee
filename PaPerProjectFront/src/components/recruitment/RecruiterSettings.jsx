@@ -7,12 +7,14 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target } from 'lucide-react';
 import { 
   getEmailSettings, 
   updateEmailSettings, 
   getInterviewSettings, 
-  updateInterviewSettings 
+  updateInterviewSettings,
+  getQualificationSettings,
+  updateQualificationSettings
 } from '@/services/recruitmentAgentService';
 
 const RecruiterSettings = () => {
@@ -31,6 +33,11 @@ const RecruiterSettings = () => {
     start_time: '09:00',
     end_time: '17:00',
     interview_time_gap: 30,
+  });
+  const [qualificationSettings, setQualificationSettings] = useState({
+    interview_threshold: 65,
+    hold_threshold: 45,
+    use_custom_thresholds: false,
   });
   const [scheduleFromDate, setScheduleFromDate] = useState(null);
   const [scheduleToDate, setScheduleToDate] = useState(null);
@@ -53,9 +60,10 @@ const RecruiterSettings = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true);
-      const [emailRes, interviewRes] = await Promise.all([
+      const [emailRes, interviewRes, qualificationRes] = await Promise.all([
         getEmailSettings(),
         getInterviewSettings(),
+        getQualificationSettings().catch(() => ({ status: 'success', data: { interview_threshold: 65, hold_threshold: 45, use_custom_thresholds: false } })),
       ]);
 
       if (emailRes.status === 'success') {
@@ -94,6 +102,9 @@ const RecruiterSettings = () => {
         } else {
           setScheduleToDate(null);
         }
+      }
+      if (qualificationRes.status === 'success') {
+        setQualificationSettings(qualificationRes.data);
       }
     } catch (error) {
       console.error('Error fetching settings:', error);
@@ -213,6 +224,31 @@ const RecruiterSettings = () => {
 
     // Just call the save function - it will automatically generate slots
     await handleSaveInterviewSettings();
+  };
+
+  const handleSaveQualificationSettings = async () => {
+    try {
+      setSaving(true);
+      const response = await updateQualificationSettings(qualificationSettings);
+      if (response.status === 'success') {
+        toast({
+          title: 'Success',
+          description: 'Qualification settings saved successfully',
+        });
+        if (response.data) {
+          setQualificationSettings(response.data);
+        }
+      }
+    } catch (error) {
+      console.error('Error saving qualification settings:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save qualification settings',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleUpdateTimeSlotAvailability = async () => {
@@ -393,6 +429,10 @@ const RecruiterSettings = () => {
           <TabsTrigger value="interview">
             <Calendar className="h-4 w-4 mr-2" />
             Interview Settings
+          </TabsTrigger>
+          <TabsTrigger value="qualification">
+            <Target className="h-4 w-4 mr-2" />
+            Qualification Settings
           </TabsTrigger>
         </TabsList>
 
@@ -845,6 +885,125 @@ const RecruiterSettings = () => {
                   Showing {timeSlots.length} time slots for {getAvailableDates().length} day(s)
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="qualification">
+          <Card>
+            <CardHeader>
+              <CardTitle>Qualification Settings</CardTitle>
+              <CardDescription>
+                Configure decision thresholds for candidate qualification (INTERVIEW/HOLD/REJECT)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="use_custom_thresholds">Use Custom Thresholds</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Enable custom decision thresholds. If disabled, default values (INTERVIEW: 65, HOLD: 45) will be used.
+                    </p>
+                  </div>
+                  <Switch
+                    id="use_custom_thresholds"
+                    checked={qualificationSettings.use_custom_thresholds}
+                    onCheckedChange={(checked) => setQualificationSettings({
+                      ...qualificationSettings,
+                      use_custom_thresholds: checked,
+                    })}
+                  />
+                </div>
+
+                {qualificationSettings.use_custom_thresholds && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="interview_threshold">INTERVIEW Threshold (0-100)</Label>
+                      <Input
+                        id="interview_threshold"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={qualificationSettings.interview_threshold}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 65;
+                          setQualificationSettings({
+                            ...qualificationSettings,
+                            interview_threshold: Math.max(0, Math.min(100, value)),
+                          });
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Minimum confidence score (0-100) to mark candidate as INTERVIEW. 
+                        Candidates with score &gt;= this value will be marked for interview.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="hold_threshold">HOLD Threshold (0-100)</Label>
+                      <Input
+                        id="hold_threshold"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={qualificationSettings.hold_threshold}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 45;
+                          setQualificationSettings({
+                            ...qualificationSettings,
+                            hold_threshold: Math.max(0, Math.min(100, value)),
+                          });
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Minimum confidence score (0-100) to mark candidate as HOLD. 
+                        Candidates with score &gt;= this value but &lt; INTERVIEW threshold will be put on hold.
+                        Scores below this will be REJECTED.
+                      </p>
+                    </div>
+
+                    <div className="p-4 bg-muted/50 rounded-lg border">
+                      <p className="text-sm font-semibold mb-2">Decision Logic:</p>
+                      <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                        <li>Score &gt;= {qualificationSettings.interview_threshold} → <span className="text-green-500 font-medium">INTERVIEW</span></li>
+                        <li>Score &gt;= {qualificationSettings.hold_threshold} and &lt; {qualificationSettings.interview_threshold} → <span className="text-yellow-500 font-medium">HOLD</span></li>
+                        <li>Score &lt; {qualificationSettings.hold_threshold} → <span className="text-red-500 font-medium">REJECT</span></li>
+                      </ul>
+                      {qualificationSettings.interview_threshold <= qualificationSettings.hold_threshold && (
+                        <p className="text-xs text-red-500 mt-2">
+                          ⚠️ Warning: INTERVIEW threshold must be greater than HOLD threshold
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {!qualificationSettings.use_custom_thresholds && (
+                  <div className="p-4 bg-muted/50 rounded-lg border">
+                    <p className="text-sm font-semibold mb-2">Default Thresholds (Currently Active):</p>
+                    <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                      <li>Score &gt;= 65 → <span className="text-green-500 font-medium">INTERVIEW</span></li>
+                      <li>Score &gt;= 45 and &lt; 65 → <span className="text-yellow-500 font-medium">HOLD</span></li>
+                      <li>Score &lt; 45 → <span className="text-red-500 font-medium">REJECT</span></li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <Button onClick={handleSaveQualificationSettings} disabled={saving || (qualificationSettings.use_custom_thresholds && qualificationSettings.interview_threshold <= qualificationSettings.hold_threshold)}>
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Qualification Settings
+                  </>
+                )}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

@@ -301,10 +301,10 @@ const CompanyDashboardPage = () => {
       <Helmet>
         <title>Company Dashboard | Pay Per Project</title>
       </Helmet>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background overflow-x-hidden">
         {/* Header */}
         <header className="border-b bg-card">
-          <div className="container mx-auto px-4 py-4">
+          <div className="container mx-auto px-4 py-4 max-w-7xl">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-3">
                 <Building2 className="h-8 w-8 text-primary" />
@@ -348,7 +348,7 @@ const CompanyDashboardPage = () => {
           </div>
         </header>
 
-        <div className="container mx-auto px-4 py-8">
+        <div className="container mx-auto px-4 py-8 max-w-7xl w-full overflow-x-hidden">
           {activeSection === 'dashboard' && (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <div className="flex justify-between items-center mb-6">

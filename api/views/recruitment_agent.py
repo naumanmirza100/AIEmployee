@@ -22,7 +22,7 @@ from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAge
 from recruitment_agent.core import GroqClient
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
-from recruitment_agent.models import Interview, CVRecord, JobDescription, RecruiterEmailSettings, RecruiterInterviewSettings
+from recruitment_agent.models import Interview, CVRecord, JobDescription, RecruiterEmailSettings, RecruiterInterviewSettings, RecruiterQualificationSettings
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
@@ -186,6 +186,17 @@ def process_cvs(request):
                     'parse_only': True
                 })
             
+            # Get qualification settings for company user (fetch once, use for all CVs)
+            interview_threshold = None
+            hold_threshold = None
+            try:
+                qual_settings = RecruiterQualificationSettings.objects.filter(company_user=company_user).first()
+                if qual_settings and qual_settings.use_custom_thresholds:
+                    interview_threshold = qual_settings.interview_threshold
+                    hold_threshold = qual_settings.hold_threshold
+            except Exception as e:
+                logger.warning(f"Error fetching qualification settings: {e}")
+            
             # Summarize, enrich, and qualify
             all_results = []
             for result in parsed_results:
@@ -203,8 +214,8 @@ def process_cvs(request):
                 if not isinstance(enriched, dict):
                     enriched = enriched[0] if isinstance(enriched, list) and len(enriched) > 0 else {}
                 
-                # Qualify - correct parameter order: (parsed_cv, candidate_insights, job_keywords, enriched_data)
-                qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched)
+                # Qualify - correct parameter order: (parsed_cv, candidate_insights, job_keywords, enriched_data, interview_threshold, hold_threshold)
+                qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched, interview_threshold, hold_threshold)
                 # Ensure qualified is a dict
                 if not isinstance(qualified, dict):
                     qualified = qualified[0] if isinstance(qualified, list) and len(qualified) > 0 else {}
@@ -1097,5 +1108,85 @@ def interview_settings(request):
         return Response({
             'status': 'error',
             'message': f'Failed to process interview settings: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def qualification_settings(request):
+    """Get or update qualification/decision threshold settings for company user"""
+    try:
+        company_user = request.user
+        
+        if request.method == 'GET':
+            settings, created = RecruiterQualificationSettings.objects.get_or_create(
+                company_user=company_user,
+                defaults={
+                    'interview_threshold': 65,
+                    'hold_threshold': 45,
+                    'use_custom_thresholds': False,
+                }
+            )
+            
+            return Response({
+                'status': 'success',
+                'data': {
+                    'interview_threshold': settings.interview_threshold,
+                    'hold_threshold': settings.hold_threshold,
+                    'use_custom_thresholds': settings.use_custom_thresholds,
+                }
+            })
+        
+        else:  # POST
+            settings, created = RecruiterQualificationSettings.objects.get_or_create(
+                company_user=company_user
+            )
+            
+            if 'interview_threshold' in request.data:
+                threshold = int(request.data['interview_threshold'])
+                if threshold < 0 or threshold > 100:
+                    return Response({
+                        'status': 'error',
+                        'message': 'interview_threshold must be between 0 and 100'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                settings.interview_threshold = threshold
+            
+            if 'hold_threshold' in request.data:
+                threshold = int(request.data['hold_threshold'])
+                if threshold < 0 or threshold > 100:
+                    return Response({
+                        'status': 'error',
+                        'message': 'hold_threshold must be between 0 and 100'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                settings.hold_threshold = threshold
+            
+            if 'use_custom_thresholds' in request.data:
+                settings.use_custom_thresholds = bool(request.data['use_custom_thresholds'])
+            
+            # Validate thresholds
+            if settings.interview_threshold <= settings.hold_threshold:
+                return Response({
+                    'status': 'error',
+                    'message': 'interview_threshold must be greater than hold_threshold'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            settings.save()
+            
+            return Response({
+                'status': 'success',
+                'message': 'Qualification settings updated successfully',
+                'data': {
+                    'interview_threshold': settings.interview_threshold,
+                    'hold_threshold': settings.hold_threshold,
+                    'use_custom_thresholds': settings.use_custom_thresholds,
+                }
+            })
+    
+    except Exception as e:
+        logger.error(f"Error with qualification settings: {e}")
+        return Response({
+            'status': 'error',
+            'message': f'Failed to process qualification settings: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

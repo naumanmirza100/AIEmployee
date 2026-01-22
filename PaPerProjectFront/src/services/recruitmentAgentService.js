@@ -258,6 +258,33 @@ export const updateInterviewSettings = async (settings) => {
   }
 };
 
+/**
+ * Get qualification settings for the company user
+ */
+export const getQualificationSettings = async () => {
+  try {
+    const response = await companyApi.get('/recruitment/settings/qualification');
+    return response;
+  } catch (error) {
+    console.error('Get qualification settings error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update qualification settings
+ * @param {object} settings - Qualification settings data (interview_threshold, hold_threshold, use_custom_thresholds)
+ */
+export const updateQualificationSettings = async (settings) => {
+  try {
+    const response = await companyApi.post('/recruitment/settings/qualification', settings);
+    return response;
+  } catch (error) {
+    console.error('Update qualification settings error:', error);
+    throw error;
+  }
+};
+
 export default {
   processCVs,
   getJobDescriptions,
@@ -272,6 +299,8 @@ export default {
   updateEmailSettings,
   getInterviewSettings,
   updateInterviewSettings,
+  getQualificationSettings,
+  updateQualificationSettings,
 };
 
 

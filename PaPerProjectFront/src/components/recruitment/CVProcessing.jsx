@@ -20,6 +20,7 @@ const CVProcessing = ({ onProcessComplete }) => {
   const [topN, setTopN] = useState('');
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState(null);
+  const [displayedKeywords, setDisplayedKeywords] = useState([]);
 
   React.useEffect(() => {
     fetchJobDescriptions();
@@ -33,6 +34,29 @@ const CVProcessing = ({ onProcessComplete }) => {
       }
     } catch (error) {
       console.error('Error fetching job descriptions:', error);
+    }
+  };
+
+  const handleJobSelection = (jobId) => {
+    setSelectedJobId(jobId === "none" ? "" : jobId);
+    
+    // Extract and display keywords when a job is selected
+    if (jobId && jobId !== "none") {
+      const selectedJob = jobDescriptions.find(job => job.id.toString() === jobId.toString());
+      if (selectedJob && selectedJob.keywords_json) {
+        try {
+          const keywordsData = JSON.parse(selectedJob.keywords_json);
+          const keywords = keywordsData.keywords || [];
+          setDisplayedKeywords(keywords);
+        } catch (error) {
+          console.error('Error parsing keywords:', error);
+          setDisplayedKeywords([]);
+        }
+      } else {
+        setDisplayedKeywords([]);
+      }
+    } else {
+      setDisplayedKeywords([]);
     }
   };
 
@@ -131,7 +155,7 @@ const CVProcessing = ({ onProcessComplete }) => {
           {/* Job Description Selection */}
           <div className="space-y-2">
             <Label htmlFor="job-description">Job Description (Optional)</Label>
-            <Select value={selectedJobId || "none"} onValueChange={(value) => setSelectedJobId(value === "none" ? "" : value)}>
+            <Select value={selectedJobId || "none"} onValueChange={handleJobSelection}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a job description" />
               </SelectTrigger>
@@ -144,6 +168,20 @@ const CVProcessing = ({ onProcessComplete }) => {
                 ))}
               </SelectContent>
             </Select>
+            
+            {/* Display Keywords when job is selected */}
+            {selectedJobId && selectedJobId !== "none" && displayedKeywords.length > 0 && (
+              <div className="mt-3 p-3 bg-muted/50 rounded-lg border">
+                <div className="text-sm font-semibold mb-2">Extracted Keywords:</div>
+                <div className="flex flex-wrap gap-2">
+                  {displayedKeywords.map((keyword, index) => (
+                    <Badge key={index} variant="secondary" className="text-xs">
+                      {keyword}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Job Description Text */}
