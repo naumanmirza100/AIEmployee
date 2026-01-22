@@ -121,9 +121,14 @@
                 AI Marketing Assistant - Orchestrate your complete marketing lifecycle
             </p>
         </div>
-        <!-- <a href="{% url 'marketing_agents_test' %}" class="btn btn-primary">
-            🤖 Access All Agents
-        </a> -->
+        <div style="display: flex; gap: 1rem;">
+        <a href="{% url 'email_accounts_list' %}" class="btn-agent" style="text-decoration: none;">
+            📧 Email Accounts
+        </a>
+        <div  style="border: 1px solid var(--primary-color); padding: 4px 10px; border-radius: 5px; cursor: pointer;" onclick="location.href='{% url "marketing_agents_test" %}#notification'">
+            <h3>🔔 </h3>
+        </div>
+</div>
     </div>
 
     <!-- Stats Overview -->
@@ -145,6 +150,16 @@
             <p class="value">${{ stats.budget_remaining|floatformat:2 }}</p>
         </div> -->
     </div>
+
+     <!-- Quick Links -->
+     <!-- <div class="recent-section">
+        <h3 style="margin: 0 0 1rem 0;">⚙️ Settings & Configuration</h3>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <a href="{% url 'email_accounts_list' %}" class="btn-agent" style="text-decoration: none;">
+                📧 Email Accounts
+            </a>
+        </div>
+    </div> -->
 
     <!-- Available Marketing Agents -->
     <div class="recent-section">
@@ -215,7 +230,7 @@
             </div>
 
             <!-- Notification Agent -->
-            <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#notification'">
+            <!-- <div class="agent-card" onclick="location.href='{% url "marketing_agents_test" %}#notification'">
                 <h3>🔔 Proactive Notification</h3>
                 <span class="status">Available</span>
                 <p>
@@ -224,22 +239,11 @@
                 <p style="font-size: 0.85rem; color: var(--primary-color); font-weight: 600;">
                     ✓ Phase 6 - Ready to use
                 </p>
-            </div>
+            </div> -->
         </div>
     </div>
 
-    <!-- Quick Links -->
-    <div class="recent-section">
-        <h3 style="margin: 0 0 1rem 0;">⚙️ Settings & Configuration</h3>
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-            <a href="{% url 'email_accounts_list' %}" class="btn-agent" style="text-decoration: none;">
-                📧 Email Accounts
-            </a>
-            <a href="{% url 'campaigns_list' %}" class="btn-agent" style="text-decoration: none;">
-                📋 All Campaigns →
-            </a>
-        </div>
-    </div>
+   
 
     <!-- Recent Campaigns -->
     <div class="recent-section">
@@ -253,17 +257,17 @@
                 <thead>
                     <tr style="border-bottom: 2px solid var(--border-color);">
                         <th style="padding: 0.75rem; text-align: left;">Name</th>
-                        <th style="padding: 0.75rem; text-align: left;">Type</th>
+                        <!-- <th style="padding: 0.75rem; text-align: left;">Type</th> -->
                         <th style="padding: 0.75rem; text-align: left;">Status</th>
-                        <th style="padding: 0.75rem; text-align: right;">Budget</th>
-                        <th style="padding: 0.75rem; text-align: right;">Spent</th>
+                        <!-- <th style="padding: 0.75rem; text-align: right;">Budget</th> -->
+                        <th style="padding: 0.75rem; text-align: right;">View </th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for campaign in campaigns %}
                     <tr style="border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="window.location.href='{% url 'campaign_detail' campaign.id %}'">
                         <td style="padding: 0.75rem;">{{ campaign.name }}</td>
-                        <td style="padding: 0.75rem;">{{ campaign.get_campaign_type_display }}</td>
+                        <!-- <td style="padding: 0.75rem;">{{ campaign.get_campaign_type_display }}</td> -->
                         <td style="padding: 0.75rem;">
                             <span style="padding: 0.25rem 0.75rem; border-radius: var(--radius-md); font-size: 0.85rem; 
                                 {% if campaign.status == 'active' %}background: var(--success-color); color: white;
@@ -274,8 +278,9 @@
                                 {{ campaign.get_status_display }}
                             </span>
                         </td>
-                        <td style="padding: 0.75rem; text-align: right;">${{ campaign.budget|floatformat:2 }}</td>
-                        <td style="padding: 0.75rem; text-align: right;">${{ campaign.actual_spend|floatformat:2 }}</td>
+                        <!-- <td style="padding: 0.75rem; text-align: right;">${{ campaign.budget|floatformat:2 }}</td> -->
+                        <td style="padding: 0.75rem; text-align: right;"><a href="{% url 'campaign_detail' campaign.id %}" style="text-decoration: none; color: var(--primary-color);">View →</a></td>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

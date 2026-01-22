@@ -305,7 +305,7 @@ const CompanyDashboardPage = () => {
       <Helmet>
         <title>Company Dashboard | Pay Per Project</title>
       </Helmet>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background overflow-x-hidden">
         {/* Header */}
         <DashboardNavbar
           icon={Building2}
@@ -344,7 +344,7 @@ const CompanyDashboardPage = () => {
           ]}
         />
 
-        <div className="container mx-auto px-4 py-8">
+        <div className="container mx-auto px-4 py-8 max-w-7xl w-full overflow-x-hidden">
           {activeSection === 'dashboard' && (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <div className="flex justify-between items-center mb-6">

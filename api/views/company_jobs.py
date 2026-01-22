@@ -1,3 +1,6 @@
+import json
+import logging
+
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
@@ -9,6 +12,9 @@ from api.serializers.career import JobDescriptionSerializer, CareerApplicationSe
 from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
 from core.models import CompanyUser, Company
+from api.views.recruitment_agent import get_agents
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -25,11 +31,45 @@ def create_company_job(request):
         data['company'] = company.id
         data['is_active'] = True
         
+        # Handle parse_keywords - can be boolean True/False or string "true"/"false"
+        # Default to True to match Django views.py behavior
+        parse_keywords_val = data.get('parse_keywords', True)
+        if isinstance(parse_keywords_val, str):
+            parse_keywords = parse_keywords_val.lower() in ('true', '1', 'yes')
+        else:
+            parse_keywords = bool(parse_keywords_val)
+        
         serializer = JobDescriptionSerializer(data=data)
         
         if serializer.is_valid():
             # Save with company and company_user
             job = serializer.save(company=company, company_user=company_user)
+            
+            # Parse keywords if requested (defaults to True, same as Django views.py)
+            keywords_json = None
+            if parse_keywords and job.description:
+                try:
+                    agents = get_agents()
+                    job_desc_agent = agents['job_desc_agent']
+                    log_service = agents['log_service']
+                    
+                    logger.info(f"Parsing keywords for company job: {job.title}")
+                    parsed = job_desc_agent.parse_text(job.description)
+                    keywords_json = json.dumps(parsed)
+                    logger.info(f"Keywords parsed successfully. Keywords count: {len(parsed.get('keywords', []))}")
+                    
+                    # Update job with keywords
+                    job.keywords_json = keywords_json
+                    job.save(update_fields=['keywords_json'])
+                    
+                except Exception as exc:
+                    logger.error(f"Error parsing keywords: {str(exc)}", exc_info=True)
+                    log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc), "title": job.title})
+                    # Continue without keywords if parsing fails
+            
+            # Verify keywords were saved
+            keywords_saved = job.keywords_json is not None
+            logger.info(f"Company job created. ID: {job.id}, Title: {job.title}, Keywords saved: {keywords_saved}")
             
             return Response({
                 'status': 'success',
@@ -44,6 +84,7 @@ def create_company_job(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.error(f"Error creating company job: {str(e)}", exc_info=True)
         return Response({
             'status': 'error',
             'message': 'Failed to create job position',
@@ -97,10 +138,42 @@ def update_company_job(request, id):
         # Users can only update their own jobs
         job = get_object_or_404(JobDescription, id=id, company_user=company_user)
         
+        # Check if description changed and if we should parse keywords
+        description_changed = 'description' in request.data
+        old_description = job.description
+        
+        # Handle parse_keywords - can be boolean True/False or string "true"/"false"
+        parse_keywords_val = request.data.get('parse_keywords', False)
+        if isinstance(parse_keywords_val, str):
+            parse_keywords = parse_keywords_val.lower() in ('true', '1', 'yes')
+        else:
+            parse_keywords = bool(parse_keywords_val)
+        
         serializer = JobDescriptionSerializer(job, data=request.data, partial=True)
         
         if serializer.is_valid():
             job = serializer.save()
+            
+            # Parse keywords if requested and description was updated
+            if parse_keywords and description_changed and job.description:
+                try:
+                    agents = get_agents()
+                    job_desc_agent = agents['job_desc_agent']
+                    log_service = agents['log_service']
+                    
+                    logger.info(f"Parsing keywords for company job update: {job.id}")
+                    parsed = job_desc_agent.parse_text(job.description)
+                    keywords_json = json.dumps(parsed)
+                    logger.info(f"Keywords parsed successfully. Keywords count: {len(parsed.get('keywords', []))}")
+                    
+                    # Update job with keywords
+                    job.keywords_json = keywords_json
+                    job.save(update_fields=['keywords_json'])
+                    
+                except Exception as exc:
+                    logger.error(f"Error parsing keywords: {str(exc)}", exc_info=True)
+                    log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc), "job_id": job.id})
+                    # Continue without updating keywords if parsing fails
             
             return Response({
                 'status': 'success',
@@ -115,6 +188,7 @@ def update_company_job(request, id):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        logger.error(f"Error updating company job: {str(e)}", exc_info=True)
         return Response({
             'status': 'error',
             'message': 'Failed to update job position',

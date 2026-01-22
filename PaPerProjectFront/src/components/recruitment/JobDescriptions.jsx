@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle } from 'lucide-react';
 import { 
@@ -22,6 +22,8 @@ const JobDescriptions = ({ onUpdate }) => {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingJob, setDeletingJob] = useState(null);
   const [editingJob, setEditingJob] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
@@ -145,18 +147,24 @@ const JobDescriptions = ({ onUpdate }) => {
     }
   };
 
-  const handleDelete = async (jobId) => {
-    if (!confirm('Are you sure you want to delete this job description?')) {
-      return;
-    }
+  const handleDeleteClick = (job) => {
+    setDeletingJob(job);
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingJob) return;
 
     try {
-      const response = await deleteJobDescription(jobId);
+      setSubmitting(true);
+      const response = await deleteJobDescription(deletingJob.id);
       if (response.status === 'success') {
         toast({
           title: 'Success',
           description: 'Job description deleted successfully',
         });
+        setShowDeleteModal(false);
+        setDeletingJob(null);
         fetchJobs();
         if (onUpdate) onUpdate();
       }
@@ -167,6 +175,8 @@ const JobDescriptions = ({ onUpdate }) => {
         description: error.message || 'Failed to delete job description',
         variant: 'destructive',
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -191,8 +201,8 @@ const JobDescriptions = ({ onUpdate }) => {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
+    <div className="space-y-4 w-full max-w-full overflow-x-hidden">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h2 className="text-2xl font-bold">Job Descriptions</h2>
           <p className="text-sm text-muted-foreground">
@@ -220,7 +230,7 @@ const JobDescriptions = ({ onUpdate }) => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-full">
           {jobs.map((job) => (
             <Card key={job.id}>
               <CardHeader>
@@ -264,8 +274,8 @@ const JobDescriptions = ({ onUpdate }) => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => handleDelete(job.id)}
-                    className="text-red-600 hover:text-red-700"
+                    onClick={() => handleDeleteClick(job)}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
@@ -312,6 +322,47 @@ const JobDescriptions = ({ onUpdate }) => {
               resetForm();
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Modal */}
+      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Job Description</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{deletingJob?.title}"? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteModal(false);
+                setDeletingJob(null);
+              }}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteConfirm}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

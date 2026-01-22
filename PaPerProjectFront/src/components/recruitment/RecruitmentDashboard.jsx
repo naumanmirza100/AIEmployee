@@ -66,10 +66,10 @@ const RecruitmentDashboard = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 w-full">
+        <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total CVs Processed</CardTitle>
             <FileText className="h-4 w-4 text-muted-foreground" />
@@ -80,7 +80,7 @@ const RecruitmentDashboard = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Active Jobs</CardTitle>
             <Briefcase className="h-4 w-4 text-muted-foreground" />
@@ -91,7 +91,7 @@ const RecruitmentDashboard = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Interviews</CardTitle>
             <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -102,7 +102,7 @@ const RecruitmentDashboard = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending Interviews</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -115,8 +115,8 @@ const RecruitmentDashboard = () => {
       </div>
 
       {/* Main Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="cv-processing">
             <Upload className="h-4 w-4 mr-2" />
@@ -147,7 +147,7 @@ const RecruitmentDashboard = () => {
               <CardDescription>Get started with recruitment tasks</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-full">
                 <Button
                   variant="outline"
                   className="h-auto flex-col items-start p-4"

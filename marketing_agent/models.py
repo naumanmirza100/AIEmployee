@@ -102,20 +102,43 @@ class Campaign(models.Model):
         return None
     
     def save(self, *args, **kwargs):
-        """Override save to automatically activate sequences when campaign becomes active"""
+        """Override save to automatically activate sequences when campaign becomes active
+        AND automatically start campaigns scheduled for today or earlier"""
         is_new = self.pk is None
         old_status = None
+        old_start_date = None
         
         # Check if status is being changed to 'active' (for existing campaigns)
         if not is_new:
             try:
                 old_campaign = Campaign.objects.get(pk=self.pk)
                 old_status = old_campaign.status
+                old_start_date = old_campaign.start_date
             except Campaign.DoesNotExist:
                 pass  # Shouldn't happen, but handle gracefully
         
-        # Call parent save first (so self.pk exists and relationships work)
+        # AUTOMATIC CAMPAIGN START: Check if campaign should start immediately
+        # Do this BEFORE saving so we can set status to 'active' in one save
+        should_auto_start = False
+        if self.status == 'scheduled' and self.start_date:
+            from django.utils import timezone
+            today = timezone.now().date()
+            if self.start_date <= today:
+                # Campaign should start now - activate it immediately!
+                should_auto_start = True
+                self.status = 'active'  # Change status before saving
+        
+        # Call parent save (campaign will be saved as 'active' if should_auto_start is True)
         super().save(*args, **kwargs)
+        
+        # If campaign was auto-started, activate sequences and log
+        if should_auto_start:
+            sequences_updated = self.email_sequences.update(is_active=True)
+            logger.info(
+                f"🚀 Campaign '{self.name}' (ID: {self.id}) automatically started! "
+                f"Start date: {self.start_date}, Today: {today}. "
+                f"Sequences activated: {sequences_updated}"
+            )
         
         # If status is 'active' (either new campaign or status changed to active), activate all sequences
         if self.status == 'active':

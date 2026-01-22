@@ -103,8 +103,6 @@ class MarketingQAAgent(MarketingBaseAgent):
                 'name': campaign.name,
                 'type': campaign.campaign_type,
                 'status': campaign.status,
-                'budget': float(campaign.budget),
-                'spend': float(campaign.actual_spend),
                 'start_date': campaign.start_date.isoformat() if campaign.start_date else None,
                 'end_date': campaign.end_date.isoformat() if campaign.end_date else None,
                 'metrics': [

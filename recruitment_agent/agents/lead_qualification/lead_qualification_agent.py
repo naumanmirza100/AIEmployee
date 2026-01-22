@@ -25,6 +25,8 @@ class LeadQualificationAgent:
         candidate_insights: Dict[str, Any],
         job_keywords: Optional[List[str]] = None,
         enriched_data: Optional[Dict[str, Any]] = None,
+        interview_threshold: Optional[int] = None,
+        hold_threshold: Optional[int] = None,
     ) -> Dict[str, Any]:
         self._log_step("qualification_start", {"has_keywords": bool(job_keywords), "has_enriched": bool(enriched_data)})
 
@@ -51,7 +53,7 @@ class LeadQualificationAgent:
         role_fit_score = candidate_insights.get("role_fit_score")
         total_exp_years = candidate_insights.get("total_experience_years")
         decision, confidence = self._recruiter_decide(
-            all_skills, inferred_skills, matched, missing, role_fit_score, total_exp_years, parsed_cv, candidate_insights, enriched_data, job_keywords
+            all_skills, inferred_skills, matched, missing, role_fit_score, total_exp_years, parsed_cv, candidate_insights, enriched_data, job_keywords, interview_threshold, hold_threshold
         )
         priority = self._assign_priority(decision, confidence, total_exp_years, matched, inferred_skills, enriched_data)
         
@@ -349,6 +351,8 @@ class LeadQualificationAgent:
         candidate_insights: Dict[str, Any],
         enriched_data: Optional[Dict[str, Any]] = None,
         job_keywords: Optional[List[str]] = None,
+        interview_threshold: Optional[int] = None,
+        hold_threshold: Optional[int] = None,
     ) -> Tuple[str, int]:
         """
         Strict, recruiter-accurate hiring decision based on SKILLS matching.
@@ -456,10 +460,13 @@ class LeadQualificationAgent:
         )
         final_score = max(0, min(100, final_score))
         
-        # DECISION THRESHOLDS: More selective
-        if final_score >= 65:
+        # DECISION THRESHOLDS: Use custom thresholds if provided, otherwise use defaults
+        interview_thresh = interview_threshold if interview_threshold is not None else 65
+        hold_thresh = hold_threshold if hold_threshold is not None else 45
+        
+        if final_score >= interview_thresh:
             decision = "INTERVIEW"  # Strong candidates only
-        elif final_score >= 45:
+        elif final_score >= hold_thresh:
             decision = "HOLD"  # HOLD becomes meaningful
         else:
             decision = "REJECT"  # Weak candidates rejected

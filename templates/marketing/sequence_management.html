@@ -166,6 +166,11 @@
         gap: 0.75rem;
     }
 
+    .delay-inputs input.error {
+        border-color: #ef4444 !important;
+        background-color: #fef2f2 !important;
+    }
+
     .stats-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1114,20 +1119,23 @@
                 </select>
             </div>
             <div style="flex: 1;">
-                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Delay</label>
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Delay <span style="color: #ef4444;">*</span></label>
                 <div class="delay-inputs">
                     <div>
-                        <input type="number" name="step_delay_days_${stepNum}" min="0" value="${stepData ? stepData.delay_days : 0}" placeholder="Days" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <input type="number" name="step_delay_days_${stepNum}" min="0" value="${stepData ? stepData.delay_days : 0}" placeholder="Days" class="delay-days-input" data-step-num="${stepNum}" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
                         <small style="color: #6b7280; font-size: 0.75rem;">Days</small>
                     </div>
                     <div>
-                        <input type="number" name="step_delay_hours_${stepNum}" min="0" max="23" value="${stepData ? stepData.delay_hours : 0}" placeholder="Hours" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <input type="number" name="step_delay_hours_${stepNum}" min="0" max="23" value="${stepData ? stepData.delay_hours : 0}" placeholder="Hours" class="delay-hours-input" data-step-num="${stepNum}" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
                         <small style="color: #6b7280; font-size: 0.75rem;">Hours</small>
                     </div>
                     <div>
-                        <input type="number" name="step_delay_minutes_${stepNum}" min="0" max="59" value="${stepData ? stepData.delay_minutes : 0}" placeholder="Minutes" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
-                        <small style="color: #6b7280; font-size: 0.75rem;">Minutes</small>
+                        <input type="number" name="step_delay_minutes_${stepNum}" min="0" max="59" value="${stepData ? (stepData.delay_days == 0 && stepData.delay_hours == 0 && stepData.delay_minutes < 5 ? 5 : stepData.delay_minutes) : 5}" placeholder="Minutes" class="delay-minutes-input" data-step-num="${stepNum}" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem;">
+                        <small style="color: #6b7280; font-size: 0.75rem;">Minutes (Min: 5)</small>
                     </div>
+                </div>
+                <div class="delay-error-message" data-step-num="${stepNum}" style="display: none; color: #ef4444; font-size: 0.75rem; margin-top: 0.25rem; padding: 0.25rem 0.5rem; background: #fee2e2; border-radius: 0.25rem; border-left: 3px solid #ef4444;">
+                    ⚠️ Minimum delay must be at least 5 minutes (or previous step delay + 5 minutes)
                 </div>
             </div>
             <div style="display: flex; align-items: flex-end;">
@@ -1140,17 +1148,207 @@
 
             document.getElementById('sequence-steps-container').appendChild(stepDiv);
 
+            // Add event listeners for real-time validation
+            const delayInputs = stepDiv.querySelectorAll('.delay-days-input, .delay-hours-input, .delay-minutes-input');
+            delayInputs.forEach(input => {
+                input.addEventListener('input', function() {
+                    validateStepDelay(this);
+                });
+                input.addEventListener('blur', function() {
+                    validateStepDelay(this);
+                });
+                input.addEventListener('change', function() {
+                    validateStepDelay(this);
+                });
+            });
+
             // Renumber all steps to ensure sequential numbering
             renumberSequenceSteps();
+            
+            // Validate this step immediately after adding (with delay to ensure DOM is ready)
+            setTimeout(() => {
+                const minutesInput = stepDiv.querySelector('.delay-minutes-input');
+                if (minutesInput) {
+                    validateStepDelay(minutesInput);
+                }
+            }, 100);
+        }
+
+        // Function to calculate total delay in minutes
+        function calculateTotalDelayMinutes(days, hours, minutes) {
+            return (parseInt(days) || 0) * 24 * 60 + (parseInt(hours) || 0) * 60 + (parseInt(minutes) || 0);
+        }
+
+        // Function to get step index (0-based) from step item
+        function getStepIndex(stepItem) {
+            const allSteps = Array.from(document.querySelectorAll('.step-item'));
+            return allSteps.indexOf(stepItem);
+        }
+
+        // Function to get previous step's delay (only the immediate previous step, not cumulative)
+        function getPreviousStepDelay(currentStepIndex) {
+            if (currentStepIndex === 0) {
+                return 0; // First step has no previous step
+            }
+
+            const allSteps = document.querySelectorAll('.step-item');
+            const previousStepItem = allSteps[currentStepIndex - 1];
+            
+            if (!previousStepItem) return 0;
+
+            const daysInput = previousStepItem.querySelector('input[name^="step_delay_days_"], .delay-days-input');
+            const hoursInput = previousStepItem.querySelector('input[name^="step_delay_hours_"], .delay-hours-input');
+            const minutesInput = previousStepItem.querySelector('input[name^="step_delay_minutes_"], .delay-minutes-input');
+
+            if (daysInput && hoursInput && minutesInput) {
+                const days = parseInt(daysInput.value) || 0;
+                const hours = parseInt(hoursInput.value) || 0;
+                const minutes = parseInt(minutesInput.value) || 0;
+                return calculateTotalDelayMinutes(days, hours, minutes);
+            }
+
+            return 0;
+        }
+
+        // Function to validate step delay (minimum: previous step delay + 5 minutes)
+        function validateStepDelay(inputElement) {
+            const stepItem = inputElement.closest('.step-item');
+            if (!stepItem) return true;
+
+            // Get step index (0-based)
+            const stepIndex = getStepIndex(stepItem);
+
+            // Get all delay inputs for this step
+            const stepNum = inputElement.getAttribute('data-step-num') || 
+                          inputElement.getAttribute('name').match(/\d+/)?.[0];
+            
+            const daysInput = stepItem.querySelector(`input[name="step_delay_days_${stepNum}"], .delay-days-input[data-step-num="${stepNum}"]`);
+            const hoursInput = stepItem.querySelector(`input[name="step_delay_hours_${stepNum}"], .delay-hours-input[data-step-num="${stepNum}"]`);
+            const minutesInput = stepItem.querySelector(`input[name="step_delay_minutes_${stepNum}"], .delay-minutes-input[data-step-num="${stepNum}"]`);
+
+            if (!daysInput || !hoursInput || !minutesInput) return true;
+
+            const days = parseInt(daysInput.value) || 0;
+            const hours = parseInt(hoursInput.value) || 0;
+            const minutes = parseInt(minutesInput.value) || 0;
+
+            const currentStepDelay = calculateTotalDelayMinutes(days, hours, minutes);
+            const previousStepDelay = getPreviousStepDelay(stepIndex);
+            
+            // Minimum required delay: previous step delay + 5 minutes
+            // For first step: minimum 5 minutes
+            // For subsequent steps: previous step delay + 5 minutes
+            const minimumRequired = stepIndex === 0 ? 5 : (previousStepDelay + 5);
+            
+            const errorMessage = stepItem.querySelector('.delay-error-message');
+            const allInputs = [daysInput, hoursInput, minutesInput];
+
+            if (currentStepDelay < minimumRequired) {
+                // Show error with specific message
+                if (errorMessage) {
+                    if (stepIndex === 0) {
+                        errorMessage.textContent = '⚠️ Minimum delay must be at least 5 minutes';
+                    } else {
+                        errorMessage.textContent = `⚠️ Minimum delay must be at least ${minimumRequired} minutes (previous step: ${previousStepDelay} min + 5 min gap)`;
+                    }
+                    errorMessage.style.display = 'block';
+                }
+                // Add error styling to inputs
+                allInputs.forEach(input => {
+                    input.style.borderColor = '#ef4444';
+                    input.style.backgroundColor = '#fef2f2';
+                });
+                return false;
+            } else {
+                // Hide error
+                if (errorMessage) {
+                    errorMessage.style.display = 'none';
+                }
+                // Remove error styling
+                allInputs.forEach(input => {
+                    input.style.borderColor = '#e5e7eb';
+                    input.style.backgroundColor = 'white';
+                });
+                
+                // Trigger validation for next steps (cascade validation)
+                validateNextSteps(stepIndex);
+                return true;
+            }
+        }
+
+        // Function to validate all steps after a changed step (cascade validation)
+        function validateNextSteps(changedStepIndex) {
+            const allSteps = document.querySelectorAll('.step-item');
+            for (let i = changedStepIndex + 1; i < allSteps.length; i++) {
+                const stepItem = allSteps[i];
+                const minutesInput = stepItem.querySelector('input[name^="step_delay_minutes_"], .delay-minutes-input');
+                if (minutesInput) {
+                    validateStepDelay(minutesInput);
+                }
+            }
+        }
+
+        // Function to validate all steps before submission
+        function validateAllStepDelays() {
+            const stepItems = document.querySelectorAll('.step-item');
+            let allValid = true;
+            const invalidSteps = [];
+            let previousStepDelay = 0;
+
+            stepItems.forEach((item, index) => {
+                const daysInput = item.querySelector('input[name^="step_delay_days_"], .delay-days-input');
+                const hoursInput = item.querySelector('input[name^="step_delay_hours_"], .delay-hours-input');
+                const minutesInput = item.querySelector('input[name^="step_delay_minutes_"], .delay-minutes-input');
+
+                if (daysInput && hoursInput && minutesInput) {
+                    const days = parseInt(daysInput.value) || 0;
+                    const hours = parseInt(hoursInput.value) || 0;
+                    const minutes = parseInt(minutesInput.value) || 0;
+
+                    const currentStepDelay = calculateTotalDelayMinutes(days, hours, minutes);
+                    
+                    // Minimum required: previous step delay + 5 minutes (or 5 for first step)
+                    const minimumRequired = index === 0 ? 5 : (previousStepDelay + 5);
+
+                    if (currentStepDelay < minimumRequired) {
+                        allValid = false;
+                        invalidSteps.push(index + 1);
+                        // Trigger validation to show error message
+                        validateStepDelay(minutesInput);
+                    } else {
+                        // Update previous step delay for next iteration
+                        previousStepDelay = currentStepDelay;
+                    }
+                }
+            });
+
+            if (!allValid) {
+                alert(`⚠️ Error: Step${invalidSteps.length > 1 ? 's' : ''} ${invalidSteps.join(', ')} have invalid delays.\n\nEach step must have at least 5 minutes more delay than the previous step's delay.\n\nExample:\n- Step 1: 5 min\n- Step 2: 10 min (5 + 5)\n- Step 3: 15 min (10 + 5)`);
+                return false;
+            }
+
+            return true;
         }
 
         function removeSequenceStep(button) {
             // Remove the step
             const stepItem = button.closest('.step-item');
+            const removedIndex = getStepIndex(stepItem);
             stepItem.remove();
 
             // Renumber all remaining steps sequentially (1, 2, 3...)
             renumberSequenceSteps();
+            
+            // Re-validate all remaining steps (since previous step delays may have changed)
+            setTimeout(() => {
+                const allSteps = document.querySelectorAll('.step-item');
+                allSteps.forEach((item, index) => {
+                    const minutesInput = item.querySelector('input[name^="step_delay_minutes_"], .delay-minutes-input');
+                    if (minutesInput) {
+                        validateStepDelay(minutesInput);
+                    }
+                });
+            }, 100);
         }
 
         function renumberSequenceSteps() {
@@ -1174,26 +1372,34 @@
                 }
 
                 // Update delay input names
-                const delayDaysInput = item.querySelector('input[name^="step_delay_days_"]');
-                const delayHoursInput = item.querySelector('input[name^="step_delay_hours_"]');
-                const delayMinutesInput = item.querySelector('input[name^="step_delay_minutes_"]');
+                const delayDaysInput = item.querySelector('input[name^="step_delay_days_"], .delay-days-input');
+                const delayHoursInput = item.querySelector('input[name^="step_delay_hours_"], .delay-hours-input');
+                const delayMinutesInput = item.querySelector('input[name^="step_delay_minutes_"], .delay-minutes-input');
+                const errorMessage = item.querySelector('.delay-error-message');
 
                 if (delayDaysInput) {
                     const currentValue = delayDaysInput.value;
                     delayDaysInput.setAttribute('name', `step_delay_days_${newStepNum}`);
+                    delayDaysInput.setAttribute('data-step-num', newStepNum);
                     delayDaysInput.value = currentValue; // Preserve value
                 }
 
                 if (delayHoursInput) {
                     const currentValue = delayHoursInput.value;
                     delayHoursInput.setAttribute('name', `step_delay_hours_${newStepNum}`);
+                    delayHoursInput.setAttribute('data-step-num', newStepNum);
                     delayHoursInput.value = currentValue; // Preserve value
                 }
 
                 if (delayMinutesInput) {
                     const currentValue = delayMinutesInput.value;
                     delayMinutesInput.setAttribute('name', `step_delay_minutes_${newStepNum}`);
+                    delayMinutesInput.setAttribute('data-step-num', newStepNum);
                     delayMinutesInput.value = currentValue; // Preserve value
+                }
+
+                if (errorMessage) {
+                    errorMessage.setAttribute('data-step-num', newStepNum);
                 }
             });
         }
@@ -1243,12 +1449,16 @@
                             const delayHoursInput = item.querySelector(`input[name="step_delay_hours_${stepNum}"]`);
                             const delayMinutesInput = item.querySelector(`input[name="step_delay_minutes_${stepNum}"]`);
 
+                            const delayDays = delayDaysInput ? parseInt(delayDaysInput.value || 0) : 0;
+                            const delayHours = delayHoursInput ? parseInt(delayHoursInput.value || 0) : 0;
+                            const delayMinutes = delayMinutesInput ? parseInt(delayMinutesInput.value || 0) : 0;
+
                             steps.push({
                                 step_order: index + 1, // Use sequential order (1, 2, 3...)
                                 template_id: parseInt(templateId),
-                                delay_days: delayDaysInput ? parseInt(delayDaysInput.value || 0) : 0,
-                                delay_hours: delayHoursInput ? parseInt(delayHoursInput.value || 0) : 0,
-                                delay_minutes: delayMinutesInput ? parseInt(delayMinutesInput.value || 0) : 0,
+                                delay_days: delayDays,
+                                delay_hours: delayHours,
+                                delay_minutes: delayMinutes,
                             });
                         }
                     });
@@ -1258,6 +1468,11 @@
                     if (steps.length === 0) {
                         alert('Please add at least one step to the sequence');
                         return;
+                    }
+
+                    // Validate that all step delays are at least 5 minutes
+                    if (!validateAllStepDelays()) {
+                        return; // Stop submission if validation fails
                     }
 
                     // Validate required fields

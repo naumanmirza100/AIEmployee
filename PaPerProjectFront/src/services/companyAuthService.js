@@ -191,6 +191,11 @@ export const companyApi = {
       body: JSON.stringify(data),
     });
   },
+  delete: (endpoint) => {
+    return companyApiRequest(endpoint, {
+      method: 'DELETE',
+    });
+  },
 };
 
 export { getCompanyToken, getCompanyUser };
