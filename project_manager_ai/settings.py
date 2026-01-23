@@ -330,54 +330,18 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 # Database (SQL Server Express)
 # --------------------
 
-
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
         'NAME': os.getenv('DB_NAME', 'project_manager_db'),
-        'HOST': r'localhost',
+        # 'HOST': r'localhost\SQLExpress',
+        'HOST': r'DESKTOP-JMIOEV2',
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
-            'disable_email_check': True,  # Disable database-level email validation (uses REGEXP_LIKE which SQL Server doesn't support)
+            'trusted_connection': 'yes',
         },
-    }
-    
-    if USE_WINDOWS_AUTH:
-        # Windows Authentication (Trusted Connection)
-        db_config['OPTIONS']['trusted_connection'] = 'yes'
-    else:
-        # SQL Server Authentication (username/password)
-        db_config['USER'] = os.getenv('DB_USER', '')
-        db_config['PASSWORD'] = os.getenv('DB_PASSWORD', '')
-        db_config['OPTIONS']['extra_params'] = 'TrustServerCertificate=yes'
-    
-    DATABASES = {
-        'default': db_config
-    }
-    
-    print("\n" + "="*60)
-    print("DATABASE CONFIGURATION:")
-    print(f"  Engine: SQL Server")
-    print(f"  Host: {DB_HOST}")
-    print(f"  Database: {DB_NAME}")
-    print(f"  Authentication: {'Windows (Trusted)' if USE_WINDOWS_AUTH else 'SQL Server'}")
-    print("="*60 + "\n")
-else:
-    # Default SQLite database (for development - no setup required)
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
-    
-    print("\n" + "="*60)
-    print("DATABASE CONFIGURATION:")
-    print(f"  Engine: SQLite")
-    print(f"  Database: {BASE_DIR / 'db.sqlite3'}")
-    print("="*60 + "\n")
 
-
+    }}
 
 # --------------------
 # Password validation
@@ -659,3 +623,4 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.MultiPartParser',
     ],
 }
+
