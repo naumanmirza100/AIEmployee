@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,13 +6,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
-import { Loader2, Send, CheckCircle2, XCircle, Sparkles } from 'lucide-react';
+import { Loader2, Send, CheckCircle2, XCircle, Sparkles, Upload, FileText, X } from 'lucide-react';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
   const [question, setQuestion] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const fileInputRef = useRef(null);
   const { toast } = useToast();
   
   // Ensure projects is always an array
@@ -84,6 +87,110 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
     }
   };
 
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      const allowedTypes = ['.txt', '.pdf', '.docx'];
+      const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+      
+      if (!allowedTypes.includes(fileExtension)) {
+        toast({
+          title: 'Invalid file type',
+          description: `Please upload a ${allowedTypes.join(', ')} file`,
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+          title: 'File too large',
+          description: 'Please upload a file smaller than 10MB',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      setSelectedFile(file);
+    }
+  };
+
+  const handleFileUpload = async () => {
+    if (!selectedFile) {
+      toast({
+        title: 'Error',
+        description: 'Please select a file to upload',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setFileLoading(true);
+      setResult(null);
+      
+      const projectId = selectedProjectId && selectedProjectId !== "all" ? selectedProjectId : null;
+      const response = await pmAgentService.projectPilotFromFile(selectedFile, projectId);
+
+      console.log('Project Pilot from file response:', response);
+      
+      if (response.status === 'success') {
+        setResult(response);
+        
+        // Show success toast
+        const actionResults = response.data?.action_results || [];
+        if (actionResults.length > 0) {
+          const successCount = actionResults.filter(r => r.success).length;
+          if (successCount > 0) {
+            toast({
+              title: 'Success',
+              description: `${successCount} action(s) completed successfully from file`,
+            });
+            // Refresh projects if any were created/updated
+            if (onProjectUpdate) {
+              onProjectUpdate();
+            }
+          }
+        } else if (response.data?.answer || response.data?.cannot_do) {
+          toast({
+            title: 'Success',
+            description: 'File processed successfully',
+          });
+        }
+        
+        // Clear file selection
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } else {
+        toast({
+          title: 'Error',
+          description: response.message || 'Failed to process file',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Project Pilot from file error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to process file',
+        variant: 'destructive',
+      });
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const removeFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card>
@@ -93,11 +200,96 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
             Project Pilot Agent
           </CardTitle>
           <CardDescription>
-            Create projects, tasks, and manage operations using natural language.
+            Create projects, tasks, and manage operations using natural language or upload a document (txt, pdf, docx).
             Example: "Create a new project called 'Website Redesign' with high priority"
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* File Upload Section */}
+          <div className="mb-6 p-4 border rounded-lg bg-muted/50">
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-sm font-medium flex items-center gap-2">
+                <Upload className="h-4 w-4" />
+                Upload Document (txt, pdf, docx)
+              </label>
+            </div>
+            
+            {!selectedFile ? (
+              <div className="space-y-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.pdf,.docx"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <label htmlFor="file-upload">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Choose File
+                  </Button>
+                </label>
+                <p className="text-xs text-muted-foreground text-center">
+                  Supported formats: .txt, .pdf, .docx (max 10MB)
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-2 bg-background rounded border">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">{selectedFile.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      ({(selectedFile.size / 1024).toFixed(2)} KB)
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={removeFile}
+                    className="h-6 w-6 p-0"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleFileUpload}
+                  disabled={fileLoading}
+                  className="w-full"
+                >
+                  {fileLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processing File...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Process File
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative mb-4">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or</span>
+            </div>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="text-sm font-medium mb-2 block">

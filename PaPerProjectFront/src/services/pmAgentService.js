@@ -100,8 +100,44 @@ export const generateSubtasks = async (projectId) => {
   }
 };
 
+/**
+ * Project Pilot from File - Upload a file and process its content
+ * @param {File} file - File to upload (txt, pdf, or docx)
+ * @param {number|null} projectId - Optional project ID
+ */
+export const projectPilotFromFile = async (file, projectId = null) => {
+  try {
+    const token = localStorage.getItem('company_auth_token');
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (projectId) {
+      formData.append('project_id', projectId);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/project-manager/ai/project-pilot/upload-file`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${token}`,
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || `HTTP error! status: ${response.status}`);
+    }
+    return data;
+  } catch (error) {
+    console.error('Project Pilot from File error:', error);
+    throw error;
+  }
+};
+
 export default {
   projectPilot,
+  projectPilotFromFile,
   taskPrioritization,
   knowledgeQA,
   timelineGantt,
