@@ -103,7 +103,7 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         
         Args:
             user_id (int): User ID
-            campaign_data (Dict): Campaign requirements (name, goals, target_audience, budget, etc.)
+            campaign_data (Dict): Campaign requirements (name, goals, target_audience, etc.)
             context (Dict): Additional context (market research, competitor data, etc.)
             
         Returns:
@@ -139,7 +139,7 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         
         Args:
             user_id (int): User ID
-            campaign_data (Dict): Campaign data (name, goals, channels, budget, etc.)
+            campaign_data (Dict): Campaign data (name, goals, channels, etc.)
             context (Dict): Additional context
             
         Returns:
@@ -155,7 +155,6 @@ class OutreachCampaignAgent(MarketingBaseAgent):
             target_audience = campaign_data.get('target_audience', {})
             
             # Extract individual goal fields (from direct fields or goals dict)
-            target_revenue = campaign_data.get('target_revenue') or (goals.get('revenue') if isinstance(goals, dict) else None)
             target_leads = campaign_data.get('target_leads') or (goals.get('leads') if isinstance(goals, dict) else None)
             target_conversions = campaign_data.get('target_conversions') or (goals.get('conversions') if isinstance(goals, dict) else None)
             
@@ -196,9 +195,7 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                 status='draft',
                 start_date=start_date,
                 end_date=end_date,
-                budget=campaign_data.get('budget', 0),
                 # Individual goal fields
-                target_revenue=target_revenue,
                 target_leads=target_leads,  # This is target QUALIFIED/interested leads, not total uploaded
                 target_conversions=target_conversions,
                 # Individual target audience fields
@@ -920,7 +917,6 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
             context += f"- Name: {campaign_data.get('name', 'New Campaign')}\n"
             context += f"- Goals: {json.dumps(campaign_data.get('goals', {}), indent=2)}\n"
             context += f"- Target Audience: {json.dumps(campaign_data.get('target_audience', {}), indent=2)}\n"
-            context += f"- Budget: ${campaign_data.get('budget', 0):,.2f}\n"
             context += f"- Preferred Channels: {', '.join(campaign_data.get('channels', []))}\n"
             context += f"- Timeline: {campaign_data.get('timeline', 'Not specified')}\n\n"
         
@@ -991,10 +987,9 @@ Create a detailed EMAIL campaign design that includes:
 - Key milestones
 - Dependencies
 
-## BUDGET ALLOCATION
-- Email campaign budget
+## RESOURCE ALLOCATION
+- Email campaign resources
 - Cost estimates for email tools/services
-- ROI projections
 
 ## PERFORMANCE METRICS
 - Email KPIs (open rate, click-through rate, conversion rate, etc.)
@@ -1094,7 +1089,6 @@ messaging guidelines, performance metrics, and specific recommendations."""
 
 Campaign: {campaign.name}
 Type: Email Campaign
-Budget: ${float(campaign.budget):,.2f}
 Goals: {json.dumps(campaign.goals, indent=2)}
 
 Provide an email campaign launch plan that includes:
@@ -1207,11 +1201,6 @@ Focus ONLY on email marketing launch activities."""
         else:
             performance['conversion_rate'] = 0
         
-        # ROI
-        performance['roi'] = campaign.get_roi()
-        performance['spend'] = float(campaign.actual_spend)
-        performance['budget'] = float(campaign.budget)
-        
         return performance
     
     def _generate_management_plan(self, campaign: Campaign, performance: Dict,
@@ -1228,15 +1217,13 @@ Performance:
 - Conversions: {performance.get('total_conversions', 0):,.0f}
 - CTR: {performance.get('ctr', 0):.2f}%
 - Conversion Rate: {performance.get('conversion_rate', 0):.2f}%
-- Spend: ${performance.get('spend', 0):,.2f} / Budget: ${performance.get('budget', 0):,.2f}
 
 Provide:
 1. Performance assessment
 2. Channel-specific recommendations
 3. Messaging consistency check
 4. Timing and scheduling adjustments
-5. Budget optimization suggestions
-6. Priority actions"""
+5. Priority actions"""
         
         try:
             management_text = self._call_llm_for_reasoning(
@@ -1331,17 +1318,14 @@ Current Performance:
 - Conversions: {performance.get('total_conversions', 0):,.0f}
 - CTR: {performance.get('ctr', 0):.2f}%
 - Conversion Rate: {performance.get('conversion_rate', 0):.2f}%
-- ROI: {performance.get('roi', 'N/A')}
-- Spend: ${performance.get('spend', 0):,.2f} / Budget: ${performance.get('budget', 0):,.2f}
 
 Provide optimization recommendations:
 1. Performance improvements by channel
-2. Budget reallocation suggestions
-3. Targeting optimizations
-4. Creative and messaging improvements
-5. Timing and scheduling optimizations
-6. A/B testing opportunities
-7. Priority actions with expected impact"""
+2. Targeting optimizations
+3. Creative and messaging improvements
+4. Timing and scheduling optimizations
+5. A/B testing opportunities
+6. Priority actions with expected impact"""
         
         try:
             optimization_text = self._call_llm_for_reasoning(

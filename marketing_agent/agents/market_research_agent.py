@@ -720,14 +720,12 @@ For each major opportunity:
 
 ### Opportunity 1: [Name]
 - **Growth Potential**: [High/Medium/Low]
-- **Estimated ROI**: [Estimate or range]
 - **Feasibility**: [Easy/Medium/Difficult]
 - **Entry Strategy**: [How to pursue this]
 - **Required Resources**: [What's needed]
 
 ### Opportunity 2: [Name]
 - **Growth Potential**: [High/Medium/Low]
-- **Estimated ROI**: [Estimate or range]
 - **Feasibility**: [Easy/Medium/Difficult]
 - **Entry Strategy**: [How to pursue this]
 - **Required Resources**: [What's needed]
@@ -780,10 +778,10 @@ Provide a concise summary (2-3 paragraphs):
 
 Create an opportunities table:
 
-| Opportunity | Market Gap/Need | Growth Potential | Estimated ROI | Feasibility | Priority |
-|------------|----------------|------------------|---------------|-------------|----------|
-| [Opp 1] | [Gap] | High/Med/Low | [Estimate] | Easy/Med/Diff | High/Med/Low |
-| [Opp 2] | [Gap] | High/Med/Low | [Estimate] | Easy/Med/Diff | High/Med/Low |
+| Opportunity | Market Gap/Need | Growth Potential | Feasibility | Priority |
+|------------|----------------|------------------|-------------|----------|
+| [Opp 1] | [Gap] | High/Med/Low | Easy/Med/Diff | High/Med/Low |
+| [Opp 2] | [Gap] | High/Med/Low | Easy/Med/Diff | High/Med/Low |
 
 ### Market Gaps & Unmet Needs
 • Gap 1: [Description]

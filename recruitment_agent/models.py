@@ -90,13 +90,15 @@ class RecruiterQualificationSettings(models.Model):
 class RecruiterInterviewSettings(models.Model):
     """
     Recruiter interview scheduling preferences.
-    Each recruiter can set their own preferences for interview scheduling:
+    Each job can have its own interview scheduling settings:
     - Date range for scheduling interviews (from date to date)
     - Time range for daily interview hours (start time to end time)
     - Interview time gap (minutes between slots)
+    - Separate time slots for each job
     """
-    recruiter = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True, related_name='recruiter_interview_settings')
-    company_user = models.OneToOneField('core.CompanyUser', on_delete=models.CASCADE, null=True, blank=True, related_name='recruiter_interview_settings_company')
+    recruiter = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='recruiter_interview_settings')
+    company_user = models.ForeignKey('core.CompanyUser', on_delete=models.CASCADE, null=True, blank=True, related_name='recruiter_interview_settings_company')
+    job = models.ForeignKey('JobDescription', on_delete=models.CASCADE, null=True, blank=True, related_name='interview_settings', help_text='Job description this setting belongs to. If null, applies to all jobs (backward compatibility)')
     
     # Date range for scheduling interviews
     schedule_from_date = models.DateField(
@@ -139,9 +141,16 @@ class RecruiterInterviewSettings(models.Model):
     class Meta:
         verbose_name = 'Recruiter Interview Settings'
         verbose_name_plural = 'Recruiter Interview Settings'
+        constraints = [
+            models.UniqueConstraint(fields=['company_user', 'job'], name='unique_company_user_job_settings', condition=models.Q(job__isnull=False)),
+            models.UniqueConstraint(fields=['company_user'], name='unique_company_user_no_job_settings', condition=models.Q(job__isnull=True)),
+            models.UniqueConstraint(fields=['recruiter', 'job'], name='unique_recruiter_job_settings', condition=models.Q(job__isnull=False)),
+        ]
     
     def __str__(self):
-        return f"Interview Settings for {self.recruiter.username}"
+        if self.job:
+            return f"Interview Settings for {self.job.title}"
+        return f"Interview Settings for {self.recruiter.username if self.recruiter else 'Company User'}"
 
 
 class JobDescription(models.Model):

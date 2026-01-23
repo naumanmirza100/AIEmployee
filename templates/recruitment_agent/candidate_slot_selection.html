@@ -373,8 +373,8 @@
         </div>
         {% else %}
         <div class="header">
-            <h1>📅 Available Interview Time Slots</h1>
-            <p>Please select a time slot that works best for you</p>
+            <h1>📅 Select Your Interview Slot</h1>
+            <p>These slots are for your <strong>{{ interview.job_role }}</strong> interview. Pick a time that works best for you.</p>
         </div>
 
         {% if messages %}
@@ -386,7 +386,7 @@
         {% endif %}
 
         <div class="interview-info">
-            <h2>Interview Details</h2>
+            <h2>Interview Details – {{ interview.job_role }}</h2>
             <div class="info-item"><strong>Position:</strong> {{ interview.job_role }}</div>
             <div class="info-item"><strong>Candidate:</strong> {{ interview.candidate_name }}</div>
             <div class="info-item"><strong>Type:</strong> {{ interview.get_interview_type_display }}</div>
@@ -421,6 +421,7 @@
                     if (data.success) {
                         timeSlotsData = data.time_slots || [];
                         takenSlots = data.taken_slots || [];
+                        window.slotJobTitle = data.job_title || null;
                         displayTimeSlotsGrid();
                     } else {
                         document.getElementById('timeSlotsGrid').innerHTML = 
@@ -445,8 +446,9 @@
 
             function displayTimeSlotsGrid() {
                 if (!timeSlotsData || timeSlotsData.length === 0) {
+                    const jobLabel = window.slotJobTitle ? ` for ${window.slotJobTitle}` : '';
                     document.getElementById('timeSlotsGrid').innerHTML = 
-                        '<div style="text-align: center; padding: 40px; color: var(--text-secondary);">No available time slots found. Please contact the recruiter.</div>';
+                        `<div style="text-align: center; padding: 40px; color: var(--text-secondary);">No available time slots found${jobLabel}. Please contact the recruiter.</div>`;
                     return;
                 }
 
@@ -650,6 +652,7 @@
                         if (data.success) {
                             takenSlots = data.taken_slots || [];
                             timeSlotsData = data.time_slots || [];
+                            window.slotJobTitle = data.job_title || null;
                             
                             // Check if selected slot is now taken or scheduled
                             const selectedSlotData = timeSlotsData.find(slot => slot.datetime === selectedSlot);

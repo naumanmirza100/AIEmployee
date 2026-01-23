@@ -432,7 +432,6 @@
                         <option value="What are our top performing campaigns and why?">What are our top performing campaigns and why?</option>
                     </optgroup>
                     <optgroup label="📈 Goals & Targets">
-                        <option value="Are we meeting our revenue targets?">Are we meeting our revenue targets?</option>
                         <option value="How many leads have we generated this month?">How many leads have we generated this month?</option>
                         <option value="What is our lead conversion rate?">What is our lead conversion rate?</option>
                         <option value="Are we on track to meet our campaign goals?">Are we on track to meet our campaign goals?</option>
@@ -667,20 +666,6 @@
                 />
             </div>
 
-                        <div class="form-group" id="campaign-budget-group" style="margin-bottom: 0;">
-                            <label for="campaign-budget">
-                                <span>💰</span> Budget ($)
-                            </label>
-                            <input 
-                                type="number" 
-                                id="campaign-budget" 
-                                name="campaign_budget" 
-                                placeholder="10000"
-                                step="0.01"
-                                min="0"
-                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
-                            />
-                        </div>
                     </div>
 
                     <div class="form-group" id="campaign-description-group" style="margin-top: 1rem; margin-bottom: 0;">
@@ -711,21 +696,6 @@
                     <div style="margin-bottom: 1.5rem;">
                         <h6 style="margin: 0 0 1rem 0; color: var(--text-primary); font-size: 1rem; font-weight: 600;">📊 Primary Goals</h6>
                         <div class="form-grid">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="target-revenue">
-                                    <span>💵</span> Target Revenue ($)
-                    </label>
-                                <input 
-                                    type="number" 
-                                    id="target-revenue" 
-                                    name="target_revenue" 
-                                    placeholder="50000"
-                                    step="0.01"
-                                    min="0"
-                                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
-                                />
-                                <div class="field-hint">Total revenue goal for this campaign</div>
-                            </div>
                             
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label for="target-leads">
@@ -987,7 +957,8 @@
                             <span>📋</span> Document Type <span class="required-field">*</span>
                         </label>
                         <select id="document-type" name="document_type" required
-                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                            style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;"
+                            onchange="updateDocumentCampaignRequirement()">
                             <option value="">-- Select Document Type --</option>
                             <option value="strategy">📊 Marketing Strategy</option>
                             <option value="proposal">📝 Campaign Proposal</option>
@@ -998,10 +969,10 @@
                         <div class="field-hint">Choose the type of document you want to create</div>
                     </div>
 
-                    <!-- Campaign Selection (Optional) -->
-                    <div class="form-group">
+                    <!-- Campaign Selection -->
+                    <div class="form-group" id="document-campaign-group">
                         <label for="document-campaign-select">
-                            <span>🎯</span> Associate with Campaign (Optional)
+                            <span>🎯</span> Associate with Campaign <span class="required-field" id="document-campaign-required" style="display: none;">*</span>
                         </label>
                         <select id="document-campaign-select" name="campaign_id"
                             style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
@@ -1010,7 +981,7 @@
                             <option value="{{ campaign.id }}">{{ campaign.name }} ({{ campaign.get_status_display }})</option>
                             {% endfor %}
                         </select>
-                        <div class="field-hint">Optionally link this document to a campaign for context</div>
+                        <div class="field-hint" id="document-campaign-hint">Optionally link this document to a campaign for context</div>
                     </div>
 
                     <!-- Document Title -->
@@ -1036,7 +1007,7 @@
                         <textarea 
                             id="document-requirements" 
                             name="requirements" 
-                            placeholder="Describe what you want in this document. For example: 'Focus on digital marketing channels, target B2B audience, include budget breakdown and ROI projections...'"
+                            placeholder="Describe what you want in this document. For example: 'Focus on digital marketing channels, target B2B audience, include ROI projections...'"
                             rows="4"
                             style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem; resize: vertical;"
                         ></textarea>
@@ -1584,12 +1555,6 @@
         if (designedCampaignData.description && document.getElementById('campaign-description')) {
             document.getElementById('campaign-description').value = designedCampaignData.description;
         }
-        if (designedCampaignData.budget && document.getElementById('campaign-budget')) {
-            document.getElementById('campaign-budget').value = designedCampaignData.budget;
-        }
-        if (designedCampaignData.target_revenue && document.getElementById('target-revenue')) {
-            document.getElementById('target-revenue').value = designedCampaignData.target_revenue;
-        }
         if (designedCampaignData.target_leads && document.getElementById('target-leads')) {
             document.getElementById('target-leads').value = designedCampaignData.target_leads;
         }
@@ -1711,10 +1676,8 @@
                 // Populate Basic Information fields
                 setFieldValue('campaign-name', campaign.name);
                 setFieldValue('campaign-description', campaign.description);
-                setFieldValue('campaign-budget', campaign.budget);
 
                 // Populate Goals fields
-                setFieldValue('target-revenue', campaign.target_revenue);
                 setFieldValue('target-leads', campaign.target_leads);
                 setFieldValue('target-conversions', campaign.target_conversions);
 
@@ -1736,13 +1699,11 @@
                     // Show the basic form fields
                     const campaignNameGroup = document.getElementById('campaign-name-group');
                     const campaignDescriptionGroup = document.getElementById('campaign-description-group');
-                    const campaignBudgetGroup = document.getElementById('campaign-budget-group');
                     const campaignStartDateGroup = document.getElementById('campaign-start-date-group');
                     const campaignEndDateGroup = document.getElementById('campaign-end-date-group');
 
                     if (campaignNameGroup) campaignNameGroup.style.display = 'block';
                     if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
-                    if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
                     if (campaignStartDateGroup) campaignStartDateGroup.style.display = 'block';
                     if (campaignEndDateGroup) campaignEndDateGroup.style.display = 'block';
                 }
@@ -1760,8 +1721,8 @@
     // Clear campaign form
     function clearCampaignForm() {
         const fields = [
-            'campaign-name', 'campaign-description', 'campaign-budget',
-            'target-revenue', 'target-leads', 'target-conversions',
+            'campaign-name', 'campaign-description',
+            'target-leads', 'target-conversions',
             'age-range', 'location', 'interests', 'industry', 'company-size', 'language',
             'campaign-start-date', 'campaign-end-date'
         ];
@@ -1781,7 +1742,6 @@
         const campaignSelectGroup = document.getElementById('campaign-select-group');
         const campaignNameGroup = document.getElementById('campaign-name-group');
         const campaignDescriptionGroup = document.getElementById('campaign-description-group');
-        const campaignBudgetGroup = document.getElementById('campaign-budget-group');
         const campaignStartDateGroup = document.getElementById('campaign-start-date-group');
         const campaignEndDateGroup = document.getElementById('campaign-end-date-group');
         const submitBtn = document.getElementById('campaign-submit-btn');
@@ -1810,10 +1770,9 @@
 
         // Reset all groups
         campaignSelectGroup.style.display = 'none';
-        // Note: campaign-name-group, campaign-description-group, and campaign-budget-group are commented out
+        // Note: campaign-name-group, campaign-description-group are commented out
         if (campaignNameGroup) campaignNameGroup.style.display = 'block';
         if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
-        if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
         campaignStartDateGroup.style.display = 'none';
         campaignEndDateGroup.style.display = 'none';
         
@@ -1838,7 +1797,6 @@
             // Keep form fields visible so they can be auto-filled and viewed (if they exist)
             if (campaignNameGroup) campaignNameGroup.style.display = 'block';
             if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
-            if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
         } else if (action === 'schedule') {
             submitBtn.textContent = '📅 Schedule Campaign';
             campaignSelectGroup.style.display = 'block';
@@ -1847,7 +1805,6 @@
             // Keep form fields visible so they can be auto-filled and viewed (if they exist)
             if (campaignNameGroup) campaignNameGroup.style.display = 'block';
             if (campaignDescriptionGroup) campaignDescriptionGroup.style.display = 'block';
-            if (campaignBudgetGroup) campaignBudgetGroup.style.display = 'block';
         }
     }
 
@@ -1891,11 +1848,6 @@
         campaignData.campaign_type = 'email';
         campaignData.channels = ['email'];
 
-        // Get budget
-        if (document.getElementById('campaign-budget') && document.getElementById('campaign-budget').value) {
-            campaignData.budget = parseFloat(document.getElementById('campaign-budget').value);
-        }
-
         // Build goals from individual fields
         const goals = {};
         const getValue = (id) => {
@@ -1912,11 +1864,6 @@
         };
 
         // Primary Goals
-        if (getValue('target-revenue')) {
-            const val = getNumberValue('target-revenue');
-            goals.revenue = val;
-            campaignData.target_revenue = val;
-        }
         if (getValue('target-leads')) {
             const val = getIntValue('target-leads');
             goals.leads = val;
@@ -2060,9 +2007,7 @@
                     designedCampaignData = {
                         name: document.getElementById('campaign-name')?.value || '',
                         description: document.getElementById('campaign-description')?.value || '',
-                        budget: document.getElementById('campaign-budget')?.value || '',
                         // Store all form data
-                        target_revenue: document.getElementById('target-revenue')?.value || '',
                         target_leads: document.getElementById('target-leads')?.value || '',
                         target_conversions: document.getElementById('target-conversions')?.value || '',
                         age_range: document.getElementById('age-range')?.value || '',
@@ -2351,6 +2296,14 @@
             return;
         }
 
+        // Validate campaign selection for report and brief
+        const campaignId = document.getElementById('document-campaign-select').value;
+        if ((documentType === 'report' || documentType === 'brief') && !campaignId) {
+            alert('A campaign must be selected to create a ' + (documentType === 'report' ? 'Performance Report' : 'Campaign Brief') + '. Please select a campaign first.');
+            document.getElementById('document-campaign-select').focus();
+            return;
+        }
+
         const loading = document.getElementById('document-loading');
         const submitText = document.getElementById('document-submit-text');
         const results = document.getElementById('document-results');
@@ -2368,8 +2321,6 @@
                 requirements: document.getElementById('document-requirements').value,
                 key_points: document.getElementById('document-context').value
             };
-
-            const campaignId = document.getElementById('document-campaign-select').value;
             
             const requestData = {
                 action: action,
@@ -2671,6 +2622,31 @@
         } catch (error) {
             console.error('Error deleting notification:', error);
             alert('Error deleting notification: ' + error.message);
+        }
+    }
+    
+    // Update campaign requirement based on document type
+    function updateDocumentCampaignRequirement() {
+        const documentType = document.getElementById('document-type').value;
+        const campaignSelect = document.getElementById('document-campaign-select');
+        const campaignRequired = document.getElementById('document-campaign-required');
+        const campaignHint = document.getElementById('document-campaign-hint');
+        
+        // Require campaign for Performance Report and Campaign Brief
+        if (documentType === 'report' || documentType === 'brief') {
+            campaignSelect.required = true;
+            if (campaignRequired) campaignRequired.style.display = 'inline';
+            if (campaignHint) {
+                campaignHint.textContent = 'Campaign selection is required for ' + (documentType === 'report' ? 'Performance Report' : 'Campaign Brief') + ' documents.';
+                campaignHint.style.color = '#e74c3c';
+            }
+        } else {
+            campaignSelect.required = false;
+            if (campaignRequired) campaignRequired.style.display = 'none';
+            if (campaignHint) {
+                campaignHint.textContent = 'Optionally link this document to a campaign for context';
+                campaignHint.style.color = '';
+            }
         }
     }
     

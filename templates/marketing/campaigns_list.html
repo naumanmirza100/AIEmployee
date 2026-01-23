@@ -283,8 +283,6 @@
                     <th>Campaign Name</th>
                     <th>Status</th>
                     <th>Type</th>
-                    <th>Budget</th>
-                    <th>Spent</th>
                     <th>Created</th>
                     <th>Actions</th>
                 </tr>
@@ -302,8 +300,6 @@
                         <span class="status-badge status-{{ campaign.status }}">{{ campaign.get_status_display }}</span>
                     </td>
                     <td class="campaign-meta">{{ campaign.get_campaign_type_display }}</td>
-                    <td class="campaign-meta">${{ campaign.budget|floatformat:2 }}</td>
-                    <td class="campaign-meta">${{ campaign.actual_spend|floatformat:2 }}</td>
                     <td class="campaign-meta">{{ campaign.created_at|date:"M d, Y" }}</td>
                     <td>
                         <a href="{% url 'campaign_detail' campaign.id %}" class="btn btn-primary btn-sm">

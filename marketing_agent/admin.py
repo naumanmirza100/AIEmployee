@@ -4,7 +4,7 @@ from .models import Campaign, MarketResearch, CampaignPerformance, MarketingDocu
 
 @admin.register(Campaign)
 class CampaignAdmin(admin.ModelAdmin):
-    list_display = ['name', 'campaign_type', 'status', 'owner', 'budget', 'actual_spend', 'start_date', 'created_at']
+    list_display = ['name', 'campaign_type', 'status', 'owner', 'start_date', 'created_at']
     list_filter = ['campaign_type', 'status', 'created_at']
     search_fields = ['name', 'description']
     readonly_fields = ['created_at', 'updated_at']
@@ -12,8 +12,8 @@ class CampaignAdmin(admin.ModelAdmin):
         ('Basic Information', {
             'fields': ('name', 'description', 'campaign_type', 'status', 'owner')
         }),
-        ('Dates & Budget', {
-            'fields': ('start_date', 'end_date', 'budget', 'actual_spend')
+        ('Dates', {
+            'fields': ('start_date', 'end_date')
         }),
         ('Configuration', {
             'fields': ('target_audience', 'goals', 'channels')

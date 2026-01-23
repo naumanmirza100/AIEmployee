@@ -103,7 +103,7 @@ const JobDescriptions = ({ onUpdate }) => {
       department: job.department || '',
       type: job.type || 'Full-time',
       requirements: job.requirements || '',
-      parse_keywords: false,
+      parse_keywords: true, // keywords regenerated when description is updated
     });
     setShowEditModal(true);
   };

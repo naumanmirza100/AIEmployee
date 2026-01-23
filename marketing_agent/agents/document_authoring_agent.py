@@ -95,6 +95,14 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         except User.DoesNotExist:
             return {'success': False, 'error': 'User not found'}
         
+        # Require campaign for Performance Report and Campaign Brief
+        if document_type in ['report', 'brief']:
+            if not campaign_id:
+                return {
+                    'success': False, 
+                    'error': f'A campaign must be selected to create a {document_type.title()} document. Please select a campaign first.'
+                }
+        
         # Get campaign if provided
         campaign = None
         if campaign_id:
@@ -289,8 +297,6 @@ Begin writing the document now.
             'status': campaign.get_status_display(),
             'start_date': str(campaign.start_date) if campaign.start_date else None,
             'end_date': str(campaign.end_date) if campaign.end_date else None,
-            'budget': float(campaign.budget) if campaign.budget else None,
-            'target_revenue': float(campaign.target_revenue) if campaign.target_revenue else None,
             'target_leads': campaign.target_leads,
             'target_conversions': campaign.target_conversions,
         }
@@ -366,11 +372,7 @@ Begin writing the document now.
             lines.append(f"End Date: {campaign_data['end_date']}")
         
         lines.append("")
-        lines.append("=== BUDGET AND TARGETS ===")
-        if 'budget' in campaign_data:
-            lines.append(f"Budget: ${campaign_data['budget']:,.2f}")
-        if 'target_revenue' in campaign_data:
-            lines.append(f"Target Revenue: ${campaign_data['target_revenue']:,.2f}")
+        lines.append("=== TARGETS ===")
         if 'target_leads' in campaign_data:
             lines.append(f"Target Leads: {campaign_data['target_leads']}")
         if 'target_conversions' in campaign_data:
@@ -446,7 +448,7 @@ Create a comprehensive Marketing Strategy document with:
 - Target Audience Analysis
 - Marketing Objectives and Goals
 - Marketing Channels and Tactics
-- Budget Allocation
+- Resource Allocation
 - Timeline and Milestones
 - Success Metrics and KPIs
 - Risk Assessment
@@ -460,9 +462,9 @@ Create a professional Campaign Proposal document with:
 - Target Audience
 - Campaign Strategy
 - Tactics and Channels
-- Budget Breakdown
+- Resource Breakdown
 - Timeline
-- Expected Results and ROI
+- Expected Results
 - Conclusion (MUST include a compelling summary, call to action, and clear next steps for approval/implementation)
 """,
             'report': """
@@ -483,7 +485,6 @@ Create a comprehensive Campaign Brief document with:
 - Target Audience
 - Key Messaging
 - Campaign Timeline
-- Budget
 - Success Criteria
 - Email Campaign Performance (MUST use REAL email sending data if provided: emails sent, opened, clicked rates)
 - Lead Engagement Data (MUST use REAL lead data if provided: number of leads, lead details, engagement metrics)

@@ -44,7 +44,6 @@ class MarketingQAAgent(MarketingBaseAgent):
         You provide intelligent, data-driven answers to questions like:
         - "Why are sales dropping?"
         - "What campaigns are performing best?"
-        - "What is our ROI?"
         - "Which channels are most effective?"
         - "What should we focus on?"
         
@@ -137,8 +136,6 @@ class MarketingQAAgent(MarketingBaseAgent):
         
         # Calculate aggregate metrics
         active_campaigns = campaigns_query.filter(status='active').count()
-        total_budget = sum(float(c.budget) for c in campaigns_query)
-        total_spend = sum(float(c.actual_spend) for c in campaigns_query)
         
         # Get performance aggregates
         all_metrics = CampaignPerformance.objects.filter(
@@ -146,7 +143,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         ).values('metric_name').annotate(
             avg_value=Avg('metric_value'),
             total_count=Count('id')
-        )
+        ).order_by('metric_name')  # Override default ordering to fix SQL Server GROUP BY error
         
         return {
             'campaigns': campaigns_data,
@@ -154,9 +151,6 @@ class MarketingQAAgent(MarketingBaseAgent):
             'stats': {
                 'total_campaigns': len(campaigns_data),
                 'active_campaigns': active_campaigns,
-                'total_budget': total_budget,
-                'total_spend': total_spend,
-                'budget_remaining': total_budget - total_spend,
                 'performance_metrics': list(all_metrics)
             }
         }
@@ -169,10 +163,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         stats = marketing_data.get('stats', {})
         context += f"OVERVIEW:\n"
         context += f"- Total Campaigns: {stats.get('total_campaigns', 0)}\n"
-        context += f"- Active Campaigns: {stats.get('active_campaigns', 0)}\n"
-        context += f"- Total Budget: ${stats.get('total_budget', 0):,.2f}\n"
-        context += f"- Total Spent: ${stats.get('total_spend', 0):,.2f}\n"
-        context += f"- Budget Remaining: ${stats.get('budget_remaining', 0):,.2f}\n\n"
+        context += f"- Active Campaigns: {stats.get('active_campaigns', 0)}\n\n"
         
         # Add campaigns
         campaigns = marketing_data.get('campaigns', [])
@@ -181,7 +172,6 @@ class MarketingQAAgent(MarketingBaseAgent):
             for camp in campaigns[:10]:  # Limit to 10 for context
                 context += f"\nCampaign: {camp['name']}\n"
                 context += f"- Type: {camp['type']}, Status: {camp['status']}\n"
-                context += f"- Budget: ${camp['budget']:,.2f}, Spent: ${camp['spend']:,.2f}\n"
                 if camp['metrics']:
                     context += f"- Recent Metrics:\n"
                     for metric in camp['metrics'][:5]:  # Top 5 metrics
@@ -236,16 +226,6 @@ Be specific, use numbers, and base everything on the data provided."""
         
         stats = marketing_data.get('stats', {})
         campaigns = marketing_data.get('campaigns', [])
-        
-        # Budget insights
-        if stats.get('total_budget', 0) > 0:
-            spend_percentage = (stats.get('total_spend', 0) / stats.get('total_budget', 1)) * 100
-            insights.append({
-                'type': 'budget',
-                'title': 'Budget Utilization',
-                'value': f"{spend_percentage:.1f}% of budget spent",
-                'status': 'warning' if spend_percentage > 80 else 'normal'
-            })
         
         # Campaign status insights
         active_count = stats.get('active_campaigns', 0)
@@ -318,16 +298,11 @@ Be specific, use numbers, and base everything on the data provided."""
             ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
             conversion_rate = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
             
-            # ROI
-            roi = campaign.get_roi()
-            
             # Generate analysis
             analysis_prompt = f"""Analyze this campaign performance:
 
 Campaign: {campaign.name}
 Type: {campaign.campaign_type}
-Budget: ${float(campaign.budget):,.2f}
-Spent: ${float(campaign.actual_spend):,.2f}
 Status: {campaign.status}
 
 Performance Metrics:
@@ -336,7 +311,6 @@ Performance Metrics:
 - Conversions: {total_conversions:,.0f}
 - CTR: {ctr:.2f}%
 - Conversion Rate: {conversion_rate:.2f}%
-- ROI: {roi:.2f}% if available
 
 Provide:
 1. Overall performance assessment
@@ -356,8 +330,7 @@ Provide:
                     'clicks': float(total_clicks),
                     'conversions': float(total_conversions),
                     'ctr': ctr,
-                    'conversion_rate': conversion_rate,
-                    'roi': roi
+                    'conversion_rate': conversion_rate
                 },
                 'analysis': analysis
             }

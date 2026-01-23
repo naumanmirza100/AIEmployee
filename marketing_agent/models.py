@@ -33,11 +33,25 @@ class Lead(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_lead'
         ordering = ['-created_at']
         unique_together = [('email', 'owner')]
     
     def __str__(self):
         return f"{self.email} - {self.get_status_display()}"
+
+
+class CampaignLead(models.Model):
+    """Through model for Campaign-Lead ManyToMany relationship with explicit table name"""
+    campaign = models.ForeignKey('Campaign', on_delete=models.CASCADE)
+    lead = models.ForeignKey('Lead', on_delete=models.CASCADE)
+    
+    class Meta:
+        db_table = 'ppp_marketingagent_campaign_leads'
+        unique_together = [('campaign', 'lead')]
+    
+    def __str__(self):
+        return f"{self.campaign.name} - {self.lead.email}"
 
 
 class Campaign(models.Model):
@@ -57,12 +71,9 @@ class Campaign(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
-    budget = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    actual_spend = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     
     # User-friendly fields instead of JSON
     # Goals fields
-    target_revenue = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text="Target revenue in dollars")
     target_leads = models.IntegerField(null=True, blank=True, help_text="Target number of leads to achieve (goal - you need to upload leads via CSV)")
     target_conversions = models.IntegerField(null=True, blank=True, help_text="Target number of conversions")
     
@@ -79,27 +90,19 @@ class Campaign(models.Model):
     goals = models.JSONField(default=dict, blank=True)
     channels = models.JSONField(default=list, blank=True)
     
-    # Leads relationship
-    leads = models.ManyToManyField('Lead', blank=True, related_name='campaigns')
+    # Leads relationship - using custom through model to specify table name
+    leads = models.ManyToManyField('Lead', blank=True, related_name='campaigns', through='CampaignLead')
     
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='marketing_campaigns')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_campaign'
         ordering = ['-created_at']
     
     def __str__(self):
         return self.name
-    
-    def get_roi(self):
-        """Calculate ROI if revenue data is available"""
-        if self.target_revenue and self.actual_spend > 0:
-            return ((float(self.target_revenue) - float(self.actual_spend)) / float(self.actual_spend)) * 100
-        elif 'revenue' in self.goals and self.actual_spend > 0:
-            revenue = float(self.goals.get('revenue', 0))
-            return ((revenue - float(self.actual_spend)) / float(self.actual_spend)) * 100
-        return None
     
     def save(self, *args, **kwargs):
         """Override save to automatically activate sequences when campaign becomes active
@@ -171,6 +174,7 @@ class MarketResearch(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_marketresearch'
         ordering = ['-created_at']
     
     def __str__(self):
@@ -187,7 +191,6 @@ class CampaignPerformance(models.Model):
         ('roi', 'ROI'),
         ('cac', 'Customer Acquisition Cost'),
         ('ltv', 'Lifetime Value'),
-        ('revenue', 'Revenue'),
         ('open_rate', 'Open Rate'),
         ('click_through_rate', 'Click-Through Rate'),
     ]
@@ -202,6 +205,7 @@ class CampaignPerformance(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_campaignperformance'
         ordering = ['-date', '-created_at']
         unique_together = ['campaign', 'metric_name', 'date', 'channel']
     
@@ -238,6 +242,7 @@ class MarketingDocument(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_marketingdocument'
         ordering = ['-created_at']
     
     def __str__(self):
@@ -251,7 +256,6 @@ class NotificationRule(models.Model):
         ('opportunity', 'Opportunity Alert'),
         ('anomaly', 'Anomaly Detection'),
         ('milestone', 'Milestone Reached'),
-        ('budget', 'Budget Alert'),
     ]
     
     rule_type = models.CharField(max_length=20, choices=RULE_TYPE_CHOICES)
@@ -266,6 +270,7 @@ class NotificationRule(models.Model):
     last_triggered = models.DateTimeField(null=True, blank=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_notificationrule'
         ordering = ['-created_at']
     
     def __str__(self):
@@ -279,7 +284,6 @@ class MarketingNotification(models.Model):
         ('opportunity', 'Opportunity Alert'),
         ('anomaly', 'Anomaly Detection'),
         ('milestone', 'Milestone Reached'),
-        ('budget', 'Budget Alert'),
         ('campaign_status', 'Campaign Status Change'),
         ('email_delivery', 'Email Delivery Issue'),
         ('engagement', 'Engagement Alert'),
@@ -306,6 +310,7 @@ class MarketingNotification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_marketingnotification'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['user', 'is_read']),
@@ -368,6 +373,7 @@ class EmailTemplate(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_emailtemplate'
         ordering = ['campaign', 'followup_sequence_number', 'created_at']
     
     def __str__(self):
@@ -409,6 +415,7 @@ class EmailSequence(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_emailsequence'
         ordering = ['-created_at']
     
     def __str__(self):
@@ -426,6 +433,7 @@ class EmailSequenceStep(models.Model):
     delay_minutes = models.IntegerField(default=0, help_text='Minutes to wait after previous step before sending this')
     
     class Meta:
+        db_table = 'ppp_marketingagent_emailsequencestep'
         ordering = ['sequence', 'step_order']
         unique_together = ['sequence', 'step_order']
     
@@ -500,6 +508,7 @@ class EmailSendHistory(models.Model):
         return token
     
     class Meta:
+        db_table = 'ppp_marketingagent_emailsendhistory'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['campaign', 'status']),
@@ -559,6 +568,7 @@ class EmailAccount(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_emailaccount'
         ordering = ['-is_default', '-is_active', '-created_at']
         unique_together = [('email', 'owner')]
     
@@ -625,6 +635,7 @@ class CampaignContact(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_campaigncontact'
         ordering = ['-created_at']
         # Note: Removed unique_together since a contact can be in main sequence and sub-sequence
         indexes = [
@@ -797,6 +808,7 @@ class Reply(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_marketingagent_reply'
         ordering = ['-replied_at']
         indexes = [
             models.Index(fields=['contact', '-replied_at']),

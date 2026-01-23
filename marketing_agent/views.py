@@ -130,8 +130,6 @@ def marketing_dashboard(request):
     
     # Get campaign stats
     active_campaigns = campaigns.filter(status='active').count()
-    total_budget = sum(float(c.budget) for c in campaigns)
-    total_spend = sum(float(c.actual_spend) for c in campaigns)
     
     print(f"Rendering template: marketing/dashboard.html")
     print(f"Campaigns found: {campaigns.count()}")
@@ -147,9 +145,6 @@ def marketing_dashboard(request):
         'stats': {
             'total_campaigns': campaigns.count(),
             'active_campaigns': active_campaigns,
-            'total_budget': total_budget,
-            'total_spend': total_spend,
-            'budget_remaining': total_budget - total_spend,
         }
     })
 
@@ -635,8 +630,6 @@ def get_campaign_details(request, campaign_id):
             'name': safe_value(campaign.name) or '',
             'description': safe_value(campaign.description) or '',
             'campaign_type': safe_value(campaign.campaign_type) or '',
-            'budget': safe_value(campaign.budget, convert_float=True),
-            'target_revenue': safe_value(campaign.target_revenue, convert_float=True),
             'target_leads': campaign.target_leads if campaign.target_leads is not None else None,
             'target_conversions': campaign.target_conversions if campaign.target_conversions is not None else None,
             'age_range': safe_value(campaign.age_range) or '',
@@ -744,7 +737,6 @@ def campaign_detail(request, campaign_id):
         'impressions': total_impressions,
         'clicks': total_clicks,
         'conversions': total_conversions,
-        'revenue': Decimal('0'),  # Revenue not tracked yet
         'open_rate': open_rate,
         'click_through_rate': click_through_rate,
         'engagement_rate': open_rate,  # Engagement = open rate for emails
@@ -754,32 +746,13 @@ def campaign_detail(request, campaign_id):
         'reply_rate': reply_rate,
     }
     
-    # Calculate derived metrics
-    total_revenue = 0  # Not tracked yet
-    
     # Calculate rates (already calculated above)
     analytics['conversion_rate'] = click_rate  # Same as click rate for emails
     analytics['engagement'] = open_rate  # Engagement = open rate
     
-    # Calculate ROI
-    roi = campaign.get_roi()
-    analytics['roi'] = roi if roi is not None else 0
-    
-    # Calculate budget utilization
-    budget_utilization = (float(campaign.actual_spend) / float(campaign.budget) * 100) if float(campaign.budget) > 0 else 0
-    analytics['budget_utilization'] = budget_utilization
-    analytics['budget_remaining'] = float(campaign.budget) - float(campaign.actual_spend)
-    
     # Get target values for comparison
-    analytics['target_revenue'] = float(campaign.target_revenue) if campaign.target_revenue else None
     analytics['target_leads'] = campaign.target_leads
     analytics['target_conversions'] = campaign.target_conversions
-    
-    # Calculate progress towards targets
-    if analytics['target_revenue']:
-        analytics['revenue_progress'] = (total_revenue / analytics['target_revenue'] * 100) if analytics['target_revenue'] > 0 else 0
-    else:
-        analytics['revenue_progress'] = None
     
     if analytics['target_conversions']:
         analytics['conversion_progress'] = (total_conversions / analytics['target_conversions'] * 100) if analytics['target_conversions'] > 0 else 0
@@ -920,7 +893,6 @@ def campaign_detail(request, campaign_id):
         'clicks': json.dumps(clicks_list),  # Clicked emails
         'conversions': json.dumps(conversions_list),  # Opened emails
         'replied': json.dumps(replied_list),  # Replied emails
-        'revenue': json.dumps([0] * len(dates_formatted)),  # Revenue not tracked yet
     }
     
     return render(request, 'marketing/campaign_detail.html', {
@@ -978,8 +950,6 @@ def campaign_edit(request, campaign_id):
             campaign.description = data.get('description', campaign.description)
             campaign.campaign_type = data.get('campaign_type', campaign.campaign_type)
             campaign.status = data.get('status', campaign.status)
-            campaign.budget = data.get('budget', campaign.budget)
-            campaign.target_revenue = data.get('target_revenue') or None
             campaign.target_leads = data.get('target_leads') or None
             campaign.target_conversions = data.get('target_conversions') or None
             campaign.age_range = data.get('age_range', '')
@@ -1241,7 +1211,7 @@ def upload_leads(request, campaign_id):
             # Double-check by querying the relationship directly
             from django.db import connection
             with connection.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) FROM marketing_agent_campaign_leads WHERE campaign_id = %s", [campaign.id])
+                cursor.execute("SELECT COUNT(*) FROM ppp_marketingagent_campaign_leads WHERE campaign_id = %s", [campaign.id])
                 direct_count = cursor.fetchone()[0]
                 logger.info(f'DEBUG: Direct database query shows {direct_count} leads in campaign_leads table')
             

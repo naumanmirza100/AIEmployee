@@ -165,17 +165,10 @@
 
         <div class="form-grid">
             <div class="form-group">
-                <label for="budget">Budget ($)</label>
-                <input type="number" id="budget" name="budget" step="0.01" min="0" value="{{ campaign.budget }}">
-            </div>
-
-            <div class="form-group">
                 <label for="start_date">Start Date</label>
                 <input type="date" id="start_date" name="start_date" value="{% if campaign.start_date %}{{ campaign.start_date|date:'Y-m-d' }}{% endif %}">
             </div>
-        </div>
 
-        <div class="form-grid">
             <div class="form-group">
                 <label for="end_date">End Date</label>
                 <input type="date" id="end_date" name="end_date" value="{% if campaign.end_date %}{{ campaign.end_date|date:'Y-m-d' }}{% endif %}">
@@ -184,11 +177,6 @@
 
         <h2 style="margin: 2rem 0 1rem 0; font-size: 1.5rem; color: #1f2937;">Goals</h2>
         <div class="form-grid">
-            <div class="form-group">
-                <label for="target_revenue">Target Revenue ($)</label>
-                <input type="number" id="target_revenue" name="target_revenue" step="0.01" min="0" value="{% if campaign.target_revenue %}{{ campaign.target_revenue }}{% endif %}">
-            </div>
-
             <div class="form-group">
                 <label for="target_leads">Target Leads</label>
                 <input type="number" id="target_leads" name="target_leads" min="0" value="{% if campaign.target_leads %}{{ campaign.target_leads }}{% endif %}">

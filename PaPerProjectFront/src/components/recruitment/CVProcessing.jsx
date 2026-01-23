@@ -154,7 +154,7 @@ const CVProcessing = ({ onProcessComplete }) => {
 
           {/* Job Description Selection */}
           <div className="space-y-2">
-            <Label htmlFor="job-description">Job Description (Optional)</Label>
+            <Label htmlFor="job-description">Select Job Description</Label>
             <Select value={selectedJobId || "none"} onValueChange={handleJobSelection}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a job description" />

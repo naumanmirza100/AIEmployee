@@ -502,11 +502,11 @@ def update_job_description(request, job_description_id):
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
         is_active = request.data.get('is_active', job_desc.is_active)
-        parse_keywords = request.data.get('parse_keywords', False)
         location = request.data.get('location', '').strip() or None
         department = request.data.get('department', '').strip() or None
         job_type = request.data.get('type', job_desc.type).strip()
         requirements = request.data.get('requirements', '').strip() or None
+        description_updated = 'description' in request.data
         
         if title:
             job_desc.title = title
@@ -523,10 +523,10 @@ def update_job_description(request, job_description_id):
         if requirements is not None:
             job_desc.requirements = requirements
         
-        # Parse keywords if requested
-        if parse_keywords and description:
+        # When description is updated, always regenerate keywords
+        if description_updated and job_desc.description:
             try:
-                parsed = job_desc_agent.parse_text(description)
+                parsed = job_desc_agent.parse_text(job_desc.description)
                 job_desc.keywords_json = json.dumps(parsed)
             except Exception as exc:
                 log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc)})
@@ -926,24 +926,56 @@ def email_settings(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def interview_settings(request):
-    """Get or update interview settings for company user"""
+    """Get or update interview settings for company user (optionally for a specific job)"""
     try:
         company_user = request.user
         
+        # Get job_id from query params (GET) or request data (POST)
+        job_id = None
         if request.method == 'GET':
-            settings, created = RecruiterInterviewSettings.objects.get_or_create(
-                company_user=company_user,
-                defaults={
-                    'start_time': '09:00',
-                    'end_time': '17:00',
-                    'interview_time_gap': 30,
-                    'time_slots_json': [],
-                }
-            )
+            job_id = request.query_params.get('job_id')
+        else:
+            job_id = request.data.get('job_id')
+        
+        # Validate job_id if provided
+        job = None
+        if job_id:
+            try:
+                job = JobDescription.objects.get(id=job_id, company_user=company_user)
+            except JobDescription.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': f'Job with id {job_id} not found or does not belong to your company.'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        if request.method == 'GET':
+            # Try to get job-specific settings first, then fallback to company-wide settings
+            if job:
+                settings = RecruiterInterviewSettings.objects.filter(company_user=company_user, job=job).first()
+            else:
+                settings = RecruiterInterviewSettings.objects.filter(company_user=company_user, job__isnull=True).first()
+            
+            if not settings:
+                # Return defaults if no settings exist
+                return Response({
+                    'status': 'success',
+                    'data': {
+                        'job_id': job_id,
+                        'job_title': job.title if job else None,
+                        'schedule_from_date': None,
+                        'schedule_to_date': None,
+                        'start_time': '09:00',
+                        'end_time': '17:00',
+                        'interview_time_gap': 30,
+                        'time_slots_json': [],
+                    }
+                })
             
             return Response({
                 'status': 'success',
                 'data': {
+                    'job_id': job_id,
+                    'job_title': settings.job.title if settings.job else None,
                     'schedule_from_date': settings.schedule_from_date.isoformat() if settings.schedule_from_date else None,
                     'schedule_to_date': settings.schedule_to_date.isoformat() if settings.schedule_to_date else None,
                     'start_time': settings.start_time.strftime('%H:%M') if settings.start_time else '09:00',
@@ -954,9 +986,30 @@ def interview_settings(request):
             })
         
         else:  # POST
-            settings, created = RecruiterInterviewSettings.objects.get_or_create(
-                company_user=company_user
-            )
+            # Get or create job-specific settings
+            if job:
+                settings, created = RecruiterInterviewSettings.objects.get_or_create(
+                    company_user=company_user,
+                    job=job,
+                    defaults={
+                        'start_time': '09:00',
+                        'end_time': '17:00',
+                        'interview_time_gap': 30,
+                        'time_slots_json': [],
+                    }
+                )
+            else:
+                # Fallback to company-wide settings (backward compatibility)
+                settings, created = RecruiterInterviewSettings.objects.get_or_create(
+                    company_user=company_user,
+                    job__isnull=True,
+                    defaults={
+                        'start_time': '09:00',
+                        'end_time': '17:00',
+                        'interview_time_gap': 30,
+                        'time_slots_json': [],
+                    }
+                )
             
             update_availability_only = request.data.get('update_availability', False)
             
@@ -1094,6 +1147,8 @@ def interview_settings(request):
                 'status': 'success',
                 'message': 'Interview settings updated successfully',
                 'data': {
+                    'job_id': job_id,
+                    'job_title': settings.job.title if settings.job else None,
                     'schedule_from_date': settings.schedule_from_date.isoformat() if settings.schedule_from_date else None,
                     'schedule_to_date': settings.schedule_to_date.isoformat() if settings.schedule_to_date else None,
                     'start_time': settings.start_time.strftime('%H:%M') if settings.start_time else '09:00',

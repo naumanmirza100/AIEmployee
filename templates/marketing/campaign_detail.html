@@ -393,14 +393,6 @@
                     <span class="info-label">Type</span>
                     <span class="info-value">{{ campaign.campaign_type }}</span>
                 </div>
-                <div class="info-item">
-                    <span class="info-label">Budget</span>
-                    <span class="info-value">${{ campaign.budget|floatformat:2 }}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Spent</span>
-                    <span class="info-value">${{ campaign.actual_spend|floatformat:2 }}</span>
-                </div>
                 {% if campaign.start_date %}
                 <div class="info-item">
                     <span class="info-label">Start Date</span>
@@ -426,12 +418,6 @@
         <div class="detail-card">
             <h2>Goals & Targets</h2>
             <div class="info-grid">
-                {% if campaign.target_revenue %}
-                <div class="info-item">
-                    <span class="info-label">Target Revenue</span>
-                    <span class="info-value">${{ campaign.target_revenue|floatformat:2 }}</span>
-                </div>
-                {% endif %}
                 {% if campaign.target_leads %}
                 <div class="info-item">
                     <span class="info-label">Target Leads</span>
@@ -809,11 +795,6 @@
                 </div>
                 {% endif %}
                 
-                {% if analytics.budget_utilization > 80 %}
-                <div style="padding: 0.75rem; background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem;">
-                    💰 <strong>Budget Alert:</strong> {{ analytics.budget_utilization|floatformat:1 }}% of budget utilized. Consider reviewing spending patterns.
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>

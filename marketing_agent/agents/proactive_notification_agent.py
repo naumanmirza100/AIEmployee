@@ -41,9 +41,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         Your role is to analyze campaign performance data and identify:
         1. Performance issues and anomalies
         2. Opportunities for optimization
-        3. Budget concerns
-        4. Milestones and achievements
-        5. Actionable recommendations
+        3. Milestones and achievements
+        4. Actionable recommendations
         
         You provide clear, actionable alerts that help stakeholders make informed decisions.
         Always be specific with metrics and provide context for your recommendations."""
@@ -156,12 +155,6 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 notifications_created.extend(perf_result.get('notifications', []))
                 issues.extend(perf_result.get('issues', []))
                 opportunities.extend(perf_result.get('opportunities', []))
-            
-            # Check budget
-            budget_result = self._check_budget(campaign, user)
-            if budget_result:
-                notifications_created.extend(budget_result.get('notifications', []))
-                issues.extend(budget_result.get('issues', []))
             
             # Check email delivery
             delivery_result = self._check_email_delivery(campaign, user)
@@ -510,71 +503,6 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             }
         return None
     
-    def _check_budget(self, campaign: Campaign, user: User) -> Optional[Dict]:
-        """Check budget utilization"""
-        notifications = []
-        issues = []
-        
-        if campaign.budget <= 0:
-            return None
-        
-        budget_utilization = (float(campaign.actual_spend) / float(campaign.budget)) * 100
-        
-        # Alert if budget is 80% utilized
-        if budget_utilization >= 80 and budget_utilization < 100:
-            notification = self._create_notification(
-                user=user,
-                campaign=campaign,
-                notification_type='budget',
-                priority='medium',
-                title=f'Budget Alert: {campaign.name}',
-                message=f'Budget is {budget_utilization:.1f}% utilized (${campaign.actual_spend:.2f} of ${campaign.budget:.2f}). Consider reviewing spend.',
-                action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
-                metadata={
-                    'budget': float(campaign.budget),
-                    'actual_spend': float(campaign.actual_spend),
-                    'utilization': budget_utilization
-                }
-            )
-            if notification:
-                notifications.append(notification)
-                issues.append({
-                    'type': 'budget_warning',
-                    'utilization': budget_utilization
-                })
-        
-        # Critical alert if budget exceeded
-        if budget_utilization >= 100:
-            notification = self._create_notification(
-                user=user,
-                campaign=campaign,
-                notification_type='budget',
-                priority='critical',
-                title=f'Budget Exceeded: {campaign.name}',
-                message=f'Budget has been exceeded! Actual spend: ${campaign.actual_spend:.2f} vs Budget: ${campaign.budget:.2f}. Immediate action required.',
-                action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
-                metadata={
-                    'budget': float(campaign.budget),
-                    'actual_spend': float(campaign.actual_spend),
-                    'utilization': budget_utilization
-                }
-            )
-            if notification:
-                notifications.append(notification)
-                issues.append({
-                    'type': 'budget_exceeded',
-                    'utilization': budget_utilization
-                })
-        
-        if notifications:
-            return {
-                'notifications': notifications,
-                'issues': issues
-            }
-        return None
-    
     def _check_email_delivery(self, campaign: Campaign, user: User) -> Optional[Dict]:
         """Check email delivery issues"""
         notifications = []
@@ -656,38 +584,6 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         'type': 'lead_milestone',
                         'actual': actual_leads,
                         'target': campaign.target_leads
-                    })
-        
-        # Check revenue targets
-        if campaign.target_revenue:
-            # Calculate actual revenue from performance metrics
-            revenue_metrics = CampaignPerformance.objects.filter(
-                campaign=campaign,
-                metric_name='revenue'
-            ).aggregate(total=Sum('metric_value'))['total'] or 0
-            
-            if revenue_metrics >= float(campaign.target_revenue):
-                notification = self._create_notification(
-                    user=user,
-                    campaign=campaign,
-                    notification_type='milestone',
-                    priority='low',
-                    title=f'Revenue Milestone Reached: {campaign.name}',
-                    message=f'Revenue target achieved! ${revenue_metrics:.2f} generated (target: ${campaign.target_revenue:.2f}).',
-                    action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
-                    metadata={
-                        'milestone': 'revenue_target',
-                        'actual': revenue_metrics,
-                        'target': float(campaign.target_revenue)
-                    }
-                )
-                if notification:
-                    notifications.append(notification)
-                    opportunities.append({
-                        'type': 'revenue_milestone',
-                        'actual': revenue_metrics,
-                        'target': float(campaign.target_revenue)
                     })
         
         if notifications:
@@ -940,23 +836,21 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         if campaign.status == 'draft':
             # Check if campaign has required setup
             has_leads = campaign.leads.count() > 0
-            has_budget = float(campaign.budget) > 0
             has_dates = campaign.start_date is not None
             
-            if has_leads and has_budget and has_dates:
+            if has_leads and has_dates:
                 notification = self._create_notification(
                     user=user,
                     campaign=campaign,
                     notification_type='campaign_status',
                     priority='medium',
                     title=f'🚀 Activate Campaign: {campaign.name}',
-                    message=f'Your campaign "{campaign.name}" is ready to activate! It has {campaign.leads.count()} leads, budget set, and dates configured. Click to activate and start sending emails.',
+                    message=f'Your campaign "{campaign.name}" is ready to activate! It has {campaign.leads.count()} leads and dates configured. Click to activate and start sending emails.',
                     action_required=True,
                     action_url=f'/marketing/campaigns/{campaign.id}/edit/',
                     metadata={
                         'action': 'activate_campaign',
                         'leads_count': campaign.leads.count(),
-                        'has_budget': has_budget,
                         'has_dates': has_dates
                     }
                 )

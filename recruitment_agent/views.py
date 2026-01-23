@@ -1258,7 +1258,8 @@ def list_interviews(request):
 def get_available_slots_for_interview(request, token):
     """
     API endpoint to get available slots for an interview based on interview settings.
-    Returns time slots from recruiter settings and checks which are already taken.
+    Returns job-specific time slots from RecruiterInterviewSettings and checks which
+    are already taken (only for the same job).
     """
     from recruitment_agent.models import Interview, RecruiterInterviewSettings
     from django.utils import timezone
@@ -1266,41 +1267,79 @@ def get_available_slots_for_interview(request, token):
     import json
     
     try:
-        interview = Interview.objects.get(confirmation_token=token, status='PENDING')
+        interview = Interview.objects.select_related(
+            'cv_record__job_description', 'company_user', 'recruiter'
+        ).get(confirmation_token=token, status='PENDING')
     except Interview.DoesNotExist:
         return JsonResponse({"error": "Invalid or expired interview link"}, status=404)
     
-    # Get recruiter interview settings
+    # Resolve job for this interview (from CV record)
+    job = None
+    if interview.cv_record and interview.cv_record.job_description_id:
+        job = interview.cv_record.job_description
+    
+    company_user = interview.company_user
     recruiter = interview.recruiter
+    
     time_slots = []
     schedule_from_date = None
     schedule_to_date = None
     start_time = time(9, 0)  # Default
     end_time = time(17, 0)  # Default
+    settings = None
     
-    if recruiter:
-        try:
-            settings = recruiter.recruiter_interview_settings
-            schedule_from_date = settings.schedule_from_date
-            schedule_to_date = settings.schedule_to_date
-            start_time = settings.start_time
-            end_time = settings.end_time
-            
-            # Get time slots from settings (only available ones)
-            if settings.time_slots_json:
-                all_slots = settings.time_slots_json
-                # Filter only available slots (where available=true)
-                time_slots = [slot for slot in all_slots if slot.get('available', True)]
-        except RecruiterInterviewSettings.DoesNotExist:
-            pass
+    # Prefer company_user + job-specific settings (same as recruiter settings UI)
+    if company_user:
+        if job:
+            settings = RecruiterInterviewSettings.objects.filter(
+                company_user=company_user, job=job
+            ).first()
+        if not settings:
+            settings = RecruiterInterviewSettings.objects.filter(
+                company_user=company_user, job__isnull=True
+            ).first()
     
-    # Get already scheduled interviews for the same recruiter
+    # Fallback: recruiter-based settings (backward compatibility)
+    if not settings and recruiter:
+        if job:
+            settings = RecruiterInterviewSettings.objects.filter(
+                recruiter=recruiter, job=job
+            ).first()
+        if not settings:
+            settings = RecruiterInterviewSettings.objects.filter(
+                recruiter=recruiter, job__isnull=True
+            ).first()
+    
+    if settings:
+        schedule_from_date = settings.schedule_from_date
+        schedule_to_date = settings.schedule_to_date
+        start_time = settings.start_time or start_time
+        end_time = settings.end_time or end_time
+        if settings.time_slots_json:
+            all_slots = settings.time_slots_json
+            time_slots = [slot for slot in all_slots if slot.get('available', True)]
+    
+    # Taken slots: only interviews for the *same job* and same org (company_user/recruiter)
     now = timezone.now()
-    scheduled_interviews = Interview.objects.filter(
-        recruiter=recruiter,
+    base_q = Interview.objects.filter(
         status__in=['SCHEDULED', 'CONFIRMED'],
         scheduled_datetime__isnull=False
     ).exclude(id=interview.id)
+    
+    if job and company_user:
+        scheduled_interviews = base_q.filter(
+            company_user=company_user, cv_record__job_description_id=job.id
+        )
+    elif job and recruiter:
+        scheduled_interviews = base_q.filter(
+            recruiter=recruiter, cv_record__job_description_id=job.id
+        )
+    elif company_user:
+        scheduled_interviews = base_q.filter(company_user=company_user)
+    elif recruiter:
+        scheduled_interviews = base_q.filter(recruiter=recruiter)
+    else:
+        scheduled_interviews = base_q.none()
     
     # Get scheduled datetime strings (ISO format) for comparison
     taken_slot_datetimes = set()
@@ -1353,8 +1392,10 @@ def get_available_slots_for_interview(request, token):
     
     max_date = schedule_to_date if schedule_to_date else (now.date() + timedelta(days=60))
     
+    job_title = job.title if job else interview.job_role
     return JsonResponse({
         "success": True,
+        "job_title": job_title,
         "time_slots": available_slots,
         "constraints": {
             "min_date": min_date.isoformat(),
@@ -1547,7 +1588,7 @@ def update_job_description(request, job_description_id):
         title = request.POST.get('title', '').strip()
         description = request.POST.get('description', '').strip()
         is_active = request.POST.get('is_active', '').lower() == 'true'
-        parse_keywords = request.POST.get('parse_keywords', 'false').lower() == 'true'
+        description_updated = 'description' in request.POST
         
         if title:
             job_desc.title = title
@@ -1556,10 +1597,10 @@ def update_job_description(request, job_description_id):
         
         job_desc.is_active = is_active
         
-        # Parse keywords if requested
-        if parse_keywords and description:
+        # When description is updated, always regenerate keywords
+        if description_updated and job_desc.description:
             try:
-                parsed = job_desc_agent.parse_text(description)
+                parsed = job_desc_agent.parse_text(job_desc.description)
                 import json
                 job_desc.keywords_json = json.dumps(parsed)
             except Exception as exc:
