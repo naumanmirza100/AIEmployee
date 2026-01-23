@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target } from 'lucide-react';
@@ -14,7 +15,8 @@ import {
   getInterviewSettings, 
   updateInterviewSettings,
   getQualificationSettings,
-  updateQualificationSettings
+  updateQualificationSettings,
+  getJobDescriptions
 } from '@/services/recruitmentAgentService';
 
 const RecruiterSettings = () => {
@@ -45,10 +47,19 @@ const RecruiterSettings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [selectedJobId, setSelectedJobId] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
+    fetchJobs();
   }, []);
+
+  useEffect(() => {
+    if (selectedJobId !== null) {
+      fetchSettings(selectedJobId);
+    }
+  }, [selectedJobId]);
 
   // Update calendar month when date range changes
   useEffect(() => {
@@ -57,12 +68,30 @@ const RecruiterSettings = () => {
     }
   }, [scheduleFromDate]);
 
-  const fetchSettings = async () => {
+  const fetchJobs = async () => {
+    try {
+      setLoadingJobs(true);
+      const response = await getJobDescriptions();
+      if (response.status === 'success' && response.data) {
+        setJobs(response.data);
+        // Auto-select first job if available and none selected
+        if (response.data.length > 0 && !selectedJobId) {
+          setSelectedJobId(response.data[0].id);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+    } finally {
+      setLoadingJobs(false);
+    }
+  };
+
+  const fetchSettings = async (jobId = null) => {
     try {
       setLoading(true);
       const [emailRes, interviewRes, qualificationRes] = await Promise.all([
         getEmailSettings(),
-        getInterviewSettings(),
+        getInterviewSettings(jobId),
         getQualificationSettings().catch(() => ({ status: 'success', data: { interview_threshold: 65, hold_threshold: 45, use_custom_thresholds: false } })),
       ]);
 
@@ -142,10 +171,19 @@ const RecruiterSettings = () => {
 
   const handleSaveInterviewSettings = async () => {
     try {
+      if (!selectedJobId) {
+        toast({
+          title: 'Error',
+          description: 'Please select a job first',
+          variant: 'destructive',
+        });
+        return;
+      }
       setSaving(true);
         // Convert Date objects to local date strings (YYYY-MM-DD format) - avoid timezone issues
         const settingsToSave = {
           ...interviewSettings,
+          job_id: selectedJobId,
           schedule_from_date: scheduleFromDate ? formatDateLocal(scheduleFromDate) : '',
           schedule_to_date: scheduleToDate ? formatDateLocal(scheduleToDate) : '',
           // Don't send time_slots_json to trigger automatic generation when date range is provided
@@ -253,9 +291,18 @@ const RecruiterSettings = () => {
 
   const handleUpdateTimeSlotAvailability = async () => {
     try {
+      if (!selectedJobId) {
+        toast({
+          title: 'Error',
+          description: 'Please select a job first',
+          variant: 'destructive',
+        });
+        return;
+      }
       setSaving(true);
       // Send only availability updates with the update_availability flag
       const response = await updateInterviewSettings({
+        job_id: selectedJobId,
         update_availability: true,
         time_slots_json: timeSlots,
       });
@@ -570,11 +617,51 @@ const RecruiterSettings = () => {
             <CardHeader>
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
-                Configure interview scheduling preferences
+                Configure interview scheduling preferences for each job. Each job can have separate time slots and scheduling settings.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="job-select">Select Job</Label>
+                <Select
+                  value={selectedJobId?.toString() || ''}
+                  onValueChange={(value) => {
+                    setSelectedJobId(value ? parseInt(value) : null);
+                    // Reset settings when job changes
+                    setInterviewSettings({
+                      schedule_from_date: '',
+                      schedule_to_date: '',
+                      start_time: '09:00',
+                      end_time: '17:00',
+                      interview_time_gap: 30,
+                    });
+                    setScheduleFromDate(null);
+                    setScheduleToDate(null);
+                    setTimeSlots([]);
+                  }}
+                  disabled={loadingJobs}
+                >
+                  <SelectTrigger id="job-select">
+                    <SelectValue placeholder={loadingJobs ? "Loading jobs..." : "Select a job"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {jobs.map((job) => (
+                      <SelectItem key={job.id} value={job.id.toString()}>
+                        {job.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!selectedJobId && (
+                  <p className="text-xs text-muted-foreground">
+                    Please select a job to configure its interview settings
+                  </p>
+                )}
+              </div>
+
+              {selectedJobId && (
+                <>
+                <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="schedule_from">Schedule From Date</Label>
@@ -648,6 +735,7 @@ const RecruiterSettings = () => {
                       Start time of day for interviews
                     </p>
                   </div>
+                  
 
                   <div className="space-y-2">
                     <Label htmlFor="end_time">End Time</Label>
@@ -884,6 +972,8 @@ const RecruiterSettings = () => {
                 <div className="mt-2 text-xs text-slate-400 text-center">
                   Showing {timeSlots.length} time slots for {getAvailableDates().length} day(s)
                 </div>
+              )}
+                </>
               )}
             </CardContent>
           </Card>

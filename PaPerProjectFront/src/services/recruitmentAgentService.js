@@ -232,11 +232,13 @@ export const updateEmailSettings = async (settings) => {
 };
 
 /**
- * Get interview settings for the company user
+ * Get interview settings for the company user (optionally for a specific job)
+ * @param {number} jobId - Optional job ID to get job-specific settings
  */
-export const getInterviewSettings = async () => {
+export const getInterviewSettings = async (jobId = null) => {
   try {
-    const response = await companyApi.get('/recruitment/settings/interview');
+    const params = jobId ? { job_id: jobId } : {};
+    const response = await companyApi.get('/recruitment/settings/interview', params);
     return response;
   } catch (error) {
     console.error('Get interview settings error:', error);
@@ -246,7 +248,7 @@ export const getInterviewSettings = async () => {
 
 /**
  * Update interview settings
- * @param {object} settings - Interview settings data
+ * @param {object} settings - Interview settings data (can include job_id for job-specific settings)
  */
 export const updateInterviewSettings = async (settings) => {
   try {

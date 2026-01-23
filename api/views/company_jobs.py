@@ -138,24 +138,15 @@ def update_company_job(request, id):
         # Users can only update their own jobs
         job = get_object_or_404(JobDescription, id=id, company_user=company_user)
         
-        # Check if description changed and if we should parse keywords
+        # When description is updated, always regenerate keywords
         description_changed = 'description' in request.data
-        old_description = job.description
-        
-        # Handle parse_keywords - can be boolean True/False or string "true"/"false"
-        parse_keywords_val = request.data.get('parse_keywords', False)
-        if isinstance(parse_keywords_val, str):
-            parse_keywords = parse_keywords_val.lower() in ('true', '1', 'yes')
-        else:
-            parse_keywords = bool(parse_keywords_val)
         
         serializer = JobDescriptionSerializer(job, data=request.data, partial=True)
         
         if serializer.is_valid():
             job = serializer.save()
             
-            # Parse keywords if requested and description was updated
-            if parse_keywords and description_changed and job.description:
+            if description_changed and job.description:
                 try:
                     agents = get_agents()
                     job_desc_agent = agents['job_desc_agent']
