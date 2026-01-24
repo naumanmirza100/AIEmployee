@@ -330,7 +330,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'mssql',
         'NAME': os.getenv('DB_NAME', 'project_manager_db'),
-        'HOST': r'localhost',
+        'HOST': r'localhost\SQLEXPRESS',
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
             'trusted_connection': 'yes',

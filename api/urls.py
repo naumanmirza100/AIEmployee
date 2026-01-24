@@ -27,6 +27,7 @@ from api.views import pm_agent
 from api.views import company_dashboard
 from api.views import recruitment_agent
 from api.views import marketing_agent
+from api.views import module_purchase
 from api.views.health import health_check
 
 app_name = 'api'
@@ -196,4 +197,10 @@ urlpatterns = [
     re_path(r'^marketing/outreach-campaign/?$', marketing_agent.outreach_campaign, name='marketing_outreach_campaign'),  # POST
     re_path(r'^marketing/document-authoring/?$', marketing_agent.document_authoring, name='marketing_document_authoring'),  # POST
     re_path(r'^marketing/notifications/?$', marketing_agent.get_notifications, name='marketing_get_notifications'),  # GET
+    
+    # Module Purchase endpoints
+    re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
+    re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
+    re_path(r'^modules/purchase/?$', module_purchase.purchase_module, name='purchase_module'),  # POST
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
 ]

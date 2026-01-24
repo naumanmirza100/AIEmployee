@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { projectService } from '@/services';
 import pmAgentService from '@/services/pmAgentService';
+import { checkModuleAccess, getPurchasedModules } from '@/services/modulePurchaseService';
 import { 
   BrainCircuit, 
   Target, 
@@ -25,7 +26,8 @@ import {
   ArrowLeft,
   UserCheck,
   Plus,
-  Megaphone
+  Megaphone,
+  Lock
 } from 'lucide-react';
 import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
@@ -46,7 +48,94 @@ const ProjectManagerDashboardPage = () => {
   
   // Get company user from localStorage
   const [companyUser, setCompanyUser] = useState(null);
+  const [hasAccess, setHasAccess] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [purchasedModules, setPurchasedModules] = useState([]);
+  const [modulesLoaded, setModulesLoaded] = useState(false);
   
+  // Check if user is a company user
+  const isCompanyUser = () => {
+    return !!companyUser;
+  };
+
+  const fetchPurchasedModules = async (user = null) => {
+    // If user is passed, use it; otherwise check companyUser state
+    const currentUser = user || companyUser;
+    if (!currentUser) {
+      setModulesLoaded(true);
+      return;
+    }
+    try {
+      // Try to get from localStorage first (cache)
+      const cachedModules = localStorage.getItem('company_purchased_modules');
+      if (cachedModules) {
+        try {
+          const cached = JSON.parse(cachedModules);
+          setPurchasedModules(cached);
+          setModulesLoaded(true);
+        } catch (e) {
+          // Invalid cache, continue to fetch
+        }
+      }
+
+      const response = await getPurchasedModules();
+      if (response.status === 'success') {
+        const moduleNames = response.module_names || [];
+        setPurchasedModules(moduleNames);
+        // Cache in localStorage
+        localStorage.setItem('company_purchased_modules', JSON.stringify(moduleNames));
+        setModulesLoaded(true);
+      } else {
+        setModulesLoaded(true);
+      }
+    } catch (error) {
+      console.error('Error fetching purchased modules:', error);
+      // If we have cached modules, use them
+      const cachedModules = localStorage.getItem('company_purchased_modules');
+      if (cachedModules) {
+        try {
+          const cached = JSON.parse(cachedModules);
+          setPurchasedModules(cached);
+        } catch (e) {
+          setPurchasedModules([]);
+        }
+      } else {
+        setPurchasedModules([]);
+      }
+      setModulesLoaded(true);
+    }
+  };
+
+  const checkModuleAccessForUser = async (user = null) => {
+    const currentUser = user || companyUser;
+    if (!currentUser) {
+      setHasAccess(true); // Regular users have access
+      setCheckingAccess(false);
+      return;
+    }
+    
+    try {
+      setCheckingAccess(true);
+      const response = await checkModuleAccess('project_manager_agent');
+      if (response.status === 'success') {
+        setHasAccess(response.has_access);
+        if (!response.has_access) {
+          toast({
+            title: 'Module Not Purchased',
+            description: 'Please purchase the Project Manager Agent module to access this dashboard',
+            variant: 'default',
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error checking module access:', error);
+      // On error, allow access (graceful degradation)
+      setHasAccess(true);
+    } finally {
+      setCheckingAccess(false);
+    }
+  };
+
   useEffect(() => {
     // Get company user from localStorage
     const companyUserStr = localStorage.getItem('company_user');
@@ -54,16 +143,37 @@ const ProjectManagerDashboardPage = () => {
       try {
         const user = JSON.parse(companyUserStr);
         setCompanyUser(user);
+        
+        // Load cached modules immediately
+        const cachedModules = localStorage.getItem('company_purchased_modules');
+        if (cachedModules) {
+          try {
+            const cached = JSON.parse(cachedModules);
+            setPurchasedModules(cached);
+            setModulesLoaded(true);
+          } catch (e) {
+            // Invalid cache
+          }
+        }
+        
+        // Check module access for company users and fetch purchased modules
+        // Pass user to functions since companyUser state might not be updated yet
+        Promise.all([
+          checkModuleAccessForUser(user),
+          fetchPurchasedModules(user)
+        ]);
       } catch (error) {
         console.error('Error parsing company user:', error);
+        setCheckingAccess(false);
+        setModulesLoaded(true);
       }
+    } else {
+      // Regular user (not company user) - allow access
+      setHasAccess(true);
+      setCheckingAccess(false);
+      setModulesLoaded(true);
     }
   }, []);
-  
-  // Check if user is a company user
-  const isCompanyUser = () => {
-    return !!companyUser;
-  };
 
   useEffect(() => {
     fetchProjects();
@@ -127,15 +237,53 @@ const ProjectManagerDashboardPage = () => {
     }
   };
 
-  // Don't block rendering while loading - show content with empty projects
-  // This prevents blank page when switching tabs
-  // if (loading) {
-  //   return (
-  //     <div className="min-h-screen flex items-center justify-center bg-background">
-  //       <Loader2 className="h-8 w-8 animate-spin text-primary" />
-  //     </div>
-  //   );
-  // }
+  // Show loading while checking access or loading modules
+  if (checkingAccess || (companyUser && !modulesLoaded)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // Show access denied if company user and module not purchased
+  if (companyUser && !hasAccess) {
+    return (
+      <>
+        <Helmet>
+          <title>Access Denied | Pay Per Project</title>
+        </Helmet>
+        <div className="min-h-screen bg-background flex items-center justify-center p-4">
+          <Card className="max-w-md w-full">
+            <CardHeader>
+              <div className="flex items-center justify-center mb-4">
+                <Lock className="h-12 w-12 text-muted-foreground" />
+              </div>
+              <CardTitle className="text-center">Module Not Purchased</CardTitle>
+              <CardDescription className="text-center">
+                You need to purchase the Project Manager Agent module to access this dashboard.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button 
+                onClick={() => navigate('/')} 
+                className="w-full"
+              >
+                Go to Home Page to Purchase
+              </Button>
+              <Button 
+                onClick={() => navigate('/company/dashboard')} 
+                variant="outline"
+                className="w-full"
+              >
+                Back to Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -168,18 +316,20 @@ const ProjectManagerDashboardPage = () => {
               section: 'project-manager',
               onClick: () => navigate('/project-manager/dashboard'),
             },
-            {
+            // Only show Recruitment Agent if purchased
+            ...(purchasedModules.includes('recruitment_agent') ? [{
               label: 'Recruitment Agent',
               icon: UserCheck,
               section: 'recruitment',
               onClick: () => navigate('/recruitment/dashboard'),
-            },
-            {
+            }] : []),
+            // Only show Marketing Agent if purchased
+            ...(purchasedModules.includes('marketing_agent') ? [{
               label: 'Marketing Agent',
               icon: Megaphone,
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
-            },
+            }] : []),
           ] : []}
         />
 
@@ -401,7 +551,7 @@ const ProjectManagerDashboardPage = () => {
               </Tabs>
             </CardContent>
           </Card>
-          )}
+          
         </main>
       </div>
     </>

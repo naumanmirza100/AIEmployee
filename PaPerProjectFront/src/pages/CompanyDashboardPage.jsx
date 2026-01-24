@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
 import { companyApi } from '@/services/companyAuthService';
+import { getPurchasedModules } from '@/services/modulePurchaseService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { 
   Building2, Plus, Briefcase, Users, Eye, 
@@ -38,6 +39,7 @@ const CompanyDashboardPage = () => {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
+  const [purchasedModules, setPurchasedModules] = useState([]);
 
   const [jobForm, setJobForm] = useState({
     title: '',
@@ -47,6 +49,43 @@ const CompanyDashboardPage = () => {
     description: '',
     requirements: '',
   });
+
+  const fetchPurchasedModules = async () => {
+    try {
+      // Try to get from localStorage first (cache)
+      const cachedModules = localStorage.getItem('company_purchased_modules');
+      if (cachedModules) {
+        try {
+          const cached = JSON.parse(cachedModules);
+          setPurchasedModules(cached);
+        } catch (e) {
+          // Invalid cache, continue to fetch
+        }
+      }
+
+      const response = await getPurchasedModules();
+      if (response.status === 'success') {
+        const moduleNames = response.module_names || [];
+        setPurchasedModules(moduleNames);
+        // Cache in localStorage
+        localStorage.setItem('company_purchased_modules', JSON.stringify(moduleNames));
+      }
+    } catch (error) {
+      console.error('Error fetching purchased modules:', error);
+      // If we have cached modules, use them
+      const cachedModules = localStorage.getItem('company_purchased_modules');
+      if (cachedModules) {
+        try {
+          const cached = JSON.parse(cachedModules);
+          setPurchasedModules(cached);
+        } catch (e) {
+          setPurchasedModules([]);
+        }
+      } else {
+        setPurchasedModules([]);
+      }
+    }
+  };
 
   useEffect(() => {
     // Get company user from localStorage
@@ -79,7 +118,20 @@ const CompanyDashboardPage = () => {
       }
       
       setCompanyUser(user);
+      
+      // Load cached modules immediately
+      const cachedModules = localStorage.getItem('company_purchased_modules');
+      if (cachedModules) {
+        try {
+          const cached = JSON.parse(cachedModules);
+          setPurchasedModules(cached);
+        } catch (e) {
+          // Invalid cache
+        }
+      }
+      
       fetchJobs();
+      fetchPurchasedModules(); // Will update cache
       if (activeTab === 'projects') {
         fetchProjects();
       }
@@ -323,24 +375,27 @@ const CompanyDashboardPage = () => {
               section: 'dashboard',
               onClick: () => setActiveSection('dashboard'),
             },
-            {
+            // Only show Project Manager Agent if purchased
+            ...(purchasedModules.includes('project_manager_agent') ? [{
               label: 'Project Manager Agent',
               icon: BrainCircuit,
               section: 'project-manager',
               onClick: () => navigate('/project-manager/dashboard'),
-            },
-            {
+            }] : []),
+            // Only show Recruitment Agent if purchased
+            ...(purchasedModules.includes('recruitment_agent') ? [{
               label: 'Recruitment Agent',
               icon: UserCheck,
               section: 'recruitment',
               onClick: () => navigate('/recruitment/dashboard'),
-            },
-            {
+            }] : []),
+            // Only show Marketing Agent if purchased
+            ...(purchasedModules.includes('marketing_agent') ? [{
               label: 'Marketing Agent',
               icon: Megaphone,
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
-            },
+            }] : []),
           ]}
         />
 

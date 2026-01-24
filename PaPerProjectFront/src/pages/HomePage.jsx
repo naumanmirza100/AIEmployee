@@ -16,6 +16,7 @@ import UniqueBenefits from '@/components/home/UniqueBenefits';
 import HowItWorksSection from '@/components/home/HowItWorksSection';
 import SolutionsShowcase from '@/components/home/SolutionsShowcase';
 import AiPredictorCta from '@/components/home/AiPredictorCta';
+import ModuleCardsSection from '@/components/home/ModuleCardsSection';
 
 const HomePage = () => {
   const { t } = useTranslation();
@@ -34,6 +35,7 @@ const HomePage = () => {
         <CompanyPitch />
         <KeyFeatures />
         <UniqueBenefits />
+        <ModuleCardsSection />
         <SolutionsShowcase />
         <BenchmarkSlider />
         <AiPredictorCta />
