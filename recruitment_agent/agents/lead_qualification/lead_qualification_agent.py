@@ -2,6 +2,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from recruitment_agent.log_service import LogService
+from recruitment_agent.skill_equivalences import skill_matches_keyword
 
 
 class LeadQualificationAgent:
@@ -281,60 +282,25 @@ class LeadQualificationAgent:
     ) -> Tuple[List[str], List[str]]:
         """
         Match job keywords against both explicit and inferred skills.
-        Uses fuzzy matching and synonym awareness.
+        Uses shared skill equivalences (e.g. Node.js ↔ JavaScript) and substring matching.
         """
         if not job_keywords:
             return [], []
         
         all_skills = explicit_skills + inferred_skills
-        skills_lower = {s.lower(): s for s in all_skills}
-        
-        # Skill equivalences (recruiter knowledge)
-        equivalences = {
-            "llm": ["llms", "large language model", "language model"],
-            "node": ["node.js", "nodejs"],
-            "react": ["react.js", "reactjs"],
-            "express": ["express.js", "expressjs"],
-            "api": ["rest api", "restful", "graphql"],
-            "mongodb": ["mongo"],
-            "postgresql": ["postgres"],
-            "javascript": ["js", "ecmascript"],
-            "typescript": ["ts"],
-        }
+        skills_lower = [s.lower() for s in all_skills]
         
         matched = []
         missing = []
         
         for kw in job_keywords:
-            kw_lower = kw.lower()
-            found = False
-            
-            # Direct match
-            if kw_lower in skills_lower:
+            kw_lower = kw.lower().strip()
+            if not kw_lower:
+                continue
+            found = any(skill_matches_keyword(sk, kw_lower) for sk in skills_lower)
+            if found:
                 matched.append(kw)
-                found = True
             else:
-                # Check equivalences
-                for canonical, variants in equivalences.items():
-                    if kw_lower == canonical or kw_lower in variants:
-                        # Check if any variant exists in skills
-                        for variant in [canonical] + variants:
-                            if variant in skills_lower:
-                                matched.append(kw)
-                                found = True
-                                break
-                        if found:
-                            break
-                
-                # Partial/substring match (recruiter-style)
-                if not found:
-                    for skill_key, skill_val in skills_lower.items():
-                        if kw_lower in skill_key or skill_key in kw_lower:
-                            matched.append(kw)
-                            found = True
-                            break
-            
-            if not found:
                 missing.append(kw)
         
         return matched, missing
@@ -355,60 +321,55 @@ class LeadQualificationAgent:
         hold_threshold: Optional[int] = None,
     ) -> Tuple[str, int]:
         """
-        Strict, recruiter-accurate hiring decision based on SKILLS matching.
-        Prevents score inflation and ensures only qualified candidates pass.
+        Hiring decision based on SKILLS + EXPERIENCE only.
+        No seniority, critical-skills penalty, or other extras.
         
-        Decision factors (in order of importance):
-        1. Base score (role_fit_score or match-based, not default 50)
-        2. Skill evidence (explicit matches weighted 3x, inferred 1x) - 30 points max
-        3. Match quality (smooth curve, not binary) - 30 points max
-        4. Experience years (minimal) - 8 points max
-        5. Seniority level (minimal) - 5 points max
-        6. Critical skills penalty (if missing required skills)
+        Factors:
+        1. Base score (role_fit_score or match-based)
+        2. Skill evidence (explicit 3x, inferred 1x) - max 30
+        3. Match quality (smooth curve) - max 30
+        4. Experience years - max 8
         
-        Gating: Candidates with < 3 matches or < 35% match ratio are auto-rejected.
+        Gating: < 3 matches or < 35% match ratio → REJECT.
         """
         matched_count = len(matched) if matched else 0
         missing_count = len(missing) if missing else 0
         total_keywords = matched_count + missing_count
         match_ratio = matched_count / max(total_keywords, 1) if total_keywords > 0 else 0.0
         
-        # GATING RULE: Stop resume spam - no interview without minimum relevance
+        # GATING RULE: No interview without minimum relevance
         if matched_count < 3 or match_ratio < 0.35:
             return "REJECT", 0
         
-        # BASE SCORE: Fix inflation - no default 50
+        # BASE SCORE
         if role_fit_score is not None:
-            base_score = role_fit_score  # Already normalized 0-100
+            base_score = role_fit_score
         elif matched_count == 0:
-            base_score = 20  # Unknown/weak = low start
+            base_score = 20
         elif match_ratio < 0.4:
-            base_score = 30  # Weak match starts low
+            base_score = 30
         else:
-            base_score = 40  # Only real matches get neutral base
+            base_score = 40
         
-        # SKILL EVIDENCE SCORE: Explicit > Inferred (weighted)
-        # Explicit matches weighted 3x, inferred 1x
+        # SKILL EVIDENCE: Explicit 3x, inferred 1x (max 30)
         skill_evidence_score = min(
-            30,  # Reduced cap to avoid quantity bias
+            30,
             (matched_count * 3) + (len(inferred_skills) * 1)
         )
         
-        # MATCH QUALITY SCORE: Smooth curve, not binary
+        # MATCH QUALITY (max 30)
         match_quality = 0
         if total_keywords > 0:
             if match_ratio >= 0.8:
-                match_quality = 30  # Excellent match
+                match_quality = 30
             elif match_ratio >= 0.65:
-                match_quality = 22  # Strong match
+                match_quality = 22
             elif match_ratio >= 0.5:
-                match_quality = 12  # Moderate match
+                match_quality = 12
             elif match_ratio >= 0.35:
-                match_quality = 5   # Weak but acceptable
-            else:
-                match_quality = 0   # Too weak
+                match_quality = 5
         
-        # Experience years boost (minimal)
+        # EXPERIENCE ONLY (max 8) - no seniority, no critical penalty
         exp_boost = 0
         if total_exp_years is not None:
             if total_exp_years >= 5:
@@ -418,46 +379,8 @@ class LeadQualificationAgent:
             elif total_exp_years >= 1:
                 exp_boost = 2
         
-        # Seniority boost (minimal)
-        seniority_boost = 0
-        if enriched_data and enriched_data.get("seniority_level"):
-            seniority = enriched_data.get("seniority_level", "").upper()
-            if seniority in ["SENIOR", "LEAD", "MANAGER"]:
-                seniority_boost = 5
-            elif seniority in ["MID"]:
-                seniority_boost = 3
-            elif seniority in ["JUNIOR"]:
-                seniority_boost = 1
-        
-        # CRITICAL SKILL PENALTY: Hard reality check
-        # Check if job_keywords contains critical_skills info or use enriched_data
-        critical_penalty = 0
-        if enriched_data and enriched_data.get("critical_skills"):
-            critical_skills = enriched_data.get("critical_skills", [])
-            if isinstance(critical_skills, list) and critical_skills:
-                # Count missing critical skills
-                all_candidate_skills = [s.lower() for s in explicit_skills + inferred_skills]
-                missing_critical = 0
-                for crit_skill in critical_skills:
-                    crit_lower = str(crit_skill).lower()
-                    if not any(crit_lower in skill or skill in crit_lower for skill in all_candidate_skills):
-                        missing_critical += 1
-                
-                # Apply penalty
-                if missing_critical >= 2:
-                    critical_penalty = -20
-                elif missing_critical == 1:
-                    critical_penalty = -10
-        
-        # Calculate final score - SKILLS FOCUSED
-        final_score = int(
-            base_score
-            + skill_evidence_score
-            + match_quality
-            + exp_boost
-            + seniority_boost
-            + critical_penalty
-        )
+        # Final score = skills + experience only
+        final_score = int(base_score + skill_evidence_score + match_quality + exp_boost)
         final_score = max(0, min(100, final_score))
         
         # DECISION THRESHOLDS: Use custom thresholds if provided, otherwise use defaults
@@ -477,23 +400,13 @@ class LeadQualificationAgent:
         self, decision: str, confidence: int, total_exp_years: Optional[float], matched: List[str], inferred_skills: List[str], enriched_data: Optional[Dict[str, Any]] = None
     ) -> str:
         """
-        Assign priority based on decision and confidence.
-        Only INTERVIEW candidates get priority (HIGH or MEDIUM).
-        HOLD and REJECT get None/LOW.
+        Priority from skills + experience only (no seniority).
+        HIGH = INTERVIEW + confidence >= 75 + experience >= 3; else MEDIUM. HOLD/REJECT = LOW.
         """
-        # Use enriched seniority_level if available
-        seniority = None
-        if enriched_data and enriched_data.get("seniority_level"):
-            seniority = enriched_data.get("seniority_level", "").upper()
-        
         if decision == "INTERVIEW":
-            # HIGH: Score >= 75 AND (experience >= 3 years OR seniority is SENIOR/LEAD/MANAGER)
-            if confidence >= 75 and (total_exp_years and total_exp_years >= 3 or seniority in ["SENIOR", "LEAD", "MANAGER"]):
+            if confidence >= 75 and total_exp_years is not None and total_exp_years >= 3:
                 return "HIGH"
-            # All other INTERVIEW candidates get MEDIUM
             return "MEDIUM"
-        
-        # HOLD and REJECT get LOW priority
         return "LOW"
 
     def _build_recruiter_reasoning(

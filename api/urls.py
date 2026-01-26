@@ -201,6 +201,9 @@ urlpatterns = [
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
-    re_path(r'^modules/purchase/?$', module_purchase.purchase_module, name='purchase_module'),  # POST
+    re_path(r'^modules/purchase/?$', module_purchase.purchase_module, name='purchase_module'),  # POST (legacy)
+    re_path(r'^modules/checkout/?$', module_purchase.create_checkout_session, name='create_checkout_session'),  # POST
+    re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
+    re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
 ]

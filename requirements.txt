@@ -28,3 +28,6 @@ django-celery-beat>=2.5.0
 # SQLAlchemy needed if using SQLite broker (development fallback)
 # SQLAlchemy>=2.0.30  # Already in requirements above
 
+# Stripe (module purchase payments)
+stripe>=8.0.0
+

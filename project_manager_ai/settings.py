@@ -460,6 +460,8 @@ SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 
 # Allow credentials (cookies, authorization headers, etc.)
@@ -487,6 +489,15 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
+
+# --------------------
+# Stripe (module purchase payments – test credentials)
+# --------------------
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'sk_test_placeholder')
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', 'pk_test_placeholder')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_placeholder')
+# Frontend base URL for Checkout success/cancel redirects (Vite dev default)
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
 
 # --------------------
 # Celery Configuration (for Marketing Automation)

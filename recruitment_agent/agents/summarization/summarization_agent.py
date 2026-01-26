@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.log_service import LogService
 from recruitment_agent.agents.summarization.prompts import SUMMARIZATION_SYSTEM_PROMPT
+from recruitment_agent.skill_equivalences import skill_matches_keyword, get_all_match_terms
 
 
 class SummarizationAgent:
@@ -61,14 +62,12 @@ class SummarizationAgent:
                         if llm_score is None or not isinstance(llm_score, (int, float)):
                             should_recalculate = True
                         elif job_keywords and len(job_keywords) > 0:
-                            # Validate LLM score against actual match percentage
-                            all_skills = validated.get("skills") or []
-                            job_kw_set = set(k.lower().strip() for k in job_keywords if k)
-                            if job_kw_set:
-                                matched_count = sum(1 for s in all_skills if s.lower() in job_kw_set or any(kw in s.lower() for kw in job_kw_set))
-                                match_percentage = (matched_count / len(job_kw_set)) * 100
-                                
-                                # If match is high but score is low, recalculate
+                            # Validate LLM score vs match % (using equivalences: Node.js ↔ JavaScript, etc.)
+                            all_skills = [s.lower() for s in (validated.get("skills") or [])]
+                            job_kw = [k.lower().strip() for k in job_keywords if k]
+                            if job_kw:
+                                matched_kw = sum(1 for kw in job_kw if any(skill_matches_keyword(sk, kw) for sk in all_skills))
+                                match_percentage = (matched_kw / len(job_kw)) * 100
                                 if match_percentage >= 70 and llm_score < 50:
                                     should_recalculate = True
                                 elif match_percentage >= 50 and llm_score < 35:
@@ -319,7 +318,7 @@ class SummarizationAgent:
 
     def _compute_fit_score(
         self,
-        key_skills: List[str],  # Note: This parameter receives ALL skills, not just key_skills subset
+        key_skills: List[str],  # ALL skills, not just key_skills subset
         achievements: List[str],
         education_level: Optional[str],
         total_experience_years: Optional[float],
@@ -328,62 +327,40 @@ class SummarizationAgent:
         certifications: Any,
     ) -> int:
         """
-        Calculate role_fit_score (0-100) based on multiple factors:
+        role_fit_score (0-100): SKILLS + EXPERIENCE only.
+        No education, seniority, or critical-skills.
         
-        SCORING BREAKDOWN (Skills = 80%, Others = 20%):
-        1. Skills Match: max 80 points (80% weight)
-           - If job_keywords provided: count overlaps against ALL candidate skills (scaled to 80 points)
-           - If no keywords: use skill volume (8 points per skill, max 80)
-        
-        2. Experience Weight: max 8 points
-           - Formula: min(8, total_experience_years * 1.5)
-        
-        3. Education Weight: max 2 points (minimal importance)
-           - PhD/Doctorate = 2, Master/MBA = 1.5, Bachelor = 1, Others = 0.5
-        
-        4. Experience Relevance: max 5 points
-           - Count keyword hits in experience descriptions (1 point per hit)
-           - Only applies if job_keywords provided
-        
-        Note: Achievements, Certifications, and Leadership are NOT included in scoring.
-        
-        Final: Sum all components, capped at 100, floored to integer.
+        1. Skills Match: max 80 pts – job_keywords vs ALL skills, using equivalences
+           (e.g. Node.js ↔ JavaScript). If no keywords: skill volume (8 pts/skill, max 80).
+        2. Experience: max 8 pts – min(8, total_experience_years * 1.5).
+        3. Experience Relevance: max 5 pts – keyword hits in roles/descriptions.
         """
         score = 0.0
-
-        # Normalize job keywords
         job_kw = [k.lower().strip() for k in job_keywords] if job_keywords else []
         job_kw = [k for k in job_kw if k]
         job_kw_set = set(job_kw)
+        skills_lower = [s.lower() for s in key_skills]
+
         if job_kw_set:
-            # Count direct overlaps between ALL candidate skills and job_keywords
-            # Note: key_skills parameter contains ALL skills, not just a subset
-            overlap = sum(1 for s in key_skills if s.lower() in job_kw_set)
-            # Calculate percentage match and scale to 80 points
-            if len(job_kw_set) > 0:
-                match_ratio = overlap / len(job_kw_set)
-                score += match_ratio * 80  # 80 points for 100% match
-            else:
-                score += 0
+            # Overlap using shared equivalences (Node.js ↔ JavaScript, etc.)
+            matched_keywords = 0
+            for kw in job_kw_set:
+                if any(skill_matches_keyword(sk, kw) for sk in skills_lower):
+                    matched_keywords += 1
+            match_ratio = matched_keywords / len(job_kw_set)
+            score += match_ratio * 80
         else:
-            # Heuristic based on skills volume (max 80 points)
-            # More skills = higher score, but with diminishing returns
             skill_count = len(key_skills)
             if skill_count >= 10:
-                score += 80  # Max points for 10+ skills
+                score += 80
             else:
-                score += skill_count * 8.0  # 8 points per skill
+                score += skill_count * 8.0
 
-        # 2. Experience weight (max 8 points)
+        # Experience only (max 8)
         if total_experience_years:
             score += min(8, total_experience_years * 1.5)
 
-        # 3. Education weight (max 2 points - minimal importance)
-        if education_level:
-            edu_weight = {"PhD": 2, "Doctorate": 2, "Master": 1.5, "MBA": 1.5, "Bachelor": 1}
-            score += edu_weight.get(education_level, 0.5)
-
-        # 4. Experience relevance: keyword hits in roles/descriptions (max 5 points)
+        # Experience relevance (max 5) – use equivalences (e.g. Node.js ↔ JavaScript)
         exp_hits = 0
         if job_kw_set and experience and isinstance(experience, list):
             for item in experience:
@@ -397,13 +374,11 @@ class SummarizationAgent:
                     ]
                 ).lower()
                 for kw in job_kw_set:
-                    if kw in text:
+                    terms = get_all_match_terms(kw)
+                    if any(t in text for t in terms):
                         exp_hits += 1
-            score += min(5, exp_hits * 1)  # 1 point per keyword hit in experience
+            score += min(5, exp_hits * 1)
 
-        # Note: Achievements, Certifications, and Leadership are NOT included in scoring
-
-        # Final: cap at 100 and floor to integer
         return int(max(0, min(100, math.floor(score))))
 
     def _build_candidate_summary(

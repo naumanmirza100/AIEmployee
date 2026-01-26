@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { Check, ArrowRight, Sparkles, CheckCircle2, Lock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { getCompanyUser } from '@/services/companyAuthService';
-import { checkModuleAccess, purchaseModule } from '@/services/modulePurchaseService';
+import { checkModuleAccess, createCheckoutSession } from '@/services/modulePurchaseService';
 
 const ModuleCard = ({ 
   title, 
@@ -91,32 +91,21 @@ const ModuleCard = ({
 
     setIsPurchasing(true);
     try {
-      const response = await purchaseModule(moduleName);
-      if (response.status === 'success') {
-        setHasAccess(true);
-        // Clear cached modules so they refresh on next page load
-        localStorage.removeItem('company_purchased_modules');
-        toast({
-          title: 'Purchase Successful!',
-          description: response.message || `${title} has been purchased successfully`,
-          variant: 'default',
-        });
-        // Refresh the page or navigate to dashboard after a short delay
-        setTimeout(() => {
-          window.location.reload();
-        }, 1500);
-      } else {
-        toast({
-          title: 'Purchase Failed',
-          description: response.message || 'Failed to purchase module',
-          variant: 'destructive',
-        });
+      const response = await createCheckoutSession(moduleName);
+      if (response.status === 'success' && response.url) {
+        window.location.href = response.url;
+        return;
       }
-    } catch (error) {
-      console.error('Purchase error:', error);
       toast({
-        title: 'Purchase Failed',
-        description: error.message || 'An error occurred while purchasing the module',
+        title: 'Checkout Failed',
+        description: response.message || 'Could not start checkout',
+        variant: 'destructive',
+      });
+    } catch (error) {
+      console.error('Checkout error:', error);
+      toast({
+        title: 'Checkout Failed',
+        description: error?.data?.message || error?.message || 'An error occurred. Please try again.',
         variant: 'destructive',
       });
     } finally {
