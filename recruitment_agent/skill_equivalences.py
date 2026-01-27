@@ -3,8 +3,6 @@ Shared skill equivalences and related-terms for matching job keywords to CV skil
 Node.js ↔ JavaScript, React ↔ ReactJS, etc. Used by Lead Qualification and Summarization.
 """
 
-# Each key is a canonical form. Values are variants + related skills that should also match.
-# E.g. "node.js" matches "javascript" because Node.js is built on JavaScript.
 SKILL_EQUIVALENCES = {
     "llm": ["llms", "large language model", "language model"],
     "node": ["node.js", "nodejs", "javascript", "js"],
