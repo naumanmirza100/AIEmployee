@@ -329,19 +329,22 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 # --------------------
 # Database (SQL Server Express)
 # --------------------
-
-
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
-        'NAME': os.getenv('DB_NAME', 'payPerProject'),
-        'HOST': r'103.4.95.77',
+        'NAME': os.getenv('DB_NAME'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
-            'trusted_connection': 'yes',
+            'extra_params': 'TrustServerCertificate=yes',  # Trust server certificate
         },
-
-    }}
+        'CONN_MAX_AGE': 0,
+        'TIME_ZONE': None,
+    }
+}
 
 # --------------------
 # Password validation
