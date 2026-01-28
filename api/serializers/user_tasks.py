@@ -13,6 +13,8 @@ class TaskSerializer(serializers.ModelSerializer):
     assignee_name = serializers.SerializerMethodField()
     subtasks = serializers.SerializerMethodField()
     
+    assignee_id = serializers.IntegerField(source='assignee.id', read_only=True, allow_null=True)
+    
     class Meta:
         model = Task
         fields = [
@@ -27,6 +29,7 @@ class TaskSerializer(serializers.ModelSerializer):
             'estimated_hours',
             'actual_hours',
             'progress_percentage',
+            'assignee_id',
             'assignee_name',
             'created_at',
             'updated_at',
