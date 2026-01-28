@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload } from 'lucide-react';
+import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3 } from 'lucide-react';
 import { 
   getJobDescriptions, 
   getInterviews, 
@@ -17,6 +17,7 @@ import JobDescriptions from './JobDescriptions';
 import Interviews from './Interviews';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
+import RecruitmentAnalytics from './RecruitmentAnalytics';
 
 const RecruitmentDashboard = () => {
   const { toast } = useToast();
@@ -116,8 +117,12 @@ const RecruitmentDashboard = () => {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+          <TabsTrigger value="analytics">
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Analytics
+          </TabsTrigger>
           <TabsTrigger value="cv-processing">
             <Upload className="h-4 w-4 mr-2" />
             CV Processing
@@ -186,6 +191,10 @@ const RecruitmentDashboard = () => {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <RecruitmentAnalytics />
         </TabsContent>
 
         <TabsContent value="cv-processing">

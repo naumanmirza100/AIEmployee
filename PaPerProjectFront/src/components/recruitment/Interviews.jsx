@@ -182,7 +182,7 @@ const Interviews = ({ onUpdate }) => {
                   <div>
                     <CardTitle className="text-lg">{interview.candidate_name}</CardTitle>
                     <CardDescription className="mt-1">
-                      {interview.job_role}
+                      {interview.job_title || interview.job_role}
                     </CardDescription>
                   </div>
                   {getStatusBadge(interview.status)}

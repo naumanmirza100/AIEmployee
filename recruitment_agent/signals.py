@@ -1,15 +1,17 @@
 """
 Django signals for automatic interview follow-up email management.
 Automatically checks and sends follow-up emails when interviews are created or updated.
+Also creates default qualification settings for new company users.
 """
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from datetime import timedelta
-from .models import Interview
+from .models import Interview, RecruiterQualificationSettings
 from .agents.interview_scheduling.interview_scheduling_agent import InterviewSchedulingAgent
 from .log_service import LogService
+from core.models import CompanyUser
 import logging
 import threading
 
@@ -117,4 +119,22 @@ def auto_check_interview_followups(sender, instance, created, **kwargs):
     thread = threading.Thread(target=_check_and_send_followup_async, args=(instance.id,))
     thread.daemon = True
     thread.start()
+
+
+@receiver(post_save, sender=CompanyUser)
+def create_default_qualification_settings(sender, instance, created, **kwargs):
+   
+    if created:
+        try:
+            RecruiterQualificationSettings.objects.get_or_create(
+                company_user=instance,
+                defaults={
+                    'interview_threshold': 65,
+                    'hold_threshold': 45,
+                    'use_custom_thresholds': False,
+                }
+            )
+            logger.info(f"✅ Created default qualification settings for company user {instance.id}")
+        except Exception as e:
+            logger.error(f"Error creating default qualification settings for company user {instance.id}: {str(e)}", exc_info=True)
 
