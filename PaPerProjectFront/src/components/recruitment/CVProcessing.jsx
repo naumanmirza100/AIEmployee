@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import { processCVs, getJobDescriptions } from '@/services/recruitmentAgentService';
+import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
+import QualificationReasoning from './QualificationReasoning';
 
 const CVProcessing = ({ onProcessComplete }) => {
   const { toast } = useToast();
@@ -37,7 +38,39 @@ const CVProcessing = ({ onProcessComplete }) => {
     }
   };
 
-  const handleJobSelection = (jobId) => {
+  const handleJobSelection = async (jobId) => {
+    // Check interview settings if a job is selected
+    if (jobId && jobId !== "none") {
+      try {
+        const settingsResponse = await getInterviewSettings(jobId);
+        if (settingsResponse.status === 'success' && settingsResponse.data) {
+          const settings = settingsResponse.data;
+          // Check if interview settings are complete
+          const isComplete = 
+            settings.schedule_from_date && 
+            settings.schedule_to_date && 
+            settings.start_time && 
+            settings.end_time &&
+            settings.time_slots_json &&
+            Array.isArray(settings.time_slots_json) &&
+            settings.time_slots_json.length > 0;
+          
+          if (!isComplete) {
+            toast({
+              title: 'Interview Settings Incomplete',
+              description: `Please complete interview settings for "${jobDescriptions.find(j => j.id.toString() === jobId.toString())?.title || 'this job'}" before processing CVs. Go to Settings > Interview Settings to configure.`,
+              variant: 'destructive',
+            });
+            // Don't set the job if settings are incomplete
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking interview settings:', error);
+        // Continue with job selection even if check fails
+      }
+    }
+    
     setSelectedJobId(jobId === "none" ? "" : jobId);
     
     // Extract and display keywords when a job is selected
@@ -73,6 +106,38 @@ const CVProcessing = ({ onProcessComplete }) => {
         variant: 'destructive',
       });
       return;
+    }
+
+    // Validate interview settings if a job is selected
+    if (selectedJobId && selectedJobId !== "none") {
+      try {
+        const settingsResponse = await getInterviewSettings(selectedJobId);
+        if (settingsResponse.status === 'success' && settingsResponse.data) {
+          const settings = settingsResponse.data;
+          // Check if interview settings are complete
+          const isComplete = 
+            settings.schedule_from_date && 
+            settings.schedule_to_date && 
+            settings.start_time && 
+            settings.end_time &&
+            settings.time_slots_json &&
+            Array.isArray(settings.time_slots_json) &&
+            settings.time_slots_json.length > 0;
+          
+          if (!isComplete) {
+            const selectedJob = jobDescriptions.find(j => j.id.toString() === selectedJobId.toString());
+            toast({
+              title: 'Interview Settings Incomplete',
+              description: `Please complete interview settings for "${selectedJob?.title || 'this job'}" before processing CVs. Go to Settings > Interview Settings to configure.`,
+              variant: 'destructive',
+            });
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking interview settings:', error);
+        // Continue with processing even if check fails
+      }
     }
 
     try {
@@ -265,9 +330,6 @@ const CVProcessing = ({ onProcessComplete }) => {
                           <CardTitle className="text-lg">
                             #{index + 1} - {result.file_name}
                           </CardTitle>
-                          <CardDescription>
-                            Role Fit Score: {qualified.role_fit_score || 'N/A'}%
-                          </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
                           {getDecisionBadge(qualified.decision)}
@@ -285,10 +347,13 @@ const CVProcessing = ({ onProcessComplete }) => {
                         </div>
                       )}
                       {qualified.reasoning && (
-                        <div>
-                          <h4 className="font-semibold mb-1">Qualification Reasoning</h4>
-                          <p className="text-sm text-muted-foreground">{qualified.reasoning}</p>
-                        </div>
+                        <QualificationReasoning 
+                          reasoning={qualified.reasoning}
+                          exactMatchedSkills={qualified.exact_matched_skills || []}
+                          relatedMatchedSkills={qualified.related_matched_skills || []}
+                          missingSkills={qualified.missing_skills || []}
+                          inferredSkills={[]}
+                        />
                       )}
                       {parsed.name && (
                         <div className="text-sm">
@@ -300,9 +365,9 @@ const CVProcessing = ({ onProcessComplete }) => {
                           <span className="font-medium">Email:</span> {parsed.email}
                         </div>
                       )}
-                      {qualified.confidence && (
+                      {qualified.confidence_score !== undefined && (
                         <div className="text-sm">
-                          <span className="font-medium">Confidence:</span> {qualified.confidence}%
+                          <span className="font-medium">Confidence Score:</span> {qualified.confidence_score}%
                         </div>
                       )}
                     </CardContent>

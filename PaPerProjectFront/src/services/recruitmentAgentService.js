@@ -287,6 +287,26 @@ export const updateQualificationSettings = async (settings) => {
   }
 };
 
+/**
+ * Get recruitment analytics data
+ * @param {number} days - Number of days for time-based analytics (default: 30)
+ * @param {number} months - Number of months for monthly analytics (default: 6)
+ * @param {number|null} jobId - Optional job ID to filter analytics by job
+ */
+export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = null) => {
+  try {
+    const params = { days, months };
+    if (jobId) {
+      params.job_id = jobId;
+    }
+    const response = await companyApi.get('/recruitment/analytics', { params });
+    return response;
+  } catch (error) {
+    console.error('Get recruitment analytics error:', error);
+    throw error;
+  }
+};
+
 export default {
   processCVs,
   getJobDescriptions,
@@ -303,6 +323,7 @@ export default {
   updateInterviewSettings,
   getQualificationSettings,
   updateQualificationSettings,
+  getRecruitmentAnalytics,
 };
 
 
