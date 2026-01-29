@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, FileText, Calendar, TrendingUp } from 'lucide-react';
 import { getCVRecords, getJobDescriptions } from '@/services/recruitmentAgentService';
+import QualificationReasoning from './QualificationReasoning';
 
 const CVRecords = () => {
   const { toast } = useToast();
@@ -176,10 +177,13 @@ const CVRecords = () => {
                     </div>
                   )}
                   {qualified.reasoning && (
-                    <div>
-                      <h4 className="font-semibold text-sm mb-1">Qualification Reasoning</h4>
-                      <p className="text-sm text-muted-foreground">{qualified.reasoning}</p>
-                    </div>
+                    <QualificationReasoning 
+                      reasoning={qualified.reasoning}
+                      exactMatchedSkills={qualified.exact_matched_skills || []}
+                      relatedMatchedSkills={qualified.related_matched_skills || []}
+                      missingSkills={qualified.missing_skills || []}
+                          inferredSkills={[]}
+                    />
                   )}
                   {parsed.skills && parsed.skills.length > 0 && (
                     <div>

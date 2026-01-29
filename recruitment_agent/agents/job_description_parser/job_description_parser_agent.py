@@ -134,6 +134,14 @@ class JobDescriptionParserAgent:
             result = self.groq_client.send_prompt(JOB_DESCRIPTION_PARSING_SYSTEM_PROMPT, text)
             return result
         except GroqClientError as exc:
+            # Check if it's an auth error (API key expired)
+            if exc.is_auth_error:
+                self._log_error("groq_api_key_expired", exc)
+                raise GroqClientError(
+                    "Groq API key expired or invalid. Job description parsing requires valid API key. "
+                    "Please update GROQ_REC_API_KEY in environment variables.",
+                    is_auth_error=True
+                ) from exc
             self._log_error("groq_parsing_failed", exc)
             raise
 

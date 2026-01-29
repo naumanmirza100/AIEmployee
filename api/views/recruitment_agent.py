@@ -103,6 +103,43 @@ def process_cvs(request):
                     company_user=company_user
                 ).first()
                 if job_desc:
+                    # Check if interview settings are complete for this job
+                    interview_settings = RecruiterInterviewSettings.objects.filter(
+                        company_user=company_user,
+                        job=job_desc
+                    ).first()
+                    
+                    # Check if settings are complete (all required fields must be present)
+                    settings_incomplete = False
+                    missing_fields = []
+                    
+                    if not interview_settings:
+                        settings_incomplete = True
+                        missing_fields.append('Interview settings not found')
+                    else:
+                        if not interview_settings.schedule_from_date:
+                            missing_fields.append('Start date')
+                        if not interview_settings.schedule_to_date:
+                            missing_fields.append('End date')
+                        if not interview_settings.start_time:
+                            missing_fields.append('Start time')
+                        if not interview_settings.end_time:
+                            missing_fields.append('End time')
+                        if not interview_settings.time_slots_json or not isinstance(interview_settings.time_slots_json, list) or len(interview_settings.time_slots_json) == 0:
+                            missing_fields.append('Time slots')
+                        
+                        if missing_fields:
+                            settings_incomplete = True
+                    
+                    if settings_incomplete:
+                        return Response({
+                            'status': 'error',
+                            'message': f'Interview settings are incomplete for job "{job_desc.title}". Please complete interview settings (missing: {", ".join(missing_fields)}) in Settings > Interview Settings before processing CVs.',
+                            'job_id': job_description_id,
+                            'job_title': job_desc.title,
+                            'missing_fields': missing_fields,
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    
                     job_description_text = job_desc.description
                     if job_desc.keywords_json:
                         try:
@@ -131,7 +168,13 @@ def process_cvs(request):
                 if extracted_keywords:
                     job_kw_list = extracted_keywords
             except Exception as exc:
-                log_service.log_error("job_description_text_parsing_failed", {"error": str(exc)})
+                # Check if it's an API key expiration error
+                from recruitment_agent.core import GroqClientError
+                if isinstance(exc, GroqClientError) and exc.is_auth_error:
+                    logger.warning(f"Groq API key expired during job description parsing. Continuing with manual keywords if provided.")
+                    log_service.log_error("job_description_parsing_api_key_expired", {"error": str(exc)})
+                else:
+                    log_service.log_error("job_description_text_parsing_failed", {"error": str(exc)})
         
         # Use manual keywords if provided
         if not job_kw_list and job_keywords:
@@ -150,7 +193,20 @@ def process_cvs(request):
                     temp_path = Path(tmp.name)
                     temp_paths.append(temp_path)
                 
-                parsed = cv_agent.parse_file(str(temp_path))
+                try:
+                    parsed = cv_agent.parse_file(str(temp_path))
+                except Exception as parse_exc:
+                    # Check if it's an API key expiration error
+                    from recruitment_agent.core import GroqClientError
+                    if isinstance(parse_exc, GroqClientError) and parse_exc.is_auth_error:
+                        logger.error(f"Groq API key expired during CV parsing for {uploaded_file.name}")
+                        return Response({
+                            'status': 'error',
+                            'message': 'Groq API key expired or invalid. Please update GROQ_REC_API_KEY in environment variables and try again.',
+                            'error_type': 'api_key_expired'
+                        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                    else:
+                        raise  # Re-raise other errors
                 
                 record_id = django_repo.store_parsed(uploaded_file.name, parsed) if django_repo else None
                 
@@ -199,8 +255,13 @@ def process_cvs(request):
             
             # Summarize, enrich, and qualify
             all_results = []
-            for result in parsed_results:
+            import time
+            for idx, result in enumerate(parsed_results):
                 parsed = result['parsed']
+                
+                # Add small delay between CVs to avoid rate limits (except for first one)
+                if idx > 0:
+                    time.sleep(0.5)  # 500ms delay between CVs
                 
                 # Summarize
                 summary = sum_agent.summarize(parsed, job_kw_list)
@@ -596,7 +657,9 @@ def list_interviews(request):
         company_user = request.user
         
         status_filter = request.query_params.get('status')
-        interviews = Interview.objects.filter(company_user=company_user)
+        interviews = Interview.objects.filter(company_user=company_user).select_related(
+            'cv_record', 'cv_record__job_description'
+        )
         
         if status_filter:
             interviews = interviews.filter(status=status_filter)
@@ -605,12 +668,18 @@ def list_interviews(request):
         
         interview_list = []
         for interview in interviews:
+            # Get job title from cv_record -> job_description if available
+            job_title = None
+            if interview.cv_record and interview.cv_record.job_description:
+                job_title = interview.cv_record.job_description.title
+            
             interview_list.append({
                 'id': interview.id,
                 'candidate_name': interview.candidate_name,
                 'candidate_email': interview.candidate_email,
                 'candidate_phone': interview.candidate_phone,
                 'job_role': interview.job_role,
+                'job_title': job_title,  # Add job title from job description
                 'interview_type': interview.interview_type,
                 'status': interview.status,
                 'scheduled_datetime': interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else None,
@@ -1195,8 +1264,22 @@ def qualification_settings(request):
         
         else:  # POST
             settings, created = RecruiterQualificationSettings.objects.get_or_create(
-                company_user=company_user
+                company_user=company_user,
+                defaults={
+                    'interview_threshold': 65,
+                    'hold_threshold': 45,
+                    'use_custom_thresholds': False,
+                }
             )
+            
+            # If settings already existed but have None values, set defaults
+            if not created:
+                if settings.interview_threshold is None:
+                    settings.interview_threshold = 65
+                if settings.hold_threshold is None:
+                    settings.hold_threshold = 45
+                if settings.use_custom_thresholds is None:
+                    settings.use_custom_thresholds = False
             
             if 'interview_threshold' in request.data:
                 threshold = int(request.data['interview_threshold'])
@@ -1243,5 +1326,423 @@ def qualification_settings(request):
         return Response({
             'status': 'error',
             'message': f'Failed to process qualification settings: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def recruitment_analytics(request):
+    """Get comprehensive analytics data for recruitment dashboard"""
+    try:
+        from django.utils import timezone
+        from datetime import timedelta, datetime
+        from django.db.models import Count, Q, Avg, Max, Min
+        from django.db.models.functions import TruncDate, TruncMonth
+        
+        company_user = request.user
+        company = company_user.company
+        
+        # Get date range (default: last 30 days, last 6 months, all time)
+        days = int(request.query_params.get('days', 30))
+        months = int(request.query_params.get('months', 6))
+        
+        # Get job filter (optional)
+        job_id = request.query_params.get('job_id', None)
+        job_filter = None
+        if job_id:
+            try:
+                job_filter = JobDescription.objects.get(id=job_id, company_user=company_user)
+            except JobDescription.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'Job not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Calculate date ranges
+        now = timezone.now()
+        days_ago = now - timedelta(days=days)
+        months_ago = now - timedelta(days=months * 30)
+        
+        # Base filters for CVs and Interviews
+        cv_base_filter = Q(job_description__company_user=company_user)
+        interview_base_filter = Q(company_user=company_user)
+        
+        if job_filter:
+            cv_base_filter &= Q(job_description=job_filter)
+            interview_base_filter &= Q(cv_record__job_description=job_filter)
+        
+        # ========== OVERVIEW STATS ==========
+        total_cvs = CVRecord.objects.filter(cv_base_filter).count()
+        
+        total_interviews = Interview.objects.filter(interview_base_filter).count()
+        total_jobs = JobDescription.objects.filter(company_user=company_user).count()
+        active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True).count()
+        
+        # ========== CV STATISTICS ==========
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        cv_by_decision = list(CVRecord.objects.filter(
+            cv_base_filter
+        ).order_by().values('qualification_decision').annotate(
+            count=Count('id')
+        ))
+        cv_by_decision.sort(key=lambda x: x['count'], reverse=True)
+        
+        cv_decisions = {
+            'INTERVIEW': 0,
+            'HOLD': 0,
+            'REJECT': 0,
+            'N/A': 0
+        }
+        for item in cv_by_decision:
+            decision = item['qualification_decision'] or 'N/A'
+            cv_decisions[decision] = item['count']
+        
+        # CVs by job (only if not filtering by specific job)
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        if not job_filter:
+            cv_by_job = list(CVRecord.objects.filter(
+                job_description__company_user=company_user,
+                job_description__isnull=False
+            ).order_by().values(
+                'job_description__title'
+            ).annotate(
+                count=Count('id')
+            ))
+        else:
+            cv_by_job = []
+        cv_by_job.sort(key=lambda x: x['count'], reverse=True)
+        cv_by_job = cv_by_job[:10]
+        
+        # CVs over time (daily for last 30 days)
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        cv_over_time = list(CVRecord.objects.filter(
+            cv_base_filter,
+            created_at__gte=days_ago
+        ).order_by().annotate(
+            date=TruncDate('created_at')
+        ).values('date').annotate(
+            count=Count('id')
+        ))
+        cv_over_time.sort(key=lambda x: x['date'] if x['date'] else datetime.min)
+        
+        # Average role fit score
+        avg_role_fit = CVRecord.objects.filter(
+            cv_base_filter,
+            role_fit_score__isnull=False
+        ).aggregate(Avg('role_fit_score'))['role_fit_score__avg'] or 0
+        
+        # ========== INTERVIEW STATISTICS ==========
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        interviews_by_status = list(Interview.objects.filter(
+            interview_base_filter
+        ).order_by().values('status').annotate(
+            count=Count('id')
+        ))
+        interviews_by_status.sort(key=lambda x: x['count'], reverse=True)
+        
+        interview_status_data = {
+            'PENDING': 0,
+            'SCHEDULED': 0,
+            'COMPLETED': 0,
+            'CANCELLED': 0,
+            'RESCHEDULED': 0
+        }
+        for item in interviews_by_status:
+            interview_status_data[item['status']] = item['count']
+        
+        # Interviews over time (daily for last 30 days)
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        interview_over_time = list(Interview.objects.filter(
+            interview_base_filter,
+            created_at__gte=days_ago
+        ).order_by().annotate(
+            date=TruncDate('created_at')
+        ).values('date').annotate(
+            count=Count('id')
+        ))
+        interview_over_time.sort(key=lambda x: x['date'] if x['date'] else datetime.min)
+        
+        # Interview conversion rate (INTERVIEW decision -> SCHEDULED interview)
+        interview_cvs = CVRecord.objects.filter(
+            cv_base_filter,
+            qualification_decision='INTERVIEW'
+        ).count()
+        scheduled_interviews = Interview.objects.filter(
+            interview_base_filter,
+            status='SCHEDULED'
+        ).count()
+        conversion_rate = (scheduled_interviews / interview_cvs * 100) if interview_cvs > 0 else 0
+        
+        # Interviews by job (only if not filtering by specific job)
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        if not job_filter:
+            interviews_by_job = list(Interview.objects.filter(
+                company_user=company_user,
+                cv_record__job_description__isnull=False
+            ).order_by().values(
+                'cv_record__job_description__title'
+            ).annotate(
+                count=Count('id')
+            ))
+            interviews_by_job.sort(key=lambda x: x['count'], reverse=True)
+            interviews_by_job = interviews_by_job[:10]
+        else:
+            interviews_by_job = []
+        
+        # Interview type distribution
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        interview_by_type = list(Interview.objects.filter(
+            company_user=company_user
+        ).order_by().values('interview_type').annotate(
+            count=Count('id')
+        ))
+        
+        interview_type_data = {
+            'ONLINE': 0,
+            'ONSITE': 0
+        }
+        for item in interview_by_type:
+            interview_type_data[item['interview_type']] = item['count']
+        
+        # ========== JOB STATISTICS ==========
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        jobs_by_status = list(JobDescription.objects.filter(
+            company_user=company_user
+        ).order_by().values('is_active').annotate(
+            count=Count('id')
+        ))
+        
+        job_status_data = {
+            'active': 0,
+            'inactive': 0
+        }
+        for item in jobs_by_status:
+            if item['is_active']:
+                job_status_data['active'] = item['count']
+            else:
+                job_status_data['inactive'] = item['count']
+        
+        # Jobs created over time (monthly for last 6 months)
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        jobs_over_time = list(JobDescription.objects.filter(
+            company_user=company_user,
+            created_at__gte=months_ago
+        ).order_by().annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            count=Count('id')
+        ))
+        jobs_over_time.sort(key=lambda x: x['month'] if x['month'] else datetime.min)
+        
+        # Top jobs by CV count
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        top_jobs_by_cvs = list(JobDescription.objects.filter(
+            company_user=company_user
+        ).order_by().annotate(
+            cv_count=Count('cv_records')
+        ))
+        top_jobs_by_cvs.sort(key=lambda x: x.cv_count if x.cv_count else 0, reverse=True)
+        top_jobs_by_cvs = top_jobs_by_cvs[:5]
+        
+        # Handle empty top_jobs list
+        top_jobs_list = [
+            {
+                'id': job.id,
+                'title': job.title,
+                'cv_count': job.cv_count
+            }
+            for job in top_jobs_by_cvs
+        ] if top_jobs_by_cvs else []
+        
+        # ========== PERFORMANCE METRICS ==========
+        # Average time from CV processing to interview scheduling
+        # (This would require tracking timestamps, simplified for now)
+        
+        # Response rate (interviews confirmed / interviews sent)
+        interviews_sent = Interview.objects.filter(
+            interview_base_filter,
+            invitation_sent_at__isnull=False
+        ).count()
+        interviews_confirmed = Interview.objects.filter(
+            interview_base_filter,
+            status__in=['SCHEDULED', 'COMPLETED']
+        ).count()
+        response_rate = (interviews_confirmed / interviews_sent * 100) if interviews_sent > 0 else 0
+        
+        # ========== ADDITIONAL STATISTICS ==========
+        # Average Response Time (time from invitation sent to confirmation)
+        # For SQL Server compatibility: calculate in Python
+        response_times = []
+        interviews_with_response = Interview.objects.filter(
+            interview_base_filter,
+            invitation_sent_at__isnull=False,
+            confirmation_sent_at__isnull=False
+        ).values('invitation_sent_at', 'confirmation_sent_at')
+        
+        for interview in interviews_with_response:
+            if interview['invitation_sent_at'] and interview['confirmation_sent_at']:
+                time_diff = interview['confirmation_sent_at'] - interview['invitation_sent_at']
+                hours = time_diff.total_seconds() / 3600
+                response_times.append(hours)
+        
+        avg_response_hours = sum(response_times) / len(response_times) if response_times else 0
+        
+        # Interview Completion Rate (COMPLETED / SCHEDULED)
+        scheduled_count = Interview.objects.filter(
+            interview_base_filter,
+            status='SCHEDULED'
+        ).count()
+        completed_count = Interview.objects.filter(
+            interview_base_filter,
+            status='COMPLETED'
+        ).count()
+        completion_rate = (completed_count / scheduled_count * 100) if scheduled_count > 0 else 0
+        
+        # CV Processing Rate (CVs processed per day in last 30 days)
+        total_cvs_last_30 = CVRecord.objects.filter(
+            cv_base_filter,
+            created_at__gte=days_ago
+        ).count()
+        cv_processing_rate = total_cvs_last_30 / days if days > 0 else 0
+        
+        # Top Performing Jobs (by conversion rate) - only if not filtering by job
+        if not job_filter:
+            top_performing_jobs = []
+            all_jobs = JobDescription.objects.filter(company_user=company_user)
+            for job in all_jobs:
+                job_interview_cvs = CVRecord.objects.filter(
+                    job_description=job,
+                    qualification_decision='INTERVIEW'
+                ).count()
+                job_scheduled = Interview.objects.filter(
+                    cv_record__job_description=job,
+                    status='SCHEDULED'
+                ).count()
+                job_conversion = (job_scheduled / job_interview_cvs * 100) if job_interview_cvs > 0 else 0
+                if job_interview_cvs > 0:  # Only include jobs with interview decisions
+                    top_performing_jobs.append({
+                        'id': job.id,
+                        'title': job.title,
+                        'conversion_rate': round(job_conversion, 2),
+                        'interview_cvs': job_interview_cvs,
+                        'scheduled': job_scheduled
+                    })
+            top_performing_jobs.sort(key=lambda x: x['conversion_rate'], reverse=True)
+            top_performing_jobs = top_performing_jobs[:5]
+        else:
+            top_performing_jobs = []
+        
+        # ========== RECENT ACTIVITY ==========
+        # For SQL Server compatibility: clear any default ordering and sort in Python
+        recent_cvs = list(CVRecord.objects.filter(
+            cv_base_filter
+        ).order_by().values(
+            'id', 'file_name', 'qualification_decision', 'role_fit_score', 'created_at'
+        ))
+        # Sort by created_at descending and take top 5
+        recent_cvs.sort(key=lambda x: x['created_at'] if x['created_at'] else datetime.min, reverse=True)
+        recent_cvs = recent_cvs[:5]
+        
+        recent_interviews = list(Interview.objects.filter(
+            interview_base_filter
+        ).order_by().values(
+            'id', 'candidate_name', 'job_role', 'status', 'created_at'
+        ))
+        # Sort by created_at descending and take top 5
+        recent_interviews.sort(key=lambda x: x['created_at'] if x['created_at'] else datetime.min, reverse=True)
+        recent_interviews = recent_interviews[:5]
+        
+        # Format dates for frontend
+        cv_over_time_list = [
+            {
+                'date': item['date'].isoformat() if item['date'] else None,
+                'count': item['count']
+            }
+            for item in cv_over_time
+        ]
+        interview_over_time_list = [
+            {
+                'date': item['date'].isoformat() if item['date'] else None,
+                'count': item['count']
+            }
+            for item in interview_over_time
+        ]
+        jobs_over_time_list = [
+            {
+                'month': item['month'].isoformat() if item['month'] else None,
+                'count': item['count']
+            }
+            for item in jobs_over_time
+        ]
+        
+        # Format recent activity dates
+        recent_cvs_list = [
+            {
+                'id': cv['id'],
+                'file_name': cv['file_name'],
+                'qualification_decision': cv['qualification_decision'],
+                'role_fit_score': cv['role_fit_score'],
+                'created_at': cv['created_at'].isoformat() if cv['created_at'] else None
+            }
+            for cv in recent_cvs
+        ]
+        recent_interviews_list = [
+            {
+                'id': interview['id'],
+                'candidate_name': interview['candidate_name'],
+                'job_role': interview['job_role'],
+                'status': interview['status'],
+                'created_at': interview['created_at'].isoformat() if interview['created_at'] else None
+            }
+            for interview in recent_interviews
+        ]
+        
+        return Response({
+            'status': 'success',
+            'data': {
+                'overview': {
+                    'total_cvs': total_cvs,
+                    'total_interviews': total_interviews,
+                    'total_jobs': total_jobs,
+                    'active_jobs': active_jobs,
+                    'avg_role_fit_score': round(avg_role_fit, 2) if avg_role_fit else 0,
+                    'conversion_rate': round(conversion_rate, 2),
+                    'response_rate': round(response_rate, 2),
+                },
+                'cv_statistics': {
+                    'by_decision': cv_decisions,
+                    'by_job': cv_by_job,
+                    'over_time': cv_over_time_list,
+                },
+                'interview_statistics': {
+                    'by_status': interview_status_data,
+                    'by_type': interview_type_data,
+                    'by_job': interviews_by_job,
+                    'over_time': interview_over_time_list,
+                },
+                'job_statistics': {
+                    'by_status': job_status_data,
+                    'over_time': jobs_over_time_list,
+                    'top_jobs_by_cvs': top_jobs_list,
+                },
+                'additional_statistics': {
+                    'avg_response_time_hours': round(avg_response_hours, 2),
+                    'completion_rate': round(completion_rate, 2),
+                    'cv_processing_rate': round(cv_processing_rate, 2),
+                    'top_performing_jobs': top_performing_jobs,
+                },
+                'recent_activity': {
+                    'recent_cvs': recent_cvs_list,
+                    'recent_interviews': recent_interviews_list,
+                },
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Error generating recruitment analytics: {e}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Failed to generate analytics: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

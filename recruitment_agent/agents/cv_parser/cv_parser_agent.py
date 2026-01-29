@@ -145,6 +145,7 @@ class CVParserAgent:
     def _call_groq(self, cleaned_text: str) -> Dict[str, Any]:
         """
         Send cleaned text to Groq for structured parsing.
+        Handles API key expiration gracefully.
         """
         try:
             self._log_step(
@@ -160,6 +161,18 @@ class CVParserAgent:
             if not isinstance(response, dict):
                 raise GroqClientError("Groq response is not a JSON object.")
             return response
+        except GroqClientError as exc:
+            # Check if it's an auth error (API key expired)
+            if exc.is_auth_error:
+                self._log_error("groq_api_key_expired", exc)
+                # Re-raise with clear message
+                raise GroqClientError(
+                    "Groq API key expired or invalid. CV parsing requires valid API key. "
+                    "Please update GROQ_REC_API_KEY in environment variables.",
+                    is_auth_error=True
+                ) from exc
+            # Re-raise other GroqClientErrors
+            raise
         except Exception as exc:  # pragma: no cover - propagated
             self._log_error("groq_call_failed", exc)
             raise

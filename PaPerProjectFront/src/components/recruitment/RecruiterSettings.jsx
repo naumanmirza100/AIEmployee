@@ -52,12 +52,19 @@ const RecruiterSettings = () => {
   const [loadingJobs, setLoadingJobs] = useState(false);
 
   useEffect(() => {
-    fetchJobs();
+    // Fetch jobs and initial settings (email & qualification don't need jobs)
+    const loadInitialData = async () => {
+      await fetchJobs();
+      // Load email and qualification settings even if no jobs exist
+      await fetchEmailAndQualificationSettings();
+    };
+    loadInitialData();
   }, []);
 
   useEffect(() => {
+    // Only fetch interview settings when a job is selected
     if (selectedJobId !== null) {
-      fetchSettings(selectedJobId);
+      fetchInterviewSettings(selectedJobId);
     }
   }, [selectedJobId]);
 
@@ -86,18 +93,41 @@ const RecruiterSettings = () => {
     }
   };
 
-  const fetchSettings = async (jobId = null) => {
+  // Fetch email and qualification settings (don't require jobs)
+  const fetchEmailAndQualificationSettings = async () => {
     try {
       setLoading(true);
-      const [emailRes, interviewRes, qualificationRes] = await Promise.all([
+      const [emailRes, qualificationRes] = await Promise.all([
         getEmailSettings(),
-        getInterviewSettings(jobId),
         getQualificationSettings().catch(() => ({ status: 'success', data: { interview_threshold: 65, hold_threshold: 45, use_custom_thresholds: false } })),
       ]);
 
       if (emailRes.status === 'success') {
         setEmailSettings(emailRes.data);
       }
+      if (qualificationRes.status === 'success') {
+        setQualificationSettings(qualificationRes.data);
+      }
+    } catch (error) {
+      console.error('Error fetching email/qualification settings:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load email and qualification settings',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch interview settings (requires a job)
+  const fetchInterviewSettings = async (jobId) => {
+    if (!jobId) return;
+    
+    try {
+      setLoading(true);
+      const interviewRes = await getInterviewSettings(jobId);
+
       if (interviewRes.status === 'success') {
         const data = interviewRes.data;
         setInterviewSettings({
@@ -132,14 +162,11 @@ const RecruiterSettings = () => {
           setScheduleToDate(null);
         }
       }
-      if (qualificationRes.status === 'success') {
-        setQualificationSettings(qualificationRes.data);
-      }
     } catch (error) {
-      console.error('Error fetching settings:', error);
+      console.error('Error fetching interview settings:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load settings',
+        description: 'Failed to load interview settings',
         variant: 'destructive',
       });
     } finally {
@@ -179,6 +206,38 @@ const RecruiterSettings = () => {
         });
         return;
       }
+
+      // Validate dates are not in the past
+      if (scheduleFromDate && isDateInPast(scheduleFromDate)) {
+        toast({
+          title: 'Error',
+          description: 'Start date cannot be in the past. Please select a future date.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (scheduleToDate && isDateInPast(scheduleToDate)) {
+        toast({
+          title: 'Error',
+          description: 'End date cannot be in the past. Please select a future date.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Validate time is not in the past if date is today
+      if (scheduleFromDate && interviewSettings.start_time) {
+        if (isTimeInPast(scheduleFromDate, interviewSettings.start_time)) {
+          toast({
+            title: 'Error',
+            description: 'Start time cannot be in the past. Please select a future time.',
+            variant: 'destructive',
+          });
+          return;
+        }
+      }
+
       setSaving(true);
         // Convert Date objects to local date strings (YYYY-MM-DD format) - avoid timezone issues
         const settingsToSave = {
@@ -343,6 +402,38 @@ const RecruiterSettings = () => {
     if (!dateString) return null;
     const [year, month, day] = dateString.split('-').map(Number);
     return new Date(year, month - 1, day);
+  };
+
+  // Helper function to check if a date is in the past
+  const isDateInPast = (date) => {
+    if (!date) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+    return checkDate < today;
+  };
+
+  // Helper function to check if a time is in the past (when date is today)
+  const isTimeInPast = (date, time) => {
+    if (!date || !time) return false;
+    const today = new Date();
+    const checkDate = new Date(date);
+    
+    // Check if date is today
+    const isToday = 
+      checkDate.getFullYear() === today.getFullYear() &&
+      checkDate.getMonth() === today.getMonth() &&
+      checkDate.getDate() === today.getDate();
+    
+    if (!isToday) return false;
+    
+    // Parse time (HH:MM format)
+    const [hours, minutes] = time.split(':').map(Number);
+    const checkDateTime = new Date(today);
+    checkDateTime.setHours(hours, minutes, 0, 0);
+    
+    return checkDateTime < today;
   };
 
   const formatTime = (hours, mins) => {
@@ -623,39 +714,50 @@ const RecruiterSettings = () => {
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="job-select">Select Job</Label>
-                <Select
-                  value={selectedJobId?.toString() || ''}
-                  onValueChange={(value) => {
-                    setSelectedJobId(value ? parseInt(value) : null);
-                    // Reset settings when job changes
-                    setInterviewSettings({
-                      schedule_from_date: '',
-                      schedule_to_date: '',
-                      start_time: '09:00',
-                      end_time: '17:00',
-                      interview_time_gap: 30,
-                    });
-                    setScheduleFromDate(null);
-                    setScheduleToDate(null);
-                    setTimeSlots([]);
-                  }}
-                  disabled={loadingJobs}
-                >
-                  <SelectTrigger id="job-select">
-                    <SelectValue placeholder={loadingJobs ? "Loading jobs..." : "Select a job"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {jobs.map((job) => (
-                      <SelectItem key={job.id} value={job.id.toString()}>
-                        {job.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {!selectedJobId && (
-                  <p className="text-xs text-muted-foreground">
-                    Please select a job to configure its interview settings
-                  </p>
+                {jobs.length === 0 && !loadingJobs ? (
+                  <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                      <Lock className="h-4 w-4 inline mr-2" />
+                      No jobs available. Please add a job description first to configure interview settings.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <Select
+                      value={selectedJobId?.toString() || ''}
+                      onValueChange={(value) => {
+                        setSelectedJobId(value ? parseInt(value) : null);
+                        // Reset settings when job changes
+                        setInterviewSettings({
+                          schedule_from_date: '',
+                          schedule_to_date: '',
+                          start_time: '09:00',
+                          end_time: '17:00',
+                          interview_time_gap: 30,
+                        });
+                        setScheduleFromDate(null);
+                        setScheduleToDate(null);
+                        setTimeSlots([]);
+                      }}
+                      disabled={loadingJobs}
+                    >
+                      <SelectTrigger id="job-select">
+                        <SelectValue placeholder={loadingJobs ? "Loading jobs..." : "Select a job"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {jobs.map((job) => (
+                          <SelectItem key={job.id} value={job.id.toString()}>
+                            {job.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!selectedJobId && jobs.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Please select a job to configure its interview settings
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -669,6 +771,15 @@ const RecruiterSettings = () => {
                       date={scheduleFromDate}
                       setDate={(date) => {
                         if (date) {
+                          // Validate date is not in the past
+                          if (isDateInPast(date)) {
+                            toast({
+                              title: 'Error',
+                              description: 'Start date cannot be in the past. Please select a future date.',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
                           setScheduleFromDate(date);
                           setCalendarMonth(new Date(date)); // Update calendar to show selected month
                           // Also update the string format for consistency - use local time
@@ -687,7 +798,7 @@ const RecruiterSettings = () => {
                       placeholder="Select start date"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Start date for scheduling (leave empty for today)
+                      Start date for scheduling (must be today or a future date)
                     </p>
                   </div>
 
@@ -697,6 +808,24 @@ const RecruiterSettings = () => {
                       date={scheduleToDate}
                       setDate={(date) => {
                         if (date) {
+                          // Validate date is not in the past
+                          if (isDateInPast(date)) {
+                            toast({
+                              title: 'Error',
+                              description: 'End date cannot be in the past. Please select a future date.',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
+                          // Validate end date is not before start date
+                          if (scheduleFromDate && date < scheduleFromDate) {
+                            toast({
+                              title: 'Error',
+                              description: 'End date cannot be before start date. Please select a date after the start date.',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
                           setScheduleToDate(date);
                           // Also update the string format for consistency - use local time
                           setInterviewSettings({
@@ -726,13 +855,25 @@ const RecruiterSettings = () => {
                       id="start_time"
                       type="time"
                       value={interviewSettings.start_time}
-                      onChange={(e) => setInterviewSettings({
-                        ...interviewSettings,
-                        start_time: e.target.value,
-                      })}
+                      onChange={(e) => {
+                        const newTime = e.target.value;
+                        // Validate time is not in the past if start date is today
+                        if (scheduleFromDate && isTimeInPast(scheduleFromDate, newTime)) {
+                          toast({
+                            title: 'Error',
+                            description: 'Start time cannot be in the past. Please select a future time.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        setInterviewSettings({
+                          ...interviewSettings,
+                          start_time: newTime,
+                        });
+                      }}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Start time of day for interviews
+                      Start time of day for interviews (must be a future time if date is today)
                     </p>
                   </div>
                   
@@ -743,13 +884,25 @@ const RecruiterSettings = () => {
                       id="end_time"
                       type="time"
                       value={interviewSettings.end_time}
-                      onChange={(e) => setInterviewSettings({
-                        ...interviewSettings,
-                        end_time: e.target.value,
-                      })}
+                      onChange={(e) => {
+                        const newTime = e.target.value;
+                        // Validate end time is after start time
+                        if (interviewSettings.start_time && newTime <= interviewSettings.start_time) {
+                          toast({
+                            title: 'Error',
+                            description: 'End time must be after start time. Please select a later time.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        setInterviewSettings({
+                          ...interviewSettings,
+                          end_time: newTime,
+                        });
+                      }}
                     />
                     <p className="text-xs text-muted-foreground">
-                      End time of day for interviews
+                      End time of day for interviews (must be after start time)
                     </p>
                   </div>
                 </div>
