@@ -167,6 +167,9 @@ def get_company_user_projects(request):
                     'priority': task.priority,
                     'due_date': task.due_date.isoformat() if task.due_date else None,
                     'created_at': task.created_at.isoformat() if task.created_at else None,
+                    'assignee_id': task.assignee.id if task.assignee else None,
+                    'assignee_name': task.assignee.get_full_name() if task.assignee and (task.assignee.first_name or task.assignee.last_name) else (task.assignee.username if task.assignee else None),
+                    'assignee_email': task.assignee.email if task.assignee else None,
                     'subtasks': [
                         {
                             'id': st.id,

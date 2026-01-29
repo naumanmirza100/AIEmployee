@@ -28,6 +28,8 @@ from api.views import white_label
 from api.views import company_jobs
 from api.views import pm_agent
 from api.views import company_dashboard
+from api.views import company_projects_tasks
+from api.views import user_project_manager
 from api.views import recruitment_agent
 from api.views import marketing_agent
 from api.views import module_purchase
@@ -56,6 +58,15 @@ urlpatterns = [
     re_path(r'^user/projects/?$', user_tasks.get_my_projects, name='get_my_projects'),  # GET
     re_path(r'^user/tasks/(?P<taskId>\d+)/status/?$', user_tasks.update_task_status, name='update_task_status'),  # PATCH
     re_path(r'^user/tasks/(?P<taskId>\d+)/progress/?$', user_tasks.update_task_progress, name='update_task_progress'),  # PATCH
+    
+    # Project Manager endpoints (for users with project_manager role)
+    re_path(r'^user/project-manager/projects-tasks/?$', user_project_manager.get_project_manager_projects_tasks, name='get_project_manager_projects_tasks'),  # GET
+    re_path(r'^user/project-manager/projects/?$', user_project_manager.get_project_manager_projects, name='get_project_manager_projects'),  # GET
+    re_path(r'^user/project-manager/projects/create/?$', user_project_manager.create_project_manager_project, name='create_project_manager_project'),  # POST
+    re_path(r'^user/project-manager/projects/(?P<project_id>\d+)/update/?$', user_project_manager.update_project_manager_project, name='update_project_manager_project'),  # PUT/PATCH
+    re_path(r'^user/project-manager/tasks/create/?$', user_project_manager.create_project_manager_task, name='create_project_manager_task'),  # POST
+    re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/update/?$', user_project_manager.update_project_manager_task, name='update_project_manager_task'),  # PUT/PATCH
+    re_path(r'^user/project-manager/company-users/?$', user_project_manager.get_company_users_for_pm, name='get_company_users_for_pm'),  # GET
     
     # Project endpoints
     re_path(r'^projects/?$', project.list_projects, name='list_projects'),
@@ -160,6 +171,11 @@ urlpatterns = [
     re_path(r'^project-manager/dashboard/?$', company_dashboard.project_manager_dashboard, name='pm_dashboard'),
     # Company User Projects endpoint
     re_path(r'^company/projects/?$', company_dashboard.get_company_user_projects, name='get_company_user_projects'),
+    re_path(r'^company/projects/(?P<project_id>\d+)/update/?$', company_projects_tasks.update_company_project, name='update_company_project'),
+    
+    # Company User Tasks endpoints
+    re_path(r'^company/tasks/(?P<task_id>\d+)/update/?$', company_projects_tasks.update_company_task, name='update_company_task'),
+    re_path(r'^company/users/for-assignment/?$', company_projects_tasks.get_company_users_for_assignment, name='get_company_users_for_assignment'),
 
     # Project Manager AI Agent endpoints (token-auth friendly)
     re_path(r'^project-manager/ai/project-pilot/?$', pm_agent.project_pilot, name='pm_project_pilot'),

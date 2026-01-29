@@ -10,12 +10,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
 import { companyApi } from '@/services/companyAuthService';
 import { getPurchasedModules } from '@/services/modulePurchaseService';
 import companyUserManagementService from '@/services/companyUserManagementService';
+import companyProjectsTasksService from '@/services/companyProjectsTasksService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { 
   Building2, Plus, Briefcase, Users, Eye, 
@@ -65,6 +66,27 @@ const CompanyDashboardPage = () => {
   const [allUsersTasksLoading, setAllUsersTasksLoading] = useState(false);
   const [taskStatusFilter, setTaskStatusFilter] = useState('all');
   const [taskUserFilter, setTaskUserFilter] = useState('all');
+  
+  // Project and Task editing state
+  const [editingProject, setEditingProject] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
+  const [showEditProjectModal, setShowEditProjectModal] = useState(false);
+  const [showEditTaskModal, setShowEditTaskModal] = useState(false);
+  const [projectForm, setProjectForm] = useState({
+    name: '',
+    description: '',
+    status: 'active',
+    priority: 'medium',
+    project_type: 'web_app',
+  });
+  const [taskForm, setTaskForm] = useState({
+    title: '',
+    description: '',
+    priority: 'medium',
+    status: 'todo',
+    assignee_id: '',
+  });
+  const [availableUsers, setAvailableUsers] = useState([]);
 
   const [jobForm, setJobForm] = useState({
     title: '',
@@ -299,6 +321,107 @@ const CompanyDashboardPage = () => {
       setProjects([]);
     } finally {
       setProjectsLoading(false);
+    }
+  };
+
+  const fetchAvailableUsers = async () => {
+    try {
+      const response = await companyProjectsTasksService.getUsersForAssignment();
+      if (response.status === 'success') {
+        setAvailableUsers(response.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching users for assignment:', error);
+    }
+  };
+
+  const handleEditProject = (project) => {
+    setEditingProject(project);
+    setProjectForm({
+      name: project.name || '',
+      description: project.description || '',
+      status: project.status || 'active',
+      priority: project.priority || 'medium',
+      project_type: project.project_type || 'web_app',
+    });
+    setShowEditProjectModal(true);
+  };
+
+  const handleUpdateProject = async (e) => {
+    e.preventDefault();
+    if (!editingProject) return;
+    
+    try {
+      const response = await companyProjectsTasksService.updateProject(editingProject.id, projectForm);
+      if (response.status === 'success') {
+        toast({
+          title: 'Success',
+          description: 'Project updated successfully',
+        });
+        setShowEditProjectModal(false);
+        setEditingProject(null);
+        fetchProjects();
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update project',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEditTask = (task) => {
+    setEditingTask(task);
+    // Convert null/undefined assignee_id to "none" for the select
+    // Handle both assignee_id (from serializer) and assignee.id (if assignee object exists)
+    const assigneeId = task.assignee_id || (task.assignee && task.assignee.id) || null;
+    const assigneeIdString = assigneeId ? assigneeId.toString() : 'none';
+    setTaskForm({
+      title: task.title || '',
+      description: task.description || '',
+      priority: task.priority || 'medium',
+      status: task.status || 'todo',
+      assignee_id: assigneeIdString,
+    });
+    // Fetch users if not already loaded
+    if (availableUsers.length === 0) {
+      fetchAvailableUsers();
+    }
+    setShowEditTaskModal(true);
+  };
+
+  const handleUpdateTask = async (e) => {
+    e.preventDefault();
+    if (!editingTask) return;
+    
+    try {
+      // Convert "none" to null for unassigning
+      const assigneeId = taskForm.assignee_id === 'none' || taskForm.assignee_id === '' ? null : taskForm.assignee_id;
+      
+      const response = await companyProjectsTasksService.updateTask(editingTask.id, {
+        ...taskForm,
+        assignee_id: assigneeId,
+      });
+      if (response.status === 'success') {
+        toast({
+          title: 'Success',
+          description: 'Task updated successfully',
+        });
+        setShowEditTaskModal(false);
+        setEditingTask(null);
+        // Refresh both projects and all users tasks
+        fetchProjects();
+        if (activeTab === 'all-tasks') {
+          fetchAllUsersTasks();
+        }
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update task',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -762,7 +885,20 @@ const CompanyDashboardPage = () => {
                                 )}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <CardTitle className="text-lg">{project.name}</CardTitle>
+                                <div className="flex items-center justify-between gap-2">
+                                  <CardTitle className="text-lg">{project.name}</CardTitle>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditProject(project);
+                                    }}
+                                    className="h-8 w-8 p-0"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                </div>
                                 <div className="mt-2 flex items-center gap-3 flex-wrap">
                                   <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
                                     {project.status}
@@ -811,7 +947,20 @@ const CompanyDashboardPage = () => {
                                     >
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="flex-1 min-w-0">
-                                          <p className="font-medium">{task.title}</p>
+                                          <div className="flex items-center gap-2">
+                                            <p className="font-medium">{task.title}</p>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleEditTask(task);
+                                              }}
+                                              className="h-6 w-6 p-0"
+                                            >
+                                              <Edit className="h-3 w-3" />
+                                            </Button>
+                                          </div>
                                           {task.description && (
                                             <p className="text-sm text-muted-foreground mt-1">
                                               {task.description}
@@ -1180,7 +1329,17 @@ const CompanyDashboardPage = () => {
                       <CardHeader>
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
-                            <CardTitle className="text-lg mb-2">{task.title}</CardTitle>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <CardTitle className="text-lg">{task.title}</CardTitle>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEditTask(task)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </div>
                             {task.description && (
                               <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                                 {task.description}
@@ -1474,6 +1633,252 @@ const CompanyDashboardPage = () => {
                 </Button>
                 <Button type="submit">
                   {editingUser ? 'Update User' : 'Create User'}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Project Modal */}
+        <Dialog open={showEditProjectModal} onOpenChange={(open) => {
+          setShowEditProjectModal(open);
+          if (!open) {
+            setEditingProject(null);
+            setProjectForm({
+              name: '',
+              description: '',
+              status: 'active',
+              priority: 'medium',
+              project_type: 'web_app',
+            });
+          }
+        }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Project</DialogTitle>
+              <DialogDescription>
+                Update project details. Changes will be saved immediately.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleUpdateProject} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="project-name">Project Name *</Label>
+                <Input
+                  id="project-name"
+                  value={projectForm.name}
+                  onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="project-description">Description</Label>
+                <Textarea
+                  id="project-description"
+                  value={projectForm.description}
+                  onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
+                  rows={4}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="project-status">Status</Label>
+                  <Select
+                    value={projectForm.status}
+                    onValueChange={(value) => setProjectForm({ ...projectForm, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="planning">Planning</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="on_hold">On Hold</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="draft">Draft</SelectItem>
+                      <SelectItem value="posted">Posted</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="review">Review</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="project-priority">Priority</Label>
+                  <Select
+                    value={projectForm.priority}
+                    onValueChange={(value) => setProjectForm({ ...projectForm, priority: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="project-type">Project Type</Label>
+                <Select
+                  value={projectForm.project_type}
+                  onValueChange={(value) => setProjectForm({ ...projectForm, project_type: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="website">Website</SelectItem>
+                    <SelectItem value="mobile_app">Mobile App</SelectItem>
+                    <SelectItem value="web_app">Web Application</SelectItem>
+                    <SelectItem value="ai_bot">AI Bot</SelectItem>
+                    <SelectItem value="integration">Integration</SelectItem>
+                    <SelectItem value="marketing">Marketing</SelectItem>
+                    <SelectItem value="database">Database</SelectItem>
+                    <SelectItem value="consulting">Consulting</SelectItem>
+                    <SelectItem value="ai_system">AI System</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowEditProjectModal(false);
+                    setEditingProject(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Update Project
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Task Modal */}
+        <Dialog open={showEditTaskModal} onOpenChange={(open) => {
+          setShowEditTaskModal(open);
+          if (!open) {
+            setEditingTask(null);
+            setTaskForm({
+              title: '',
+              description: '',
+              priority: 'medium',
+              status: 'todo',
+              assignee_id: 'none',
+            });
+          }
+        }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Task</DialogTitle>
+              <DialogDescription>
+                Update task details including assignment, priority, and status.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleUpdateTask} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="task-title">Task Title *</Label>
+                <Input
+                  id="task-title"
+                  value={taskForm.title}
+                  onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="task-description">Description</Label>
+                <Textarea
+                  id="task-description"
+                  value={taskForm.description}
+                  onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                  rows={4}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="task-priority">Priority</Label>
+                  <Select
+                    value={taskForm.priority}
+                    onValueChange={(value) => setTaskForm({ ...taskForm, priority: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="task-status">Status</Label>
+                  <Select
+                    value={taskForm.status}
+                    onValueChange={(value) => setTaskForm({ ...taskForm, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todo">To Do</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="review">Review</SelectItem>
+                      <SelectItem value="done">Done</SelectItem>
+                      <SelectItem value="blocked">Blocked</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="task-assignee">Assign To</Label>
+                <Select
+                  value={taskForm.assignee_id || 'none'}
+                  onValueChange={(value) => setTaskForm({ ...taskForm, assignee_id: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select user (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None (Unassign)</SelectItem>
+                    {availableUsers.map((user) => (
+                      <SelectItem key={user.id} value={user.id.toString()}>
+                        {user.full_name} ({user.email}) - {user.role}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowEditTaskModal(false);
+                    setEditingTask(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Update Task
                 </Button>
               </div>
             </form>
