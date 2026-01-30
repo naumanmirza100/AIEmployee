@@ -1,0 +1,20 @@
+Dear {{ candidate_name }},
+
+Your interview has been rescheduled.
+
+Interview Details:
+- Position: {{ job_title }}
+- Interview Type: {{ interview_type }}
+- New Date & Time: {{ scheduled_display|default:selected_slot }}
+
+Please update your calendar and make sure to:
+- Arrive on time (or join the online meeting 5 minutes early)
+- Bring a copy of your resume
+- Prepare any questions you may have
+
+For online interviews, you will receive a meeting link separately.
+
+We look forward to meeting you!
+
+Best regards,
+Recruitment Team

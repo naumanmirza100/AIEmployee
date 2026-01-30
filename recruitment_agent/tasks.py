@@ -4,6 +4,8 @@ This runs periodically to check for interviews that need follow-up emails.
 """
 
 from django.utils import timezone
+from django.db import connection, close_old_connections
+from django.db.utils import OperationalError
 from datetime import timedelta
 from .models import Interview
 from .agents.interview_scheduling.interview_scheduling_agent import InterviewSchedulingAgent

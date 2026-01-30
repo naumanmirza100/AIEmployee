@@ -361,7 +361,7 @@ const JobDescriptions = ({ onUpdate }) => {
         </div>
       )}
 
-      {/* Create Modal (manual) */}
+      {/* Create Modal (manual) – reset form when closed by X or overlay too */}
       <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) resetForm(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -434,8 +434,8 @@ const JobDescriptions = ({ onUpdate }) => {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+      {/* Edit Modal – reset form and editingJob when closed by X, overlay, or Cancel */}
+      <Dialog open={showEditModal} onOpenChange={(open) => { setShowEditModal(open); if (!open) { setEditingJob(null); resetForm(); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Job Description</DialogTitle>

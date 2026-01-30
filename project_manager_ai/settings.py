@@ -454,7 +454,7 @@ RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
 # Base URL for email tracking (opens/clicks)
 # For local testing with ngrok, use your ngrok URL
 # For production, use your actual domain
-SITE_URL = os.getenv('SITE_URL')
+SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 
 
 # --------------------

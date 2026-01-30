@@ -945,6 +945,101 @@ def update_interview(request, interview_id):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_reschedule_slots(request, interview_id):
+    """Get available slots for rescheduling an interview (company only)"""
+    try:
+        company_user = request.user
+        interview = Interview.objects.filter(
+            id=interview_id,
+            company_user=company_user
+        ).first()
+
+        if not interview:
+            return Response({
+                'status': 'error',
+                'message': 'Interview not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        agents = get_agents()
+        interview_agent = agents['interview_agent']
+        result = interview_agent.get_reschedule_slots(interview_id)
+
+        if not result.get('success'):
+            return Response({
+                'status': 'error',
+                'message': result.get('error', 'Failed to get slots')
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'slots': result.get('slots', []),
+                'message': result.get('message'),
+            }
+        })
+    except Exception as e:
+        logger.exception(f"Error getting reschedule slots: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reschedule_interview(request, interview_id):
+    """Reschedule an interview to a new slot; sends new invitation to candidate (company only)"""
+    try:
+        company_user = request.user
+        interview = Interview.objects.filter(
+            id=interview_id,
+            company_user=company_user
+        ).first()
+
+        if not interview:
+            return Response({
+                'status': 'error',
+                'message': 'Interview not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        new_slot_datetime = request.data.get('new_slot_datetime')
+        if not new_slot_datetime:
+            return Response({
+                'status': 'error',
+                'message': 'new_slot_datetime is required (ISO format)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        agents = get_agents()
+        interview_agent = agents['interview_agent']
+        result = interview_agent.reschedule_interview(interview_id, new_slot_datetime)
+
+        if not result.get('success'):
+            return Response({
+                'status': 'error',
+                'message': result.get('error', 'Reschedule failed')
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'success',
+            'message': 'Interview rescheduled; candidate has been notified.',
+            'data': {
+                'interview_id': result.get('interview_id'),
+                'scheduled_datetime': result.get('scheduled_datetime'),
+                'selected_slot': result.get('selected_slot'),
+            }
+        })
+    except Exception as e:
+        logger.exception(f"Error rescheduling interview: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1634,12 +1729,18 @@ def recruitment_analytics(request):
         days = int(request.query_params.get('days', 30))
         months = int(request.query_params.get('months', 6))
         
-        # Get job filter (optional)
-        job_id = request.query_params.get('job_id', None)
+        # Get job filter (optional): when set, analytics are for that job only
+        job_id_param = request.query_params.get('job_id', None)
         job_filter = None
-        if job_id:
+        if job_id_param not in (None, '', 'all'):
             try:
+                job_id = int(job_id_param)
                 job_filter = JobDescription.objects.get(id=job_id, company_user=company_user)
+            except (ValueError, TypeError):
+                return Response({
+                    'status': 'error',
+                    'message': 'Invalid job_id'
+                }, status=status.HTTP_400_BAD_REQUEST)
             except JobDescription.DoesNotExist:
                 return Response({
                     'status': 'error',
@@ -1663,8 +1764,13 @@ def recruitment_analytics(request):
         total_cvs = CVRecord.objects.filter(cv_base_filter).count()
         
         total_interviews = Interview.objects.filter(interview_base_filter).count()
-        total_jobs = JobDescription.objects.filter(company_user=company_user).count()
-        active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True).count()
+        # When filtering by job: show 1 job (that job's active state). Otherwise all jobs.
+        if job_filter:
+            total_jobs = 1
+            active_jobs = 1 if job_filter.is_active else 0
+        else:
+            total_jobs = JobDescription.objects.filter(company_user=company_user).count()
+            active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True).count()
         
         # ========== CV STATISTICS ==========
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -1777,10 +1883,9 @@ def recruitment_analytics(request):
         else:
             interviews_by_job = []
         
-        # Interview type distribution
-        # For SQL Server compatibility: clear any default ordering and sort in Python
+        # Interview type distribution (respect job filter)
         interview_by_type = list(Interview.objects.filter(
-            company_user=company_user
+            interview_base_filter
         ).order_by().values('interview_type').annotate(
             count=Count('id')
         ))
@@ -1793,10 +1898,11 @@ def recruitment_analytics(request):
             interview_type_data[item['interview_type']] = item['count']
         
         # ========== JOB STATISTICS ==========
-        # For SQL Server compatibility: clear any default ordering and sort in Python
-        jobs_by_status = list(JobDescription.objects.filter(
-            company_user=company_user
-        ).order_by().values('is_active').annotate(
+        # When filtering by job: show only that job's status. Otherwise all jobs.
+        jobs_q = JobDescription.objects.filter(company_user=company_user)
+        if job_filter:
+            jobs_q = jobs_q.filter(pk=job_filter.id)
+        jobs_by_status = list(jobs_q.order_by().values('is_active').annotate(
             count=Count('id')
         ))
         
@@ -1810,23 +1916,25 @@ def recruitment_analytics(request):
             else:
                 job_status_data['inactive'] = item['count']
         
-        # Jobs created over time (monthly for last 6 months)
-        # For SQL Server compatibility: clear any default ordering and sort in Python
-        jobs_over_time = list(JobDescription.objects.filter(
+        # Jobs created over time (monthly for last 6 months). When job filter: that job only.
+        jobs_over_time_q = JobDescription.objects.filter(
             company_user=company_user,
             created_at__gte=months_ago
-        ).order_by().annotate(
+        )
+        if job_filter:
+            jobs_over_time_q = jobs_over_time_q.filter(pk=job_filter.id)
+        jobs_over_time = list(jobs_over_time_q.order_by().annotate(
             month=TruncMonth('created_at')
         ).values('month').annotate(
             count=Count('id')
         ))
         jobs_over_time.sort(key=lambda x: x['month'] if x['month'] else datetime.min)
         
-        # Top jobs by CV count
-        # For SQL Server compatibility: clear any default ordering and sort in Python
-        top_jobs_by_cvs = list(JobDescription.objects.filter(
-            company_user=company_user
-        ).order_by().annotate(
+        # Top jobs by CV count. When job filter: that job only.
+        top_jobs_q = JobDescription.objects.filter(company_user=company_user)
+        if job_filter:
+            top_jobs_q = top_jobs_q.filter(pk=job_filter.id)
+        top_jobs_by_cvs = list(top_jobs_q.order_by().annotate(
             cv_count=Count('cv_records')
         ))
         top_jobs_by_cvs.sort(key=lambda x: x.cv_count if x.cv_count else 0, reverse=True)

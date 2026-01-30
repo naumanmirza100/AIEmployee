@@ -213,6 +213,37 @@ export const getInterviewDetails = async (interviewId) => {
 };
 
 /**
+ * Get available slots for rescheduling an interview
+ * @param {number} interviewId - Interview ID
+ */
+export const getRescheduleSlots = async (interviewId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/interviews/${interviewId}/reschedule-slots`);
+    return response;
+  } catch (error) {
+    console.error('Get reschedule slots error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Reschedule an interview to a new slot (sends new invitation to candidate)
+ * @param {number} interviewId - Interview ID
+ * @param {string} newSlotDatetime - New slot in ISO format
+ */
+export const rescheduleInterview = async (interviewId, newSlotDatetime) => {
+  try {
+    const response = await companyApi.post(`/recruitment/interviews/${interviewId}/reschedule`, {
+      new_slot_datetime: newSlotDatetime,
+    });
+    return response;
+  } catch (error) {
+    console.error('Reschedule interview error:', error);
+    throw error;
+  }
+};
+
+/**
  * Get CV records/candidates with server-side pagination
  * @param {object} filters - Optional filters (job_id, decision, page, page_size)
  */
@@ -334,11 +365,12 @@ export const updateQualificationSettings = async (settings) => {
  */
 export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = null) => {
   try {
-    const params = { days, months };
-    if (jobId) {
-      params.job_id = jobId;
+    // companyApi.get(endpoint, queryParams) – second arg is the query object, not { params }
+    const queryParams = { days, months };
+    if (jobId != null && jobId !== '' && jobId !== 'all') {
+      queryParams.job_id = typeof jobId === 'number' ? jobId : Number(jobId) || jobId;
     }
-    const response = await companyApi.get('/recruitment/analytics', { params });
+    const response = await companyApi.get('/recruitment/analytics', queryParams);
     return response;
   } catch (error) {
     console.error('Get recruitment analytics error:', error);
@@ -356,6 +388,8 @@ export default {
   getInterviews,
   scheduleInterview,
   getInterviewDetails,
+  getRescheduleSlots,
+  rescheduleInterview,
   getCVRecords,
   getEmailSettings,
   updateEmailSettings,

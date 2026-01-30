@@ -1,37 +1,34 @@
 import React, { useState, useEffect } from 'react';
+import { format, startOfDay } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, Calendar, Mail, Phone, Clock } from 'lucide-react';
-import { getInterviews, scheduleInterview, getCVRecords, updateInterview } from '@/services/recruitmentAgentService';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock } from 'lucide-react';
+import { getInterviews, updateInterview, rescheduleInterview } from '@/services/recruitmentAgentService';
 
 const Interviews = ({ onUpdate }) => {
   const { toast } = useToast();
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [decisionFilter, setDecisionFilter] = useState('');
-  const [formData, setFormData] = useState({
-    candidate_name: '',
-    candidate_email: '',
-    candidate_phone: '',
-    job_role: '',
-    interview_type: 'ONLINE',
-    cv_record_id: '',
-  });
-  const [cvRecords, setCvRecords] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
   const [updatingId, setUpdatingId] = useState(null);
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleInterviewObj, setRescheduleInterviewObj] = useState(null);
+  const [reschedulePickedDate, setReschedulePickedDate] = useState(null);
+  const [reschedulePickedTime, setReschedulePickedTime] = useState('');
+  const [rescheduleError, setRescheduleError] = useState('');
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
 
   useEffect(() => {
     fetchInterviews();
-    fetchCVRecords();
   }, [statusFilter, decisionFilter]);
 
   const fetchInterviews = async () => {
@@ -54,66 +51,6 @@ const Interviews = ({ onUpdate }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fetchCVRecords = async () => {
-    try {
-      const response = await getCVRecords({ decision: 'INTERVIEW' });
-      if (response.status === 'success') {
-        setCvRecords(response.data || []);
-      }
-    } catch (error) {
-      console.error('Error fetching CV records:', error);
-    }
-  };
-
-  const handleSchedule = async () => {
-    if (!formData.candidate_name || !formData.candidate_email || !formData.job_role) {
-      toast({
-        title: 'Validation Error',
-        description: 'Candidate name, email, and job role are required',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      const response = await scheduleInterview({
-        ...formData,
-        cv_record_id: formData.cv_record_id || null,
-      });
-      if (response.status === 'success') {
-        toast({
-          title: 'Success',
-          description: 'Interview scheduled successfully',
-        });
-        setShowScheduleModal(false);
-        resetForm();
-        fetchInterviews();
-        if (onUpdate) onUpdate();
-      }
-    } catch (error) {
-      console.error('Error scheduling interview:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to schedule interview',
-        variant: 'destructive',
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      candidate_name: '',
-      candidate_email: '',
-      candidate_phone: '',
-      job_role: '',
-      interview_type: 'ONLINE',
-      cv_record_id: '',
-    });
   };
 
   const getStatusBadge = (status) => {
@@ -184,6 +121,59 @@ const Interviews = ({ onUpdate }) => {
     }
   };
 
+  const openRescheduleModal = (interview) => {
+    setRescheduleInterviewObj(interview);
+    setReschedulePickedDate(null);
+    setReschedulePickedTime('');
+    setRescheduleError('');
+    setShowRescheduleModal(true);
+    // Pre-fill with current scheduled time so recruiter can see and change it
+    if (interview.scheduled_datetime) {
+      try {
+        const d = new Date(interview.scheduled_datetime);
+        setReschedulePickedDate(d);
+        setReschedulePickedTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+      } catch (_) {}
+    }
+  };
+
+  const handleRescheduleSubmit = async () => {
+    if (!rescheduleInterviewObj || !reschedulePickedDate || !reschedulePickedTime) {
+      setRescheduleError('Please select a date and time.');
+      return;
+    }
+    setRescheduleError('');
+    const [h, m] = reschedulePickedTime.split(':').map(Number);
+    const combined = new Date(reschedulePickedDate.getFullYear(), reschedulePickedDate.getMonth(), reschedulePickedDate.getDate(), h || 0, m || 0);
+    const isoDatetime = combined.toISOString();
+    try {
+      setRescheduleSubmitting(true);
+      const response = await rescheduleInterview(rescheduleInterviewObj.id, isoDatetime);
+      if (response.status === 'success') {
+        toast({
+          title: 'Rescheduled',
+          description: 'Interview rescheduled; candidate has been notified.',
+        });
+        setShowRescheduleModal(false);
+        setRescheduleInterviewObj(null);
+        setReschedulePickedDate(null);
+        setReschedulePickedTime('');
+        fetchInterviews();
+        if (onUpdate) onUpdate();
+      }
+    } catch (error) {
+      const message = error.response?.data?.message || error.message || 'Reschedule failed';
+      setRescheduleError(message);
+      toast({
+        title: 'Reschedule failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRescheduleSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -227,25 +217,17 @@ const Interviews = ({ onUpdate }) => {
               <SelectItem value="REJECTED">Rejected</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={() => setShowScheduleModal(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Schedule Interview
-          </Button>
         </div>
       </div>
 
       {interviews.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
-            <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <CalendarIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <p className="text-lg font-medium mb-2">No interviews yet</p>
-            <p className="text-sm text-muted-foreground mb-4">
-              Schedule your first interview to get started
+            <p className="text-sm text-muted-foreground">
+              Interviews appear here when scheduled from Candidates.
             </p>
-            <Button onClick={() => setShowScheduleModal(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Schedule Interview
-            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -286,21 +268,26 @@ const Interviews = ({ onUpdate }) => {
                   <div className="space-y-2">
                     {interview.scheduled_datetime && (
                       <div className="flex items-center gap-2 text-sm">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
                         <span>
-                          {new Date(interview.scheduled_datetime).toLocaleString()}
+                          {format(new Date(interview.scheduled_datetime), 'EEEE, MMMM d, yyyy \'at\' h:mm a')}
                         </span>
-                      </div>
-                    )}
-                    {interview.selected_slot && (
-                      <div className="text-sm text-muted-foreground">
-                        Selected: {interview.selected_slot}
                       </div>
                     )}
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-4 pt-4 border-t">
+                  {(interview.status === 'PENDING' || interview.status === 'SCHEDULED') && (
+                    <button
+                      type="button"
+                      onClick={() => openRescheduleModal(interview)}
+                      className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-sm font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 hover:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50 dark:hover:border-amber-700"
+                    >
+                      <CalendarClock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                      Reschedule
+                    </button>
+                  )}
                   <div className="flex items-center gap-2">
                     <Label className="text-sm font-medium text-muted-foreground">Status</Label>
                     <Select
@@ -351,120 +338,106 @@ const Interviews = ({ onUpdate }) => {
         </div>
       )}
 
-      {/* Schedule Modal */}
-      <Dialog open={showScheduleModal} onOpenChange={setShowScheduleModal}>
-        <DialogContent className="max-w-2xl">
+      {/* Reschedule Modal */}
+      <Dialog open={showRescheduleModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowRescheduleModal(false);
+          setRescheduleInterviewObj(null);
+          setReschedulePickedDate(null);
+          setReschedulePickedTime('');
+          setRescheduleError('');
+        }
+      }}>
+        <DialogContent className="max-w-lg w-[calc(100%-2rem)] sm:w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Schedule Interview</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">Reschedule Interview</DialogTitle>
+            {rescheduleInterviewObj && (
+              <DialogDescription className="text-sm line-clamp-2 sm:line-clamp-none">
+                {rescheduleInterviewObj.candidate_name} – {rescheduleInterviewObj.job_title || rescheduleInterviewObj.job_role}
+              </DialogDescription>
+            )}
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="cv-record">Select Candidate (Optional)</Label>
-              <Select
-                value={formData.cv_record_id || "manual"}
-                onValueChange={(value) => {
-                  if (value === "manual") {
-                    setFormData({ ...formData, cv_record_id: '' });
-                    return;
-                  }
-                  setFormData({ ...formData, cv_record_id: value });
-                  const record = cvRecords.find(r => r.id.toString() === value);
-                  if (record && record.parsed) {
-                    setFormData({
-                      ...formData,
-                      cv_record_id: value,
-                      candidate_name: record.parsed.name || '',
-                      candidate_email: record.parsed.email || '',
-                      candidate_phone: record.parsed.phone || '',
-                    });
-                  }
+            <p className="text-sm text-muted-foreground">
+              Pre-filled with current scheduled time. Change date or time as needed, then confirm.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2 min-w-0">
+                <Label className="text-sm font-medium">Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start h-[47px] text-left font-normal text-sm truncate"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                      <span className="truncate">
+                        {reschedulePickedDate ? format(reschedulePickedDate, 'PPP') : 'Pick a date'}
+                      </span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={reschedulePickedDate}
+                      onSelect={(d) => {
+                        setReschedulePickedDate(d);
+                        setRescheduleError('');
+                      }}
+                      disabled={{ before: startOfDay(new Date()) }}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-2 min-w-0">
+                <Label htmlFor="reschedule-time" className="text-sm font-medium">Time</Label>
+                <Input
+                  id="reschedule-time"
+                  type="time"
+                  value={reschedulePickedTime}
+                  onChange={(e) => {
+                    setReschedulePickedTime(e.target.value);
+                    setRescheduleError('');
+                  }}
+                  className="w-full"
+                />
+              </div>
+            </div>
+            {rescheduleError && (
+              <p className="text-sm text-destructive font-medium">
+                {rescheduleError}
+              </p>
+            )}
+            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end sm:gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowRescheduleModal(false);
+                  setRescheduleInterviewObj(null);
+                  setReschedulePickedDate(null);
+                  setReschedulePickedTime('');
+                  setRescheduleError('');
                 }}
+                disabled={rescheduleSubmitting}
+                className="w-full sm:w-auto shrink-0 order-2 sm:order-1"
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select from candidates" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manual">Manual Entry</SelectItem>
-                  {cvRecords.map((record) => (
-                    <SelectItem key={record.id} value={record.id.toString()}>
-                      {record.parsed?.name || record.file_name} - {record.parsed?.email || ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="candidate_name">Candidate Name *</Label>
-              <Input
-                id="candidate_name"
-                value={formData.candidate_name}
-                onChange={(e) => setFormData({ ...formData, candidate_name: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="candidate_email">Candidate Email *</Label>
-              <Input
-                id="candidate_email"
-                type="email"
-                value={formData.candidate_email}
-                onChange={(e) => setFormData({ ...formData, candidate_email: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="candidate_phone">Candidate Phone</Label>
-              <Input
-                id="candidate_phone"
-                value={formData.candidate_phone}
-                onChange={(e) => setFormData({ ...formData, candidate_phone: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="job_role">Job Role *</Label>
-              <Input
-                id="job_role"
-                value={formData.job_role}
-                onChange={(e) => setFormData({ ...formData, job_role: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="interview_type">Interview Type</Label>
-              <Select
-                value={formData.interview_type}
-                onValueChange={(value) => setFormData({ ...formData, interview_type: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ONLINE">Online</SelectItem>
-                  <SelectItem value="ONSITE">Onsite</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => {
-                setShowScheduleModal(false);
-                resetForm();
-              }} disabled={submitting}>
                 Cancel
               </Button>
-              <Button onClick={handleSchedule} disabled={submitting}>
-                {submitting ? (
+              <Button
+                size="lg"
+                onClick={handleRescheduleSubmit}
+                disabled={!reschedulePickedDate || !reschedulePickedTime || rescheduleSubmitting}
+                className="w-full sm:min-w-[240px] shrink-0 order-1 sm:order-2"
+              >
+                {rescheduleSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Scheduling...
+                    Rescheduling...
                   </>
                 ) : (
-                  'Schedule Interview'
+                  'Reschedule & notify candidate'
                 )}
               </Button>
             </div>

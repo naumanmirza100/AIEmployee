@@ -45,6 +45,7 @@ class RecruiterEmailSettings(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_recruitment_agent_recruiteremailsettings'
         verbose_name = 'Recruiter Email Settings'
         verbose_name_plural = 'Recruiter Email Settings'
     
@@ -80,6 +81,7 @@ class RecruiterQualificationSettings(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_recruitment_agent_recruiterqualificationsettings'
         verbose_name = 'Recruiter Qualification Settings'
         verbose_name_plural = 'Recruiter Qualification Settings'
     
@@ -147,6 +149,7 @@ class RecruiterInterviewSettings(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_recruitment_agent_recruiterinterviewsettings'
         verbose_name = 'Recruiter Interview Settings'
         verbose_name_plural = 'Recruiter Interview Settings'
         constraints = [
@@ -192,6 +195,7 @@ class JobDescription(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'ppp_recruitment_agent_jobdescription'
         ordering = ['-created_at']
         verbose_name = 'Job Description'
         verbose_name_plural = 'Job Descriptions'
@@ -205,8 +209,8 @@ class JobDescription(models.Model):
 
 class CVRecord(models.Model):
     """
-    Django model equivalent to dbo.ppp_cv_records table from RecruitmentAI.
-    Stores parsed CV data and all processing results.
+    Django model for parsed CV data and processing results.
+    Table: dbo.ppp_recruitment_agent_cvrecord (aligned with ppp_ prefix).
     """
     file_name = models.CharField(max_length=512)
     parsed_json = models.TextField(help_text="Structured CV data from CVParserAgent")
@@ -225,7 +229,7 @@ class CVRecord(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     
     class Meta:
-        db_table = 'ppp_cv_records'  # Use same table name as original
+        db_table = 'ppp_recruitment_agent_cvrecord'
         ordering = ['-created_at']
         verbose_name = 'CV Record'
         verbose_name_plural = 'CV Records'
@@ -312,6 +316,7 @@ class Interview(models.Model):
     notes = models.TextField(null=True, blank=True)
     
     class Meta:
+        db_table = 'ppp_recruitment_agent_interview'
         ordering = ['-created_at']
         verbose_name = 'Interview'
         verbose_name_plural = 'Interviews'
@@ -397,6 +402,7 @@ class CareerApplication(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     
     class Meta:
+        db_table = 'ppp_recruitment_agent_careerapplication'
         ordering = ['-created_at']
     
     def __str__(self):
