@@ -41,6 +41,11 @@ import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
 import MarketingAgentPage from '@/pages/MarketingAgentPage';
+import MarketingDashboard from '@/components/marketing/MarketingDashboard';
+import CampaignDetail from '@/components/marketing/CampaignDetail';
+import SequenceManagementPage from '@/components/marketing/SequenceManagementPage';
+import EmailSendingStatusPage from '@/components/marketing/EmailSendingStatusPage';
+import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
 import ProtectedRoute from '@/components/common/ProtectedRoute';
@@ -99,7 +104,13 @@ import { useTranslation } from 'react-i18next';
             />
             
             {/* Marketing Agent routes without header/footer */}
-            <Route path="/marketing/dashboard" element={<MarketingAgentPage />} />
+            <Route path="/marketing/dashboard" element={<MarketingAgentPage />}>
+              <Route index element={<MarketingDashboard />} />
+              <Route path="campaign/:id" element={<CampaignDetail />} />
+              <Route path="campaign/:id/sequences" element={<SequenceManagementPage />} />
+              <Route path="campaign/:id/email-status" element={<EmailSendingStatusPage />} />
+              <Route path="email-accounts" element={<EmailAccountsPage />} />
+            </Route>
             
             {/* Recruitment Agent routes without header/footer */}
             <Route path="/recruitment" element={<Navigate to="/recruitment/dashboard" replace />} />

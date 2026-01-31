@@ -14,6 +14,7 @@ try:
 except ImportError:
     OpenAI = None  # Optional - only needed for document writing
 
+import os
 from django.conf import settings
 import logging
 
@@ -39,31 +40,33 @@ class MarketingBaseAgent:
             model (str): Groq model to use. Defaults to settings.GROQ_MODEL for Q&A
             use_embeddings (bool): Whether this agent needs embeddings capability
         """
-        # Groq API (for Q&A)
-        self.groq_api_key = getattr(settings, 'GROQ_API_KEY', None)
-        if not self.groq_api_key:
-            raise ValueError("GROQ_API_KEY not found in environment variables. Please set it in .env file.")
-        
-        try:
-            # Initialize Groq client (same pattern as core BaseAgent)
-            self.groq_client = Groq(api_key=self.groq_api_key)
-        except TypeError as e:
-            error_msg = str(e)
-            if 'proxies' in error_msg or 'unexpected keyword' in error_msg:
-                logger.error(f"Groq client initialization error: {e}")
-                logger.error("This is usually caused by an outdated groq library version.")
-                logger.error("Please run: pip install --upgrade groq")
-                raise ValueError(
-                    f"Groq client initialization failed. "
-                    f"This is likely due to an incompatible groq library version. "
-                    f"Please update it: pip install --upgrade groq. "
-                    f"Original error: {e}"
-                )
-            else:
-                raise
-        except Exception as e:
-            logger.error(f"Unexpected error initializing Groq client: {e}")
-            raise ValueError(f"Failed to initialize Groq client: {e}")
+        # Groq API (for Q&A) – optional so agents that don't use LLM (e.g. ProactiveNotificationAgent) can run without it
+        # Note: GROQ (Q) = Groq.com (Llama). GROK (K) = xAI Grok – different service.
+        self.groq_api_key = (
+            getattr(settings, 'GROQ_API_KEY', None) or getattr(settings, 'GROQ_REC_API_KEY', None)
+            or os.environ.get('GROQ_API_KEY') or os.environ.get('GROQ_REC_API_KEY') or ''
+        ).strip()
+        self.groq_client = None
+        if self.groq_api_key:
+            try:
+                self.groq_client = Groq(api_key=self.groq_api_key)
+            except TypeError as e:
+                error_msg = str(e)
+                if 'proxies' in error_msg or 'unexpected keyword' in error_msg:
+                    logger.error(f"Groq client initialization error: {e}")
+                    logger.error("This is usually caused by an outdated groq library version.")
+                    logger.error("Please run: pip install --upgrade groq")
+                    raise ValueError(
+                        f"Groq client initialization failed. "
+                        f"This is likely due to an incompatible groq library version. "
+                        f"Please update it: pip install --upgrade groq. "
+                        f"Original error: {e}"
+                    )
+                else:
+                    raise
+            except Exception as e:
+                logger.error(f"Unexpected error initializing Groq client: {e}")
+                raise ValueError(f"Failed to initialize Groq client: {e}")
         
         # OpenAI API (Optional - for document writing and advanced tasks)
         self.openai_api_key = getattr(settings, 'OPENAI_API_KEY', None)
@@ -223,6 +226,11 @@ class MarketingBaseAgent:
         Returns:
             str: LLM response text
         """
+        if not self.groq_client:
+            raise ValueError(
+                "GROQ_API_KEY or GROQ_REC_API_KEY not found in environment variables. "
+                "Set one of them in your .env file to use LLM features."
+            )
         try:
             messages = []
             

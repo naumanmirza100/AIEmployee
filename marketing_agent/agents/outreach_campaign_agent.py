@@ -187,9 +187,16 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                 except (ValueError, TypeError):
                     end_date = None
             
+            campaign_name = (campaign_data.get('name') or 'New Campaign').strip() or 'New Campaign'
+            if Campaign.objects.filter(owner_id=user_id, name__iexact=campaign_name).exists():
+                return {
+                    'success': False,
+                    'error': 'A campaign with this name already exists. Please choose a different name.',
+                }
+            
             # Create campaign in database with all fields
             campaign = Campaign.objects.create(
-                name=campaign_data.get('name', 'New Campaign'),
+                name=campaign_name,
                 description=campaign_data.get('description', ''),
                 campaign_type=campaign_data.get('campaign_type', 'email'),  # Email-only campaigns
                 status='draft',

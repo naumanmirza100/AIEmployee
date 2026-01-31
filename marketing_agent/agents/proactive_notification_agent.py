@@ -82,17 +82,12 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
     
     def monitor_all_campaigns(self, user_id: int) -> Dict:
         """
-        Monitor all active campaigns for the user
-        
-        Args:
-            user_id (int): User ID
-            
-        Returns:
-            Dict: Monitoring results
+        Monitor all active, scheduled, and paused campaigns for the user.
+        Paused campaigns are included so replies/opens/clicks from recent activity are still reported.
         """
         try:
             user = User.objects.get(id=user_id)
-            campaigns = Campaign.objects.filter(owner=user, status__in=['active', 'scheduled'])
+            campaigns = Campaign.objects.filter(owner=user, status__in=['active', 'scheduled', 'paused'])
             
             total_notifications_count = 0
             issues_found = []
@@ -218,6 +213,24 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     notifications_created.extend(progress_result.get('notifications', []))
                     opportunities.extend(progress_result.get('opportunities', []))
             
+            # Recent activity summary (opens, clicks, replies) - any campaign with sends or replies
+            activity_result = self._check_recent_activity_summary(campaign, user)
+            if activity_result:
+                notifications_created.extend(activity_result.get('notifications', []))
+                opportunities.extend(activity_result.get('opportunities', []))
+            
+            # First open / first click milestones (low threshold so new campaigns get feedback)
+            milestones_result = self._check_first_milestones(campaign, user)
+            if milestones_result:
+                notifications_created.extend(milestones_result.get('notifications', []))
+                opportunities.extend(milestones_result.get('opportunities', []))
+            
+            # Sub-sequence triggered by reply (reply triggered a follow-up sequence)
+            subseq_result = self._check_sub_sequence_triggered(campaign, user)
+            if subseq_result:
+                notifications_created.extend(subseq_result.get('notifications', []))
+                opportunities.extend(subseq_result.get('opportunities', []))
+            
             # Filter out None values (duplicates that weren't created) and count actual notifications
             actual_notifications = [n for n in notifications_created if n is not None and hasattr(n, 'id')]
             
@@ -291,8 +304,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         bounce_rate = (emails_bounced / total_sent * 100) if total_sent > 0 else 0
         failure_rate = (emails_failed / total_sent * 100) if total_sent > 0 else 0
         
-        # Check for low open rate (alert if < 15%)
-        if open_rate < 15 and total_sent >= 10:
+        # Check for low open rate (alert if < 15%) - lowered threshold so smaller campaigns get feedback
+        if open_rate < 15 and total_sent >= 5:
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
@@ -370,7 +383,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 })
         
         # Check for opportunities (high engagement)
-        if open_rate > 30 and total_sent >= 20:
+        if open_rate > 30 and total_sent >= 10:
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
@@ -395,7 +408,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     'threshold': 30
                 })
         
-        if click_rate > 5 and total_sent >= 20:
+        if click_rate > 5 and total_sent >= 10:
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
@@ -429,7 +442,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             replies_count = Reply.objects.filter(campaign=campaign).count()
             
             # If no clicks AND no replies after sending multiple emails
-            if emails_clicked == 0 and replies_count == 0 and total_sent >= 10:
+            if emails_clicked == 0 and replies_count == 0 and total_sent >= 5:
                 # Check if emails were sent at least 24 hours ago (give time for engagement)
                 oldest_email = email_sends.order_by('sent_at').first()
                 if oldest_email and oldest_email.sent_at:
@@ -463,7 +476,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                             })
             
             # If emails opened but no clicks and no replies
-            elif emails_opened > 0 and emails_clicked == 0 and replies_count == 0 and total_sent >= 15:
+            elif emails_opened > 0 and emails_clicked == 0 and replies_count == 0 and total_sent >= 8:
                 oldest_email = email_sends.order_by('sent_at').first()
                 if oldest_email and oldest_email.sent_at:
                     hours_since_first = (timezone.now() - oldest_email.sent_at).total_seconds() / 3600
@@ -1098,7 +1111,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         click_rate = (emails_clicked / total_sent * 100) if total_sent > 0 else 0
         
         # Recommendation: Improve email content if open rate is low
-        if open_rate < 20 and total_sent >= 10:
+        if open_rate < 20 and total_sent >= 5:
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
@@ -1127,7 +1140,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 })
         
         # Recommendation: Optimize for clicks if open rate is good but click rate is low
-        if open_rate >= 20 and click_rate < 3 and total_sent >= 10:
+        if open_rate >= 20 and click_rate < 3 and total_sent >= 5:
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
@@ -1538,18 +1551,49 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         sequences_count = sequences.count()
         active_sequences = sequences.filter(is_active=True).count()
         
-        # No sequences at all
+        # No sequences at all - use actual campaign status and actionable copy
         if sequences_count == 0:
+            status_label = campaign.get_status_display()
+            leads_count = campaign.leads.count()
+            if campaign.status == 'draft':
+                if leads_count == 0:
+                    title = f'📧 Setup draft campaign: {campaign.name}'
+                    message = (
+                        f'Draft campaign "{campaign.name}" has no leads and no email sequences. '
+                        'Next steps: 1) Upload your leads (CSV/Excel). 2) Create email sequences. 3) Schedule the campaign to start.'
+                    )
+                    action_url = f'/marketing/campaigns/{campaign.id}/leads/upload/'
+                else:
+                    title = f'📧 Create sequences: {campaign.name}'
+                    message = (
+                        f'Draft campaign "{campaign.name}" has {leads_count} lead(s) but no email sequences. '
+                        'Create email sequences, then schedule the campaign to start sending.'
+                    )
+                    action_url = f'/marketing/campaigns/{campaign.id}/sequences/'
+            else:
+                title = f'📧 No Email Sequences: {campaign.name}'
+                if leads_count == 0:
+                    message = (
+                        f'{status_label} campaign "{campaign.name}" has no leads and no sequences. '
+                        'Upload your leads first, then create email sequences.'
+                    )
+                    action_url = f'/marketing/campaigns/{campaign.id}/leads/upload/'
+                else:
+                    message = (
+                        f'{status_label} campaign "{campaign.name}" has no email sequences. '
+                        f'Create sequences to start sending emails to your {leads_count} lead(s).'
+                    )
+                    action_url = f'/marketing/campaigns/{campaign.id}/sequences/'
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
                 notification_type='campaign_status',
                 priority='high',
-                title=f'📧 No Email Sequences: {campaign.name}',
-                message=f'Active campaign "{campaign.name}" has NO email sequences! Create email sequences to start sending emails to your {campaign.leads.count()} leads.',
+                title=title,
+                message=message,
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
-                metadata={'action': 'no_sequences', 'leads_count': campaign.leads.count()}
+                action_url=action_url,
+                metadata={'action': 'no_sequences', 'leads_count': leads_count, 'status': campaign.status}
             )
             if notification:
                 notifications.append(notification)
@@ -1604,13 +1648,14 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         # Low email sending activity (has sent emails before but none recently)
         # Only alert for active campaigns (paused/scheduled might be intentionally not sending)
         elif total_emails_sent > 0 and recent_emails == 0 and active_sequences > 0 and campaign.status == 'active':
+            status_label = campaign.get_status_display()
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
                 notification_type='campaign_status',
                 priority='medium',
                 title=f'📉 Low Email Activity: {campaign.name}',
-                message=f'Active campaign "{campaign.name}" has sent {total_emails_sent} emails total but NONE in the last 7 days. Check: 1) Sequence delays, 2) Sequence completion, 3) Lead status.',
+                message=f'{status_label} campaign "{campaign.name}" has sent {total_emails_sent} emails total but none in the last 7 days. Check: 1) Sequence delays, 2) Sequence completion, 3) Lead status.',
                 action_required=True,
                 action_url=f'/marketing/campaigns/{campaign.id}/',
                 metadata={'action': 'low_email_activity', 'total_sent': total_emails_sent, 'recent_sent': 0}
@@ -1878,6 +1923,156 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 'notifications': notifications,
                 'opportunities': opportunities
             }
+        return None
+    
+    def _check_recent_activity_summary(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Create one notification per campaign: recent stats plus issues, opportunities, and improvement suggestions."""
+        notifications = []
+        opportunities = []
+        recent_cutoff = timezone.now() - timedelta(days=7)
+        email_sends = EmailSendHistory.objects.filter(campaign=campaign, sent_at__gte=recent_cutoff)
+        total_sent = email_sends.count()
+        if total_sent == 0:
+            replies_recent = Reply.objects.filter(campaign=campaign, replied_at__gte=recent_cutoff)
+            if not replies_recent.exists():
+                return None
+        emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
+        emails_clicked = email_sends.filter(status='clicked').count()
+        replies_recent = Reply.objects.filter(campaign=campaign, replied_at__gte=recent_cutoff)
+        reply_count = replies_recent.count()
+        positive_count = replies_recent.filter(interest_level='positive').count()
+        negative_count = replies_recent.filter(interest_level='negative').count()
+        if total_sent == 0 and reply_count == 0:
+            return None
+        # Build stats line
+        parts = []
+        if total_sent > 0:
+            parts.append(f'{total_sent} sent, {emails_opened} opened, {emails_clicked} clicked')
+        if reply_count > 0:
+            parts.append(f'{reply_count} replies ({positive_count} positive, {negative_count} negative)')
+        message = 'Last 7 days: ' + '; '.join(parts) + '.'
+        # Add issue/opportunity and improvement suggestions
+        improvements = []
+        if total_sent >= 1:
+            if emails_opened == 0:
+                improvements.append('Issue: no opens – improve subject lines, send time, or email content.')
+            elif emails_clicked == 0:
+                improvements.append('Issue: opened but not clicked – add a clearer call-to-action or one primary CTA button.')
+            elif reply_count == 0:
+                improvements.append('Opportunity: good clicks but no replies – add a direct ask (e.g. "Reply to schedule a call" or "Book a demo").')
+            if positive_count > 0:
+                improvements.append('Opportunity: positive replies – follow up quickly to convert.')
+            if emails_opened > 0 and total_sent >= 3:
+                open_pct = (emails_opened / total_sent) * 100
+                if open_pct >= 25:
+                    improvements.append('Opportunity: solid open rate – consider A/B testing subject lines to improve further.')
+                elif open_pct < 15:
+                    improvements.append('Issue: low open rate – try shorter, benefit-led subject lines and avoid spam triggers.')
+        if improvements:
+            message += ' ' + ' '.join(improvements)
+        notification = self._create_notification(
+            user=user,
+            campaign=campaign,
+            notification_type='engagement',
+            priority='medium',
+            title=f'Activity update: {campaign.name}',
+            message=message,
+            action_required=False,
+            action_url=f'/marketing/campaigns/{campaign.id}/',
+            metadata={
+                'action': 'activity_summary',
+                'sent_7d': total_sent,
+                'opened_7d': emails_opened,
+                'clicked_7d': emails_clicked,
+                'replies_7d': reply_count,
+                'positive_7d': positive_count,
+                'negative_7d': negative_count,
+            }
+        )
+        if notification:
+            notifications.append(notification)
+            opportunities.append({'type': 'activity_summary'})
+        if notifications:
+            return {'notifications': notifications, 'opportunities': opportunities}
+        return None
+    
+    def _check_first_milestones(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Notify on first open and first click (low threshold so new campaigns get feedback)."""
+        notifications = []
+        opportunities = []
+        email_sends = EmailSendHistory.objects.filter(campaign=campaign)
+        total_sent = email_sends.count()
+        if total_sent < 1:
+            return None
+        emails_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
+        emails_clicked = email_sends.filter(status='clicked').count()
+        if emails_opened >= 1:
+            n = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='engagement',
+                priority='low',
+                title=f'First email opened: {campaign.name}',
+                message=f'Campaign "{campaign.name}" had its first email open. Engagement has started.',
+                action_required=False,
+                action_url=f'/marketing/campaigns/{campaign.id}/',
+                metadata={'action': 'first_open', 'total_sent': total_sent}
+            )
+            if n:
+                notifications.append(n)
+                opportunities.append({'type': 'first_open'})
+        if emails_clicked >= 1:
+            n = self._create_notification(
+                user=user,
+                campaign=campaign,
+                notification_type='engagement',
+                priority='low',
+                title=f'First click: {campaign.name}',
+                message=f'Campaign "{campaign.name}" had its first link click. Recipients are engaging with content.',
+                action_required=False,
+                action_url=f'/marketing/campaigns/{campaign.id}/',
+                metadata={'action': 'first_click', 'total_sent': total_sent}
+            )
+            if n:
+                notifications.append(n)
+                opportunities.append({'type': 'first_click'})
+        if notifications:
+            return {'notifications': notifications, 'opportunities': opportunities}
+        return None
+    
+    def _check_sub_sequence_triggered(self, campaign: Campaign, user: User) -> Optional[Dict]:
+        """Notify when a reply triggered a sub-sequence (follow-up sequence)."""
+        notifications = []
+        opportunities = []
+        recent_cutoff = timezone.now() - timedelta(days=7)
+        triggered = Reply.objects.filter(
+            campaign=campaign,
+            sub_sequence__isnull=False,
+            replied_at__gte=recent_cutoff
+        )
+        if not triggered.exists():
+            return None
+        count = triggered.count()
+        unique_leads = triggered.values('lead__email').distinct().count()
+        sub_names = list(triggered.values_list('sub_sequence__name', flat=True).distinct())
+        sub_names = [n for n in sub_names if n]
+        sub_label = sub_names[0] if len(sub_names) == 1 else f'{len(sub_names)} sub-sequences'
+        notification = self._create_notification(
+            user=user,
+            campaign=campaign,
+            notification_type='engagement',
+            priority='medium',
+            title=f'Sub-sequence triggered: {campaign.name}',
+            message=f'Campaign "{campaign.name}": {count} reply/replies from {unique_leads} lead(s) triggered follow-up sequence(s) ({sub_label}) in the last 7 days.',
+            action_required=False,
+            action_url=f'/marketing/campaigns/{campaign.id}/',
+            metadata={'action': 'sub_sequence_triggered', 'count': count, 'unique_leads': unique_leads}
+        )
+        if notification:
+            notifications.append(notification)
+            opportunities.append({'type': 'sub_sequence_triggered', 'count': count})
+        if notifications:
+            return {'notifications': notifications, 'opportunities': opportunities}
         return None
     
     def _create_notification(self, user: User, campaign: Optional[Campaign],

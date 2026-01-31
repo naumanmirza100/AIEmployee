@@ -240,10 +240,14 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
+# Project root (parent of project_manager_ai) – same folder as manage.py and .env
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Load .env from project root so Celery/Beat see it regardless of CWD
+_env_file = BASE_DIR / '.env'
+if _env_file.exists():
+    load_dotenv(_env_file)
+else:
+    load_dotenv()
 
 SECRET_KEY = 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45'
 DEBUG = True

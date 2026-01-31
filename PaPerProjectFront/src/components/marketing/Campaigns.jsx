@@ -5,24 +5,21 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, TrendingUp, Pause, Play, Trash2 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
+import OutreachCampaign from './OutreachCampaign';
 
 const Campaigns = ({ onRefresh }) => {
   const { toast } = useToast();
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchCampaigns();
-  }, []);
-
   const fetchCampaigns = async () => {
     try {
       setLoading(true);
       const response = await marketingAgentService.listCampaigns();
-      
-      if (response.status === 'success' && response.data) {
+      if (response?.status === 'success' && response?.data) {
         setCampaigns(response.data.campaigns || []);
       }
+      if (onRefresh) onRefresh();
     } catch (error) {
       console.error('Error fetching campaigns:', error);
       toast({
@@ -34,6 +31,10 @@ const Campaigns = ({ onRefresh }) => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchCampaigns();
+  }, []);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -50,24 +51,22 @@ const Campaigns = ({ onRefresh }) => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <OutreachCampaign onCampaignCreated={fetchCampaigns} />
+
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold">Campaigns</h3>
+        <h3 className="text-lg font-semibold">Your Campaigns</h3>
         <Button onClick={fetchCampaigns} variant="outline" size="sm">
           Refresh
         </Button>
       </div>
 
-      {campaigns.length === 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : campaigns.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">No campaigns found. Create your first campaign to get started.</p>
@@ -91,14 +90,6 @@ const Campaigns = ({ onRefresh }) => {
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
-                    <p className="text-muted-foreground">Budget</p>
-                    <p className="font-semibold">${parseFloat(campaign.budget || 0).toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Spend</p>
-                    <p className="font-semibold">${parseFloat(campaign.actual_spend || 0).toFixed(2)}</p>
-                  </div>
-                  <div>
                     <p className="text-muted-foreground">Start Date</p>
                     <p className="font-semibold">
                       {campaign.start_date ? new Date(campaign.start_date).toLocaleDateString() : 'N/A'}
@@ -110,6 +101,18 @@ const Campaigns = ({ onRefresh }) => {
                       {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
+                  {campaign.target_leads != null && (
+                    <div>
+                      <p className="text-muted-foreground">Target Leads</p>
+                      <p className="font-semibold">{campaign.target_leads}</p>
+                    </div>
+                  )}
+                  {campaign.target_conversions != null && (
+                    <div>
+                      <p className="text-muted-foreground">Target Conversions</p>
+                      <p className="font-semibold">{campaign.target_conversions}</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
