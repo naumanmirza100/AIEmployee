@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Megaphone, Send, Upload, CheckCircle } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
+import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 
 const ACTIONS = [
   { value: 'design', label: 'Design Campaign' },
@@ -417,11 +419,19 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="start">Start date</Label>
-                <Input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <DatePicker
+                  date={startDate ? parseDateLocal(startDate) : undefined}
+                  setDate={(d) => setStartDate(d ? formatDateLocal(d) : '')}
+                  placeholder="Select start date"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="end">End date</Label>
-                <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <DatePicker
+                  date={endDate ? parseDateLocal(endDate) : undefined}
+                  setDate={(d) => setEndDate(d ? formatDateLocal(d) : '')}
+                  placeholder="Select end date"
+                />
               </div>
             </div>
           )}

@@ -24,7 +24,7 @@ from api.permissions import IsCompanyUserOnly
 from marketing_agent.models import (
     Campaign, Lead, EmailTemplate, EmailSequence, EmailSequenceStep,
     EmailSendHistory, EmailAccount, CampaignContact, MarketingNotification,
-    MarketResearch
+    MarketResearch, MarketingDocument
 )
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 
@@ -1003,6 +1003,151 @@ def outreach_campaign(request):
         logger.exception("outreach_campaign failed")
         return Response(
             {'status': 'error', 'message': 'Outreach campaign failed', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_documents(request):
+    """List marketing documents for company user. Query: type, campaign_id."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        qs = MarketingDocument.objects.filter(created_by=user).select_related('campaign').order_by('-created_at')
+        doc_type = request.query_params.get('type', '').strip()
+        if doc_type:
+            qs = qs.filter(document_type=doc_type)
+        campaign_id = request.query_params.get('campaign_id', '')
+        if campaign_id:
+            try:
+                qs = qs.filter(campaign_id=int(campaign_id))
+            except ValueError:
+                pass
+        documents = []
+        for doc in qs:
+            documents.append({
+                'id': doc.id,
+                'document_type': doc.document_type,
+                'document_type_display': doc.get_document_type_display(),
+                'title': doc.title,
+                'status': doc.status,
+                'status_display': doc.get_status_display(),
+                'campaign_id': doc.campaign_id,
+                'campaign_name': doc.campaign.name if doc.campaign else None,
+                'created_at': doc.created_at.isoformat() if doc.created_at else None,
+                'updated_at': doc.updated_at.isoformat() if doc.updated_at else None,
+                'content_preview': (doc.content[:200] + '...') if doc.content and len(doc.content) > 200 else (doc.content or ''),
+            })
+        return Response({
+            'status': 'success',
+            'data': {
+                'documents': documents,
+                'count': len(documents),
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("list_documents failed")
+        return Response(
+            {'status': 'error', 'message': 'List documents failed', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_detail(request, document_id):
+    """Get a single marketing document by id."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        document = get_object_or_404(MarketingDocument, id=document_id, created_by=user)
+        from marketing_agent.document_generator import DocumentGenerator
+        available_formats = DocumentGenerator.get_available_formats(document.document_type)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': document.id,
+                'document_type': document.document_type,
+                'document_type_display': document.get_document_type_display(),
+                'title': document.title,
+                'content': document.content,
+                'status': document.status,
+                'status_display': document.get_status_display(),
+                'campaign_id': document.campaign_id,
+                'campaign_name': document.campaign.name if document.campaign else None,
+                'created_at': document.created_at.isoformat() if document.created_at else None,
+                'updated_at': document.updated_at.isoformat() if document.updated_at else None,
+                'available_formats': [{'code': c, 'name': n} for c, n in available_formats],
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("document_detail failed")
+        return Response(
+            {'status': 'error', 'message': 'Document not found', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_download(request, document_id, format_type):
+    """Download document as PDF, DOCX, or PPTX. Returns file response."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        document = get_object_or_404(MarketingDocument, id=document_id, created_by=user)
+        from marketing_agent.document_generator import DocumentGenerator
+        if format_type == 'pdf':
+            response = DocumentGenerator.generate_pdf(document)
+        elif format_type == 'pptx':
+            if document.document_type != 'presentation':
+                return Response(
+                    {'status': 'error', 'message': 'PPTX is only available for presentations'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            response = DocumentGenerator.generate_pptx(document)
+        else:
+            return Response(
+                {'status': 'error', 'message': f'Unsupported format: {format_type}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return response
+    except ImportError as e:
+        logger.exception("document_download import error")
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        logger.exception("document_download failed")
+        return Response(
+            {'status': 'error', 'message': 'Download failed', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST", "DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_delete(request, document_id):
+    """Delete a marketing document. Only the creator can delete."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        document = get_object_or_404(MarketingDocument, id=document_id, created_by=user)
+        document.delete()
+        return Response({
+            'status': 'success',
+            'data': {'message': 'Document deleted successfully'},
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("document_delete failed")
+        return Response(
+            {'status': 'error', 'message': 'Delete failed', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

@@ -451,7 +451,7 @@ const Notifications = ({ onUnreadCountChange }) => {
               <CardTitle className="text-base">History</CardTitle>
               <CardDescription className="text-xs">
                 {history.length} read notification{history.length !== 1 ? 's' : ''}
-              </CardDescription>
+          </CardDescription>
             </div>
           </div>
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchHistory} disabled={loading}>

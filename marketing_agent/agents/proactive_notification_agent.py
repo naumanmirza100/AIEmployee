@@ -82,12 +82,12 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
     
     def monitor_all_campaigns(self, user_id: int) -> Dict:
         """
-        Monitor all active, scheduled, and paused campaigns for the user.
-        Paused campaigns are included so replies/opens/clicks from recent activity are still reported.
+        Monitor all campaigns for the user: active, scheduled, paused, and draft.
+        Same set as the Celery monitor task so "Run monitor" checks every campaign.
         """
         try:
             user = User.objects.get(id=user_id)
-            campaigns = Campaign.objects.filter(owner=user, status__in=['active', 'scheduled', 'paused'])
+            campaigns = Campaign.objects.filter(owner=user, status__in=['active', 'scheduled', 'paused', 'draft'])
             
             total_notifications_count = 0
             issues_found = []
@@ -2100,7 +2100,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         if duplicate and not duplicate.is_read:
             return None  # Return None to indicate no new notification was created
         
-        # Create new notification
+        # Create new notification (stays unread until user marks as read)
         notification = MarketingNotification.objects.create(
             user=user,
             campaign=campaign,
@@ -2112,27 +2112,6 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             action_url=action_url or '',
             metadata=metadata or {}
         )
-        
-        # Auto-mark all previous unread notifications as read when new notification is created
-        # This ensures only the newest notifications show as unread in Recent Notifications tab
-        # Strategy: Mark notifications created BEFORE this one as read (within a small time window to handle batch creation)
-        # This way, all notifications created in the same batch (within 1 second) will remain unread
-        batch_window = timezone.now() - timedelta(seconds=2)  # 2 second window for batch
-        
-        previous_unread = MarketingNotification.objects.filter(
-            user=user,
-            is_read=False,
-            created_at__lt=batch_window  # Only mark ones created before this batch window
-        )
-        
-        if previous_unread.exists():
-            # Mark all previous unread notifications as read
-            updated_count = previous_unread.update(
-                is_read=True,
-                read_at=timezone.now()
-            )
-            logger.info(f"Auto-marked {updated_count} previous notifications as read for user {user.id} when new notification {notification.id} was created")
-        
         return notification
     
     def get_notifications(self, user_id: int, unread_only: bool = False,

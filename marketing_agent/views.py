@@ -363,8 +363,6 @@ def document_download(request, document_id, format_type):
     try:
         if format_type == 'pdf':
             return DocumentGenerator.generate_pdf(document)
-        elif format_type == 'docx':
-            return DocumentGenerator.generate_docx(document)
         elif format_type == 'pptx':
             if document.document_type != 'presentation':
                 return JsonResponse({'error': 'PPTX format is only available for presentations'}, status=400)
