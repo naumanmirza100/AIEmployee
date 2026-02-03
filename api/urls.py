@@ -221,6 +221,7 @@ urlpatterns = [
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/reschedule-slots/?$', recruitment_agent.get_reschedule_slots, name='recruitment_get_reschedule_slots'),  # GET
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/reschedule/?$', recruitment_agent.reschedule_interview, name='recruitment_reschedule_interview'),  # POST
     re_path(r'^recruitment/cv-records/?$', recruitment_agent.list_cv_records, name='recruitment_list_cv_records'),  # GET
+    re_path(r'^recruitment/cv-records/bulk-update/?$', recruitment_agent.bulk_update_cv_records, name='recruitment_bulk_update_cv_records'),  # POST
     re_path(r'^recruitment/settings/email/?$', recruitment_agent.email_settings, name='recruitment_email_settings'),  # GET/POST
     re_path(r'^recruitment/settings/interview/?$', recruitment_agent.interview_settings, name='recruitment_interview_settings'),  # GET/POST
     re_path(r'^recruitment/settings/qualification/?$', recruitment_agent.qualification_settings, name='recruitment_qualification_settings'),  # GET/POST

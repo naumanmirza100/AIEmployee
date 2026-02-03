@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, FileText, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
-import { getCVRecords, getJobDescriptions } from '@/services/recruitmentAgentService';
+import { getCVRecords, getJobDescriptions, bulkUpdateCVRecords } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
 const PAGE_SIZES = [10, 25, 50];
@@ -39,6 +39,7 @@ const CVRecords = () => {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -137,6 +138,35 @@ const CVRecords = () => {
     setSelectedRecord(null);
   };
 
+  const handleBulkChangeDecision = async (decision) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      setBulkUpdating(true);
+      const response = await bulkUpdateCVRecords(ids, decision);
+      if (response.status === 'success') {
+        toast({
+          title: 'Updated',
+          description: response.message || `Updated ${response.updated_count} candidate(s) to ${decision}`,
+        });
+        setSelectedIds(new Set());
+        fetchRecords();
+      } else {
+        throw new Error(response.message || 'Bulk update failed');
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to update selected candidates',
+        variant: 'destructive',
+      });
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -187,6 +217,48 @@ const CVRecords = () => {
           </Select>
         </div>
       </div>
+
+      {selectedIds.size > 0 && (
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="py-3 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm font-medium">
+              {selectedIds.size} selected — Change decision (e.g. move rejected to Interview):
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                className="bg-green-600 hover:bg-green-700"
+                disabled={bulkUpdating}
+                onClick={() => handleBulkChangeDecision('INTERVIEW')}
+              >
+                {bulkUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                Mark as Interview
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={bulkUpdating}
+                onClick={() => handleBulkChangeDecision('HOLD')}
+              >
+                Mark as Hold
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="text-red-600 hover:text-red-700"
+                disabled={bulkUpdating}
+                onClick={() => handleBulkChangeDecision('REJECT')}
+              >
+                Mark as Reject
+              </Button>
+              <Button size="sm" variant="ghost" onClick={clearSelection}>
+                Clear selection
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {total === 0 ? (
         <Card>

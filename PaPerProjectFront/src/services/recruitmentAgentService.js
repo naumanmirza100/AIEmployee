@@ -275,6 +275,24 @@ export const getCVRecords = async (filters = {}) => {
 };
 
 /**
+ * Bulk update qualification decision for selected CV records (admin override).
+ * @param {number[]} cvRecordIds - Array of CV record IDs
+ * @param {string} qualificationDecision - One of: INTERVIEW, HOLD, REJECT
+ */
+export const bulkUpdateCVRecords = async (cvRecordIds, qualificationDecision) => {
+  try {
+    const response = await companyApi.post('/recruitment/cv-records/bulk-update', {
+      cv_record_ids: cvRecordIds,
+      qualification_decision: qualificationDecision,
+    });
+    return response;
+  } catch (error) {
+    console.error('Bulk update CV records error:', error);
+    throw error;
+  }
+};
+
+/**
  * Get email settings for the company user
  */
 export const getEmailSettings = async () => {
@@ -391,6 +409,7 @@ export default {
   getRescheduleSlots,
   rescheduleInterview,
   getCVRecords,
+  bulkUpdateCVRecords,
   getEmailSettings,
   updateEmailSettings,
   getInterviewSettings,
