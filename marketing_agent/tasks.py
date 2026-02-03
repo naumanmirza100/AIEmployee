@@ -5,7 +5,9 @@ All tasks that were previously run via Windows Task Scheduler are now automated 
 from celery import shared_task
 from django.core.management import call_command
 from django.utils import timezone
-from marketing_agent.models import Campaign, EmailSendHistory
+from datetime import timedelta
+
+from marketing_agent.models import Campaign, EmailSendHistory, EmailSequence, MarketingNotification
 from marketing_agent.views import auto_pause_expired_campaigns
 
 
@@ -111,33 +113,82 @@ def retry_failed_emails_task(self):
         raise self.retry(exc=e)
 
 
+def _create_scheduled_launch_notification(campaign, user, title, message, action_required, action_url=None, metadata=None):
+    """Create notification for scheduled campaign launch - avoid duplicates in last 24h."""
+    recent_cutoff = timezone.now() - timedelta(hours=24)
+    dup = MarketingNotification.objects.filter(
+        user=user, campaign=campaign, notification_type='campaign_status',
+        title=title, created_at__gte=recent_cutoff
+    ).first()
+    if dup and not dup.is_read:
+        return None
+    return MarketingNotification.objects.create(
+        user=user, campaign=campaign, notification_type='campaign_status',
+        priority='high', title=title, message=message,
+        action_required=action_required, action_url=action_url or '',
+        metadata=metadata or {}
+    )
+
+
 @shared_task
 def auto_start_campaigns_task():
     """
-    Celery task to automatically start scheduled campaigns.
-    Handles: Campaigns with start_date = today, status = 'scheduled'.
+    Celery task to automatically start scheduled campaigns when start_date has arrived.
+    - Only auto-activates if campaign has at least one active sequence with steps (ready to send).
+    - If no sequences: creates notification and does NOT activate (campaign stays scheduled).
+    - If sequences present: auto-activates and creates notification.
     
-    Scheduled: Every hour via Celery Beat
-    NEW FEATURE: Not previously automated
+    Scheduled: Every 15 minutes via Celery Beat
     """
     try:
         today = timezone.now().date()
-        
-        # Also check for campaigns that should have started (start_date <= today)
-        campaigns_to_start = Campaign.objects.filter(
+        campaigns_due = Campaign.objects.filter(
             status='scheduled',
-            start_date__lte=today  # Changed from = to <= to catch past dates too
-        )
+            start_date__lte=today
+        ).select_related('owner')
         
         started_count = 0
-        for campaign in campaigns_to_start:
-            campaign.status = 'active'
-            campaign.save()
-            # Activate sequences
-            campaign.email_sequences.update(is_active=True)
-            started_count += 1
+        notified_no_sequences = 0
         
-        return {'status': 'success', 'started_count': started_count, 'date_checked': str(today)}
+        for campaign in campaigns_due:
+            user = campaign.owner
+            sequences = EmailSequence.objects.filter(campaign=campaign)
+            has_sequence_with_steps = any(seq.steps.exists() for seq in sequences)
+            
+            if has_sequence_with_steps:
+                # Auto-activate: campaign has sequences ready
+                campaign.status = 'active'
+                campaign.save()
+                campaign.email_sequences.update(is_active=True)
+                started_count += 1
+                _create_scheduled_launch_notification(
+                    campaign, user,
+                    title=f'✅ Campaign Auto-Activated: {campaign.name}',
+                    message=f'Scheduled date ({campaign.start_date}) has arrived. Campaign "{campaign.name}" was automatically activated. Emails will be sent according to your sequences.',
+                    action_required=False,
+                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    metadata={'action': 'auto_activated', 'start_date': str(campaign.start_date)}
+                )
+                print(f'Auto-activated campaign "{campaign.name}" (ID {campaign.id})')
+            else:
+                # Do NOT activate - create notification that date arrived but needs sequences
+                _create_scheduled_launch_notification(
+                    campaign, user,
+                    title=f'⏰ Scheduled Date Arrived – Action Required: {campaign.name}',
+                    message=f'Scheduled date ({campaign.start_date}) has arrived but campaign "{campaign.name}" cannot be activated automatically. It has no email sequences (or no templates). Create email templates and sequences first, then launch the campaign manually.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    metadata={'action': 'date_arrived_no_sequences', 'start_date': str(campaign.start_date)}
+                )
+                notified_no_sequences += 1
+                print(f'Notification: Campaign "{campaign.name}" (ID {campaign.id}) - date arrived but no sequences')
+        
+        return {
+            'status': 'success',
+            'started_count': started_count,
+            'notified_no_sequences': notified_no_sequences,
+            'date_checked': str(today)
+        }
     except Exception as e:
         print(f'Error in auto-start campaigns task: {str(e)}')
         return {'status': 'error', 'error': str(e)}

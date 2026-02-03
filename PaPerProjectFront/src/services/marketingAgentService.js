@@ -469,6 +469,68 @@ export const outreachCampaign = async (action, campaignData = {}, campaignId = n
 };
 
 /**
+ * List marketing documents.
+ * API: GET /api/marketing/documents?type=&campaign_id=
+ */
+export const listDocuments = async (params = {}) => {
+  try {
+    const query = {};
+    if (params.type) query.type = params.type;
+    if (params.campaign_id != null && params.campaign_id !== '') query.campaign_id = params.campaign_id;
+    const response = await companyApi.get('/marketing/documents', query);
+    return response;
+  } catch (error) {
+    console.error('List documents error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get a single document by id.
+ * API: GET /api/marketing/documents/:id
+ */
+export const getDocument = async (documentId) => {
+  try {
+    const response = await companyApi.get(`/marketing/documents/${documentId}`);
+    return response;
+  } catch (error) {
+    console.error('Get document error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a document.
+ * API: POST or DELETE /api/marketing/documents/:id/delete
+ */
+export const deleteDocument = async (documentId) => {
+  try {
+    const response = await companyApi.post(`/marketing/documents/${documentId}/delete/`);
+    return response;
+  } catch (error) {
+    console.error('Delete document error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Download document as file (PDF, DOCX, PPTX). Returns blob; caller can trigger download.
+ * API: GET /api/marketing/documents/:id/download/:format
+ */
+export const downloadDocument = async (documentId, formatType) => {
+  try {
+    const blob = await companyApi.get(
+      `/marketing/documents/${documentId}/download/${formatType}/`,
+      { responseType: 'blob' }
+    );
+    return blob;
+  } catch (error) {
+    console.error('Download document error:', error);
+    throw error;
+  }
+};
+
+/**
  * Document Authoring Agent.
  * API: POST /api/marketing/document-authoring
  * Body: { action, document_type, document_data, campaign_id?, context }.
@@ -593,6 +655,10 @@ export default {
   marketingQA,
   marketResearch,
   outreachCampaign,
+  listDocuments,
+  getDocument,
+  deleteDocument,
+  downloadDocument,
   documentAuthoring,
   getNotifications,
   monitorCampaigns,

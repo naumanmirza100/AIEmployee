@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DatePicker } from '@/components/ui/date-picker';
 import {
   Loader2,
   ArrowLeft,
@@ -30,7 +31,7 @@ import {
   Upload,
   Download,
   Rocket,
-  Calendar,
+  Calendar as CalendarIcon,
   Zap,
   Pause,
   ListOrdered,
@@ -50,6 +51,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import marketingAgentService from '@/services/marketingAgentService';
+import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import SequenceManagementPage from './SequenceManagementPage';
 import EmailSendingStatusPage from './EmailSendingStatusPage';
 
@@ -268,11 +270,15 @@ const CampaignDetail = () => {
     }
     setActionLoading('launch');
     try {
-      await marketingAgentService.outreachCampaign('launch', {
+      const result = await marketingAgentService.outreachCampaign('launch', {
         start_date: launchStart,
         end_date: launchEnd || undefined,
       }, id);
-      toast({ title: 'Success', description: 'Campaign launched' });
+      if (result?.success === false) {
+        toast({ title: 'Launch failed', description: result.error || 'Campaign could not be launched', variant: 'destructive' });
+        return;
+      }
+      toast({ title: 'Success', description: result?.message || 'Campaign launched' });
       setLaunchOpen(false);
       fetchDetail();
     } catch (e) {
@@ -506,7 +512,7 @@ const CampaignDetail = () => {
             <Button
               size="sm"
               onClick={() => {
-                setLaunchStart(campaign.start_date ? campaign.start_date.slice(0, 10) : new Date().toISOString().slice(0, 10));
+                setLaunchStart(campaign.start_date ? campaign.start_date.slice(0, 10) : formatDateLocal(new Date()));
                 setLaunchEnd(campaign.end_date ? campaign.end_date.slice(0, 10) : '');
                 setLaunchOpen(true);
               }}
@@ -521,13 +527,13 @@ const CampaignDetail = () => {
               size="sm"
               variant="outline"
               onClick={() => {
-                setScheduleStart(campaign.start_date ? campaign.start_date.slice(0, 10) : new Date().toISOString().slice(0, 10));
+                setScheduleStart(campaign.start_date ? campaign.start_date.slice(0, 10) : formatDateLocal(new Date()));
                 setScheduleEnd(campaign.end_date ? campaign.end_date.slice(0, 10) : '');
                 setScheduleOpen(true);
               }}
               disabled={!!actionLoading}
             >
-              <Calendar className="mr-2 h-4 w-4" />
+              <CalendarIcon className="mr-2 h-4 w-4" />
               Schedule
             </Button>
           )}
@@ -906,20 +912,18 @@ const CampaignDetail = () => {
           <div className="space-y-4 py-4">
             <div>
               <Label>Start date *</Label>
-              <Input
-                type="date"
-                value={launchStart}
-                onChange={(e) => setLaunchStart(e.target.value)}
-                className="mt-1"
+              <DatePicker
+                date={launchStart ? parseDateLocal(launchStart) : undefined}
+                setDate={(d) => setLaunchStart(d ? formatDateLocal(d) : '')}
+                placeholder="Select start date"
               />
             </div>
             <div>
               <Label>End date (optional)</Label>
-              <Input
-                type="date"
-                value={launchEnd}
-                onChange={(e) => setLaunchEnd(e.target.value)}
-                className="mt-1"
+              <DatePicker
+                date={launchEnd ? parseDateLocal(launchEnd) : undefined}
+                setDate={(d) => setLaunchEnd(d ? formatDateLocal(d) : '')}
+                placeholder="Select end date"
               />
             </div>
           </div>
@@ -942,11 +946,19 @@ const CampaignDetail = () => {
           <div className="space-y-4 py-4">
             <div>
               <Label>Start date *</Label>
-              <Input type="date" value={scheduleStart} onChange={(e) => setScheduleStart(e.target.value)} className="mt-1" />
+              <DatePicker
+                date={scheduleStart ? parseDateLocal(scheduleStart) : undefined}
+                setDate={(d) => setScheduleStart(d ? formatDateLocal(d) : '')}
+                placeholder="Select start date"
+              />
             </div>
             <div>
               <Label>End date *</Label>
-              <Input type="date" value={scheduleEnd} onChange={(e) => setScheduleEnd(e.target.value)} className="mt-1" />
+              <DatePicker
+                date={scheduleEnd ? parseDateLocal(scheduleEnd) : undefined}
+                setDate={(d) => setScheduleEnd(d ? formatDateLocal(d) : '')}
+                placeholder="Select end date"
+              />
             </div>
           </div>
           <DialogFooter>
@@ -987,11 +999,19 @@ const CampaignDetail = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Start date</Label>
-                <Input type="date" value={editForm.start_date || ''} onChange={(e) => setEditForm((f) => ({ ...f, start_date: e.target.value }))} className="mt-1" />
+                <DatePicker
+                  date={editForm.start_date ? parseDateLocal(editForm.start_date) : undefined}
+                  setDate={(d) => setEditForm((f) => ({ ...f, start_date: d ? formatDateLocal(d) : '' }))}
+                  placeholder="Select start date"
+                />
               </div>
               <div>
                 <Label>End date</Label>
-                <Input type="date" value={editForm.end_date || ''} onChange={(e) => setEditForm((f) => ({ ...f, end_date: e.target.value }))} className="mt-1" />
+                <DatePicker
+                  date={editForm.end_date ? parseDateLocal(editForm.end_date) : undefined}
+                  setDate={(d) => setEditForm((f) => ({ ...f, end_date: d ? formatDateLocal(d) : '' }))}
+                  placeholder="Select end date"
+                />
               </div>
             </div>
             <div>

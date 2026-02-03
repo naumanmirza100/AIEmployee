@@ -24,38 +24,39 @@ const getCompanyUser = () => {
 
 /**
  * Base API request function for company routes
+ * options.responseType === 'blob' → returns blob (for file downloads), otherwise parses JSON
  */
 const companyApiRequest = async (endpoint, options = {}) => {
   const token = getCompanyToken();
-  
+  const wantBlob = options.responseType === 'blob';
+
   const defaultHeaders = {
     'Content-Type': 'application/json',
   };
-  
+
   // Add token-based authentication
   if (token) {
     defaultHeaders['Authorization'] = `Token ${token}`;
   } else {
     console.warn('No company auth token found in localStorage');
   }
-  
+
+  const { responseType, ...restOptions } = options;
   const config = {
-    ...options,
+    ...restOptions,
     headers: {
       ...defaultHeaders,
       ...(options.headers || {}),
     },
   };
-  
+
   try {
-    console.log('Making request to:', `${API_BASE_URL}${endpoint}`, 'with headers:', defaultHeaders);
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-    
-    // Check if response is ok before trying to parse JSON
+
     if (!response.ok) {
       let errorData;
       try {
-        errorData = await response.json();
+        errorData = wantBlob ? { message: `HTTP error! status: ${response.status}` } : await response.json();
       } catch {
         errorData = { message: `HTTP error! status: ${response.status}` };
       }
@@ -64,11 +65,13 @@ const companyApiRequest = async (endpoint, options = {}) => {
       error.data = errorData;
       throw error;
     }
-    
+
+    if (wantBlob) {
+      return await response.blob();
+    }
     const data = await response.json();
     return data;
   } catch (error) {
-    // Handle network errors separately
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
       console.error('Network error - Failed to fetch:', error);
       const networkError = new Error('Failed to connect to server. Please check if the backend is running.');
@@ -168,10 +171,17 @@ export const loginCompany = async (email, password) => {
  * Company API helper for authenticated requests
  */
 export const companyApi = {
-  get: (endpoint, params = {}) => {
-    const queryString = new URLSearchParams(params).toString();
-    const url = queryString ? `${endpoint}?${queryString}` : endpoint;
-    return companyApiRequest(url, { method: 'GET' });
+  get: (endpoint, paramsOrOptions = {}) => {
+    const isBlobRequest = paramsOrOptions && paramsOrOptions.responseType === 'blob';
+    let url = endpoint;
+    const requestOptions = { method: 'GET' };
+    if (isBlobRequest) {
+      requestOptions.responseType = 'blob';
+    } else if (paramsOrOptions && typeof paramsOrOptions === 'object' && Object.keys(paramsOrOptions).length > 0) {
+      const queryString = new URLSearchParams(paramsOrOptions).toString();
+      url = queryString ? `${endpoint}?${queryString}` : endpoint;
+    }
+    return companyApiRequest(url, requestOptions);
   },
   post: (endpoint, data = {}) => {
     return companyApiRequest(endpoint, {
