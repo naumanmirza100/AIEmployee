@@ -749,9 +749,34 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         if campaign.status == 'scheduled':
             leads_count = campaign.leads.count()
             sequences = EmailSequence.objects.filter(campaign=campaign)
+            has_sequence_with_steps = any(seq.steps.exists() for seq in sequences)
+            date_arrived = campaign.start_date and campaign.start_date <= timezone.now().date()
+            
+            # SCHEDULED DATE HAS ARRIVED but cannot auto-activate (no sequences or no leads)
+            if date_arrived and (leads_count == 0 or not has_sequence_with_steps):
+                notification = self._create_notification(
+                    user=user,
+                    campaign=campaign,
+                    notification_type='campaign_status',
+                    priority='high',
+                    title=f'⏰ Scheduled Date Arrived – Action Required: {campaign.name}',
+                    message=f'The scheduled start date ({campaign.start_date}) has arrived but campaign "{campaign.name}" cannot be activated. It has no email sequences or no leads. Upload leads, create email templates and sequences, then launch the campaign manually.',
+                    action_required=True,
+                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    metadata={
+                        'action': 'scheduled_date_arrived_no_setup',
+                        'status': 'scheduled',
+                        'leads_count': leads_count,
+                        'start_date': campaign.start_date.isoformat(),
+                        'has_sequences': has_sequence_with_steps
+                    }
+                )
+                if notification:
+                    notifications.append(notification)
+                    issues.append({'type': 'scheduled_date_arrived_no_setup'})
             
             # Scheduled with no leads
-            if leads_count == 0:
+            elif leads_count == 0:
                 notification = self._create_notification(
                     user=user,
                     campaign=campaign,

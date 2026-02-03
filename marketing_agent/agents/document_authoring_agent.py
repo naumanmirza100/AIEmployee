@@ -154,7 +154,10 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         
         # Use LLM for writing (OpenAI GPT-4 for better quality)
         # Lower temperature (0.35) for consistent output; higher max_tokens for long documents
-        target_pages = min(20, max(1, int((document_data or {}).get('pages', 5))))
+        # Performance Report: default and minimum 6 pages (more than 5); other docs default 5
+        default_pages = 6 if document_type == 'report' else 5
+        min_pages = 6 if document_type == 'report' else 1
+        target_pages = min(20, max(min_pages, int((document_data or {}).get('pages', default_pages))))
         min_words = target_pages * 450  # ~450 words per page
         max_tokens_needed = min(16384, (min_words * 2) // 3)  # ~1.35 tokens/word, with headroom
         content = self._call_llm_for_writing(
@@ -233,8 +236,10 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         # Frontend sends 'notes'; also support 'requirements' and 'key_points'
         requirements = document_data.get('requirements') or document_data.get('notes', '')
         key_points = document_data.get('key_points') or document_data.get('notes', '')
-        # Pages (1-20), tables, charts - user-controlled. NO word limits.
-        target_pages = min(20, max(1, int(document_data.get('pages', 5))))
+        # Pages (1-20), tables, charts - user-controlled. Performance Report: default and minimum 6 pages.
+        default_pages = 6 if document_type == 'report' else 5
+        min_pages = 6 if document_type == 'report' else 1
+        target_pages = min(20, max(min_pages, int(document_data.get('pages', default_pages))))
         target_tables = max(0, int(document_data.get('tables', 3)))
         target_charts = max(0, int(document_data.get('charts', 1))) if document_type == 'report' else 0
         chart_type = (document_data.get('chart_type') or 'bar').lower()

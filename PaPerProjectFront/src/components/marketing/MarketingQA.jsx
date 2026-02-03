@@ -10,6 +10,86 @@ import marketingAgentService from '@/services/marketingAgentService';
 
 const STORAGE_KEY = 'marketing_qa_chats';
 
+/** Markdown to HTML for Q&A answers - readable paragraphs, headings, bullets, tables */
+function markdownToHtml(markdown) {
+  if (!markdown || typeof markdown !== 'string') return '';
+  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
+  const lines = markdown.split('\n');
+  const out = [];
+  let inList = false;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+    // Markdown table: | col | col |
+    if (t.startsWith('|') && t.endsWith('|')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      const tableRows = [];
+      let j = i;
+      while (j < lines.length && lines[j].trim().startsWith('|')) {
+        const cells = lines[j].trim().split('|').map(c => c.trim()).filter(Boolean);
+        if (cells.length > 0 && cells.every(c => /^[-:\s]+$/.test(c))) { j++; continue; }
+        tableRows.push(cells);
+        j++;
+      }
+      i = j;
+      if (tableRows.length > 0) {
+        out.push('<div class="my-5 overflow-x-auto rounded-lg border border-border"><table class="w-full text-base">');
+        out.push('<thead><tr class="bg-muted">');
+        tableRows[0].forEach(cell => out.push(`<th class="px-4 py-3 text-left font-semibold">${bold(escape(cell))}</th>`));
+        out.push('</tr></thead><tbody>');
+        tableRows.slice(1).forEach((row, idx) => {
+          out.push(`<tr class="${idx % 2 === 0 ? 'bg-muted/30' : ''}">`);
+          row.forEach(cell => out.push(`<td class="px-4 py-3 border-t border-border text-base">${bold(escape(cell))}</td>`));
+          out.push('</tr>');
+        });
+        out.push('</tbody></table></div>');
+      }
+      continue;
+    }
+    if (/^---+$/.test(t)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push('<hr class="my-5 border-border"/>');
+      i++; continue;
+    }
+    if (/^## /.test(t)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t.slice(3)))}</h2>`);
+      i++; continue;
+    }
+    if (/^### /.test(t)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h3 class="text-lg font-bold mt-4 mb-2 text-foreground">${bold(escape(t.slice(4)))}</h3>`);
+      i++; continue;
+    }
+    // Lines ending with : (like "Opportunities We're Missing:") treated as h2
+    if (t.endsWith(':') && t.length > 10 && !t.startsWith('-') && !t.startsWith('*')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t))}</h2>`);
+      i++; continue;
+    }
+    if (/^[\s]*(?:•|-|\*|\d+\.)\s+/.test(t)) {
+      if (!inList) { out.push('<ul class="list-disc pl-6 my-4 space-y-2">'); inList = true; }
+      const content = t.replace(/^[\s]*(?:•|-|\*|\d+\.)\s+/, '');
+      out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
+      i++; continue;
+    }
+    if (t === '' && inList) {
+      out.push('</ul>');
+      inList = false;
+      i++; continue;
+    }
+    if (t && !t.startsWith('<')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<p class="my-4 text-base leading-relaxed">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
+    }
+    i++;
+  }
+  if (inList) out.push('</ul>');
+  return out.join('\n');
+}
+
 /** Suggested questions matching backend / agents_test.html Knowledge Q&A + Analytics */
 const SUGGESTED_QUESTIONS = [
   { group: 'Performance & Analytics', options: [
@@ -219,7 +299,10 @@ const MarketingQA = () => {
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                   ) : (
                     <>
-                      <p className="text-sm whitespace-pre-wrap">{selectedChat?.responseData?.answer || msg.content}</p>
+                      <div
+                        className="prose prose-base max-w-none [&_h2]:text-violet-600 [&_h2]:dark:text-violet-400 [&_strong]:font-semibold [&_p]:text-base [&_li]:text-base"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(selectedChat?.responseData?.answer || msg.content) }}
+                      />
                       {selectedChat?.responseData?.insights?.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-border/50">
                           <p className="text-xs font-semibold mb-2">Key Insights</p>

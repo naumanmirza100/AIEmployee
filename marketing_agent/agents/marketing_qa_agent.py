@@ -199,11 +199,19 @@ class MarketingQAAgent(MarketingBaseAgent):
 
 {context}
 
-Provide a comprehensive, data-driven answer. Include:
-1. Direct answer to the question
-2. Relevant data points and metrics
-3. Insights and patterns you notice
-4. Actionable recommendations if applicable
+FORMATTING REQUIREMENTS (you MUST follow these):
+1. **Readable paragraphs**: Write in clear, well-spaced paragraphs. Use blank lines between paragraphs. Each paragraph should be 2–4 sentences max.
+2. **Highlight key terms**: Use **double asterisks** around important words, metrics, and concepts (e.g. **70% cloud adoption**, **summer sales 26**, **email-based campaigns**).
+3. **Structure with headers**: ALWAYS use ## (two hashes) for main sections (e.g. "## Opportunities We're Missing", "## Key Insights", "## Actionable Recommendations"). Use ### for sub-sections. CRITICAL: Every major section MUST start with ##, not just a line ending with ":".
+4. **Lists**: Use bullet points (• or -) for numbered items or recommendations. Use **bold** for list item labels.
+5. **Data points**: Put key metrics in **bold** when first mentioned (e.g. "**2 campaigns**", "**1 active**", "**70%** of UK businesses).
+6. **Tables**: Use markdown tables when presenting metrics, comparisons, or data summaries. Format: | Column A | Column B | with header row, then data rows.
+
+Provide:
+1. Direct answer to the question in flowing paragraphs
+2. Relevant data points and metrics (with **bold** highlights)
+3. Insights and patterns (use ## Key Insights as header)
+4. Actionable recommendations (use ## Recommendations as header, with bullets)
 
 Be specific, use numbers, and base everything on the data provided."""
         

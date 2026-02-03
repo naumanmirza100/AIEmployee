@@ -118,6 +118,13 @@ const Documents = () => {
     fetchCampaigns();
   }, [fetchCampaigns]);
 
+  // Performance Report: ensure at least 6 pages when selected
+  useEffect(() => {
+    if (documentType === 'report' && (typeof pages !== 'number' || pages < 6)) {
+      setPages(6);
+    }
+  }, [documentType]);
+
   const openDetail = async (id) => {
     setSelectedDocumentId(id);
     setDetailDoc(null);
@@ -197,7 +204,9 @@ const Documents = () => {
       const documentData = {};
       if (title?.trim()) documentData.title = title.trim();
       if (notes?.trim()) documentData.notes = notes.trim();
-      documentData.pages = Math.min(20, Math.max(1, parseInt(pages, 10) || 5));
+      const minPages = documentType === 'report' ? 6 : 1;
+      const defaultPages = documentType === 'report' ? 6 : 5;
+      documentData.pages = Math.min(20, Math.max(minPages, parseInt(pages, 10) || defaultPages));
       documentData.tables = Math.max(0, parseInt(tables, 10) ?? 3);
       if (tableTypes?.trim()) documentData.table_types = String(tableTypes).trim();
       if (documentType === 'report') {
@@ -336,16 +345,20 @@ const Documents = () => {
                   <Label>Target pages (1–20)</Label>
                   <Input
                     type="number"
-                    min={1}
+                    min={documentType === 'report' ? 6 : 1}
                     max={20}
                     value={pages}
                     onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    setPages(isNaN(v) ? 5 : Math.min(20, Math.max(1, v)));
-                  }}
-                    placeholder="5"
+                      const v = parseInt(e.target.value, 10);
+                      const minP = documentType === 'report' ? 6 : 1;
+                      const defaultP = documentType === 'report' ? 6 : 5;
+                      setPages(isNaN(v) ? defaultP : Math.min(20, Math.max(minP, v)));
+                    }}
+                    placeholder={documentType === 'report' ? '6' : '5'}
                   />
-                  <p className="text-xs text-muted-foreground">Default: 5. Max: 20 pages. No word limit.</p>
+                  <p className="text-xs text-muted-foreground">
+                    {documentType === 'report' ? 'Performance Report: min 6 pages. ' : ''}Max: 20 pages. No word limit.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Number of tables</Label>
