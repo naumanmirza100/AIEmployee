@@ -24,7 +24,7 @@ from api.permissions import IsCompanyUserOnly
 from marketing_agent.models import (
     Campaign, Lead, EmailTemplate, EmailSequence, EmailSequenceStep,
     EmailSendHistory, EmailAccount, CampaignContact, MarketingNotification,
-    MarketResearch, MarketingDocument
+    MarketResearch, MarketingDocument, Reply,
 )
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 
@@ -1424,7 +1424,10 @@ def list_sequences(request, campaign_id):
                 'open_rate': round(open_rate, 2),
                 'click_rate': round(click_rate, 2),
             })
-        templates_data = [{'id': t.id, 'name': t.name, 'subject': t.subject} for t in templates]
+        templates_data = [
+            {'id': t.id, 'name': t.name, 'subject': t.subject, 'html_content': t.html_content or ''}
+            for t in templates
+        ]
         has_main_sequence = len(sequences_data) > 0
         email_accounts_data = [{'id': a.id, 'email': a.email, 'is_default': getattr(a, 'is_default', False)} for a in email_accounts]
         return Response({
@@ -1848,6 +1851,177 @@ def delete_template(request, campaign_id, template_id):
         )
 
 
+def _get_pending_and_upcoming_emails(campaign):
+    """
+    Compute pending (ready to send) and upcoming (scheduled within 24h) emails for a campaign.
+    Returns (pending_list, upcoming_list) of JSON-serializable dicts.
+    """
+    now = timezone.now()
+    horizon = now + timedelta(hours=24)
+    pending_list = []
+    upcoming_list = []
+
+    if campaign.status != 'active':
+        return pending_list, upcoming_list
+
+    # Main sequence contacts: not completed, not replied
+    contacts = (
+        CampaignContact.objects
+        .filter(
+            campaign=campaign,
+            sequence__is_active=True,
+            sequence__isnull=False,
+            completed=False,
+            replied=False,
+        )
+        .select_related('lead', 'sequence')
+        .prefetch_related('sequence__steps__template')
+    )[:200]
+
+    for contact in contacts:
+        sequence = contact.sequence
+        steps = list(sequence.steps.all().order_by('step_order'))
+        next_step = next((s for s in steps if s.step_order == contact.current_step + 1), None)
+        if not next_step:
+            continue
+        if contact.current_step == 0:
+            reference_time = contact.started_at if contact.started_at else contact.created_at
+        else:
+            if contact.last_sent_at and contact.last_sent_at <= now:
+                time_since_last = now - contact.last_sent_at
+                reference_time = contact.last_sent_at if time_since_last <= timedelta(hours=24) else now
+            else:
+                reference_time = now
+        next_send_time = reference_time + timedelta(
+            days=next_step.delay_days,
+            hours=next_step.delay_hours,
+            minutes=next_step.delay_minutes,
+        )
+        if contact.current_step > 0 and next_send_time < now - timedelta(hours=1):
+            reference_time = now
+            next_send_time = reference_time + timedelta(
+                days=next_step.delay_days,
+                hours=next_step.delay_hours,
+                minutes=next_step.delay_minutes,
+            )
+        existing_email = EmailSendHistory.objects.filter(
+            campaign=campaign,
+            lead=contact.lead,
+            email_template=next_step.template,
+        ).first()
+        if existing_email and existing_email.status in ['sent', 'delivered', 'opened', 'clicked']:
+            continue
+        if next_send_time <= now:
+            is_retry = existing_email and existing_email.status in ['pending', 'failed']
+            pending_list.append({
+                'recipient_email': contact.lead.email,
+                'subject': next_step.template.subject,
+                'sequence_name': sequence.name,
+                'sequence_id': sequence.id,
+                'step_order': next_step.step_order,
+                'template_name': next_step.template.name,
+                'is_sub_sequence': False,
+                'is_retry': is_retry,
+                'previous_status': existing_email.status if existing_email else None,
+            })
+        elif next_send_time <= horizon:
+            upcoming_list.append({
+                'lead_email': contact.lead.email,
+                'sequence_name': sequence.name,
+                'sequence_id': sequence.id,
+                'next_send_time': next_send_time.isoformat(),
+                'step_order': next_step.step_order,
+                'template_name': next_step.template.name,
+                'delay_days': next_step.delay_days,
+                'delay_hours': next_step.delay_hours,
+                'delay_minutes': next_step.delay_minutes,
+                'is_sub_sequence': False,
+            })
+
+    # Sub-sequence contacts: replied, sub_sequence active, not sub_sequence_completed
+    sub_contacts = (
+        CampaignContact.objects
+        .filter(
+            campaign=campaign,
+            sub_sequence__is_active=True,
+            sub_sequence__isnull=False,
+            sub_sequence_completed=False,
+            replied=True,
+        )
+        .select_related('lead', 'sequence', 'sub_sequence', 'sub_sequence__parent_sequence')
+        .prefetch_related('sub_sequence__steps__template')
+    )[:200]
+
+    for contact in sub_contacts:
+        sub_sequence = contact.sub_sequence
+        if not sub_sequence:
+            continue
+        parent_sequence = getattr(sub_sequence, 'parent_sequence', None) or contact.sequence
+        if not parent_sequence:
+            continue
+        steps = list(sub_sequence.steps.all().order_by('step_order'))
+        next_step = next((s for s in steps if s.step_order == contact.sub_sequence_step + 1), None)
+        if not next_step:
+            continue
+        if contact.sub_sequence_step == 0:
+            reference_time = contact.replied_at or contact.updated_at
+        else:
+            if contact.sub_sequence_last_sent_at and contact.sub_sequence_last_sent_at <= now:
+                time_since = now - contact.sub_sequence_last_sent_at
+                reference_time = contact.sub_sequence_last_sent_at if time_since <= timedelta(hours=24) else now
+            else:
+                reference_time = now
+        next_send_time = reference_time + timedelta(
+            days=next_step.delay_days,
+            hours=next_step.delay_hours,
+            minutes=next_step.delay_minutes,
+        )
+        if contact.sub_sequence_step > 0 and next_send_time < now - timedelta(hours=1):
+            reference_time = now
+            next_send_time = reference_time + timedelta(
+                days=next_step.delay_days,
+                hours=next_step.delay_hours,
+                minutes=next_step.delay_minutes,
+            )
+        existing_email = EmailSendHistory.objects.filter(
+            campaign=campaign,
+            lead=contact.lead,
+            email_template=next_step.template,
+        ).first()
+        if existing_email and existing_email.status in ['sent', 'delivered', 'opened', 'clicked']:
+            continue
+        if next_send_time <= now:
+            is_retry = existing_email and existing_email.status in ['pending', 'failed']
+            pending_list.append({
+                'recipient_email': contact.lead.email,
+                'subject': next_step.template.subject,
+                'sequence_name': parent_sequence.name,
+                'sequence_id': parent_sequence.id,
+                'sub_sequence_name': sub_sequence.name,
+                'step_order': next_step.step_order,
+                'template_name': next_step.template.name,
+                'is_sub_sequence': True,
+                'is_retry': is_retry,
+                'previous_status': existing_email.status if existing_email else None,
+            })
+        elif next_send_time <= horizon:
+            upcoming_list.append({
+                'lead_email': contact.lead.email,
+                'sequence_name': parent_sequence.name,
+                'sequence_id': parent_sequence.id,
+                'sub_sequence_name': sub_sequence.name,
+                'next_send_time': next_send_time.isoformat(),
+                'step_order': next_step.step_order,
+                'template_name': next_step.template.name,
+                'delay_days': next_step.delay_days,
+                'delay_hours': next_step.delay_hours,
+                'delay_minutes': next_step.delay_minutes,
+                'is_sub_sequence': True,
+            })
+
+    return pending_list, upcoming_list
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1868,13 +2042,21 @@ def get_email_status_full(request, campaign_id):
             .select_related('email_template', 'lead')
             .order_by('-sent_at', '-created_at')
         )
+        pending_emails, upcoming_emails = _get_pending_and_upcoming_emails(campaign)
+        # total_replied = count of Reply records (each reply event), not unique contacts
+        try:
+            total_replied = Reply.objects.filter(campaign=campaign).count()
+        except Exception:
+            total_replied = CampaignContact.objects.filter(campaign=campaign, replied=True).count()
         stats = {
             'total_sent': all_email_history.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count(),
             'total_opened': all_email_history.filter(status__in=['opened', 'clicked']).count(),
             'total_clicked': all_email_history.filter(status='clicked').count(),
             'total_failed': all_email_history.filter(status='failed').count(),
             'total_bounced': all_email_history.filter(status='bounced').count(),
-            'total_replied': CampaignContact.objects.filter(campaign=campaign, replied=True).count(),
+            'total_replied': total_replied,
+            'pending_count': len(pending_emails),
+            'upcoming_count': len(upcoming_emails),
         }
         if stats['total_sent'] > 0:
             stats['open_rate'] = round((stats['total_opened'] / stats['total_sent']) * 100, 1)
@@ -1885,19 +2067,86 @@ def get_email_status_full(request, campaign_id):
             stats['click_rate'] = 0
             stats['bounce_rate'] = 0
         last_5_min = timezone.now() - timedelta(minutes=5)
-        currently_sending = all_email_history.filter(sent_at__gte=last_5_min).exists()
+        currently_sending = all_email_history.filter(sent_at__gte=last_5_min).exists() or len(pending_emails) > 0
         recent_emails = list(all_email_history[:100])
+        email_ids = [e.id for e in recent_emails]
         template_ids = [e.email_template_id for e in recent_emails if e.email_template_id]
-        template_to_sequence = {}
-        if template_ids:
-            for step in EmailSequenceStep.objects.filter(
-                template_id__in=template_ids
-            ).filter(sequence__is_sub_sequence=False).select_related('sequence'):
-                if step.sequence and step.template_id not in template_to_sequence:
-                    template_to_sequence[step.template_id] = step.sequence.name
+
+        # Map email_id -> interest_level from latest Reply (for Replied column)
+        # Use contact.reply_interest_level when Reply.interest_level is 'not_analyzed' (match Django)
+        replied_map = {}
+        try:
+            for reply in Reply.objects.filter(
+                campaign=campaign,
+                triggering_email_id__in=email_ids,
+            ).select_related('contact').order_by('-replied_at'):
+                eid = reply.triggering_email_id
+                if eid and eid not in replied_map:
+                    level = reply.interest_level or 'not_analyzed'
+                    if level == 'not_analyzed' and getattr(reply, 'contact', None):
+                        level = (reply.contact.reply_interest_level or 'not_analyzed')
+                    replied_map[eid] = level
+        except Exception:
+            pass
+
+        # Per-email type (Sequence vs Sub-Sequence): context-aware like Django view.
+        # Sub-Sequence only when this send was part of sub-sequence flow (sent after reply).
+        contacts_by_lead = {}
+        for c in CampaignContact.objects.filter(campaign=campaign).select_related(
+            'sequence', 'sub_sequence', 'sub_sequence__parent_sequence'
+        ):
+            if c.lead_id not in contacts_by_lead:
+                contacts_by_lead[c.lead_id] = []
+            contacts_by_lead[c.lead_id].append(c)
+
+        def get_email_type_and_sequence(email_send):
+            """Determine type from template steps + contact timing (match Django view logic)."""
+            if not email_send.email_template_id:
+                return ('initial', 'Initial / Other')
+            template_steps = list(
+                EmailSequenceStep.objects.filter(
+                    template_id=email_send.email_template_id,
+                    sequence__campaign=campaign,
+                ).select_related('sequence', 'sequence__parent_sequence')
+            )
+            if not template_steps:
+                return ('initial', 'Initial / Other')
+            sent_at = email_send.sent_at
+            contacts = (contacts_by_lead.get(email_send.lead_id) or []) if email_send.lead_id else []
+            # Sub-sequence: template in sub_sequence AND contact has that sub_sequence AND sent_at >= replied_at
+            for step in template_steps:
+                seq = step.sequence
+                if not seq.is_sub_sequence:
+                    continue
+                for contact in contacts:
+                    if contact.sub_sequence_id != seq.id:
+                        continue
+                    if not contact.replied_at or not sent_at or sent_at < contact.replied_at:
+                        continue
+                    parent = getattr(seq, 'parent_sequence', None)
+                    return ('sub_sequence', parent.name if parent else seq.name)
+            # Main sequence: template in main sequence and send in main flow
+            for step in template_steps:
+                seq = step.sequence
+                if seq.is_sub_sequence:
+                    continue
+                for contact in contacts:
+                    if contact.sequence_id == seq.id:
+                        if not contact.created_at or not sent_at or sent_at >= contact.created_at:
+                            return ('sequence', seq.name)
+                        break
+            # Fallback: single step (e.g. no contact or no sent_at)
+            step = template_steps[0]
+            seq = step.sequence
+            if seq.is_sub_sequence and seq.parent_sequence_id:
+                return ('sub_sequence', (seq.parent_sequence.name if seq.parent_sequence else seq.name))
+            return ('sequence', seq.name)
+
         emails_by_sequence = {}
         for email_send in recent_emails:
-            seq_name = template_to_sequence.get(email_send.email_template_id, 'Initial / Other')
+            email_type, seq_name = get_email_type_and_sequence(email_send)
+            is_replied = email_send.id in replied_map
+            reply_interest_level = replied_map.get(email_send.id)
             if seq_name not in emails_by_sequence:
                 emails_by_sequence[seq_name] = []
             emails_by_sequence[seq_name].append({
@@ -1907,7 +2156,49 @@ def get_email_status_full(request, campaign_id):
                 'status': email_send.status,
                 'sent_at': email_send.sent_at.isoformat() if email_send.sent_at else None,
                 'template_name': email_send.email_template.name if email_send.email_template else None,
+                'type': email_type,
+                'is_replied': is_replied,
+                'reply_interest_level': reply_interest_level,
             })
+
+        # Replies (from Reply model) - for "Replied contacts" section
+        replies_list = []
+        replies_by_sequence = {}
+        try:
+            all_replies = list(
+                Reply.objects.filter(campaign=campaign)
+                .select_related('lead', 'sequence', 'sub_sequence', 'triggering_email', 'contact')
+                .order_by('-replied_at')[:100]
+            )
+            for reply in all_replies:
+                seq_name = reply.sequence.name if reply.sequence else 'No Sequence'
+                seq_id = reply.sequence_id or 'no_sequence'
+                reply_content = (reply.reply_content or '').strip()
+                if len(reply_content) > 400:
+                    reply_content = reply_content[:400] + '…'
+                interest_level = reply.interest_level or 'not_analyzed'
+                if interest_level == 'not_analyzed' and getattr(reply, 'contact', None):
+                    interest_level = (reply.contact.reply_interest_level or 'not_analyzed')
+                r = {
+                    'id': reply.id,
+                    'lead_email': reply.lead.email if reply.lead else None,
+                    'sequence_name': seq_name,
+                    'sequence_id': reply.sequence_id,
+                    'sub_sequence_name': reply.sub_sequence.name if reply.sub_sequence else None,
+                    'sub_sequence_id': reply.sub_sequence_id,
+                    'interest_level': interest_level,
+                    'replied_at': reply.replied_at.isoformat() if reply.replied_at else None,
+                    'reply_subject': reply.reply_subject or '',
+                    'reply_content': reply_content,
+                    'in_reply_to_subject': reply.triggering_email.subject if reply.triggering_email else None,
+                }
+                replies_list.append(r)
+                if seq_id not in replies_by_sequence:
+                    replies_by_sequence[seq_id] = {'sequence_name': seq_name, 'replies': []}
+                replies_by_sequence[seq_id]['replies'].append(r)
+        except Exception as e:
+            logger.warning("Could not load replies for email status: %s", e)
+
         return Response({
             'status': 'success',
             'data': {
@@ -1916,6 +2207,10 @@ def get_email_status_full(request, campaign_id):
                 'currently_sending': currently_sending,
                 'emails_by_sequence': emails_by_sequence,
                 'total_emails_shown': len(recent_emails),
+                'pending_emails': pending_emails,
+                'upcoming_emails': upcoming_emails,
+                'replies': replies_list,
+                'replies_by_sequence': replies_by_sequence,
             }
         }, status=status.HTTP_200_OK)
     except Exception as e:

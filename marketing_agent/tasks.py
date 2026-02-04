@@ -166,7 +166,7 @@ def auto_start_campaigns_task():
                     title=f'✅ Campaign Auto-Activated: {campaign.name}',
                     message=f'Scheduled date ({campaign.start_date}) has arrived. Campaign "{campaign.name}" was automatically activated. Emails will be sent according to your sequences.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}',
                     metadata={'action': 'auto_activated', 'start_date': str(campaign.start_date)}
                 )
                 print(f'Auto-activated campaign "{campaign.name}" (ID {campaign.id})')
@@ -177,7 +177,7 @@ def auto_start_campaigns_task():
                     title=f'⏰ Scheduled Date Arrived – Action Required: {campaign.name}',
                     message=f'Scheduled date ({campaign.start_date}) has arrived but campaign "{campaign.name}" cannot be activated automatically. It has no email sequences (or no templates). Create email templates and sequences first, then launch the campaign manually.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences',
                     metadata={'action': 'date_arrived_no_sequences', 'start_date': str(campaign.start_date)}
                 )
                 notified_no_sequences += 1

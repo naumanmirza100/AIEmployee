@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3 } from 'lucide-react';
+import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye } from 'lucide-react';
 import {
   getSequences,
   createSequence,
@@ -29,6 +29,7 @@ import {
   deleteSequence,
   getSequenceDetails,
   createTemplate,
+  updateTemplate,
   deleteTemplate,
 } from '@/services/marketingAgentService';
 
@@ -101,6 +102,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const [viewTemplateOpen, setViewTemplateOpen] = useState(false);
+  const [viewTemplate, setViewTemplate] = useState(null);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [createSequenceOpen, setCreateSequenceOpen] = useState(false);
   const [editSequenceOpen, setEditSequenceOpen] = useState(false);
   const [detailsSequenceOpen, setDetailsSequenceOpen] = useState(false);
@@ -217,6 +221,50 @@ const SequenceManagementPage = ({ embedded = false }) => {
       }
     } catch (e) {
       toast({ title: 'Error', description: e?.message || 'Failed to create template.', variant: 'destructive' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openViewTemplate = (t) => {
+    setViewTemplate(t);
+    setViewTemplateOpen(true);
+  };
+
+  const openEditTemplate = (t) => {
+    setTemplateForm({
+      name: t.name || '',
+      subject: t.subject || '',
+      html_content: t.html_content || '',
+    });
+    setEditingTemplateId(t.id);
+    setCreateTemplateOpen(true);
+  };
+
+  const handleUpdateTemplate = async (e) => {
+    e.preventDefault();
+    if (!editingTemplateId || !templateForm.name?.trim() || !templateForm.subject?.trim()) {
+      toast({ title: 'Validation', description: 'Name and subject are required.', variant: 'destructive' });
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await updateTemplate(id, editingTemplateId, {
+        name: templateForm.name.trim(),
+        subject: templateForm.subject.trim(),
+        html_content: templateForm.html_content || '',
+      });
+      if (res?.status === 'success') {
+        toast({ title: 'Success', description: res?.data?.message || 'Template updated.' });
+        setCreateTemplateOpen(false);
+        setEditingTemplateId(null);
+        setTemplateForm({ name: '', subject: '', html_content: '' });
+        fetchData();
+      } else {
+        toast({ title: 'Error', description: res?.message || 'Failed to update template.', variant: 'destructive' });
+      }
+    } catch (e) {
+      toast({ title: 'Error', description: e?.message || 'Failed to update template.', variant: 'destructive' });
     } finally {
       setActionLoading(false);
     }
@@ -529,20 +577,39 @@ const SequenceManagementPage = ({ embedded = false }) => {
                   {templates.map((t) => (
                     <li
                       key={t.id}
-                      className="flex items-center justify-between rounded-lg border p-3 bg-muted/20"
+                      className="flex items-center justify-between gap-2 rounded-lg border p-3 bg-muted/20"
                     >
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <span className="font-medium">{t.name}</span>
                         <span className="text-muted-foreground text-sm ml-2">— {t.subject}</span>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteConfirm({ type: 'template', id: t.id, name: t.name })}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="View template"
+                          onClick={() => openViewTemplate(t)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Edit template"
+                          onClick={() => openEditTemplate(t)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          title="Delete template"
+                          onClick={() => setDeleteConfirm({ type: 'template', id: t.id, name: t.name })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -567,7 +634,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className="font-semibold">{seq.name}</h3>
-                            <Badge variant={seq.effective_is_active ? 'default' : 'secondary'}>
+                            <Badge variant={seq.effective_is_active ? 'default' : 'secondary'} className="text-xs py-0 ml-3">
                               {seq.effective_is_active ? 'Active' : 'Inactive'}
                             </Badge>
                           </div>
@@ -627,15 +694,15 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         <ul className="space-y-2">
                           {seq.steps?.map((step) => (
                             <li key={step.id} className="flex items-center gap-3 rounded border p-2 bg-background">
-                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-medium">
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-medium">
                                 {step.step_order}
                               </span>
-                              <span className="font-medium text-sm">{step.template_name || step.template_subject || '—'}</span>
-                              <div className="flex gap-2 justify-between w-full">
-                                <span className="text-xs text-muted-foreground">
+                              <span className="min-w-[7rem] shrink-0 whitespace-nowrap font-medium text-sm">{step.template_name || step.template_subject || '—'}</span>
+                              <div className="flex min-w-0 flex-1 gap-2 justify-between">
+                                <span className="text-xs text-muted-foreground truncate">
                                   {step.template_subject}
                                 </span>
-                                <span className="text-xs text-muted-foreground flex justify-end">
+                                <span className="text-xs text-muted-foreground shrink-0">
                                   Delay: {step.delay_days}d {step.delay_hours}h {step.delay_minutes}m
                                 </span>
                               </div>
@@ -652,9 +719,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div>
                                     <span className="font-medium text-sm text-foreground">{sub.name}</span>
-                                    <Badge variant={sub.effective_is_active ? 'default' : 'secondary'} className="ml-2 text-xs">
+                                    {/* <Badge variant={sub.effective_is_active ? 'default' : 'secondary'} className="ml-2 text-xs">
                                       {sub.effective_is_active ? 'Active' : 'Inactive'}
-                                    </Badge>
+                                    </Badge> */}
                                     <span className="text-xs text-muted-foreground ml-2">
                                       Interest: {INTEREST_LEVEL_OPTIONS.find((o) => o.value === sub.interest_level)?.label ?? sub.interest_level}
                                     </span>
@@ -680,9 +747,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
                                 <ul className="mt-2 space-y-1">
                                   {sub.steps?.slice(0, 5).map((step) => (
                                     <li key={step.id} className="flex items-center gap-2 text-xs">
-                                      <span className="font-medium">{step.step_order}.</span>
-                                      {step.template_name || step.template_subject || '—'}
-                                      <span className="text-muted-foreground">Delay: {step.delay_days}d {step.delay_hours}h {step.delay_minutes}m</span>
+                                      <span className="shrink-0 font-medium">{step.step_order}.</span>
+                                      <span className="min-w-[6rem] shrink-0 whitespace-nowrap">{step.template_name || step.template_subject || '—'}</span>
+                                      <span className="text-muted-foreground shrink-0">Delay: {step.delay_days}d {step.delay_hours}h {step.delay_minutes}m</span>
                                     </li>
                                   ))}
                                   {(sub.steps?.length ?? 0) > 5 && (
@@ -727,14 +794,46 @@ const SequenceManagementPage = ({ embedded = false }) => {
         </>
       )}
 
-      {/* Create template modal */}
-      <Dialog open={createTemplateOpen} onOpenChange={setCreateTemplateOpen}>
+      {/* View template modal */}
+      <Dialog open={viewTemplateOpen} onOpenChange={(open) => { if (!open) setViewTemplate(null); setViewTemplateOpen(open); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Email template</DialogTitle>
+            <DialogDescription>View template content.</DialogDescription>
+          </DialogHeader>
+          {viewTemplate && (
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-muted-foreground text-xs">Name</Label>
+                <p className="font-medium mt-0.5">{viewTemplate.name}</p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Subject</Label>
+                <p className="mt-0.5 break-words">{viewTemplate.subject}</p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Body (HTML)</Label>
+                <div className="mt-1 rounded border bg-muted/20 p-3 max-h-64 overflow-y-auto text-sm font-mono whitespace-pre-wrap break-words">
+                  {viewTemplate.html_content || <span className="text-muted-foreground">(empty)</span>}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setViewTemplateOpen(false)}>Close</Button>
+                <Button onClick={() => { setViewTemplateOpen(false); openEditTemplate(viewTemplate); }}>Edit</Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create / Edit template modal */}
+      <Dialog open={createTemplateOpen} onOpenChange={(open) => { if (!open) { setEditingTemplateId(null); setTemplateForm({ name: '', subject: '', html_content: '' }); } setCreateTemplateOpen(open); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create email template</DialogTitle>
-            <DialogDescription>Add a template to use in sequence steps.</DialogDescription>
+            <DialogTitle>{editingTemplateId ? 'Edit email template' : 'Create email template'}</DialogTitle>
+            <DialogDescription>{editingTemplateId ? 'Update the template. Changes apply to sequence steps using it.' : 'Add a template to use in sequence steps.'}</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleCreateTemplate}>
+          <form onSubmit={editingTemplateId ? handleUpdateTemplate : handleCreateTemplate}>
             <div className="space-y-4 py-4">
               <div>
                 <Label htmlFor="t-name">Name</Label>
@@ -792,7 +891,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                 Cancel
               </Button>
               <Button type="submit" disabled={actionLoading}>
-                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : editingTemplateId ? 'Update' : 'Create'}
               </Button>
             </DialogFooter>
           </form>

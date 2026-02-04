@@ -60,21 +60,24 @@ Determine if this reply indicates the lead is INTERESTED (positive) or NOT INTER
 CLASSIFICATION OPTIONS:
 1. "positive" - Lead is INTERESTED:
    - Expresses interest, asks questions, requests more information
-   - Agrees to a meeting, call, or demo
+   - Agrees to a meeting, call, or demo (include brief agreement: "yes", "yes okay", "sure", "okay", "sounds good", "let's do it")
    - Shows enthusiasm, excitement, or curiosity
    - Asks about pricing, features, or next steps
-   - Positive language: "interested", "sounds good", "let's do it", "I'd like to", "tell me more"
+   - Forward-looking or warm sign-off: "see you soon", "thank you and see you soon", "looking forward to", "talk soon", "thanks, let's connect"
+   - Positive language: "interested", "sounds good", "I'd like to", "tell me more"
+   - When in doubt between neutral and positive for short replies, prefer "positive" if there is any agreement or warmth (e.g. "Yes okay" = positive; "Thank you and see you soon!" = positive).
 
 2. "negative" - Lead is NOT INTERESTED:
    - Explicitly declines or says "no thanks"
    - Negative language: "not interested", "don't contact me", "spam"
    - Complaints or criticism
-   - Very short dismissive replies: "no", "not interested"
+   - Very short dismissive replies: "no", "not interested" (without agreement or warmth)
 
-3. "neutral" - NEUTRAL/Acknowledgment:
-   - Simple acknowledgments: "thanks", "received", "ok"
+3. "neutral" - NEUTRAL/Acknowledgment only (no clear interest or disinterest):
+   - Purely informational: "received", "got it", "noted"
+   - Vague or minimal: "ok" alone with no other context, "thanks" with no forward-looking or agreeing tone
    - Questions that don't show clear interest or disinterest
-   - Requests for clarification only
+   - Do NOT use neutral for: "yes okay", "thank you and see you soon", "sure", "sounds good" — these are positive.
 
 4. "requested_info" - REQUESTED MORE INFORMATION:
    - Asks specific questions about features, pricing, capabilities
@@ -185,8 +188,12 @@ Be specific and cite the actual words/phrases from the reply that led to your de
                 'confidence': 75
             }
         
-        # Check positive/negative
-        positive_keywords = ['interested', 'yes', 'sounds good', 'schedule', 'meeting', 'call', 'demo', 'like to', 'would like']
+        # Check positive/negative (include short agreement and warm sign-offs)
+        positive_keywords = [
+            'interested', 'yes', 'sounds good', 'schedule', 'meeting', 'call', 'demo', 'like to', 'would like',
+            'yes okay', 'yes ok', 'sure', 'okay', 'see you soon', 'talk soon', 'looking forward', 'thank you and',
+            'thanks and', 'let\'s do it', 'let\'s connect', 'sounds great', 'perfect'
+        ]
         negative_keywords = ['not interested', 'no thanks', 'don\'t contact', 'spam', 'delete']
         
         positive_count = sum(1 for keyword in positive_keywords if keyword in combined_text)

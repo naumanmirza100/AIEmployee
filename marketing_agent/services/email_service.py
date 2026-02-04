@@ -131,12 +131,21 @@ class EmailService:
         """
         recipient_email = test_email or lead.email
         
-        # Prepare context variables
+        # Prepare context variables for {{ first_name }}, {{ last_name }}, {{ lead_name }}, etc.
+        first = (lead.first_name or '').strip()
+        last = (lead.last_name or '').strip()
+        lead_name = first or last or lead.email.split('@')[0] if lead.email else ''
+        full_name = f'{first} {last}'.strip() if (first or last) else lead_name
         context_vars = {
-            'lead_name': lead.first_name or lead.email.split('@')[0],
+            'first_name': first or lead_name,
+            'last_name': last,
+            'name': full_name,
+            'lead_name': lead_name,
+            'full_name': full_name,
             'lead_email': lead.email,
-            'campaign_name': campaign.name,
+            'campaign_name': campaign.name or '',
             'lead_company': lead.company or '',
+            'company': lead.company or '',
         }
         
         # Render email content

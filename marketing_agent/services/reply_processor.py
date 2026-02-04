@@ -28,18 +28,20 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
         dict: {'success': bool, 'message': str, 'error': str (if failed)}
     """
     try:
-        # Get or create contact
-        contact = CampaignContact.objects.filter(
+        # Get all contacts for this lead in campaign (there can be multiple)
+        all_contacts = list(CampaignContact.objects.filter(
             campaign=campaign,
             lead=lead
-        ).first()
+        ).select_related('sequence', 'sub_sequence', 'sub_sequence__parent_sequence'))
         
+        contact = all_contacts[0] if all_contacts else None
         if not contact:
             contact = CampaignContact.objects.create(
                 campaign=campaign,
                 lead=lead,
                 current_step=0
             )
+            all_contacts = [contact]
         
         # Use current time if no date provided
         if not reply_date:
@@ -99,25 +101,72 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
                         else:
                             triggering_email = most_recent_email
             
-            # SIMPLIFIED: Check if triggering email is from a sub-sequence
-            if triggering_email and triggering_email.email_template:
-                sequence_steps = triggering_email.email_template.sequence_steps.all()
-                if sequence_steps.exists():
-                    seq_step = sequence_steps.first()
-                    reply_sequence = seq_step.sequence
-                    # CRITICAL: Check if this sequence is a sub-sequence
-                    if reply_sequence and reply_sequence.is_sub_sequence:
-                        is_sub_sequence_reply = True
-                        reply_sub_sequence = reply_sequence
-                        reply_sequence = reply_sequence.parent_sequence  # Get parent for main sequence
-                        logger.info(f"Detected sub-sequence reply: {lead.email} replied to sub-sequence '{reply_sub_sequence.name}'")
-                    else:
-                        # Main sequence reply
-                        logger.info(f"Detected main sequence reply: {lead.email} replied to main sequence '{reply_sequence.name if reply_sequence else 'None'}'")
+            # Resolve which contact "owns" this reply. Check SUB-SEQUENCE first: if the email was sent after
+            # a contact's reply and template is in their sub_sequence, do not analyze (sub-sequence reply).
+            # Only then check main sequence so we don't wrongly analyze sub-sequence replies when multiple contacts exist.
+            email_sent_at = getattr(triggering_email, 'sent_at', None) if triggering_email else None
+            if triggering_email and triggering_email.email_template and email_sent_at:
+                sequence_steps = list(triggering_email.email_template.sequence_steps.select_related('sequence', 'sequence__parent_sequence').all())
+                main_seq_ids = {s.sequence_id for s in sequence_steps if not s.sequence.is_sub_sequence}
+                sub_seq_ids = {s.sequence_id for s in sequence_steps if s.sequence.is_sub_sequence}
+                resolved_contact = None
+                # First: sub-sequence reply (email sent after they replied, template in sub_sequence) -> do not analyze
+                if sub_seq_ids:
+                    for c in all_contacts:
+                        if c.sub_sequence_id and c.sub_sequence_id in sub_seq_ids and c.replied_at and email_sent_at >= c.replied_at:
+                            resolved_contact = c
+                            is_sub_sequence_reply = True
+                            reply_sub_sequence = next((s.sequence for s in sequence_steps if s.sequence_id == c.sub_sequence_id), None)
+                            if reply_sub_sequence:
+                                reply_sequence = getattr(reply_sub_sequence, 'parent_sequence', None) or reply_sub_sequence
+                                logger.info(f"Detected sub-sequence reply (resolved contact): {lead.email} - email sent after reply - sub '{reply_sub_sequence.name}'")
+                            break
+                # Only if not sub-sequence: main sequence (template in main sequence, send before their reply or first reply)
+                if resolved_contact is None:
+                    for c in all_contacts:
+                        if c.sequence_id and c.sequence_id in main_seq_ids:
+                            if c.replied_at is None or email_sent_at < c.replied_at:
+                                resolved_contact = c
+                                is_sub_sequence_reply = False
+                                reply_sequence = next((s.sequence for s in sequence_steps if s.sequence_id == c.sequence_id), None)
+                                if reply_sequence:
+                                    logger.info(f"Detected main sequence reply (resolved contact): {lead.email} - email sent before reply - sequence '{reply_sequence.name}'")
+                                break
+                if resolved_contact is not None:
+                    contact = resolved_contact
+                elif sequence_steps:
+                    # Fallback: use first contact and previous timing logic
+                    contact_replied_at = getattr(contact, 'replied_at', None)
+                    if contact_replied_at and email_sent_at and email_sent_at >= contact_replied_at and getattr(contact, 'sub_sequence_id', None):
+                        for step in sequence_steps:
+                            if step.sequence_id == contact.sub_sequence_id:
+                                is_sub_sequence_reply = True
+                                reply_sub_sequence = step.sequence
+                                reply_sequence = getattr(step.sequence, 'parent_sequence', None) or step.sequence
+                                break
+                    if not is_sub_sequence_reply:
+                        for step in sequence_steps:
+                            if not step.sequence.is_sub_sequence:
+                                reply_sequence = step.sequence
+                                break
+                        if reply_sequence is None and sequence_steps:
+                            step = sequence_steps[0]
+                            reply_sequence = step.sequence.parent_sequence if step.sequence.is_sub_sequence else step.sequence
+                            if step.sequence.is_sub_sequence and contact_replied_at and email_sent_at >= contact_replied_at:
+                                reply_sub_sequence = step.sequence
+                                is_sub_sequence_reply = True
+            elif triggering_email and triggering_email.email_template:
+                sequence_steps = list(triggering_email.email_template.sequence_steps.select_related('sequence', 'sequence__parent_sequence').all())
+                if sequence_steps:
+                    for step in sequence_steps:
+                        if not step.sequence.is_sub_sequence:
+                            reply_sequence = step.sequence
+                            break
+                    if reply_sequence is None and sequence_steps:
+                        step = sequence_steps[0]
+                        reply_sequence = step.sequence.parent_sequence if step.sequence.is_sub_sequence else step.sequence
                 else:
-                    # No sequence steps found - fallback to contact's sequence
                     reply_sequence = contact.sequence
-                    logger.warning(f"No sequence steps found for triggering email template, using contact sequence: {contact.sequence.name if contact.sequence else 'None'}")
             else:
                 # No triggering email found - check most recent email
                 reply_sequence = contact.sequence
@@ -136,8 +185,8 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
         except Exception as e:
             logger.warning(f'Could not determine reply sequence: {str(e)}')
             reply_sequence = contact.sequence
-            # If contact has sub_sequence, assume it's a sub-sequence reply (safer default)
-            if contact.sub_sequence:
+            # Only assume sub-sequence reply if they had already replied before (context)
+            if contact.sub_sequence and getattr(contact, 'replied_at', None):
                 is_sub_sequence_reply = True
                 reply_sub_sequence = contact.sub_sequence
                 logger.warning(f'Using fallback: marking as sub-sequence reply for {lead.email}')
