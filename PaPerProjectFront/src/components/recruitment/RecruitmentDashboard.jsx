@@ -19,11 +19,16 @@ import Interviews from './Interviews';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
+import RecruitmentApiTester from './RecruitmentApiTester';
+import AiInterviewQuestions from './AiInterviewQuestions';
+import { FlaskConical, HelpCircle } from 'lucide-react';
 
 const PATH_TO_TAB = {
   dashboard: 'dashboard',
   cvprocessing: 'cv-processing',
   analytics: 'analytics',
+  'api-tester': 'api-tester',
+  'ai-interview-questions': 'ai-interview-questions',
   'job-descriptions': 'jobs',
   candidates: 'candidates',
   interviews: 'interviews',
@@ -33,6 +38,8 @@ const TAB_TO_PATH = {
   'dashboard': 'dashboard',
   'cv-processing': 'cvprocessing',
   'analytics': 'analytics',
+  'api-tester': 'api-tester',
+  'ai-interview-questions': 'ai-interview-questions',
   'jobs': 'job-descriptions',
   'candidates': 'candidates',
   'interviews': 'interviews',
@@ -140,7 +147,7 @@ const RecruitmentDashboard = () => {
 
       {/* Main Tabs - each tab navigates to its URL */}
       <Tabs value={activeTab} onValueChange={(tab) => navigate(`/recruitment/${TAB_TO_PATH[tab] || 'dashboard'}`)} className="w-full">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-9">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="analytics">
             <BarChart3 className="h-4 w-4 mr-2" />
@@ -149,6 +156,14 @@ const RecruitmentDashboard = () => {
           <TabsTrigger value="cv-processing">
             <Upload className="h-4 w-4 mr-2" />
             CV Processing
+          </TabsTrigger>
+          <TabsTrigger value="api-tester">
+            <FlaskConical className="h-4 w-4 mr-2" />
+            API Tester
+          </TabsTrigger>
+          <TabsTrigger value="ai-interview-questions">
+            <HelpCircle className="h-4 w-4 mr-2" />
+            AI Questions
           </TabsTrigger>
           <TabsTrigger value="jobs">
             <Briefcase className="h-4 w-4 mr-2" />
@@ -175,7 +190,7 @@ const RecruitmentDashboard = () => {
               <CardDescription>Get started with recruitment tasks</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-full">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-full">
                 <Button
                   variant="outline"
                   className="h-auto flex-col items-start p-4"
@@ -211,6 +226,18 @@ const RecruitmentDashboard = () => {
                     Schedule interviews with candidates
                   </span>
                 </Button>
+
+                <Button
+                  variant="outline"
+                  className="h-auto flex-col items-start p-4"
+                  onClick={() => navigate('/recruitment/ai-interview-questions')}
+                >
+                  <HelpCircle className="h-6 w-6 mb-2" />
+                  <span className="font-semibold">AI Interview Questions</span>
+                  <span className="text-xs text-muted-foreground mt-1">
+                    Get suggested questions for a candidate + job
+                  </span>
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -222,6 +249,14 @@ const RecruitmentDashboard = () => {
 
         <TabsContent value="cv-processing">
           <CVProcessing onProcessComplete={fetchStats} />
+        </TabsContent>
+
+        <TabsContent value="api-tester">
+          <RecruitmentApiTester />
+        </TabsContent>
+
+        <TabsContent value="ai-interview-questions">
+          <AiInterviewQuestions />
         </TabsContent>
 
         <TabsContent value="jobs">
