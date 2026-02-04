@@ -86,7 +86,7 @@ def process_cvs(request):
                 'message': 'No files uploaded. Please upload at least one CV.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get job description and keywords
+        # Get job description and keywords — job selection is required
         job_description_id = request.data.get('job_description_id')
         job_description_text = request.data.get('job_description_text', '').strip()
         job_keywords = request.data.get('job_keywords', '').strip()
@@ -94,11 +94,17 @@ def process_cvs(request):
         top_n = int(top_n) if top_n else None
         parse_only = request.data.get('parse_only', False)
         
+        if not job_description_id:
+            return Response({
+                'status': 'error',
+                'message': 'Please select a job description before processing CVs. Job selection is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         # Initialize job_kw_list
         job_kw_list = None
         job_desc = None
         
-        # If job description ID is provided, fetch it
+        # Fetch job description (required)
         if job_description_id:
             try:
                 job_desc = JobDescription.objects.filter(
@@ -152,8 +158,17 @@ def process_cvs(request):
                                 job_kw_list = extracted_keywords
                         except (json.JSONDecodeError, TypeError):
                             pass
+                else:
+                    return Response({
+                        'status': 'error',
+                        'message': 'Selected job not found or you do not have access to it.'
+                    }, status=status.HTTP_404_NOT_FOUND)
             except Exception as e:
                 logger.error(f"Error fetching job description: {e}")
+                return Response({
+                    'status': 'error',
+                    'message': 'Failed to load job description.'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Parse keywords from text if not already loaded
         if not job_kw_list and job_description_text:
@@ -1285,6 +1300,213 @@ def list_cv_records(request):
         return Response({
             'status': 'error',
             'message': f'Failed to list CV records: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+VALID_QUALIFICATION_DECISIONS = {'INTERVIEW', 'HOLD', 'REJECT'}
+
+
+def _get_parsed_email_and_name(parsed):
+    """Extract email and name from parsed CV dict; try common keys. Returns (email, name)."""
+    if not isinstance(parsed, dict):
+        return None, 'Candidate'
+    email = (
+        (parsed.get('email') or parsed.get('contact_email') or parsed.get('Email') or '') if isinstance(parsed, dict) else ''
+    )
+    if not email and isinstance(parsed.get('contact'), dict):
+        email = (parsed['contact'].get('email') or parsed['contact'].get('contact_email') or '') or ''
+    email = (email or '').strip()
+    name = (parsed.get('name') or parsed.get('full_name') or parsed.get('Name') or 'Candidate') if isinstance(parsed, dict) else 'Candidate'
+    name = (name or 'Candidate').strip()
+    return (email or None), name
+
+
+def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, email_settings, log_service):
+    """
+    If this CV record has no existing interview and has candidate email in parsed_json,
+    schedule an interview and send invitation email. Returns ('sent', True), ('skipped', reason), or ('error', False).
+    """
+    if not cv_record.parsed_json:
+        return ('skipped', 'no_parsed_json')
+    try:
+        parsed = json.loads(cv_record.parsed_json) if isinstance(cv_record.parsed_json, str) else cv_record.parsed_json
+    except (TypeError, ValueError):
+        return ('skipped', 'invalid_parsed_json')
+    candidate_email, candidate_name = _get_parsed_email_and_name(parsed)
+    if not candidate_email:
+        logger.info(f"Bulk INTERVIEW: CV record id={cv_record.id} skipped - no email in parsed_json (keys: {list(parsed.keys()) if isinstance(parsed, dict) else 'n/a'})")
+        return ('skipped', 'no_email')
+    # Skip if interview already exists for this CV record
+    if Interview.objects.filter(cv_record=cv_record).exists():
+        return ('skipped', 'already_has_interview')
+
+    candidate_phone = (parsed.get('phone') or '').strip() or None if isinstance(parsed, dict) else None
+    job_role = 'Position'
+    if cv_record.job_description:
+        job_role = (cv_record.job_description.title or 'Position')[:255]
+    interview_type_to_use = 'ONLINE'
+    job_settings = RecruiterInterviewSettings.objects.filter(
+        company_user=company_user,
+        job_id=cv_record.job_description_id
+    ).first()
+    if job_settings and getattr(job_settings, 'default_interview_type', None):
+        interview_type_to_use = job_settings.default_interview_type
+
+    try:
+        result = interview_agent.schedule_interview(
+            candidate_name=candidate_name,
+            candidate_email=candidate_email,
+            job_role=job_role,
+            interview_type=interview_type_to_use,
+            candidate_phone=candidate_phone,
+            cv_record_id=cv_record.id,
+            recruiter_id=None,
+            company_user_id=company_user.id,
+            email_settings=email_settings,
+            custom_slots=None,
+        )
+        if result.get('interview_id'):
+            interview = Interview.objects.filter(id=result['interview_id']).first()
+            if interview:
+                interview.company_user = company_user
+                try:
+                    email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
+                    interview.followup_delay_hours = email_settings_obj.followup_delay_hours
+                    interview.reminder_hours_before = email_settings_obj.reminder_hours_before
+                    interview.max_followup_emails = email_settings_obj.max_followup_emails
+                    interview.min_hours_between_followups = email_settings_obj.min_hours_between_followups
+                except RecruiterEmailSettings.DoesNotExist:
+                    pass
+                interview.save()
+        if result.get('invitation_sent'):
+            logger.info(f"Bulk INTERVIEW: invitation email sent for CV record id={cv_record.id} -> {candidate_email}")
+            return ('sent', True)
+        return ('error', False)
+    except Exception as e:
+        logger.warning(f"Failed to schedule interview for CV record {cv_record.id} ({candidate_email}): {e}")
+        if log_service:
+            log_service.log_error("bulk_interview_scheduling_error", {
+                "cv_record_id": cv_record.id,
+                "candidate_email": candidate_email,
+                "error": str(e),
+            })
+        return ('error', False)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def bulk_update_cv_records(request):
+    """Bulk update qualification decision for selected CV records (admin override).
+    When changing to INTERVIEW, schedules an interview and sends invitation email for each
+    CV that does not already have an interview (same as after processing)."""
+    try:
+        company_user = request.user
+        cv_record_ids = request.data.get('cv_record_ids')
+        qualification_decision = request.data.get('qualification_decision')
+
+        if not cv_record_ids or not isinstance(cv_record_ids, list):
+            return Response({
+                'status': 'error',
+                'message': 'cv_record_ids must be a non-empty list of integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not qualification_decision or str(qualification_decision).strip().upper() not in VALID_QUALIFICATION_DECISIONS:
+            return Response({
+                'status': 'error',
+                'message': 'qualification_decision must be one of: INTERVIEW, HOLD, REJECT'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        decision = str(qualification_decision).strip().upper()
+        ids = [int(x) for x in cv_record_ids if x is not None]
+        if not ids:
+            return Response({
+                'status': 'error',
+                'message': 'No valid CV record IDs provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = CVRecord.objects.filter(
+            id__in=ids,
+            job_description__company_user=company_user
+        )
+        updated_count = qs.update(qualification_decision=decision)
+
+        # When changing to INTERVIEW: schedule interview and send invitation email for each
+        # CV that doesn't already have an interview (so admin-override gets same email as processing).
+        emails_sent = 0
+        skip_reasons = {}
+        if decision == 'INTERVIEW' and updated_count > 0:
+            try:
+                agents = get_agents()
+                interview_agent = agents.get('interview_agent')
+                log_service = agents.get('log_service')
+                email_settings = None
+                try:
+                    email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
+                    email_settings = {
+                        'followup_delay_hours': email_settings_obj.followup_delay_hours,
+                        'reminder_hours_before': email_settings_obj.reminder_hours_before,
+                        'max_followup_emails': email_settings_obj.max_followup_emails,
+                        'min_hours_between_followups': email_settings_obj.min_hours_between_followups,
+                    }
+                except RecruiterEmailSettings.DoesNotExist:
+                    pass
+                cv_records = CVRecord.objects.filter(
+                    id__in=ids,
+                    job_description__company_user=company_user
+                ).select_related('job_description')
+                for cv in cv_records:
+                    status, detail = _schedule_interview_for_cv_record(cv, company_user, interview_agent, email_settings, log_service)
+                    if status == 'sent':
+                        emails_sent += 1
+                    elif status == 'skipped':
+                        skip_reasons[detail] = skip_reasons.get(detail, 0) + 1
+                if skip_reasons:
+                    logger.info(f"Bulk INTERVIEW skip reasons: {skip_reasons}")
+            except Exception as e:
+                logger.exception(f"Error scheduling interviews after bulk update to INTERVIEW: {e}")
+                # Still return success for the decision update; mention emails may have failed
+                return Response({
+                    'status': 'success',
+                    'updated_count': updated_count,
+                    'emails_sent': 0,
+                    'message': f'Updated {updated_count} CV record(s) to INTERVIEW. Could not send invitation emails: {str(e)}'
+                })
+
+        message = f'Updated {updated_count} CV record(s) to {decision}'
+        if decision == 'INTERVIEW':
+            if emails_sent > 0:
+                message += f'. Interview invitation email sent to {emails_sent} candidate(s).'
+            elif updated_count > 0:
+                no_email = skip_reasons.get('no_email', 0)
+                already = skip_reasons.get('already_has_interview', 0)
+                if no_email == updated_count:
+                    message += '. No invitation emails sent: no email found in parsed CV data for selected candidates.'
+                elif already == updated_count:
+                    message += '. No invitation emails sent: all selected candidates already have an interview.'
+                else:
+                    message += '. No invitation emails sent (check: no email in CV, or already has interview).'
+
+        payload = {
+            'status': 'success',
+            'updated_count': updated_count,
+            'message': message
+        }
+        if decision == 'INTERVIEW':
+            payload['emails_sent'] = emails_sent
+            if skip_reasons:
+                payload['skip_reasons'] = skip_reasons
+        return Response(payload)
+    except (ValueError, TypeError) as e:
+        return Response({
+            'status': 'error',
+            'message': 'Invalid cv_record_ids: must be integers'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"Error bulk updating CV records: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e) if settings.DEBUG else 'Failed to bulk update CV records'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
