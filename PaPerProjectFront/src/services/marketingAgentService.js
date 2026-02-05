@@ -104,7 +104,7 @@ export const outreachCampaign = async (action, campaignData = {}, campaignId = n
     }
 
     const token = localStorage.getItem('company_auth_token');
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
 
     const response = await fetch(`${API_BASE_URL}/marketing/outreach-campaign`, {
       method: 'POST',

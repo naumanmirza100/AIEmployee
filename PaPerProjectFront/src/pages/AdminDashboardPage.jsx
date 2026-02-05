@@ -441,7 +441,7 @@ const AdminDashboardPage = () => {
 
   const getFileUrl = (attachmentPath) => {
     if (!attachmentPath) return null;
-    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
     return `${apiBaseUrl.replace('/api', '')}/${attachmentPath}`;
   };
 
@@ -540,7 +540,7 @@ const AdminDashboardPage = () => {
 
   const getResumeUrl = (resumePath) => {
     if (!resumePath) return null;
-    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com';
     return `${apiBaseUrl.replace('/api', '')}/${resumePath}`;
   };
 

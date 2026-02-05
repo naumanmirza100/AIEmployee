@@ -36,7 +36,7 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
   const fetchIndustries = async () => {
     try {
       setLoadingIndustries(true);
-      const response = await fetch('http://localhost:8000/api/industries/');
+      const response = await fetch('https://aiemployeemine.onrender.com/api/industries/');
       if (response.ok) {
         const data = await response.json();
         setIndustries(data.data || []);

@@ -108,7 +108,7 @@ export const generateSubtasks = async (projectId) => {
 export const projectPilotFromFile = async (file, projectId = null) => {
   try {
     const token = localStorage.getItem('company_auth_token');
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
 
     const formData = new FormData();
     formData.append('file', file);

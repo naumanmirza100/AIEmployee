@@ -240,10 +240,14 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
+# Project root (parent of project_manager_ai) – same folder as manage.py and .env
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Load .env from project root so Celery/Beat see it regardless of CWD
+_env_file = BASE_DIR / '.env'
+if _env_file.exists():
+    load_dotenv(_env_file)
+else:
+    load_dotenv()
 
 SECRET_KEY = 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45'
 DEBUG = True
@@ -291,11 +295,13 @@ INSTALLED_APPS = [
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
     'api',  # API app
+    'whitenoise.runserver_nostatic',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
+     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -303,6 +309,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'recruitment_agent.middleware.AutoInterviewFollowupMiddleware',  # Auto follow-up email checking
+   
 ]
 
 ROOT_URLCONF = 'project_manager_ai.urls'
@@ -338,11 +345,11 @@ DATABASES = {
         'USER': os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'OPTIONS': {
-            'driver': 'ODBC Driver 17 for SQL Server',
-            'extra_params': 'TrustServerCertificate=yes',  # Trust server certificate
-        },
+                'driver': 'ODBC Driver 18 for SQL Server',  # ← Change from 17 to 18
+                'extra_params': 'TrustServerCertificate=yes;Encrypt=Optional',  # Recomm                
+            },
         'CONN_MAX_AGE': 0,
-        'TIME_ZONE': None,
+        'TIME_ZONE': 'UTC',
     }
 }
 
@@ -369,8 +376,15 @@ USE_TZ = True
 # --------------------
 # Static files
 # --------------------
+DATABASE_CONNECTION_POOLING = False
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+# This is the key line that's missing
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # or '/app/staticfiles' – both work
+
+# Optional but recommended for production (uses Whitenoise efficiently)
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # --------------------
 # Media files (for file uploads)
@@ -384,6 +398,10 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # --------------------
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+if not DEBUG:
+    # Production memory optimizations
+    import gc
+    gc.set_threshold(700, 10, 10)  # more aggressive garbage collection
 
 # --------------------
 # Auth redirects
@@ -460,12 +478,33 @@ SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 # --------------------
 # CORS Configuration
 # --------------------
-# Read CORS allowed origins from .env (comma-separated list)
-cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000')
+# Read CORS allowed origins from .env (comma-separated list). Set CORS_ALLOWED_ORIGINS in .env for your frontend URL(s).
+cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
+
+# If no origins in env, add default localhost for development
+if not CORS_ALLOWED_ORIGINS:
+    # Default to localhost for development (remove in production)
+    CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
+
+
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",
+#     "http://127.0.0.1:3000",
+#     "http://127.0.0.1:8000",
+#     "https://aiemployeemine.onrender.com",  # optional self-reference
+#     # Add your production frontend domain here later
+# ]
+
+# If env var exists, extend the list (safe fallback)
+cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
+if cors_origins_env:
+    extra_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
+    CORS_ALLOWED_ORIGINS.extend(extra_origins)
 
 # Allow credentials (cookies, authorization headers, etc.)
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False  # Do NOT set to True in production
 
 # Allow all headers
 CORS_ALLOW_HEADERS = [
@@ -478,6 +517,8 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-company-user-id',  # Company user ID header
+    'x-company-id',
 ]
 
 # Allow all methods
@@ -496,8 +537,12 @@ CORS_ALLOW_METHODS = [
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'sk_test_placeholder')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', 'pk_test_placeholder')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_placeholder')
-# Frontend base URL for Checkout success/cancel redirects (Vite dev default)
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+# Frontend base URL (React app) – for CORS, Stripe success/cancel redirects. Set FRONTEND_URL in .env.
+FRONTEND_URL = (os.getenv('FRONTEND_URL') or '').rstrip('/')
+# Backend base URL (Django server) – for links in emails (e.g. interview slot selection page). Set BACKEND_URL in .env (e.g. http://localhost:8000 or https://api.yourapp.com).
+BACKEND_URL = (os.getenv('BACKEND_URL') or '').rstrip('/')
+# Alias for code that still expects SITE_DOMAIN (e.g. task links in emails).
+SITE_DOMAIN = BACKEND_URL
 
 # --------------------
 # Celery Configuration (for Marketing Automation)

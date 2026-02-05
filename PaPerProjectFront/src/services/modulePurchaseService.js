@@ -5,7 +5,7 @@ import { companyApi } from './companyAuthService';
  */
 export const getModulePrices = async () => {
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/modules/prices`);
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com'}/api/modules/prices`);
     const data = await response.json();
     return data;
   } catch (error) {
@@ -70,7 +70,7 @@ export const createCheckoutSession = async (moduleName) => {
   }
 };
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
 
 /**
  * Verify Stripe Checkout session and fulfill module purchase. Public, no auth.
