@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
-from django.db.models.signals import m2m_changed, pre_save
+from django.db.models.signals import m2m_changed, pre_save, post_save
 from django.dispatch import receiver
 import json
 import logging
@@ -820,6 +820,20 @@ class Reply(models.Model):
     
     def __str__(self):
         return f"Reply from {self.lead.email} on {self.replied_at.strftime('%Y-%m-%d %H:%M')} ({self.get_interest_level_display()})"
+
+
+@receiver(post_save, sender=Reply)
+def mark_triggering_email_opened_on_reply(sender, instance, created, **kwargs):
+    """When a lead replies, the email they replied to was opened. Mark triggering_email as opened for open rate."""
+    if not created or not instance.triggering_email_id:
+        return
+    send = instance.triggering_email
+    if send.status not in ('opened', 'clicked'):
+        send.status = 'opened'
+        if not send.opened_at:
+            send.opened_at = instance.replied_at or timezone.now()
+        send.save(update_fields=['status', 'opened_at', 'updated_at'])
+        logger.info(f"Marked EmailSendHistory {send.id} as opened (reply from {instance.lead.email})")
 
 
 # Signal to automatically create CampaignContact when leads are added to campaigns

@@ -389,7 +389,6 @@ class DocumentGenerator:
                     elements.append(Spacer(1, 0.2 * inch))
                     i = next_i
                     continue
-            i += 1
 
             # Headings: strip # with or without space so "#" never appears in PDF (Marketing Strategy and all docs)
             # ## = H2 (main sections only for strategy); # = H1; ###/#### = bold subhead

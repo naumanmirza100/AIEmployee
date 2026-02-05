@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye } from 'lucide-react';
+import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send } from 'lucide-react';
 import {
   getSequences,
   createSequence,
@@ -31,6 +31,8 @@ import {
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  testEmailTemplate,
+  getCampaign,
 } from '@/services/marketingAgentService';
 
 const MIN_STEP_GAP_MINUTES = 5;
@@ -109,6 +111,12 @@ const SequenceManagementPage = ({ embedded = false }) => {
   const [editSequenceOpen, setEditSequenceOpen] = useState(false);
   const [detailsSequenceOpen, setDetailsSequenceOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [testTemplateOpen, setTestTemplateOpen] = useState(false);
+  const [testTemplate, setTestTemplate] = useState(null);
+  const [testEmail, setTestEmail] = useState('');
+  const [testLeadId, setTestLeadId] = useState('');
+  const [testLeads, setTestLeads] = useState([]);
+  const [testSending, setTestSending] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [templateForm, setTemplateForm] = useState({ name: '', subject: '', html_content: '' });
   const [sequenceForm, setSequenceForm] = useState({
@@ -239,6 +247,50 @@ const SequenceManagementPage = ({ embedded = false }) => {
     });
     setEditingTemplateId(t.id);
     setCreateTemplateOpen(true);
+  };
+
+  const openTestTemplate = async (t) => {
+    setTestTemplate(t);
+    setTestEmail('');
+    setTestLeadId('');
+    setTestLeads([]);
+    setTestTemplateOpen(true);
+    try {
+      const res = await getCampaign(id, { detail: 1 });
+      const leads = res?.data?.leads ?? [];
+      setTestLeads(Array.isArray(leads) ? leads : []);
+    } catch {
+      setTestLeads([]);
+    }
+  };
+
+  const handleSendTestEmail = async (e) => {
+    e.preventDefault();
+    const email = (testEmail || '').trim();
+    if (!email) {
+      toast({ title: 'Validation', description: 'Enter an email address to send the test to.', variant: 'destructive' });
+      return;
+    }
+    if (!testTemplate?.id) return;
+    setTestSending(true);
+    try {
+      const payload = { test_email: email };
+      if (testLeadId) payload.lead_id = Number(testLeadId);
+      const res = await testEmailTemplate(id, testTemplate.id, payload);
+      if (res?.status === 'success') {
+        toast({ title: 'Success', description: res?.data?.message || 'Test email sent.' });
+        setTestTemplateOpen(false);
+        setTestTemplate(null);
+        setTestEmail('');
+        setTestLeadId('');
+      } else {
+        toast({ title: 'Error', description: res?.message || 'Failed to send test email.', variant: 'destructive' });
+      }
+    } catch (e) {
+      toast({ title: 'Error', description: e?.message || 'Failed to send test email.', variant: 'destructive' });
+    } finally {
+      setTestSending(false);
+    }
   };
 
   const handleUpdateTemplate = async (e) => {
@@ -603,6 +655,14 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         <Button
                           variant="ghost"
                           size="sm"
+                          title="Send test email"
+                          onClick={() => openTestTemplate(t)}
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           className="text-destructive hover:text-destructive"
                           title="Delete template"
                           onClick={() => setDeleteConfirm({ type: 'template', id: t.id, name: t.name })}
@@ -823,6 +883,57 @@ const SequenceManagementPage = ({ embedded = false }) => {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Send test email dialog */}
+      <Dialog open={testTemplateOpen} onOpenChange={(open) => { if (!open) { setTestTemplate(null); setTestEmail(''); setTestLeadId(''); } setTestTemplateOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send test email</DialogTitle>
+            <DialogDescription>
+              {testTemplate?.name
+                ? `Send a test of "${testTemplate.name}" to verify subject and body (e.g. {{first_name}}). Use sample data or pick a lead.`
+                : 'Send a test email for this template.'}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSendTestEmail} className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="test-email">Email address *</Label>
+              <Input
+                id="test-email"
+                type="email"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                placeholder="you@example.com"
+                disabled={testSending}
+              />
+            </div>
+            <div>
+              <Label htmlFor="test-lead">Lead (optional)</Label>
+              <Select value={testLeadId || 'none'} onValueChange={(v) => setTestLeadId(v === 'none' ? '' : v)} disabled={testSending}>
+                <SelectTrigger id="test-lead">
+                  <SelectValue placeholder="Use sample data" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Use sample data (Test User)</SelectItem>
+                  {testLeads.map((lead) => (
+                    <SelectItem key={lead.id} value={String(lead.id)}>
+                      {lead.first_name || lead.last_name ? [lead.first_name, lead.last_name].filter(Boolean).join(' ') : lead.email}
+                      {lead.email ? ` (${lead.email})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">Pick a lead to fill placeholders with their data; otherwise sample values are used.</p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setTestTemplateOpen(false)} disabled={testSending}>Cancel</Button>
+              <Button type="submit" disabled={testSending}>
+                {testSending ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Sending…</> : 'Send test'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

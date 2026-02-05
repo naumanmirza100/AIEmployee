@@ -53,6 +53,15 @@ const formatDelay = (d, h, m) => {
   return parts.length ? parts.join(' ') : 'Immediate';
 };
 
+/** Strip HTML tags so reply content doesn't show raw <a href="..."> or long tracking URLs in tags. */
+const stripHtmlForDisplay = (html) => {
+  if (!html || typeof html !== 'string') return '';
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/  +/g, ' ')
+    .trim();
+};
+
 const INTEREST_LABELS = {
   positive: 'Interested',
   negative: 'Not Interested',
@@ -89,14 +98,20 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
     }
   };
 
+  // Initial load
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      await fetchData(false);
-    };
-    run();
-    return () => { cancelled = true; };
+    fetchData(false);
   }, [id]);
+
+  // Auto-refresh so changes (new emails, pending, replies) show without reloading the page
+  const POLL_INTERVAL_MS = 30 * 1000; // 30 seconds
+  useEffect(() => {
+    if (!id || loading) return;
+    const interval = setInterval(() => {
+      fetchData(true); // background refresh (uses refreshing state, not full loading)
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [id, loading]);
 
   if (loading && !refreshing) {
     return (
@@ -150,10 +165,13 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
             Track emails sent, opens, clicks, and replies.
           </p>
         </div>
+        <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => fetchData(true)} disabled={refreshing}>
           <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
+        <span className="text-xs text-muted-foreground ml-2">Auto-refreshes every 30s</span>
+        </div>
       </div>
 
       {/* Stats cards - muted professional colors */}
@@ -209,8 +227,8 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
         </Card>
       </div>
 
-  {/* Email history by sequence - matches template: Type (Initial/Seq/Sub-Seq), Replied + interest */}
-  {emails_by_sequence && Object.keys(emails_by_sequence).length > 0 ? (
+      {/* Email history by sequence - matches template: Type (Initial/Seq/Sub-Seq), Replied + interest */}
+      {emails_by_sequence && Object.keys(emails_by_sequence).length > 0 ? (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold">Full email history (last {total_emails_shown ?? 100}) – by sequence</h2>
           {Object.entries(emails_by_sequence).map(([seqName, emails]) => (
@@ -268,16 +286,20 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                                   Replied
                                 </span>
                                 {e.reply_interest_level && e.reply_interest_level !== 'not_analyzed' ? (
-                                  <span className={`text-xs font-medium ${
-                                    e.reply_interest_level === 'positive' ? 'text-green-600 dark:text-green-400' :
-                                    e.reply_interest_level === 'negative' ? 'text-red-600 dark:text-red-400' :
-                                    e.reply_interest_level === 'neutral' ? 'text-muted-foreground' :
-                                    e.reply_interest_level === 'requested_info' ? 'text-blue-600 dark:text-blue-400' :
-                                    e.reply_interest_level === 'objection' ? 'text-amber-600 dark:text-amber-400' :
-                                    e.reply_interest_level === 'unsubscribe' ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
-                                  }`}>
-                                    {INTEREST_LABELS[e.reply_interest_level] || e.reply_interest_level}
-                                  </span>
+                                  e.reply_interest_level === 'requested_info' ? (
+                                    <span className="mt-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-0.5 text-xs font-semibold border border-blue-200/50 dark:border-blue-700/40">
+                                      Requested Info
+                                    </span>
+                                  ) : (
+                                    <span className={`text-xs font-medium ${e.reply_interest_level === 'positive' ? 'text-green-600 dark:text-green-400' :
+                                        e.reply_interest_level === 'negative' ? 'text-red-600 dark:text-red-400' :
+                                          e.reply_interest_level === 'neutral' ? 'text-muted-foreground' :
+                                            e.reply_interest_level === 'objection' ? 'text-amber-600 dark:text-amber-400' :
+                                              e.reply_interest_level === 'unsubscribe' ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
+                                      }`}>
+                                      {INTEREST_LABELS[e.reply_interest_level] || e.reply_interest_level}
+                                    </span>
+                                  )
                                 ) : null}
                               </div>
                             ) : (
@@ -343,8 +365,8 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
           </CardHeader>
           <CardContent>
             <ul className="space-y-3">
-                {upcomingSub.map((u, idx) => (
-                  <li key={`sub-${idx}`} className="rounded-lg border-l-4 border-violet-500/70 bg-[rgba(76,75,74,0.2)] p-3">
+              {upcomingSub.map((u, idx) => (
+                <li key={`sub-${idx}`} className="rounded-lg border-l-4 border-violet-500/70 bg-[rgba(76,75,74,0.2)] p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-medium text-foreground">{u.lead_email}</p>
@@ -373,10 +395,10 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
       {/* Replied contacts */}
       {(replies.length > 0 || Object.keys(replies_by_sequence).length > 0) && (
         <Card className="border-slate-700/80">
-            <CardHeader>
-              <CardTitle className="text-base text-emerald-600 ">Replied contacts</CardTitle>
-              <CardDescription>Reply, email they replied to, and AI interest</CardDescription>
-            </CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base text-emerald-600 ">Replied contacts</CardTitle>
+            <CardDescription>Reply, email they replied to, and AI interest</CardDescription>
+          </CardHeader>
           <CardContent>
             {Object.keys(replies_by_sequence).length > 0 ? (
               <div className="space-y-4">
@@ -394,18 +416,24 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                             <p className="font-medium text-foreground">{r.lead_email}</p>
                             <div className="flex items-center gap-2 shrink-0">
                               {r.interest_level && r.interest_level !== 'not_analyzed' ? (
-                                <Badge
-                                  variant={
-                                    r.interest_level === 'positive'
-                                      ? 'default'
-                                      : r.interest_level === 'negative'
-                                        ? 'destructive'
-                                        : 'secondary'
-                                  }
-                                  className="text-xs"
-                                >
-                                  {INTEREST_LABELS[r.interest_level] || r.interest_level}
-                                </Badge>
+                                r.interest_level === 'requested_info' ? (
+                                  <span className="rounded bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-0.5 text-xs font-semibold border border-blue-200/50 dark:border-blue-700/40">
+                                    Requested Info
+                                  </span>
+                                ) : (
+                                  <Badge
+                                    variant={
+                                      r.interest_level === 'positive'
+                                        ? 'default'
+                                        : r.interest_level === 'negative'
+                                          ? 'destructive'
+                                          : 'secondary'
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {INTEREST_LABELS[r.interest_level] || r.interest_level}
+                                  </Badge>
+                                )
                               ) : null}
                               <span className="text-xs text-muted-foreground">{formatDateTime(r.replied_at)}</span>
                             </div>
@@ -422,7 +450,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                           )}
                           {r.reply_content && (
                             <div className="rounded bg-muted/50 dark:bg-muted/40 p-2 text-sm text-foreground whitespace-pre-wrap break-words">
-                              {r.reply_content}
+                              {stripHtmlForDisplay(r.reply_content)}
                             </div>
                           )}
                           {r.sub_sequence_name && (
@@ -443,7 +471,12 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-medium text-foreground">{r.lead_email}</p>
                       <div className="flex items-center gap-2 shrink-0">
-                        {r.interest_level && r.interest_level !== 'not_analyzed' ? (
+{r.interest_level && r.interest_level !== 'not_analyzed' ? (
+                        r.interest_level === 'requested_info' ? (
+                          <span className="rounded bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-0.5 text-xs font-semibold border border-blue-200/50 dark:border-blue-700/40">
+                            Requested Info
+                          </span>
+                        ) : (
                           <Badge
                             variant={
                               r.interest_level === 'positive'
@@ -456,6 +489,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                           >
                             {INTEREST_LABELS[r.interest_level] || r.interest_level}
                           </Badge>
+                        )
                         ) : null}
                         <span className="text-xs text-muted-foreground">{formatDateTime(r.replied_at)}</span>
                       </div>
@@ -472,7 +506,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                     )}
                     {r.reply_content && (
                       <div className="rounded bg-muted/50 dark:bg-muted/40 p-2 text-sm text-foreground whitespace-pre-wrap break-words">
-                        {r.reply_content}
+                        {stripHtmlForDisplay(r.reply_content)}
                       </div>
                     )}
                     {r.sub_sequence_name && (
@@ -532,7 +566,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
         </Card>
       )}
 
-    
+
     </div>
   );
 };

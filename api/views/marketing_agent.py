@@ -26,6 +26,7 @@ from marketing_agent.models import (
     EmailSendHistory, EmailAccount, CampaignContact, MarketingNotification,
     MarketResearch, MarketingDocument, Reply,
 )
+from marketing_agent.services.email_service import EmailService
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
@@ -176,31 +177,55 @@ def list_campaigns(request):
 
 
 def _build_campaign_detail(campaign, user):
-    """Build full campaign detail: email_stats, analytics, chart_data, email_sends, leads."""
+    """Build full campaign detail: email_stats, analytics, chart_data, email_sends, leads.
+
+    Open/click rate:
+    - total_sent: emails with status in sent, delivered, opened, clicked.
+    - total_opened: emails with status opened or clicked (tracking pixel load or reply implies open).
+    - total_clicked: emails with status clicked (tracked link click).
+    - open_rate = (total_opened / total_sent) * 100
+    - click_rate = (total_clicked / total_sent) * 100
+    When a lead replies, the triggering_email is marked as opened (see Reply post_save signal).
+    """
     leads = campaign.leads.all().order_by('-created_at')[:200]
     all_email_sends = EmailSendHistory.objects.filter(campaign=campaign)
     total_sent = all_email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
     total_opened = all_email_sends.filter(status__in=['opened', 'clicked']).count()
     total_clicked = all_email_sends.filter(status='clicked').count()
-    total_replied = CampaignContact.objects.filter(campaign=campaign, replied=True).count()
+    # Use Reply model so total matches Email Sending page (count of reply events, not unique contacts)
+    total_replied = Reply.objects.filter(campaign=campaign).count()
     total_failed = all_email_sends.filter(status='failed').count()
     total_bounced = all_email_sends.filter(status='bounced').count()
-    positive_replies = CampaignContact.objects.filter(
-        campaign=campaign, replied=True, reply_interest_level__in=['positive', 'neutral']
+    # Positive = interested, requested_info, neutral, objection (show as Positive/Neutral on dashboard)
+    positive_replies = Reply.objects.filter(
+        campaign=campaign,
+        interest_level__in=['positive', 'neutral', 'requested_info', 'objection']
     ).count()
-    negative_replies = CampaignContact.objects.filter(
-        campaign=campaign, replied=True, reply_interest_level='negative'
+    # Negative = not interested + unsubscribe
+    negative_replies = Reply.objects.filter(
+        campaign=campaign,
+        interest_level__in=['negative', 'unsubscribe']
     ).count()
     open_rate = (total_opened / total_sent * 100) if total_sent > 0 else 0
     click_rate = (total_clicked / total_sent * 100) if total_sent > 0 else 0
     reply_rate = (total_replied / total_sent * 100) if total_sent > 0 else 0
     click_through_rate = (total_clicked / total_opened * 100) if total_opened > 0 else 0
-    engagement = open_rate
+    # Leads engagement: % of leads (who were sent at least one email) who opened, clicked, or replied
+    leads_sent_to = all_email_sends.values_list('lead_id', flat=True).distinct().count()
+    lead_ids_opened_clicked = set(
+        all_email_sends.filter(status__in=['opened', 'clicked']).values_list('lead_id', flat=True).distinct()
+    )
+    lead_ids_replied = set(Reply.objects.filter(campaign=campaign).values_list('lead_id', flat=True).distinct())
+    engaged_lead_ids = lead_ids_opened_clicked | lead_ids_replied
+    leads_engagement_rate = (len(engaged_lead_ids) / leads_sent_to * 100) if leads_sent_to > 0 else 0
+    engagement = round(leads_engagement_rate, 2)
     target_leads = campaign.target_leads
     target_conversions = campaign.target_conversions
     leads_count = campaign.leads.count()
     leads_progress = (leads_count / target_leads * 100) if target_leads and target_leads > 0 else None
-    conversion_progress = (total_clicked / target_conversions * 100) if target_conversions and target_conversions > 0 else None
+    # Conversion = positive replies (interested, requested_info, etc.), not clicks
+    total_conversions = positive_replies
+    conversion_progress = (total_conversions / target_conversions * 100) if target_conversions and target_conversions > 0 else None
 
     analytics = {
         'open_rate_percent': round(open_rate, 2),
@@ -224,6 +249,8 @@ def _build_campaign_detail(campaign, user):
         'total_leads': leads_count,
         'total_failed': total_failed,
         'total_bounced': total_bounced,
+        'engaged_leads_count': len(engaged_lead_ids),
+        'leads_sent_to': leads_sent_to,
     }
 
     # Chart data (last 30 days)
@@ -246,12 +273,12 @@ def _build_campaign_detail(campaign, user):
                 metrics_by_date[date_str]['opened'] += 1
             if email_send.status == 'clicked':
                 metrics_by_date[date_str]['clicked'] += 1
-    recent_replies = CampaignContact.objects.filter(
-        campaign=campaign, replied=True, replied_at__isnull=False, replied_at__gte=thirty_days_ago
+    recent_replies = Reply.objects.filter(
+        campaign=campaign, replied_at__isnull=False, replied_at__gte=thirty_days_ago
     )
-    for contact in recent_replies:
-        if contact.replied_at:
-            date_str = contact.replied_at.date().strftime('%Y-%m-%d')
+    for reply in recent_replies:
+        if reply.replied_at:
+            date_str = reply.replied_at.date().strftime('%Y-%m-%d')
             if date_str in metrics_by_date:
                 metrics_by_date[date_str]['replied'] += 1
     sorted_dates = sorted(metrics_by_date.keys())
@@ -750,6 +777,12 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
     df.columns = df.columns.str.lower().str.strip()
     if 'email' not in df.columns:
         return (0, 'Email column is required in the file')
+    # Support "first name"/"last name" (with space) and "name" columns
+    def _get(row, *keys):
+        for k in keys:
+            if k in row and pd.notna(row.get(k)) and str(row.get(k)).strip():
+                return str(row.get(k)).strip()
+        return ''
     created_count = 0
     with transaction.atomic():
         for index, row in df.iterrows():
@@ -757,23 +790,44 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                 email = str(row['email']).strip().lower()
                 if not email or pd.isna(row['email']) or email == 'nan':
                     continue
+                first = _get(row, 'first_name', 'first name')
+                last = _get(row, 'last_name', 'last name')
+                if not first and not last:
+                    name_val = _get(row, 'name')
+                    if name_val:
+                        parts = name_val.split(None, 1)
+                        first = parts[0] or ''
+                        last = parts[1] if len(parts) > 1 else ''
                 lead, created = Lead.objects.get_or_create(
                     email=email, owner=user,
                     defaults={
-                        'first_name': str(row.get('first_name', '')).strip() if pd.notna(row.get('first_name')) else '',
-                        'last_name': str(row.get('last_name', '')).strip() if pd.notna(row.get('last_name')) else '',
-                        'phone': str(row.get('phone', '')).strip() if pd.notna(row.get('phone')) else '',
-                        'company': str(row.get('company', '')).strip() if pd.notna(row.get('company')) else '',
-                        'job_title': str(row.get('job_title', '')).strip() if pd.notna(row.get('job_title')) else '',
-                        'source': str(row.get('source', '')).strip() if pd.notna(row.get('source')) else '',
+                        'first_name': first,
+                        'last_name': last,
+                        'phone': _get(row, 'phone'),
+                        'company': _get(row, 'company'),
+                        'job_title': _get(row, 'job_title'),
+                        'source': _get(row, 'source'),
                     }
                 )
                 if created:
                     created_count += 1
                 else:
-                    for f in ['first_name', 'last_name', 'phone', 'company', 'job_title', 'source']:
-                        if getattr(lead, f) in (None, '') and pd.notna(row.get(f)):
-                            setattr(lead, f, str(row.get(f, '')).strip())
+                    if not lead.first_name and first:
+                        lead.first_name = first
+                    if not lead.last_name and last:
+                        lead.last_name = last
+                    v = _get(row, 'phone')
+                    if not lead.phone and v:
+                        lead.phone = v
+                    v = _get(row, 'company')
+                    if not lead.company and v:
+                        lead.company = v
+                    v = _get(row, 'job_title', 'job title')
+                    if not lead.job_title and v:
+                        lead.job_title = v
+                    v = _get(row, 'source')
+                    if not lead.source and v:
+                        lead.source = v
                     lead.save()
                     created_count += 1
                 campaign.leads.add(lead)
@@ -1851,6 +1905,78 @@ def delete_template(request, campaign_id, template_id):
         )
 
 
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def test_email_template(request, campaign_id, template_id):
+    """
+    Send a test email for a template so you can verify dynamic values ({{ first_name }}, etc.).
+    Body: { "test_email": "you@example.com", "lead_id": 123 } (lead_id optional).
+    If lead_id is provided, uses that lead's first_name, last_name, etc. Otherwise uses sample data.
+    """
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        if not campaign:
+            return Response(
+                {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        template = EmailTemplate.objects.filter(id=template_id, campaign=campaign).first()
+        if not template:
+            return Response(
+                {'status': 'error', 'message': 'Template not found.', 'error': 'not_found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        test_email = (request.data.get('test_email') or '').strip()
+        if not test_email:
+            return Response(
+                {'status': 'error', 'message': 'test_email is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        lead_id = request.data.get('lead_id')
+        if lead_id is not None:
+            lead = campaign.leads.filter(id=lead_id).first()
+            if not lead:
+                return Response(
+                    {'status': 'error', 'message': 'Lead not found in this campaign.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            # Dummy lead with sample values so {{ first_name }}, {{ last_name }} etc. are filled
+            lead = Lead(
+                email=test_email,
+                first_name='Test',
+                last_name='User',
+                company='Test Company',
+                owner=campaign.owner,
+            )
+        from marketing_agent.services.email_service import EmailService
+        email_service = EmailService()
+        result = email_service.send_email(
+            template=template,
+            lead=lead,
+            campaign=campaign,
+            test_email=test_email,
+        )
+        if not result.get('success'):
+            return Response(
+                {'status': 'error', 'message': result.get('error', 'Failed to send test email.')},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({
+            'status': 'success',
+            'data': {'message': f'Test email sent to {test_email}. Check your inbox to verify dynamic values (e.g. first_name, last_name).'},
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("test_email_template failed")
+        return Response(
+            {'status': 'error', 'message': str(e), 'error': 'failed'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def _get_pending_and_upcoming_emails(campaign):
     """
     Compute pending (ready to send) and upcoming (scheduled within 24h) emails for a campaign.
@@ -1864,6 +1990,7 @@ def _get_pending_and_upcoming_emails(campaign):
     if campaign.status != 'active':
         return pending_list, upcoming_list
 
+    email_svc = EmailService()
     # Main sequence contacts: not completed, not replied
     contacts = (
         CampaignContact.objects
@@ -1913,9 +2040,10 @@ def _get_pending_and_upcoming_emails(campaign):
             continue
         if next_send_time <= now:
             is_retry = existing_email and existing_email.status in ['pending', 'failed']
+            rendered_subject = email_svc.render_with_lead(next_step.template.subject or '', contact.lead, campaign)
             pending_list.append({
                 'recipient_email': contact.lead.email,
-                'subject': next_step.template.subject,
+                'subject': rendered_subject,
                 'sequence_name': sequence.name,
                 'sequence_id': sequence.id,
                 'step_order': next_step.step_order,
@@ -1992,9 +2120,10 @@ def _get_pending_and_upcoming_emails(campaign):
             continue
         if next_send_time <= now:
             is_retry = existing_email and existing_email.status in ['pending', 'failed']
+            rendered_subject = email_svc.render_with_lead(next_step.template.subject or '', contact.lead, campaign)
             pending_list.append({
                 'recipient_email': contact.lead.email,
-                'subject': next_step.template.subject,
+                'subject': rendered_subject,
                 'sequence_name': parent_sequence.name,
                 'sequence_id': parent_sequence.id,
                 'sub_sequence_name': sub_sequence.name,
