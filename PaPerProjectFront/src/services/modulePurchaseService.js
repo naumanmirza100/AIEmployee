@@ -1,11 +1,12 @@
 import { companyApi } from './companyAuthService';
+import { API_BASE_URL } from '@/config/apiConfig';
 
 /**
  * Get pricing information for all modules (public)
  */
 export const getModulePrices = async () => {
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com'}/api/modules/prices`);
+    const response = await fetch(`${API_BASE_URL}/modules/prices`);
     const data = await response.json();
     return data;
   } catch (error) {
@@ -70,14 +71,12 @@ export const createCheckoutSession = async (moduleName) => {
   }
 };
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
-
 /**
  * Verify Stripe Checkout session and fulfill module purchase. Public, no auth.
  * Call this on the success page with session_id from URL.
  */
 export const verifySession = async (sessionId) => {
-  const res = await fetch(`${API_BASE}/modules/verify-session`, {
+  const res = await fetch(`${API_BASE_URL}/modules/verify-session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id: sessionId }),

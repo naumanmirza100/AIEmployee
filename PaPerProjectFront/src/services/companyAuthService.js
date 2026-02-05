@@ -1,6 +1,6 @@
 // Company Auth Service
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
+import { API_BASE_URL } from '@/config/apiConfig';
 /**
  * Get company authentication token from localStorage
  */

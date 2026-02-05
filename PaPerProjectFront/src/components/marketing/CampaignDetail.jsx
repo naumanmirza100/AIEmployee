@@ -114,9 +114,10 @@ const formatDateTime = (iso) => {
   }
 };
 
+import { API_BASE_URL } from '@/config/apiConfig';
+
 const getBackendBase = () => {
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-  return apiUrl.replace(/\/api\/?$/, '');
+  return API_BASE_URL.replace(/\/api\/?$/, '');
 };
 
 const getBackendCampaignUrl = (campaignId) => `${getBackendBase()}/marketing/campaigns/${campaignId}/`;

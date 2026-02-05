@@ -47,6 +47,8 @@ import SequenceManagementPage from '@/components/marketing/SequenceManagementPag
 import EmailSendingStatusPage from '@/components/marketing/EmailSendingStatusPage';
 import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
+import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
+import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
 import ProtectedRoute from '@/components/common/ProtectedRoute';
 import PublicLayout from '@/components/layout/PublicLayout';
@@ -124,6 +126,11 @@ import { useTranslation } from 'react-i18next';
             <Route path="/recruitment/settings/email" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/settings/interview" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/settings/qualification" element={<RecruitmentAgentPage />} />
+            
+            {/* Frontline Agent routes without header/footer */}
+            <Route path="/frontline/dashboard" element={<FrontlineAgentPage />}>
+              <Route index element={<FrontlineDashboard />} />
+            </Route>
             
             {/* Module purchase Stripe success (public) */}
             <Route path="/module-purchase-success" element={<PublicLayout><ModulePurchaseSuccessPage /></PublicLayout>} />

@@ -5,7 +5,7 @@
 
 import { companyApi } from './companyAuthService';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aiemployeemine.onrender.com/api';
+import { API_BASE_URL } from '@/config/apiConfig';
 
 /**
  * Create a new user

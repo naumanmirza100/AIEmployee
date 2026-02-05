@@ -1,30 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Outlet } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
-import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import { checkModuleAccess, getPurchasedModules } from '@/services/modulePurchaseService';
 import { 
-  UserCheck, 
+  Headphones, 
   Building2, 
   BrainCircuit, 
+  UserCheck,
   Megaphone,
-  Headphones,
   Loader2,
   Lock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
-const RecruitmentAgentPage = () => {
+const FrontlineAgentPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [companyUser, setCompanyUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [activeSection, setActiveSection] = useState('recruitment');
+  const [activeSection, setActiveSection] = useState('frontline');
   const [purchasedModules, setPurchasedModules] = useState([]);
   const [modulesLoaded, setModulesLoaded] = useState(false);
 
@@ -34,7 +33,7 @@ const RecruitmentAgentPage = () => {
     if (!companyUserStr) {
       toast({
         title: 'Not logged in',
-        description: 'Please log in to access the recruitment agent',
+        description: 'Please log in to access the frontline agent',
         variant: 'destructive',
       });
       navigate('/company/login');
@@ -117,13 +116,13 @@ const RecruitmentAgentPage = () => {
   const checkModuleAccessForUser = async () => {
     try {
       setCheckingAccess(true);
-      const response = await checkModuleAccess('recruitment_agent');
+      const response = await checkModuleAccess('frontline_agent');
       if (response.status === 'success') {
         setHasAccess(response.has_access);
         if (!response.has_access) {
           toast({
             title: 'Module Not Purchased',
-            description: 'Please purchase the Recruitment Agent module to access this dashboard',
+            description: 'Please purchase the Frontline Agent module to access this dashboard',
             variant: 'default',
           });
         }
@@ -170,7 +169,7 @@ const RecruitmentAgentPage = () => {
               </div>
               <CardTitle className="text-center">Module Not Purchased</CardTitle>
               <CardDescription className="text-center">
-                You need to purchase the Recruitment Agent module to access this dashboard.
+                You need to purchase the Frontline Agent module to access this dashboard.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -197,13 +196,13 @@ const RecruitmentAgentPage = () => {
   return (
     <>
       <Helmet>
-        <title>Recruitment Agent | Pay Per Project</title>
+        <title>Frontline Agent | Pay Per Project</title>
       </Helmet>
       <div className="min-h-screen bg-background">
         {/* Header */}
         <DashboardNavbar
-          icon={UserCheck}
-          title={companyUser.companyName || 'Recruitment Agent'}
+          icon={Headphones}
+          title={companyUser.companyName || 'Frontline Agent'}
           subtitle={companyUser.fullName}
           user={companyUser}
           userRole="Company User"
@@ -224,36 +223,36 @@ const RecruitmentAgentPage = () => {
               section: 'project-manager',
               onClick: () => navigate('/project-manager/dashboard'),
             }] : []),
-            {
+            // Show Recruitment Agent if purchased
+            ...(purchasedModules.includes('recruitment_agent') ? [{
               label: 'Recruitment Agent',
               icon: UserCheck,
               section: 'recruitment',
               onClick: () => navigate('/recruitment/dashboard'),
-            },
-            // Show Marketing Agent if purchased (always show current page's module)
+            }] : []),
+            // Show Marketing Agent if purchased
             ...(purchasedModules.includes('marketing_agent') ? [{
               label: 'Marketing Agent',
               icon: Megaphone,
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
             }] : []),
-            // Show Frontline Agent if purchased
-            ...(purchasedModules.includes('frontline_agent') ? [{
+            {
               label: 'Frontline Agent',
               icon: Headphones,
               section: 'frontline',
               onClick: () => navigate('/frontline/dashboard'),
-            }] : []),
+            },
           ]}
         />
 
         <div className="container mx-auto px-4 py-8">
-          <RecruitmentDashboard />
+          <Outlet />
         </div>
       </div>
     </>
   );
 };
 
-export default RecruitmentAgentPage;
+export default FrontlineAgentPage;
 

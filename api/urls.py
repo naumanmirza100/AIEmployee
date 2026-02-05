@@ -32,6 +32,7 @@ from api.views import company_projects_tasks
 from api.views import user_project_manager
 from api.views import recruitment_agent
 from api.views import marketing_agent
+from api.views import frontline_agent
 from api.views import module_purchase
 from api.views.health import health_check
 
@@ -268,6 +269,16 @@ urlpatterns = [
     re_path(r'^marketing/notifications/monitor/?$', marketing_agent.proactive_notification_monitor, name='marketing_notifications_monitor'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/read/?$', marketing_agent.mark_notification_read, name='marketing_notification_read'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/delete/?$', marketing_agent.delete_notification, name='marketing_notification_delete'),  # POST
+
+    # Frontline Agent endpoints (Company User)
+    re_path(r'^frontline/dashboard/?$', frontline_agent.frontline_dashboard, name='frontline_dashboard'),  # GET
+    re_path(r'^frontline/documents/?$', frontline_agent.list_documents, name='frontline_list_documents'),  # GET
+    re_path(r'^frontline/documents/upload/?$', frontline_agent.upload_document, name='frontline_upload_document'),  # POST
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/?$', frontline_agent.get_document, name='frontline_get_document'),  # GET
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/delete/?$', frontline_agent.delete_document, name='frontline_delete_document'),  # POST
+    re_path(r'^frontline/knowledge/qa/?$', frontline_agent.knowledge_qa, name='frontline_knowledge_qa'),  # POST
+    re_path(r'^frontline/knowledge/search/?$', frontline_agent.search_knowledge, name='frontline_search_knowledge'),  # GET
+    re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
