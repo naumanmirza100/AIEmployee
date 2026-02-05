@@ -8,12 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle } from 'lucide-react';
+import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2 } from 'lucide-react';
 import { 
   getJobDescriptions, 
   createJobDescription, 
   updateJobDescription, 
-  deleteJobDescription 
+  deleteJobDescription,
+  generateJobDescription,
 } from '@/services/recruitmentAgentService';
 
 const JobDescriptions = ({ onUpdate }) => {
@@ -21,6 +22,8 @@ const JobDescriptions = ({ onUpdate }) => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateWithAiModal, setShowCreateWithAiModal] = useState(false);
+  const [createWithAiStep, setCreateWithAiStep] = useState('prompt'); // 'prompt' | 'form'
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingJob, setDeletingJob] = useState(null);
@@ -35,6 +38,8 @@ const JobDescriptions = ({ onUpdate }) => {
     parse_keywords: true,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -78,6 +83,8 @@ const JobDescriptions = ({ onUpdate }) => {
           description: 'Job description created successfully',
         });
         setShowCreateModal(false);
+        setShowCreateWithAiModal(false);
+        setCreateWithAiStep('prompt');
         resetForm();
         fetchJobs();
         if (onUpdate) onUpdate();
@@ -190,6 +197,62 @@ const JobDescriptions = ({ onUpdate }) => {
       requirements: '',
       parse_keywords: true,
     });
+    setAiPrompt('');
+  };
+
+  const handleGenerateWithAi = async () => {
+    const prompt = (aiPrompt || '').trim();
+    if (!prompt) {
+      toast({
+        title: 'Validation',
+        description: 'Enter a prompt to generate a job (e.g. role, skills, responsibilities).',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      setGenerating(true);
+      const response = await generateJobDescription(prompt);
+      if (response.status === 'success' && response.data) {
+        setFormData((prev) => ({
+          ...prev,
+          title: response.data.title ?? prev.title,
+          description: response.data.description ?? prev.description,
+          requirements: response.data.requirements ?? prev.requirements,
+          location: response.data.location ?? prev.location,
+          department: response.data.department ?? prev.department,
+          type: response.data.type ?? prev.type,
+        }));
+        setCreateWithAiStep('form');
+        toast({
+          title: 'Generated',
+          description: 'Review and edit below, then Save to create the job.',
+        });
+      }
+    } catch (error) {
+      console.error('Generate job error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to generate job description',
+        variant: 'destructive',
+      });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const openCreateWithAi = () => {
+    setAiPrompt('');
+    setCreateWithAiStep('prompt');
+    resetForm();
+    setShowCreateWithAiModal(true);
+  };
+
+  const closeCreateWithAi = () => {
+    setShowCreateWithAiModal(false);
+    setCreateWithAiStep('prompt');
+    setAiPrompt('');
+    resetForm();
   };
 
   if (loading) {
@@ -209,10 +272,16 @@ const JobDescriptions = ({ onUpdate }) => {
             Manage job descriptions for recruitment
           </p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Create Job Description
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowCreateModal(true)} variant="outline">
+            <Plus className="h-4 w-4 mr-2" />
+            Create Job Description
+          </Button>
+          <Button onClick={openCreateWithAi}>
+            <Wand2 className="h-4 w-4 mr-2" />
+            Create Job with AI
+          </Button>
+        </div>
       </div>
 
       {jobs.length === 0 ? (
@@ -223,10 +292,16 @@ const JobDescriptions = ({ onUpdate }) => {
             <p className="text-sm text-muted-foreground mb-4">
               Create your first job description to start recruiting
             </p>
-            <Button onClick={() => setShowCreateModal(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Job Description
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={() => setShowCreateModal(true)} variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Job Description
+              </Button>
+              <Button onClick={openCreateWithAi}>
+                <Wand2 className="h-4 w-4 mr-2" />
+                Create Job with AI
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -286,27 +361,81 @@ const JobDescriptions = ({ onUpdate }) => {
         </div>
       )}
 
-      {/* Create Modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+      {/* Create Modal (manual) – reset form when closed by X or overlay too */}
+      <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) resetForm(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create Job Description</DialogTitle>
+            <DialogDescription>
+              Fill in the details below and save.
+            </DialogDescription>
           </DialogHeader>
           <JobForm
             formData={formData}
             setFormData={setFormData}
             onSubmit={handleCreate}
             submitting={submitting}
-            onCancel={() => {
-              setShowCreateModal(false);
-              resetForm();
-            }}
+            onCancel={() => { setShowCreateModal(false); resetForm(); }}
           />
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+      {/* Create Job with AI Modal: step 1 = prompt, step 2 = editable form */}
+      <Dialog open={showCreateWithAiModal} onOpenChange={(open) => { if (!open) closeCreateWithAi(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Job with AI</DialogTitle>
+            <DialogDescription>
+              {createWithAiStep === 'prompt'
+                ? 'Write a prompt to generate your job description (e.g. role, skills, responsibilities).'
+                : 'Review and edit the generated job, then Save to create it.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {createWithAiStep === 'prompt' ? (
+            <div className="space-y-4">
+              <Textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="e.g. MERN Stack Developer, 5+ years, MongoDB, Express, React, Node.js, RESTful APIs, remote..."
+                className="min-h-[120px]"
+                disabled={generating}
+              />
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCreateWithAi} disabled={generating}>
+                  Cancel
+                </Button>
+                <Button onClick={handleGenerateWithAi} disabled={generating}>
+                  {generating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Creating job description...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="h-4 w-4 mr-2" />
+                      Generate job description
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <>
+              <JobForm
+                formData={formData}
+                setFormData={setFormData}
+                onSubmit={handleCreate}
+                submitting={submitting}
+                onCancel={closeCreateWithAi}
+              />
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Modal – reset form and editingJob when closed by X, overlay, or Cancel */}
+      <Dialog open={showEditModal} onOpenChange={(open) => { setShowEditModal(open); if (!open) { setEditingJob(null); resetForm(); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Job Description</DialogTitle>

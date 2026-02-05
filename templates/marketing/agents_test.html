@@ -1029,6 +1029,58 @@
                         <div class="field-hint">Optional: Add any specific data, insights, or context</div>
                     </div>
 
+                    <!-- Pages, Tables, Table Types -->
+                    <div class="form-grid-3" style="margin-bottom: 1rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="document-pages">
+                                <span>📄</span> Target pages (1–20)
+                            </label>
+                            <input type="number" id="document-pages" name="pages" min="1" max="20" value="5"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                            <div class="field-hint">Default: 5. Max: 20. No word limit.</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="document-tables">
+                                <span>📊</span> Number of tables
+                            </label>
+                            <input type="number" id="document-tables" name="tables" min="0" max="20" value="3"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                            <div class="field-hint">Tables to include in the document.</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="document-table-types">
+                                <span>📋</span> Table types (what kind)
+                            </label>
+                            <input type="text" id="document-table-types" name="table_types" placeholder="e.g. metrics, timeline, lead details, comparison, budget"
+                                value="metrics, timeline, lead details"
+                                style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                            <div class="field-hint">Comma-separated table types.</div>
+                        </div>
+                    </div>
+                    <!-- Charts (Performance Report only) -->
+                    <div id="document-charts-row" style="display: none; margin-bottom: 1.5rem;">
+                        <div class="form-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group" id="document-charts-group" style="margin-bottom: 0;">
+                                <label for="document-charts">
+                                    <span>📈</span> Number of charts
+                                </label>
+                                <input type="number" id="document-charts" name="charts" min="0" max="10" value="1"
+                                    style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;" />
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="document-chart-type">
+                                    <span>📉</span> Chart type
+                                </label>
+                                <select id="document-chart-type" name="chart_type" style="width: 100%; padding: 0.75rem; border: 2px solid var(--border-color); border-radius: var(--radius-md); font-size: 1rem;">
+                                    <option value="bar">Bar chart</option>
+                                    <option value="pie">Pie chart</option>
+                                    <option value="line">Line chart</option>
+                                </select>
+                                <div class="field-hint">Type of chart to insert in the report.</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Submit Button -->
                     <div class="form-group" style="margin-top: 1.5rem;">
                         <button type="submit" class="btn btn-primary" style="width: 100%; padding: 1rem; font-size: 1rem;">
@@ -2273,6 +2325,7 @@
             } else if (action === 'generate') {
                 submitText.textContent = '👁️ Generate Preview';
             }
+            updateDocumentCampaignRequirement();
         } else {
             formContainer.style.display = 'none';
         }
@@ -2319,8 +2372,15 @@
             const documentData = {
                 title: document.getElementById('document-title').value,
                 requirements: document.getElementById('document-requirements').value,
-                key_points: document.getElementById('document-context').value
+                key_points: document.getElementById('document-context').value,
+                pages: Math.min(20, Math.max(1, parseInt(document.getElementById('document-pages')?.value || '5', 10))),
+                tables: Math.max(0, parseInt(document.getElementById('document-tables')?.value || '3', 10)),
+                table_types: (document.getElementById('document-table-types')?.value || 'metrics, timeline, lead details').trim()
             };
+            if (documentType === 'report') {
+                documentData.charts = Math.max(0, parseInt(document.getElementById('document-charts')?.value || '1', 10));
+                documentData.chart_type = document.getElementById('document-chart-type')?.value || 'bar';
+            }
             
             const requestData = {
                 action: action,
@@ -2374,9 +2434,6 @@
                     
                     // PDF for all types
                     output += `<a href="/marketing/documents/${data.document_id}/download/pdf/" style="display: inline-block; padding: 0.5rem 1rem; margin: 0.25rem; background: #dc2626; color: white; text-decoration: none; border-radius: var(--radius-md); font-size: 0.9rem;">📄 PDF</a>`;
-                    
-                    // DOCX for all types
-                    output += `<a href="/marketing/documents/${data.document_id}/download/docx/" style="display: inline-block; padding: 0.5rem 1rem; margin: 0.25rem; background: #2563eb; color: white; text-decoration: none; border-radius: var(--radius-md); font-size: 0.9rem;">📝 Word (DOCX)</a>`;
                     
                     // PPTX only for presentations
                     // if (data.document_type === 'presentation') {
@@ -2625,12 +2682,13 @@
         }
     }
     
-    // Update campaign requirement based on document type
+    // Update campaign requirement and charts visibility based on document type
     function updateDocumentCampaignRequirement() {
         const documentType = document.getElementById('document-type').value;
         const campaignSelect = document.getElementById('document-campaign-select');
         const campaignRequired = document.getElementById('document-campaign-required');
         const campaignHint = document.getElementById('document-campaign-hint');
+        const chartsRow = document.getElementById('document-charts-row');
         
         // Require campaign for Performance Report and Campaign Brief
         if (documentType === 'report' || documentType === 'brief') {
@@ -2648,6 +2706,8 @@
                 campaignHint.style.color = '';
             }
         }
+        // Show charts row (number + type) only for Performance Report
+        if (chartsRow) chartsRow.style.display = documentType === 'report' ? 'block' : 'none';
     }
     
     // Load notifications on page load if notification tab is active

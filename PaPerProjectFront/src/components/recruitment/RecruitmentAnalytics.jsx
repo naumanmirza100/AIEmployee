@@ -256,12 +256,12 @@ const RecruitmentAnalytics = () => {
 
   return (
     <div className="space-y-6">
-      {/* Job Filter Dropdown */}
+      {/* Job Filter: All Jobs = analytics for all; specific job = analytics for that job only */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <label className="text-sm font-medium">Filter by Job:</label>
-            <Select value={selectedJobId || 'all'} onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}>
+            <Select value={selectedJobId ? String(selectedJobId) : 'all'} onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}>
               <SelectTrigger className="w-[300px]">
                 <SelectValue placeholder="Select a job" />
               </SelectTrigger>
@@ -274,10 +274,12 @@ const RecruitmentAnalytics = () => {
                 ))}
               </SelectContent>
             </Select>
-            {selectedJob && (
+            {selectedJob ? (
               <Badge variant="secondary" className="ml-2">
-                {selectedJob.title}
+                Showing analytics for: {selectedJob.title}
               </Badge>
+            ) : (
+              <span className="text-sm text-muted-foreground">Showing analytics for all jobs</span>
             )}
           </div>
         </CardContent>

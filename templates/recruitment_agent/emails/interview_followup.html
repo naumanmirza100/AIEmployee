@@ -23,7 +23,7 @@
         <div class="content">
             <p>Dear {{ candidate_name }},</p>
             
-            <p>We wanted to follow up regarding your interview invitation for the <strong>{{ job_role }}</strong> position.</p>
+            <p>We wanted to follow up regarding your interview invitation for the <strong>{{ job_title }}</strong> position.</p>
             
             {% if followup_number > 1 %}
             <div class="urgent-box">
@@ -37,7 +37,7 @@
             
             <h3>Interview Details:</h3>
             <ul>
-                <li><strong>Position:</strong> {{ job_role }}</li>
+                <li><strong>Position:</strong> {{ job_title }}</li>
                 <li><strong>Interview Type:</strong> {{ interview_type }}</li>
             </ul>
             
@@ -56,7 +56,11 @@
             </p>
             
             <div style="text-align: center; margin: 30px 0;">
-                <a href="{{ slot_selection_url }}" class="button">Select Your Interview Time Slot</a>
+                {% if slot_selection_url %}
+                <a href="{{ slot_selection_url }}" target="_blank" rel="noopener noreferrer" class="button">Select Your Interview Time Slot</a>
+                {% else %}
+                <p style="color: #d32f2f;">Scheduling link is not configured. Please contact the recruiter.</p>
+                {% endif %}
             </div>
             
             <p>Click the button above to select your preferred interview time slot. This will help us proceed with your application.</p>

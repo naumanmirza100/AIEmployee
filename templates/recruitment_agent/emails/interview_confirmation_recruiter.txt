@@ -4,7 +4,7 @@ An interview has been scheduled:
 
 Candidate: {{ candidate_name }}
 Email: {{ candidate_email }}
-Position: {{ job_role }}
+Position: {{ job_title }}
 Interview Type: {{ interview_type }}
 Scheduled Date & Time: {{ scheduled_datetime|date:"F d, Y" }} at {{ scheduled_datetime|time:"g:i A" }}
 

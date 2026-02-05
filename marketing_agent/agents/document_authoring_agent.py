@@ -10,6 +10,8 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.db.models import Count, Sum, Avg, Q
 import logging
+import re
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -151,39 +153,152 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         prompt = self._build_document_prompt(document_type, document_data, campaign, context)
         
         # Use LLM for writing (OpenAI GPT-4 for better quality)
-        # Increased max_tokens for more detailed documents
+        # Lower temperature (0.35) for consistent output; higher max_tokens for long documents
+        # Performance Report: default and minimum 6 pages (more than 5); other docs default 5
+        default_pages = 6 if document_type == 'report' else 5
+        min_pages = 6 if document_type == 'report' else 1
+        target_pages = min(20, max(min_pages, int((document_data or {}).get('pages', default_pages))))
+        min_words = target_pages * 450  # ~450 words per page
+        max_tokens_needed = min(16384, (min_words * 2) // 3)  # ~1.35 tokens/word, with headroom
         content = self._call_llm_for_writing(
             prompt=prompt,
             system_prompt=self.system_prompt,
-            temperature=0.7,
-            max_tokens=8000  # Increased for detailed documents
+            temperature=0.35,  # Lower = more consistent, especially on retry
+            max_tokens=max(max_tokens_needed, 8000)
         )
         
+        # Post-process: ensure Phase 2 is never missing in timeline sections (strategy and brief)
+        if document_type == 'strategy':
+            content = self._fix_timeline_phase2(content, document_type='strategy', campaign=None)
+        elif document_type == 'brief':
+            content = self._fix_timeline_phase2(content, document_type='brief', campaign=campaign)
+        
         return content
+    
+    def _fix_timeline_phase2(self, content: str, document_type: str = 'strategy', campaign: Optional[Campaign] = None) -> str:
+        """If content has Phase 1 and Phase 3 but no Phase 2, insert Phase 2 before Phase 3."""
+        if not content or 'Phase 2' in content:
+            return content
+        # Case-insensitive check for Phase 1 and Phase 3
+        content_lower = content.lower()
+        if 'phase 1' not in content_lower or 'phase 3' not in content_lower:
+            return content
+        if document_type == 'strategy':
+            phase2_line = '• Phase 2: Month 3-4: Launch and execute marketing campaigns, including email via Pay Per Project, social media, and content distribution; monitor early metrics and engagement.'
+        else:
+            # brief: use campaign dates if available to compute Phase 2 date range
+            phase2_line = self._get_brief_phase2_line(campaign, content)
+        # Try multiple patterns (bullet format, then fallback without bullet)
+        patterns = [
+            (r'(\n\s*[•\-*]\s*)(Phase 3:.*?)(\n|$)', r'\n' + phase2_line + r'\n\1\2\3'),
+            (r'(\n\s*)(Phase 3:.*?)(\n|$)', r'\n' + phase2_line + r'\n\1\2\3'),
+        ]
+        for pattern, replacement in patterns:
+            content, n = re.subn(pattern, replacement, content, count=1, flags=re.IGNORECASE)
+            if n > 0:
+                break
+        return content
+
+    def _get_brief_phase2_line(self, campaign: Optional[Campaign], content: str) -> str:
+        """Build Phase 2 line for Campaign Brief, using campaign dates when available."""
+        phase2_desc = 'Execute email sequences, monitor engagement, and nurture leads.'
+        if campaign and getattr(campaign, 'start_date', None) and getattr(campaign, 'end_date', None):
+            try:
+                start = campaign.start_date
+                end = campaign.end_date
+                # Normalize to date (Django DateField returns date; handle datetime or string)
+                if isinstance(start, datetime):
+                    start = start.date()
+                if isinstance(end, datetime):
+                    end = end.date()
+                if isinstance(start, str):
+                    start = datetime.strptime(start[:10], '%Y-%m-%d').date()
+                if isinstance(end, str):
+                    end = datetime.strptime(end[:10], '%Y-%m-%d').date()
+                total_days = (end - start).days
+                if total_days >= 4:
+                    # Split into 3 equal phases: Phase 2 = middle third
+                    segment = total_days // 3
+                    p2_start = start + timedelta(days=segment)
+                    p2_end = start + timedelta(days=2 * segment)
+                    if p2_end > end:
+                        p2_end = end
+                    start_str = p2_start.strftime('%B %d, %Y')
+                    end_str = p2_end.strftime('%B %d, %Y')
+                    return f'• Phase 2: {start_str} to {end_str}: {phase2_desc}'
+            except (ValueError, TypeError):
+                pass
+        return f'• Phase 2: Mid-campaign: {phase2_desc} (within the campaign start–end date range above).'
     
     def _build_document_prompt(self, document_type: str, document_data: Dict, campaign: Optional[Campaign], context: Dict) -> str:
         """Build the prompt for document generation"""
         title = document_data.get('title', f'{document_type.title()} Document')
-        requirements = document_data.get('requirements', '')
-        key_points = document_data.get('key_points', '')
+        # Frontend sends 'notes'; also support 'requirements' and 'key_points'
+        requirements = document_data.get('requirements') or document_data.get('notes', '')
+        key_points = document_data.get('key_points') or document_data.get('notes', '')
+        # Pages (1-20), tables, charts - user-controlled. Performance Report: default and minimum 6 pages.
+        default_pages = 6 if document_type == 'report' else 5
+        min_pages = 6 if document_type == 'report' else 1
+        target_pages = min(20, max(min_pages, int(document_data.get('pages', default_pages))))
+        target_tables = max(0, int(document_data.get('tables', 3)))
+        target_charts = max(0, int(document_data.get('charts', 1))) if document_type == 'report' else 0
+        chart_type = (document_data.get('chart_type') or 'bar').lower()
+        if chart_type not in ('bar', 'pie', 'line'):
+            chart_type = 'bar'
+        table_types_str = (document_data.get('table_types') or 'metrics, timeline, lead details').strip()
         
         # Get campaign data if available
         campaign_data = {}
         if campaign:
             campaign_data = self._get_campaign_data_for_document(campaign, document_type)
         
-        # Build document type specific instructions
-        doc_instructions = self._get_document_type_instructions(document_type)
+        # Build document type specific instructions (pass target_tables for report conditional)
+        doc_instructions = self._get_document_type_instructions(document_type, target_tables)
         
+        user_notes = (requirements or '').strip() or (key_points or '').strip()
         prompt = f"""Create a professional {document_type} document.
 
-DOCUMENT TITLE: {title}
+DOCUMENT TITLE (use this): {title}
 
 DOCUMENT REQUIREMENTS:
 {requirements if requirements else 'Create a comprehensive, professional document.'}
 
-ADDITIONAL KEY POINTS:
+ADDITIONAL KEY POINTS (what the user wants in this document - YOU MUST ADDRESS THESE):
 {key_points if key_points else 'None provided'}
+
+LENGTH AND FORMAT REQUIREMENTS (USER-SPECIFIED - MANDATORY, NO EXCEPTIONS):
+
+**PAGE COUNT (STRICT):** Target = {target_pages} page(s). One rendered page ≈ 450 words. Your output MUST be at least {target_pages * 450} words ({target_pages * 450} words minimum). Write detailed paragraphs—do NOT stop early. If you finish a section and are under the minimum, expand with more analysis, examples, and detail. Count roughly: aim for at least {target_pages * 450} words total.
+
+**TABLES:** {"User requested ZERO tables. You MUST NOT include any markdown tables (no | column | format). Present ALL metrics, lead data, timelines, and information using bullet lists (•) or numbered lists or paragraphs ONLY. Do NOT use pipe characters (|) to create tables. This overrides any other instruction." if target_tables == 0 else f"Include exactly {target_tables} markdown table(s). Table types: {table_types_str}. Create tables in | col | col | format."}
+{f'''- CHARTS (MANDATORY): Include exactly {target_charts} chart(s) using [CHART]...[/CHART] blocks. Chart type: {chart_type}. You MUST insert these chart blocks—do NOT skip them.
+  Exact format for each chart block:
+  [CHART]
+  type: {chart_type if chart_type in ('bar', 'pie') else 'bar'}
+  title: [Chart title, e.g. "Email Open Rates by Month"]
+  labels: [comma-separated labels, e.g. Jan, Feb, Mar, Apr]
+  values: [comma-separated numbers matching labels, e.g. 25, 30, 28, 32]
+  [/CHART]
+  Use REAL data from the campaign (open rates, click rates, leads, etc.). Place charts in relevant sections. For "line" type use "bar" (supported).''' if target_charts > 0 and document_type == 'report' else ''}
+
+"""
+        if user_notes:
+            # For brief/report: user often asks for specific focus (issues, improvement, engagement) — address that.
+            # For strategy/proposal: keep full professional structure; use title/notes as theme only.
+            if document_type in ('brief', 'report'):
+                prompt += f"""
+USER REQUEST (for this brief/report): "{user_notes}"
+Address what the user asked for (e.g. issues, improvement, engagement) while still using the campaign data and full structure.
+
+"""
+            else:
+                prompt += f"""
+USER PROMPT (incorporate in strategy/proposal): The user provided: "{user_notes}"
+
+You MUST cater to this in the document:
+- Use it as the theme/focus (e.g. "help in marketing", "lead generation") and weave it into the Executive Summary and relevant sections.
+- If the user gave specific details, put them in the right sections: budget or cost → Resource Breakdown; timeline or dates → Timeline; target audience, industry, or geography → Target Audience and Campaign Strategy; product/campaign name → Campaign Overview; goals or metrics → Objectives and Goals; channels (e.g. "focus on email") → Tactics and Channels. Do not ignore or genericize what the user asked for.
+- Keep the full, professional document structure with all standard sections—do not shorten or replace the structure. Just incorporate the user's details where they fit.
 
 """
         
@@ -197,43 +312,51 @@ CAMPAIGN DATA (REAL DATA FROM DATABASE - USE ALL OF THIS):
 ═══════════════════════════════════════════════════════════════
 
 CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
-1. ALL data above is REAL data fetched from the database for this specific campaign
-2. You MUST include ALL performance metrics, statistics, and data points provided above
-3. DO NOT skip or omit any metrics - include emails_sent, emails_opened, emails_clicked, open_rate, click_rate, reply_rate, bounce_rate, leads_count, etc.
+1. For briefs/reports: address what the user asked for (e.g. issues, improvement, engagement). For strategy/proposal: produce a full, professional document with all sections; if the user gave a title or notes (or specific details like budget, timeline, audience), incorporate those in the relevant sections—budget in Resource Breakdown, timeline in Timeline, audience/industry in Target Audience, etc. Do not ignore or genericize user-provided details.
+2. ALL data above is REAL data fetched from the database for this specific campaign
+3. You MUST include ALL performance metrics, statistics, and data points provided above
 4. Create DETAILED sections with actual numbers, percentages, and specific data points
-5. Use the actual values provided above - do NOT use placeholder, generic, or "Not specified" data
-6. If a field is missing from the data above, you can mention it's not available, but DO NOT make up values
-7. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided
-8. For email campaigns: Create a detailed "Email Performance Metrics" section with:
+5. Use the actual values provided above - do NOT use placeholder, generic, or invented data
+6. NEVER write [insert date], [insert duration], or any [insert ...] placeholder. If Start Date or End Date are "Not set" in the data, write "Not specified" or "To be determined"
+7. If a field is missing from the data above, write "Not specified" or "Not available" - do NOT make up values or placeholders
+8. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided
+9. For email campaigns: Create a detailed "Email Performance Metrics" section with:
    - Total emails sent (actual number)
    - Open rate (actual percentage)
    - Click rate (actual percentage)
    - Reply rate (actual percentage)
    - Bounce rate (actual percentage)
    - Analysis of what these metrics mean
-9. For leads: Create a detailed "Lead Engagement" section with:
+10. For leads: Create a detailed "Lead Engagement" section with:
    - Total leads count (actual number)
-   - Lead details and status breakdown
-   - Engagement analysis
-10. Make the document VERY DETAILED and SPECIFIC to this campaign using ALL the real data above
-11. Include tables, charts descriptions, and detailed breakdowns where appropriate
-12. Write in-depth analysis, not just surface-level information
+   - Lead details: list or table of EVERY lead from the LEAD DATA section (email, name, company, status for each lead—do NOT omit any)
+   - Lead status breakdown and engagement analysis
+11. For Performance Reports: (a) {"Campaign metrics and Lead Details (every lead) as bullet lists—NO tables (user requested 0 tables)." if target_tables == 0 else f"Campaign metrics table and Lead Details table (every lead). Include {target_tables} tables total."} (b) Use ## for main sections only—do NOT use ### (H3). (c) Charts: you MUST add the chart(s) requested in LENGTH AND FORMAT REQUIREMENTS using [CHART]...[/CHART] blocks—do NOT omit them. (d) Key Achievements and Challenges and Issues: each point must have a full paragraph. (e) Always include ## Call to Action and ## Future Outlook. (f) Output MUST be at least {target_pages * 450} words ({target_pages} pages).
+12. Make the document VERY DETAILED and SPECIFIC to this campaign using ALL the real data above
+13. {"Do NOT use markdown tables. Use bullet lists and paragraphs for all data." if target_tables == 0 else f"Include {target_tables} markdown tables of the types specified."} Charts and detailed breakdowns where appropriate.
+14. Write in-depth analysis, not just surface-level information
 """
         else:
             prompt += """
-NOTE: No campaign data is associated with this document. Create a general document based on the requirements provided.
+NO CAMPAIGN LINKED: This document is not tied to a specific campaign.
+- Create a full, professional document with all standard sections (e.g. Executive Summary, Market Analysis, Target Audience, Objectives, Marketing Channels, Resource Allocation, Timeline, Success Metrics, Risk Assessment, Conclusion).
+- Use the DOCUMENT TITLE and ADDITIONAL KEY POINTS as the theme/focus. If the user gave specific details (e.g. budget $10k, launch Q2, B2B SaaS, UK market, "focus on email"), incorporate them in the right sections: budget → Resource Breakdown; timeline → Timeline; audience/industry → Target Audience; channels → Tactics. Do not ignore user-provided details.
+- You may use illustrative examples and typical industry metrics where helpful. Do not invent a specific campaign name; keep it general and reusable.
 """
         
         prompt += f"""
 
 {doc_instructions}
 
+FORMATTING: Use **text** for bold (e.g. **Brand Awareness**: description). For Performance Reports: {'You MUST include ' + str(target_charts) + ' chart(s) using [CHART] blocks—see LENGTH AND FORMAT REQUIREMENTS for exact format. Each chart MUST have type, title, labels, values.' if target_charts > 0 else 'Do NOT add [CHART] blocks—charts are not used in this report.'} For strategy/proposal/brief you may optionally include charts using [CHART] blocks.
+
 DOCUMENT STRUCTURE REQUIREMENTS:
-- Clear sections and headings (use ## for main sections, ### for subsections)
+- Use ## for main sections only. Do NOT use ### or #### in any document (strategy, proposal, report, brief). Use **bold** subheads or bullet points followed by full paragraphs instead of ###/#### subsections.
+- When listing numbered phases (Phase 1, Phase 2, Phase 3) or steps, do NOT skip numbers—include every phase in sequence (e.g. Phase 1, then Phase 2, then Phase 3; never Phase 1 then Phase 3). In Marketing Strategy Timeline and Milestones, you MUST include Phase 2 (e.g. Phase 2: Month 3–4); never output only Phase 1 and Phase 3.
 - Professional language and tone throughout
 - VERY DETAILED content - write comprehensive, in-depth sections
 - Include ALL performance metrics, statistics, and data points provided
-- Create detailed tables or formatted lists for metrics when appropriate
+- {"Use bullet lists and paragraphs for metrics—NO markdown tables." if target_tables == 0 else f"Create {target_tables} detailed markdown tables (| col | format) for metrics, plus formatted lists where appropriate."}
 - Actionable insights and recommendations based on REAL data
 - Proper markdown formatting for structure
 - A comprehensive, professional CONCLUSION section (see below)
@@ -245,14 +368,14 @@ DETAIL AND DEPTH REQUIREMENTS:
 4. Create dedicated sections for performance metrics with full breakdowns
 5. Include multiple paragraphs per section explaining the data
 6. Add context and interpretation for all metrics
-7. Make the document comprehensive and thorough - aim for 2000+ words if data is available
+7. Output MUST be at least {target_pages * 450} words ({target_pages} pages). Do not stop until you reach this minimum. Expand sections with more detail if needed.
 
 PERFORMANCE METRICS SECTION REQUIREMENTS:
 If campaign data includes performance metrics, you MUST create a detailed section like:
 
 ## Performance Metrics and Analysis
 
-### Email Campaign Performance
+**Email Campaign Performance**
 - **Total Emails Sent**: [actual number from data]
 - **Open Rate**: [actual percentage]% - [analysis of what this means]
 - **Click Rate**: [actual percentage]% - [analysis of what this means]
@@ -261,7 +384,7 @@ If campaign data includes performance metrics, you MUST create a detailed sectio
 
 [Detailed paragraph analyzing these metrics, comparing to industry standards, identifying trends, etc.]
 
-### Lead Engagement Metrics
+**Lead Engagement Metrics**
 - **Total Leads**: [actual number]
 - **Lead Status Breakdown**: [detailed breakdown]
 - **Engagement Analysis**: [detailed analysis]
@@ -280,7 +403,9 @@ The conclusion MUST be a proper, professional ending that:
 8. For strategies: Include a comprehensive summary of strategic priorities, implementation roadmap, and expected outcomes
 9. DO NOT end abruptly - always provide a detailed, multi-paragraph conclusion
 
-Begin writing the document now. 
+**FINAL REMINDERS BEFORE YOU WRITE:**
+- Minimum length: {target_pages * 450} words ({target_pages} pages). Do not stop early.
+- Tables: {"ZERO. Use lists and paragraphs only—no | table | format." if target_tables == 0 else f"Exactly {target_tables} markdown tables."}
 - Use ALL REAL campaign data provided above
 - Write in DETAIL with comprehensive analysis
 - Include ALL performance metrics in dedicated sections
@@ -300,17 +425,23 @@ Begin writing the document now.
             'target_leads': campaign.target_leads,
             'target_conversions': campaign.target_conversions,
         }
+        # Include goals and target_audience so brief/strategy/proposal use real data
+        if getattr(campaign, 'goals', None) and campaign.goals:
+            data['goals'] = campaign.goals
+        if getattr(campaign, 'target_audience', None) and campaign.target_audience:
+            data['target_audience'] = campaign.target_audience
         
         # Get performance metrics
         performance = self._get_campaign_performance_data(campaign)
         if performance:
             data['performance'] = performance
         
-        # Get leads data
+        # Get leads data (more leads for report so the document includes full lead list)
         leads_count = campaign.leads.count()
         if leads_count > 0:
             data['leads_count'] = leads_count
-            data['leads'] = list(campaign.leads.values('email', 'first_name', 'last_name', 'company', 'status')[:10])
+            max_leads = 50 if document_type == 'report' else 10
+            data['leads'] = list(campaign.leads.values('email', 'first_name', 'last_name', 'company', 'status')[:max_leads])
         
         # Get email sending data from database
         email_sends = EmailSendHistory.objects.filter(campaign=campaign)
@@ -368,8 +499,31 @@ Begin writing the document now.
             lines.append(f"Status: {campaign_data['status']}")
         if 'start_date' in campaign_data:
             lines.append(f"Start Date: {campaign_data['start_date']}")
+        else:
+            lines.append("Start Date: Not set (use 'Not specified' in document - NEVER use [insert date])")
         if 'end_date' in campaign_data:
             lines.append(f"End Date: {campaign_data['end_date']}")
+        else:
+            lines.append("End Date: Not set (use 'Not specified' in document - NEVER use [insert date])")
+        
+        if 'target_audience' in campaign_data and campaign_data['target_audience']:
+            lines.append("")
+            lines.append("=== TARGET AUDIENCE (USE THIS EXACT DATA) ===")
+            aud = campaign_data['target_audience']
+            if isinstance(aud, dict):
+                for k, v in aud.items():
+                    lines.append(f"{k.replace('_', ' ').title()}: {v}")
+            else:
+                lines.append(str(aud))
+        if 'goals' in campaign_data and campaign_data['goals']:
+            lines.append("")
+            lines.append("=== GOALS / OBJECTIVES (USE THIS EXACT DATA) ===")
+            goals = campaign_data['goals']
+            if isinstance(goals, dict):
+                for k, v in goals.items():
+                    lines.append(f"{k.replace('_', ' ').title()}: {v}")
+            else:
+                lines.append(str(goals))
         
         lines.append("")
         lines.append("=== TARGETS ===")
@@ -414,19 +568,21 @@ Begin writing the document now.
         # Lead data
         if 'leads_count' in campaign_data:
             lines.append("")
-            lines.append("=== LEAD DATA (MUST INCLUDE IN DOCUMENT) ===")
+            lines.append("=== LEAD DATA (MUST INCLUDE IN DOCUMENT - LIST EACH LEAD BELOW IN A 'LEAD DETAILS' SECTION) ===")
             lines.append(f"Total Leads: {campaign_data['leads_count']}")
             if 'leads' in campaign_data and campaign_data['leads']:
-                lines.append(f"Sample Leads (showing up to 10):")
-                for lead in campaign_data['leads'][:10]:
-                    lead_str = f"  - {lead.get('email', 'N/A')}"
-                    if lead.get('first_name') or lead.get('last_name'):
-                        lead_str += f" ({lead.get('first_name', '')} {lead.get('last_name', '')})".strip()
+                lines.append("List of leads (include EVERY lead below in the report with email, name, company, status):")
+                for i, lead in enumerate(campaign_data['leads'], 1):
+                    lead_str = f"  {i}. Email: {lead.get('email', 'N/A')}"
+                    name = f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip()
+                    if name:
+                        lead_str += f" | Name: {name}"
                     if lead.get('company'):
-                        lead_str += f" - {lead.get('company')}"
+                        lead_str += f" | Company: {lead.get('company')}"
                     if lead.get('status'):
-                        lead_str += f" [Status: {lead.get('status')}]"
+                        lead_str += f" | Status: {lead.get('status')}"
                     lines.append(lead_str)
+                lines.append("(You MUST include a Lead Details section listing each lead above—as a table if user requested tables, otherwise as a numbered bullet list.)")
         
         # Handle nested dicts
         for key, value in campaign_data.items():
@@ -438,57 +594,181 @@ Begin writing the document now.
         
         return "\n".join(lines)
     
-    def _get_document_type_instructions(self, document_type: str) -> str:
-        """Get document type specific instructions"""
+    def _get_document_type_instructions(self, document_type: str, target_tables: int = 3) -> str:
+        """Get document type specific instructions. target_tables=0 means no tables, use lists only."""
         instructions = {
             'strategy': """
-Create a comprehensive Marketing Strategy document with:
-- Executive Summary
-- Market Analysis
-- Target Audience Analysis
-- Marketing Objectives and Goals
-- Marketing Channels and Tactics
-- Resource Allocation
-- Timeline and Milestones
-- Success Metrics and KPIs
-- Risk Assessment
-- Conclusion and Next Steps (MUST include a detailed conclusion summarizing strategic priorities, implementation roadmap, and expected outcomes)
+Create a LONG, comprehensive Marketing Strategy document—like a consultant's full deliverable (8–12+ pages when rendered). Use ## for main sections only; do NOT use ### or ####. Use **bold** subheads or bullet points followed by full paragraphs. Every section must have substantial content (multiple paragraphs or bullets with explanation).
+
+USER THEME: The DOCUMENT TITLE and ADDITIONAL KEY POINTS define the strategy's focus (e.g. "Overcome Other Tech Companies", "B2B SaaS lead generation", "UK market expansion"). Weave this theme into the ENTIRE document—Executive Summary, Market Analysis, Competitor Analysis, Objectives, Tactics, and Conclusion. Do not write a generic strategy; make it specific to what the user asked for.
+
+Sections (each as ## Section Name)—write LONG, detailed content in each:
+
+## Executive Summary
+2–4 full paragraphs. Summarise the strategy's purpose, key objectives, main channels (including use of Pay Per Project for email), target audience, and expected outcomes. State clearly how this strategy addresses the user's theme (e.g. overcoming competitors, entering a market, scaling lead gen).
+
+## Market Analysis
+Multiple full paragraphs. **Competitor Analysis**: 2+ paragraphs naming and analysing 2–4 competitors (strengths, weaknesses, market position). **Industry Trends and Opportunities**: 2+ paragraphs on relevant trends (e.g. digital transformation, AI/ML, cloud adoption), growth projections, and concrete opportunities for the organisation. Use illustrative data or industry benchmarks where helpful. Tie trends to the user's theme.
+
+## Target Audience Analysis
+2–3 full paragraphs. Demographics (age, role, company size, geography). **Pain Points and Needs**: bullet list with a short paragraph for each. **Buyer Personas**: if useful, 1–2 short persona descriptions. Align audience with the DOCUMENT TITLE and user's focus (e.g. "B2B decision-makers in tech" for "Overcome Other Tech Companies").
+
+## Marketing Objectives and Goals
+For each objective use: **Objective Name**: One-line goal. Then a bullet (•) and a full paragraph explaining how you will achieve it and how it supports the overall theme. Include at least: Brand Awareness, Lead Generation, Conversion (or Revenue). Add 1–2 more if relevant (e.g. Customer Retention, Market Penetration). Minimum 3 objectives, each with a full paragraph.
+
+## Marketing Channels and Tactics
+Intro paragraph on multi-channel approach. Then **bold** sub-heads with 3–5 bullets each and short paragraphs where needed:
+**Email Marketing** • Use the platform's email marketing agent, Pay Per Project, for targeted email campaigns, automation, and measurement. • [2–3 more specific tactics]
+**Content Marketing** • [bullets + short paragraph]
+**Social Media** • [bullets + short paragraph]
+**Other channels** (e.g. SEO, events, partnerships) as relevant. Ensure Pay Per Project is clearly mentioned under Email Marketing.
+
+## Resource Allocation
+2+ full paragraphs. **Budget**: state total and breakdown (e.g. by channel or by month). **Technology**: mention Pay Per Project and any other tools. **People/Team**: roles and time allocation. Use a compact markdown table if helpful (e.g. Category | Allocation). If the user provided a budget or cost in their notes, use it here.
+
+## Timeline and Milestones
+2+ full paragraphs describing the rollout. Then a phased timeline.
+
+CRITICAL - DO NOT SKIP PHASES: You MUST list phases in strict numerical order with NO gaps. If you have Phase 1 and Phase 3, you MUST also write Phase 2 (Month 3–4). Never output "Phase 1" followed by "Phase 3" without Phase 2 in between. Minimum three phases: Phase 1, Phase 2, Phase 3. Prefer 4–6 phases (e.g. Phase 1: Month 1–2, Phase 2: Month 3–4, Phase 3: Month 5–6, Phase 4: Month 7–8 if needed). Example structure:
+• Phase 1: Month 1–2: [deliverables]
+• Phase 2: Month 3–4: [deliverables—e.g. launch campaigns, execute email via Pay Per Project]
+• Phase 3: Month 5–6: [deliverables—e.g. analyze results, optimize]
+Use at least 4–6 time buckets or 4–6 phases with clear deliverables for each. A compact markdown table is recommended: Phase | Timeframe | Key Deliverables.
+
+## Success Metrics and KPIs
+2+ full paragraphs. List specific KPIs (e.g. Email Open Rate, Click Rate, Lead Count, Conversion Rate, Revenue) with target numbers. Use **bold** for each KPI name and a short explanation. If the user gave targets in their notes, use them here.
+
+## Risk Assessment
+2+ full paragraphs. Identify 3–5 risks (e.g. competition, technology dependency, resource constraints, market shifts). For each: **Risk**: short description. • Mitigation: one or two sentences. Do not leave as one-line bullets only.
+
+## Conclusion and Next Steps
+2–4 full paragraphs. Summarise the strategy, strategic priorities, implementation roadmap, and expected outcomes. List 4–6 concrete next steps (e.g. establish team, finalise budget, launch Phase 1, set up Pay Per Project campaigns). End with a strong closing that ties back to the user's theme (e.g. how this positions the organisation to overcome competitors or achieve the stated goal).
+
+LENGTH AND QUALITY: Aim for a document that would be 8–12+ pages when rendered. Every section must have multiple paragraphs or detailed bullets with explanation. Do not produce a short or generic strategy—match the depth of a professional consultant deliverable.
+
+TIMELINE RULE: In ## Timeline and Milestones you MUST include Phase 2 (and every phase in order). Never write only Phase 1 and Phase 3—always Phase 1, then Phase 2, then Phase 3 (and more if needed). Skipping Phase 2 is forbidden.
 """,
             'proposal': """
-Create a professional Campaign Proposal document with:
-- Executive Summary
-- Campaign Overview
-- Objectives and Goals
-- Target Audience
-- Campaign Strategy
-- Tactics and Channels
-- Resource Breakdown
-- Timeline
-- Expected Results
-- Conclusion (MUST include a compelling summary, call to action, and clear next steps for approval/implementation)
+Create a LONG, comprehensive Campaign Proposal (full paragraphs and tables—like a professional client-ready document). Use ## for main sections only; NEVER use ### or ####. Use **bold** only for sub-sections (e.g. **Email Marketing** under Campaign Strategy)—never # or ## for those.
+
+CRITICAL - PROPOSAL ONLY (do NOT add report-style sections):
+Do NOT include in a Campaign Proposal: "Performance Metrics and Analysis", "Email Campaign Performance", "Lead Engagement Metrics", "Brand Awareness Metrics", "Appendices", or any section that reports or analyzes actual campaign performance. Those belong in a Performance Report. A proposal is a plan to get approval—not a report on results.
+
+Tables: Use at most 3–4 compact tables (e.g. Resource Breakdown, Timeline). Keep tables to 3–4 columns max and short cell text. Do not add many tables.
+
+Structure (proposal sections only):
+
+## Executive Summary
+2–3 full paragraphs: outline the strategic plan (brand awareness, lead generation, conversion), mention multi-channel efforts and Pay Per Project for email execution, and state expected outcomes.
+
+## Campaign Overview
+2+ full paragraphs: how the campaign will be executed (email, social media, content, SEO), target audience segmentation, and how objectives will be measured (open rates, click-through rates, conversion, ROI).
+
+## Objectives and Goals
+For each objective use: **Objective Name**: One-line goal. Then a bullet (•) and a full paragraph explaining how you will achieve it.
+Example: **Conversion**: Convert a minimum of 20% of leads into paying customers. • [Full paragraph on lead nurturing, content, trust, etc.]
+Do this for Conversion, Lead Generation, Brand Awareness (or as many as relevant).
+
+## Target Audience
+Paragraph on how audience will be identified (market research, buyer personas). Then a markdown table: Segment | Description | Demographics (e.g. Decision-Makers, Influencers, Users with descriptions and age/role).
+
+## Campaign Strategy
+Intro paragraph (strong online presence, email marketing, lead nurturing; mention leveraging the platform's email marketing agent, Pay Per Project, for email execution). Then **bold** sub-heads with bullets and short text:
+**Email Marketing** • [bullet points]
+**Content Marketing** • [bullet points]
+**Social Media Advertising** • [bullet points]
+
+## Tactics and Channels
+**Email Marketing** • Utilize Pay Per Project for email execution. • [1–2 more bullets]
+**Content Marketing** • [bullets]
+**Social Media Advertising** • [bullets]
+
+## Resource Breakdown
+One compact table only: Resource / Item | Allocation / Cost (3–4 rows + Total). Short labels and numbers so it fits on one page.
+
+## Timeline
+One compact table only: Phase | Dates | Deliverables (4–5 rows). Short cell text so it fits on one page.
+
+## Expected Results
+Short bullet list or one short table of TARGETS only (e.g. Open Rate: 20%; Total Leads: 500). Do NOT add performance analysis, "actual" metrics, engagement analysis, or industry-average commentary. Just state what we expect to achieve.
+
+## Conclusion
+2–3 full paragraphs: summarize the plan, channels, resource breakdown, timeline; state expected outcomes; recommend approving and implementing the campaign.
+
+## Recommendations
+Bullet list (e.g. Approve and implement; Monitor and analyze performance).
+
+## Next Steps
+Bullet list (e.g. Schedule meeting with marketing team; Monitor performance; make adjustments).
+
+End the proposal here. Do NOT add Performance Metrics and Analysis, Email Campaign Performance, Lead Engagement Metrics, Brand Awareness Metrics, Appendices, or any report-style sections. Always produce a LONG, detailed proposal with full paragraphs in Executive Summary, Campaign Overview, Objectives, Target Audience, Campaign Strategy, and Conclusion. Use at most 3–4 compact tables. NEVER use ### or ####—only ## and **bold**.
 """,
             'report': """
-Create a detailed Performance Report document with:
-- Executive Summary
-- Campaign Overview
-- Performance Metrics and KPIs (use REAL data from campaign if provided)
-- Key Achievements
-- Challenges and Issues
-- Analysis and Insights (based on REAL performance data)
-- Recommendations (data-driven recommendations)
-- Conclusion (MUST include a comprehensive summary of performance, key takeaways, and future outlook)
+Create a LONG, detailed Performance Report (full paragraphs throughout—not short bullets). Use ## for main sections only; do NOT use ### (H3) subsections—use **bold** labels or bullet points followed by full paragraphs.
+
+Sections:
+- Executive Summary (2–3 full paragraphs)
+- Campaign Overview: present campaign info, target audience, goals/targets in flowing prose and bullet lists where useful; then add a short paragraph summarizing the campaign. Do NOT use ### under Campaign Overview.
+- Performance Metrics and KPIs: include campaign metrics and REAL data; write full paragraphs analyzing what the numbers mean. Present metrics as a markdown table ONLY if user requested tables; otherwise use bullet lists.
+- Lead Details: list EVERY lead (Email, Name, Company, Status). Use a table ONLY if user requested tables; otherwise use a numbered bullet list.
+- Key Achievements: each achievement as a bullet or bold point PLUS a full paragraph explaining it (do not just list one-line bullets). If there are positive opportunities (e.g. strong metrics, engaged leads, growth potential), include them here and make that part a bit long.
+- Challenges and Issues: ALWAYS include this section. Keep it a bit long—each challenge as a **bold** label (e.g. **Low Email Open Rates**, **Limited Lead Engagement**) PLUS a full paragraph (3–5 sentences) explaining what it is, why it matters, and its impact. Do not use one-line bullets only.
+- Analysis and Insights: 2–4 full paragraphs based on REAL performance data. If there are positive opportunities, mention them and make that part a bit long.
+- Recommendations: ALWAYS include this section. Keep it a bit long—each recommendation as a **bold** label (e.g. **Gather Audience Data**, **Optimize Email Marketing**) PLUS a full paragraph (3–5 sentences) on what to do, why it helps, and how to implement. Do not use one-line bullets only.
+- Conclusion: comprehensive summary and key takeaways (2–3 paragraphs).
+- Call to Action: always include this section (## Call to Action) with clear, actionable next steps (e.g. what to do next week, who to follow up with, decisions needed).
+- Future Outlook: always include this section (## Future Outlook) with outlook for the campaign (e.g. expected trends, risks, opportunities, next quarter).
+
+MANDATORY:
+1. Campaign metrics: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate, Total Leads. Present as a markdown table (| Metric | Value |) ONLY if user requested tables; otherwise use bullet list.
+2. Lead Details: every lead from the data (Email, Name, Company, Status). Use table format ONLY if user requested tables; otherwise use numbered bullet list.
+3. Do NOT use ### (H3) headings—use ## for main sections and **bold** or bullets + paragraphs for sub-content.
+4. Charts: you MUST add [CHART] blocks when user requested them. Use the exact format shown in LENGTH AND FORMAT REQUIREMENTS (type, title, labels, values). Never omit requested charts.
+5. Always include ## Call to Action and ## Future Outlook as separate section headings with full paragraphs.
+6. Always write a LONG report: full paragraphs in every section, especially Achievements and Challenges (each point must have a paragraph). Aim for thorough, readable length.
+7. ALWAYS include Challenges and Issues and Recommendations; keep both sections a bit long (full paragraphs per item). If there are positive opportunities (e.g. strong performance, upside potential), include them in Key Achievements or Analysis and make that part a bit long too.
 """,
             'brief': """
-Create a comprehensive Campaign Brief document with:
-- Campaign Overview
-- Objectives and Goals
-- Target Audience
-- Key Messaging
-- Campaign Timeline
-- Success Criteria
-- Email Campaign Performance (MUST use REAL email sending data if provided: emails sent, opened, clicked rates)
-- Lead Engagement Data (MUST use REAL lead data if provided: number of leads, lead details, engagement metrics)
-- Conclusion (MUST include a summary of campaign readiness, launch recommendations, and expected outcomes based on REAL data)
+Create a DETAILED Campaign Brief that reads like a proper campaign briefing. Use ONLY the campaign data provided above. Use ## for main sections only; do NOT use ### or ####. Every section MUST have substantive content (paragraphs or bullets with explanation)—do NOT leave sections empty or one-line.
+
+Sections (use ONLY these—do NOT add "Performance Metrics and Analysis", "Lead Engagement Metrics", "Engagement Analysis", "Improvement Opportunities", or "Action Items" as extra ## sections):
+
+## Campaign Overview
+2–3 full paragraphs. Paragraph 1: Campaign name, description, status, start date, end date (from CAMPAIGN INFORMATION). Paragraph 2: Objectives (target leads, target conversions, goals from TARGETS/GOALS). Paragraph 3: Summary of target audience and focus. Use the exact data—do not write "no data available" if the data is in the prompt above.
+
+## Objectives and Goals
+List each target from the data (Target Leads, Target Conversions) and goals. For each: **Target name**: value. Then a short paragraph explaining what it means and how the campaign will achieve it. Do not write only one bullet with no context.
+
+## Target Audience
+Use the TARGET AUDIENCE section from the data. Write 1–2 full paragraphs describing who the audience is (age, location, industry, interests, company size—use every field provided). If the data lists demographics, include them. Do not leave this section empty.
+
+## Key Messaging
+1–2 paragraphs derived from the campaign description and goals. What will the campaign communicate? What value proposition? Use the data.
+
+## Campaign Timeline
+Use ONLY the campaign's Start Date and End Date from the data. Write a full paragraph (e.g. "The campaign runs from [start] to [end]. Key phases…"). Phases MUST be derived from this campaign period only—split the period into 2–4 phases (e.g. by weeks or equal segments). Use actual dates or date ranges that fall BETWEEN start and end (e.g. if campaign is Jan 30–Feb 22: Phase 1: Jan 30–Feb 7, Phase 2: Feb 8–Feb 15, Phase 3: Feb 16–Feb 22). NEVER use generic "Month 1-2", "Month 5-6", or any timeframe outside the campaign dates. If you list Phase 1, Phase 2, Phase 3, do NOT skip numbers—always include Phase 2 between Phase 1 and Phase 3. If dates are "Not set", write "Not specified" and add a sentence on planned timeline.
+
+## Success Criteria
+Use the targets from the data. Full paragraph or bullets with short explanation of how success will be measured.
+
+## Email Campaign Performance
+Use the exact EMAIL CAMPAIGN METRICS from the data. List: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate (use the exact numbers from the prompt). For each metric, 1 sentence of what it means. If the data provides numbers (e.g. Emails Sent: 3, Open Rate: 0%), use them and comment on them—do not say "No email campaign performance data available" when the data is provided. If the prompt has no email metrics at all, then one short paragraph: "Email campaign not yet launched" and what will be measured.
+
+## Lead Engagement Data
+Use the exact LEAD DATA from the data. State Total Leads. List EVERY lead from the prompt (email, name, company, status for each). Then 1–2 paragraphs on engagement (e.g. lead status breakdown, what it means, next steps). Do not leave empty or say "no lead data" when leads are listed in the prompt.
+
+## Issues / Challenges
+ALWAYS include this section. Keep it a bit long—each issue must have real detail. For each issue: **Bold issue name** (e.g. **Low Email Open Rates**, **Limited Lead Engagement**, **Missing Audience Data**) followed by a FULL PARAGRAPH (3–5 sentences) explaining: what the issue is, why it matters, cause/context from the campaign data, and impact on the campaign. Do NOT write only one-line bullets. Minimum 2–4 issues, each with a bold heading and a full paragraph. Base on actual data (open rate, click rate, lead count, audience fields, conversions).
+
+## Improvements / Recommendations
+ALWAYS include this section. Keep it a bit long—each recommendation must have real detail. For each: **Bold recommendation name** (e.g. **Gather Audience Data**, **Optimize Email Marketing**, **Develop Valuable Content**) followed by a FULL PARAGRAPH (3–5 sentences) explaining: what to do, why it will help, and how to implement it. Do NOT write only one-line bullets. Minimum 2–4 recommendations, each with a bold heading and a full paragraph. Examples: audience research, A/B testing subject lines, content calendar, lead nurturing, tracking setup.
+
+If the campaign has positive opportunities (e.g. strong open rate, engaged leads, growth potential), mention them in the Conclusion or in a short paragraph—and make that part a bit long (2–4 sentences minimum).
+
+## Conclusion
+2–3 full paragraphs: campaign readiness, launch recommendations, expected outcomes. Summarize the brief and state whether the campaign is ready and what is needed.
+
+CRITICAL: (1) Use ALL campaign data from the prompt—every number, every lead, every date. (2) Do NOT add duplicate or report-style section headers (no "Performance Metrics and Analysis", "Lead Engagement Metrics", "Action Items" as ##). (3) Do NOT leave any section with only a heading—every section must have at least 2–3 sentences or a bullet list with explanation. (4) If you list numbered phases (Phase 1, Phase 2, Phase 3), do NOT skip numbers—always include Phase 2 between Phase 1 and Phase 3, and so on. (5) If the user provided notes (e.g. "issues and improvement"), address those in Issues/Challenges and Improvements/Recommendations. (6) Issues / Challenges and Improvements / Recommendations: ALWAYS include both sections; each item MUST have a **bold** heading (e.g. **Low Email Open Rates**, **Gather Audience Data**) followed by a full paragraph (3–5 sentences)—keep these sections a bit long. If there are positive opportunities, mention them and make that part a bit long too. (7) Do not disturb or change strategy, proposal, or report documents—this applies to Campaign Brief only.
 """,
             'presentation': """
 Create a presentation document with slides covering:

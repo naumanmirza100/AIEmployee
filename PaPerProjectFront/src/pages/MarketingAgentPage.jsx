@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Outlet } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
-import MarketingDashboard from '@/components/marketing/MarketingDashboard';
-import { checkModuleAccess } from '@/services/modulePurchaseService';
+import { checkModuleAccess, getPurchasedModules } from '@/services/modulePurchaseService';
 import { 
   Megaphone, 
   Building2, 
@@ -240,7 +239,7 @@ const MarketingAgentPage = () => {
         />
 
         <div className="container mx-auto px-4 py-8">
-          <MarketingDashboard />
+          <Outlet />
         </div>
       </div>
     </>

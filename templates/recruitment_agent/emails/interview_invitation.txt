@@ -1,9 +1,9 @@
 Dear {{ candidate_name }},
 
-Thank you for your interest in the {{ job_role }} position. We are pleased to invite you for an interview.
+Thank you for your interest in the {{ job_title }} position. We are pleased to invite you for an interview.
 
 Interview Details:
-- Position: {{ job_role }}
+- Position: {{ job_title }}
 - Interview Type: {{ interview_type }}
 
 Please select your preferred date and time for the interview using our scheduling system.

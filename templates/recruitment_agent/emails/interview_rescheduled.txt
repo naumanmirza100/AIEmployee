@@ -1,13 +1,13 @@
 Dear {{ candidate_name }},
 
-Your interview has been confirmed!
+Your interview has been rescheduled.
 
 Interview Details:
 - Position: {{ job_title }}
 - Interview Type: {{ interview_type }}
-- Scheduled Date & Time: {{ selected_slot }}
+- New Date & Time: {{ scheduled_display|default:selected_slot }}
 
-Please make sure to:
+Please update your calendar and make sure to:
 - Arrive on time (or join the online meeting 5 minutes early)
 - Bring a copy of your resume
 - Prepare any questions you may have
@@ -18,4 +18,3 @@ We look forward to meeting you!
 
 Best regards,
 Recruitment Team
-

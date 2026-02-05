@@ -1,6 +1,6 @@
 Dear {{ candidate_name }},
 
-This is a friendly reminder about your interview invitation for the {{ job_role }} position.
+This is a friendly reminder about your interview invitation for the {{ job_title }} position.
 
 We haven't received your response yet. Please select one of the following available time slots:
 

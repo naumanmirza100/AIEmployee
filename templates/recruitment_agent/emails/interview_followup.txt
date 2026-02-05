@@ -1,6 +1,6 @@
 Dear {{ candidate_name }},
 
-We wanted to follow up regarding your interview invitation for the {{ job_role }} position.
+We wanted to follow up regarding your interview invitation for the {{ job_title }} position.
 
 {% if followup_number > 1 %}
 This is a friendly reminder (follow-up #{{ followup_number }}) - we haven't received your confirmation yet.
@@ -9,7 +9,7 @@ We haven't received your confirmation yet. Please confirm your interview slot to
 {% endif %}
 
 Interview Details:
-- Position: {{ job_role }}
+- Position: {{ job_title }}
 - Interview Type: {{ interview_type }}
 
 Available Time Slots:

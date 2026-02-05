@@ -135,4 +135,59 @@ class GroqClient:
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             raise GroqClientError(f"Unable to parse Groq response: {exc}") from exc
 
+    def send_prompt_text(self, system_prompt: str, text: str) -> str:
+        """
+        Send a prompt and return raw text (no JSON mode). Use for long or free-form
+        output where JSON would be fragile (e.g. multi-paragraph job descriptions).
+        """
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = requests.post(
+                self.base_url, headers=headers, json=payload, timeout=self.timeout
+            )
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = ""
+            try:
+                error_body = exc.response.json()
+                detail = error_body.get("error", {}).get("message", exc.response.text)
+            except Exception:
+                detail = exc.response.text
+            if exc.response.status_code in (401, 403):
+                raise GroqClientError(
+                    f"Groq API authentication failed: {detail}",
+                    is_auth_error=True,
+                ) from exc
+            if exc.response.status_code == 429:
+                raise GroqClientError(
+                    "Groq API rate limit exceeded.",
+                    is_rate_limit=True,
+                ) from exc
+            if exc.response.status_code == 413:
+                raise GroqClientError(
+                    "Groq API request too large.",
+                    is_request_too_large=True,
+                ) from exc
+            raise GroqClientError(
+                f"Groq API request failed (HTTP {exc.response.status_code}): {detail}"
+            ) from exc
+        except requests.RequestException as exc:
+            raise GroqClientError(f"Groq API request failed: {exc}") from exc
+        try:
+            content = response.json()
+            return content["choices"][0]["message"]["content"].strip() or ""
+        except (KeyError, TypeError):
+            raise GroqClientError("Unable to read Groq response") from None
+
 

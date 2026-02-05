@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,8 +20,15 @@ import {
   getJobDescriptions
 } from '@/services/recruitmentAgentService';
 
+const SETTINGS_SUB_PATHS = ['email', 'interview', 'qualification'];
+
 const RecruiterSettings = () => {
   const { toast } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const settingsSub = pathParts[pathParts.length - 1];
+  const activeSettingsTab = SETTINGS_SUB_PATHS.includes(settingsSub) ? settingsSub : 'email';
   const [emailSettings, setEmailSettings] = useState({
     followup_delay_hours: 48,
     min_hours_between_followups: 24,
@@ -35,6 +43,7 @@ const RecruiterSettings = () => {
     start_time: '09:00',
     end_time: '17:00',
     interview_time_gap: 30,
+    default_interview_type: 'ONLINE',
   });
   const [qualificationSettings, setQualificationSettings] = useState({
     interview_threshold: 65,
@@ -136,6 +145,7 @@ const RecruiterSettings = () => {
           start_time: data.start_time || '09:00',
           end_time: data.end_time || '17:00',
           interview_time_gap: data.interview_time_gap || 30,
+          default_interview_type: data.default_interview_type || 'ONLINE',
         });
         // Load time slots from the response
         if (data.time_slots_json && Array.isArray(data.time_slots_json)) {
@@ -556,9 +566,13 @@ const RecruiterSettings = () => {
     );
   }
 
+  const handleSettingsTabChange = (value) => {
+    navigate(`/recruitment/settings/${value}`);
+  };
+
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="email" className="space-y-4">
+      <Tabs value={activeSettingsTab} onValueChange={handleSettingsTabChange} className="space-y-4">
         <TabsList>
           <TabsTrigger value="email">
             <Mail className="h-4 w-4 mr-2" />
@@ -734,6 +748,7 @@ const RecruiterSettings = () => {
                           start_time: '09:00',
                           end_time: '17:00',
                           interview_time_gap: 30,
+                          default_interview_type: 'ONLINE',
                         });
                         setScheduleFromDate(null);
                         setScheduleToDate(null);
@@ -920,6 +935,28 @@ const RecruiterSettings = () => {
                   />
                   <p className="text-xs text-muted-foreground">
                     Time gap between interview slots in minutes
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="default_interview_type">Interview type for this job</Label>
+                  <Select
+                    value={interviewSettings.default_interview_type || 'ONLINE'}
+                    onValueChange={(value) => setInterviewSettings({
+                      ...interviewSettings,
+                      default_interview_type: value,
+                    })}
+                  >
+                    <SelectTrigger id="default_interview_type" className="max-w-[200px]">
+                      <SelectValue placeholder="Online or Onsite" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ONLINE">Online</SelectItem>
+                      <SelectItem value="ONSITE">Onsite</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Selected candidates for this job will receive this interview type in their invitation email.
                   </p>
                 </div>
               </div>

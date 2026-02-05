@@ -197,7 +197,7 @@ def create_checkout_session(request):
 
         price_usd = MODULE_PRICES[module_name]
         display_name = MODULE_DISPLAY_NAMES[module_name]
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+        frontend_url = (getattr(settings, 'FRONTEND_URL', None) or '').rstrip('/')
 
         session = stripe.checkout.Session.create(
             mode='payment',

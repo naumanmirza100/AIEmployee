@@ -40,7 +40,7 @@ const CVProcessing = ({ onProcessComplete }) => {
 
   const handleJobSelection = async (jobId) => {
     // Check interview settings if a job is selected
-    if (jobId && jobId !== "none") {
+    if (jobId) {
       try {
         const settingsResponse = await getInterviewSettings(jobId);
         if (settingsResponse.status === 'success' && settingsResponse.data) {
@@ -71,10 +71,10 @@ const CVProcessing = ({ onProcessComplete }) => {
       }
     }
     
-    setSelectedJobId(jobId === "none" ? "" : jobId);
+    setSelectedJobId(jobId || "");
     
     // Extract and display keywords when a job is selected
-    if (jobId && jobId !== "none") {
+    if (jobId) {
       const selectedJob = jobDescriptions.find(job => job.id.toString() === jobId.toString());
       if (selectedJob && selectedJob.keywords_json) {
         try {
@@ -108,8 +108,17 @@ const CVProcessing = ({ onProcessComplete }) => {
       return;
     }
 
-    // Validate interview settings if a job is selected
-    if (selectedJobId && selectedJobId !== "none") {
+    if (!selectedJobId) {
+      toast({
+        title: 'Job required',
+        description: 'Please select a job description before processing CVs.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate interview settings for the selected job
+    if (selectedJobId) {
       try {
         const settingsResponse = await getInterviewSettings(selectedJobId);
         if (settingsResponse.status === 'success' && settingsResponse.data) {
@@ -146,7 +155,7 @@ const CVProcessing = ({ onProcessComplete }) => {
 
       const response = await processCVs(
         files,
-        selectedJobId && selectedJobId !== "none" ? selectedJobId : null,
+        selectedJobId,
         jobDescriptionText,
         jobKeywords,
         topN ? parseInt(topN) : null,
@@ -217,15 +226,14 @@ const CVProcessing = ({ onProcessComplete }) => {
             )}
           </div>
 
-          {/* Job Description Selection */}
+          {/* Job Description Selection (Required) */}
           <div className="space-y-2">
-            <Label htmlFor="job-description">Select Job Description</Label>
-            <Select value={selectedJobId || "none"} onValueChange={handleJobSelection}>
+            <Label htmlFor="job-description">Select Job Description <span className="text-destructive">*</span></Label>
+            <Select value={selectedJobId || ""} onValueChange={handleJobSelection}>
               <SelectTrigger>
-                <SelectValue placeholder="Select a job description" />
+                <SelectValue placeholder="Select a job (required)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">None - Use text/keywords below</SelectItem>
                 {jobDescriptions.map((job) => (
                   <SelectItem key={job.id} value={job.id.toString()}>
                     {job.title}
@@ -233,6 +241,7 @@ const CVProcessing = ({ onProcessComplete }) => {
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">Job selection is required to process CVs. Ensure interview settings are complete for the selected job.</p>
             
             {/* Display Keywords when job is selected */}
             {selectedJobId && selectedJobId !== "none" && displayedKeywords.length > 0 && (
@@ -249,21 +258,7 @@ const CVProcessing = ({ onProcessComplete }) => {
             )}
           </div>
 
-          {/* Job Description Text */}
-          {!selectedJobId && (
-            <div className="space-y-2">
-              <Label htmlFor="job-text">Job Description Text (Optional)</Label>
-              <Textarea
-                id="job-text"
-                value={jobDescriptionText}
-                onChange={(e) => setJobDescriptionText(e.target.value)}
-                placeholder="Paste job description here..."
-                className="min-h-[100px]"
-              />
-            </div>
-          )}
-
-          {/* Keywords */}
+          {/* Keywords (Optional) */}
           <div className="space-y-2">
             <Label htmlFor="keywords">Keywords (Optional, comma-separated)</Label>
             <Input
@@ -288,7 +283,7 @@ const CVProcessing = ({ onProcessComplete }) => {
 
           <Button
             onClick={handleProcess}
-            disabled={processing || files.length === 0}
+            disabled={processing || files.length === 0 || !selectedJobId}
             className="w-full"
           >
             {processing ? (

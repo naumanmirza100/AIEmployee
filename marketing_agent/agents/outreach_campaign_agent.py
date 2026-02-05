@@ -187,9 +187,16 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                 except (ValueError, TypeError):
                     end_date = None
             
+            campaign_name = (campaign_data.get('name') or 'New Campaign').strip() or 'New Campaign'
+            if Campaign.objects.filter(owner_id=user_id, name__iexact=campaign_name).exists():
+                return {
+                    'success': False,
+                    'error': 'A campaign with this name already exists. Please choose a different name.',
+                }
+            
             # Create campaign in database with all fields
             campaign = Campaign.objects.create(
-                name=campaign_data.get('name', 'New Campaign'),
+                name=campaign_name,
                 description=campaign_data.get('description', ''),
                 campaign_type=campaign_data.get('campaign_type', 'email'),  # Email-only campaigns
                 status='draft',
@@ -691,12 +698,24 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
                         campaign.end_date = end_date
             
             # Check if email templates exist
-            from marketing_agent.models import EmailTemplate
+            from marketing_agent.models import EmailTemplate, EmailSequence
             email_templates = EmailTemplate.objects.filter(campaign=campaign, is_active=True)
             if not email_templates.exists():
                 return {
                     'success': False,
                     'error': 'No active email templates found. Please create at least one email template before launching the campaign.'
+                }
+            # Check if at least one active sequence with steps exists (emails are sent via sequences)
+            active_sequences = EmailSequence.objects.filter(campaign=campaign, is_active=True)
+            has_sequence_with_steps = False
+            for seq in active_sequences:
+                if seq.steps.exists():
+                    has_sequence_with_steps = True
+                    break
+            if not has_sequence_with_steps:
+                return {
+                    'success': False,
+                    'error': 'No active email sequences found. Please create at least one email sequence with steps before launching. Go to Sequence Management to add sequences.'
                 }
             
             # Update campaign status directly (no AI call)

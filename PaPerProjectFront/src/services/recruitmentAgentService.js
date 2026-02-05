@@ -87,6 +87,21 @@ export const getJobDescriptions = async () => {
 };
 
 /**
+ * Generate job title and description from a prompt (AI fills form; user saves to create)
+ * @param {string} prompt - User prompt describing the job to generate
+ * @returns {Promise<{ title, description, requirements, location, department, type }>}
+ */
+export const generateJobDescription = async (prompt) => {
+  try {
+    const response = await companyApi.post('/recruitment/job-descriptions/generate', { prompt });
+    return response;
+  } catch (error) {
+    console.error('Generate job description error:', error);
+    throw error;
+  }
+};
+
+/**
  * Create a new job description
  * @param {object} jobData - Job description data
  */
@@ -139,6 +154,9 @@ export const getInterviews = async (filters = {}) => {
     if (filters.status) {
       params.append('status', filters.status);
     }
+    if (filters.outcome !== undefined && filters.outcome !== '') {
+      params.append('outcome', filters.outcome);
+    }
     
     const queryString = params.toString();
     const endpoint = `/recruitment/interviews${queryString ? `?${queryString}` : ''}`;
@@ -166,6 +184,21 @@ export const scheduleInterview = async (interviewData) => {
 };
 
 /**
+ * Update interview status and/or outcome
+ * @param {number} interviewId - Interview ID
+ * @param {object} payload - { status?, outcome? }
+ */
+export const updateInterview = async (interviewId, payload) => {
+  try {
+    const response = await companyApi.patch(`/recruitment/interviews/${interviewId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update interview error:', error);
+    throw error;
+  }
+};
+
+/**
  * Get interview details
  * @param {number} interviewId - Interview ID
  */
@@ -180,8 +213,39 @@ export const getInterviewDetails = async (interviewId) => {
 };
 
 /**
- * Get CV records/candidates
- * @param {object} filters - Optional filters (job_id, decision)
+ * Get available slots for rescheduling an interview
+ * @param {number} interviewId - Interview ID
+ */
+export const getRescheduleSlots = async (interviewId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/interviews/${interviewId}/reschedule-slots`);
+    return response;
+  } catch (error) {
+    console.error('Get reschedule slots error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Reschedule an interview to a new slot (sends new invitation to candidate)
+ * @param {number} interviewId - Interview ID
+ * @param {string} newSlotDatetime - New slot in ISO format
+ */
+export const rescheduleInterview = async (interviewId, newSlotDatetime) => {
+  try {
+    const response = await companyApi.post(`/recruitment/interviews/${interviewId}/reschedule`, {
+      new_slot_datetime: newSlotDatetime,
+    });
+    return response;
+  } catch (error) {
+    console.error('Reschedule interview error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get CV records/candidates with server-side pagination
+ * @param {object} filters - Optional filters (job_id, decision, page, page_size)
  */
 export const getCVRecords = async (filters = {}) => {
   try {
@@ -192,6 +256,12 @@ export const getCVRecords = async (filters = {}) => {
     if (filters.decision) {
       params.append('decision', filters.decision);
     }
+    if (filters.page != null) {
+      params.append('page', String(filters.page));
+    }
+    if (filters.page_size != null) {
+      params.append('page_size', String(filters.page_size));
+    }
     
     const queryString = params.toString();
     const endpoint = `/recruitment/cv-records${queryString ? `?${queryString}` : ''}`;
@@ -200,6 +270,24 @@ export const getCVRecords = async (filters = {}) => {
     return response;
   } catch (error) {
     console.error('Get CV records error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Bulk update qualification decision for selected CV records (admin override).
+ * @param {number[]} cvRecordIds - Array of CV record IDs
+ * @param {string} qualificationDecision - One of: INTERVIEW, HOLD, REJECT
+ */
+export const bulkUpdateCVRecords = async (cvRecordIds, qualificationDecision) => {
+  try {
+    const response = await companyApi.post('/recruitment/cv-records/bulk-update', {
+      cv_record_ids: cvRecordIds,
+      qualification_decision: qualificationDecision,
+    });
+    return response;
+  } catch (error) {
+    console.error('Bulk update CV records error:', error);
     throw error;
   }
 };
@@ -295,11 +383,12 @@ export const updateQualificationSettings = async (settings) => {
  */
 export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = null) => {
   try {
-    const params = { days, months };
-    if (jobId) {
-      params.job_id = jobId;
+    // companyApi.get(endpoint, queryParams) – second arg is the query object, not { params }
+    const queryParams = { days, months };
+    if (jobId != null && jobId !== '' && jobId !== 'all') {
+      queryParams.job_id = typeof jobId === 'number' ? jobId : Number(jobId) || jobId;
     }
-    const response = await companyApi.get('/recruitment/analytics', { params });
+    const response = await companyApi.get('/recruitment/analytics', queryParams);
     return response;
   } catch (error) {
     console.error('Get recruitment analytics error:', error);
@@ -310,13 +399,17 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
 export default {
   processCVs,
   getJobDescriptions,
+  generateJobDescription,
   createJobDescription,
   updateJobDescription,
   deleteJobDescription,
   getInterviews,
   scheduleInterview,
   getInterviewDetails,
+  getRescheduleSlots,
+  rescheduleInterview,
   getCVRecords,
+  bulkUpdateCVRecords,
   getEmailSettings,
   updateEmailSettings,
   getInterviewSettings,

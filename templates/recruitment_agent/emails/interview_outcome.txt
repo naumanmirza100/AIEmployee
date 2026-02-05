@@ -1,0 +1,10 @@
+Dear {{ candidate_name }},
+
+Your interview outcome for the {{ job_title }} position has been updated.
+
+Decision: {{ outcome_label }}
+
+Thank you for your time and interest.
+
+Best regards,
+Recruitment Team

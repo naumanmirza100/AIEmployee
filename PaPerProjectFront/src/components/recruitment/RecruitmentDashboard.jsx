@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,9 +20,31 @@ import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
 
+const PATH_TO_TAB = {
+  dashboard: 'dashboard',
+  cvprocessing: 'cv-processing',
+  analytics: 'analytics',
+  'job-descriptions': 'jobs',
+  candidates: 'candidates',
+  interviews: 'interviews',
+  settings: 'settings',
+};
+const TAB_TO_PATH = {
+  'dashboard': 'dashboard',
+  'cv-processing': 'cvprocessing',
+  'analytics': 'analytics',
+  'jobs': 'job-descriptions',
+  'candidates': 'candidates',
+  'interviews': 'interviews',
+  'settings': 'settings',
+};
+
 const RecruitmentDashboard = () => {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathSegment = (location.pathname.match(/\/recruitment\/?([^/]*)/) || [])[1] || 'dashboard';
+  const activeTab = PATH_TO_TAB[pathSegment] || 'dashboard';
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalCVs: 0,
@@ -115,8 +138,8 @@ const RecruitmentDashboard = () => {
         </Card>
       </div>
 
-      {/* Main Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      {/* Main Tabs - each tab navigates to its URL */}
+      <Tabs value={activeTab} onValueChange={(tab) => navigate(`/recruitment/${TAB_TO_PATH[tab] || 'dashboard'}`)} className="w-full">
         <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="analytics">
@@ -156,7 +179,7 @@ const RecruitmentDashboard = () => {
                 <Button
                   variant="outline"
                   className="h-auto flex-col items-start p-4"
-                  onClick={() => setActiveTab('cv-processing')}
+                  onClick={() => navigate('/recruitment/cvprocessing')}
                 >
                   <Upload className="h-6 w-6 mb-2" />
                   <span className="font-semibold">Process CVs</span>
@@ -168,7 +191,7 @@ const RecruitmentDashboard = () => {
                 <Button
                   variant="outline"
                   className="h-auto flex-col items-start p-4"
-                  onClick={() => setActiveTab('jobs')}
+                  onClick={() => navigate('/recruitment/job-descriptions')}
                 >
                   <Briefcase className="h-6 w-6 mb-2" />
                   <span className="font-semibold">Manage Jobs</span>
@@ -180,7 +203,7 @@ const RecruitmentDashboard = () => {
                 <Button
                   variant="outline"
                   className="h-auto flex-col items-start p-4"
-                  onClick={() => setActiveTab('interviews')}
+                  onClick={() => navigate('/recruitment/interviews')}
                 >
                   <Calendar className="h-6 w-6 mb-2" />
                   <span className="font-semibold">Schedule Interview</span>

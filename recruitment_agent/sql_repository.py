@@ -25,14 +25,14 @@ from sqlalchemy.exc import SQLAlchemyError
 class SQLRepository:
     """
     Simple SQL Server repository to persist parsed CVs and insights.
-    Uses a single table `dbo.ppp_cv_records` (schema: dbo, table: ppp_cv_records) with parsed JSON and optional insights.
+    Uses table dbo.ppp_recruitment_agent_cvrecord (aligned with Django CVRecord.db_table).
     """
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
         self.metadata = MetaData(schema="dbo")
         self.cv_records = Table(
-            "ppp_cv_records",
+            "ppp_recruitment_agent_cvrecord",
             self.metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
             Column("file_name", String(512), nullable=False),
@@ -72,12 +72,12 @@ class SQLRepository:
     def _ensure_enriched_column(self) -> None:
         try:
             inspector = inspect(self.engine)
-            cols = inspector.get_columns("ppp_cv_records", schema="dbo")
+            cols = inspector.get_columns("ppp_recruitment_agent_cvrecord", schema="dbo")
             names = {c["name"] for c in cols}
             if "enriched_json" in names:
                 return
             with self.engine.begin() as conn:
-                conn.execute(text("ALTER TABLE dbo.ppp_cv_records ADD enriched_json NVARCHAR(MAX) NULL"))
+                conn.execute(text("ALTER TABLE dbo.ppp_recruitment_agent_cvrecord ADD enriched_json NVARCHAR(MAX) NULL"))
         except SQLAlchemyError:
             # Best-effort; ignore if cannot alter (table might not exist yet or column already exists)
             traceback.print_exc()
@@ -85,17 +85,17 @@ class SQLRepository:
     def _ensure_qualification_columns(self) -> None:
         try:
             inspector = inspect(self.engine)
-            cols = inspector.get_columns("ppp_cv_records", schema="dbo")
+            cols = inspector.get_columns("ppp_recruitment_agent_cvrecord", schema="dbo")
             names = {c["name"] for c in cols}
             alter_stmts = []
             if "qualification_json" not in names:
-                alter_stmts.append("ALTER TABLE dbo.ppp_cv_records ADD qualification_json NVARCHAR(MAX) NULL")
+                alter_stmts.append("ALTER TABLE dbo.ppp_recruitment_agent_cvrecord ADD qualification_json NVARCHAR(MAX) NULL")
             if "qualification_decision" not in names:
-                alter_stmts.append("ALTER TABLE dbo.ppp_cv_records ADD qualification_decision NVARCHAR(32) NULL")
+                alter_stmts.append("ALTER TABLE dbo.ppp_recruitment_agent_cvrecord ADD qualification_decision NVARCHAR(32) NULL")
             if "qualification_confidence" not in names:
-                alter_stmts.append("ALTER TABLE dbo.ppp_cv_records ADD qualification_confidence INT NULL")
+                alter_stmts.append("ALTER TABLE dbo.ppp_recruitment_agent_cvrecord ADD qualification_confidence INT NULL")
             if "qualification_priority" not in names:
-                alter_stmts.append("ALTER TABLE dbo.ppp_cv_records ADD qualification_priority NVARCHAR(16) NULL")
+                alter_stmts.append("ALTER TABLE dbo.ppp_recruitment_agent_cvrecord ADD qualification_priority NVARCHAR(16) NULL")
             for stmt in alter_stmts:
                 try:
                     with self.engine.begin() as conn:

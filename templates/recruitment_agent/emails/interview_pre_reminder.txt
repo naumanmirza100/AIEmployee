@@ -2,7 +2,7 @@ Dear {{ candidate_name }},
 
 This is a reminder that you have an interview scheduled:
 
-Position: {{ job_role }}
+Position: {{ job_title }}
 Interview Type: {{ interview_type }}
 Date & Time: {{ selected_slot }}
 
