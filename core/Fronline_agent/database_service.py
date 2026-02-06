@@ -75,28 +75,36 @@ class PayPerProjectDatabaseService:
             List of FAQ dictionaries
         """
         try:
-            # Try to query from PayPerProject database tables
-            # Adjust table names based on actual PayPerProject schema
-            query = """
-                SELECT TOP (%s)
-                    id, question, answer, category, 
-                    created_at, updated_at, is_active
-                FROM dbo.FAQs
-                WHERE is_active = 1
-            """
-            params = [limit]
+            # Try to use Django FAQ model first
+            from core.models import FAQ
+            from django.db.models import Q
+            
+            queryset = FAQ.objects.filter(is_active=True)
             
             if search_term:
-                query += " AND (question LIKE %s OR answer LIKE %s OR category LIKE %s)"
-                search_pattern = f"%{search_term}%"
-                params.extend([search_pattern, search_pattern, search_pattern])
+                queryset = queryset.filter(
+                    Q(question__icontains=search_term) |
+                    Q(answer__icontains=search_term) |
+                    Q(category__icontains=search_term)
+                )
             
-            query += " ORDER BY updated_at DESC"
+            faqs = queryset.order_by('-updated_at')[:limit]
             
-            return self._execute_read_query(query, params)
+            return [
+                {
+                    'id': faq.id,
+                    'question': faq.question,
+                    'answer': faq.answer,
+                    'category': faq.category or '',
+                    'created_at': faq.created_at,
+                    'updated_at': faq.updated_at,
+                    'is_active': faq.is_active
+                }
+                for faq in faqs
+            ]
         except Exception as e:
-            logger.warning(f"FAQs table may not exist or query failed: {e}")
-            # Fallback to local KnowledgeBase if PayPerProject table doesn't exist
+            logger.warning(f"FAQ model may not exist or query failed: {e}")
+            # Fallback to local KnowledgeBase if FAQ model doesn't exist
             return self._get_faqs_fallback(search_term, limit)
     
     def _get_faqs_fallback(self, search_term: Optional[str] = None, limit: int = 10) -> List[Dict]:
@@ -139,27 +147,8 @@ class PayPerProjectDatabaseService:
         Returns:
             List of policy dictionaries
         """
-        try:
-            query = """
-                SELECT TOP (%s)
-                    id, title, content, policy_type, 
-                    version, effective_date, created_at, updated_at, is_active
-                FROM dbo.Policies
-                WHERE is_active = 1
-            """
-            params = [limit]
-            
-            if search_term:
-                query += " AND (title LIKE %s OR content LIKE %s OR policy_type LIKE %s)"
-                search_pattern = f"%{search_term}%"
-                params.extend([search_pattern, search_pattern, search_pattern])
-            
-            query += " ORDER BY updated_at DESC"
-            
-            return self._execute_read_query(query, params)
-        except Exception as e:
-            logger.warning(f"Policies table may not exist or query failed: {e}")
-            return self._get_policies_fallback(search_term, limit)
+        # Use KnowledgeBase model with policies category
+        return self._get_policies_fallback(search_term, limit)
     
     def _get_policies_fallback(self, search_term: Optional[str] = None, limit: int = 10) -> List[Dict]:
         """Fallback to local KnowledgeBase model"""
@@ -203,27 +192,8 @@ class PayPerProjectDatabaseService:
         Returns:
             List of manual dictionaries
         """
-        try:
-            query = """
-                SELECT TOP (%s)
-                    id, title, content, manual_type, 
-                    section, created_at, updated_at, is_active
-                FROM dbo.Manuals
-                WHERE is_active = 1
-            """
-            params = [limit]
-            
-            if search_term:
-                query += " AND (title LIKE %s OR content LIKE %s OR manual_type LIKE %s)"
-                search_pattern = f"%{search_term}%"
-                params.extend([search_pattern, search_pattern, search_pattern])
-            
-            query += " ORDER BY updated_at DESC"
-            
-            return self._execute_read_query(query, params)
-        except Exception as e:
-            logger.warning(f"Manuals table may not exist or query failed: {e}")
-            return self._get_manuals_fallback(search_term, limit)
+        # Use KnowledgeBase model with documentation category
+        return self._get_manuals_fallback(search_term, limit)
     
     def _get_manuals_fallback(self, search_term: Optional[str] = None, limit: int = 10) -> List[Dict]:
         """Fallback to local KnowledgeBase model"""

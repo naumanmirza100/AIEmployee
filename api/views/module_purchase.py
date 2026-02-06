@@ -27,12 +27,14 @@ MODULE_PRICES = {
     'recruitment_agent': 99,
     'marketing_agent': 149,
     'project_manager_agent': 199,
+    'frontline_agent': 149,
 }
 
 MODULE_DISPLAY_NAMES = {
     'recruitment_agent': 'Recruitment Agent',
     'marketing_agent': 'Marketing Agent',
     'project_manager_agent': 'Project Manager Agent',
+    'frontline_agent': 'Frontline Agent',
 }
 
 

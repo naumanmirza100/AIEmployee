@@ -27,6 +27,7 @@ import {
   UserCheck,
   Plus,
   Megaphone,
+  Headphones,
   Lock
 } from 'lucide-react';
 import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
@@ -329,6 +330,13 @@ const ProjectManagerDashboardPage = () => {
               icon: Megaphone,
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
+            }] : []),
+            // Only show Frontline Agent if purchased
+            ...(purchasedModules.includes('frontline_agent') ? [{
+              label: 'Frontline Agent',
+              icon: Headphones,
+              section: 'frontline',
+              onClick: () => navigate('/frontline/dashboard'),
             }] : []),
           ] : []}
         />

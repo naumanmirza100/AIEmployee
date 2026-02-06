@@ -1,33 +1,45 @@
-Django==5.0.1
+# Django & REST
+Django==4.2.10
+djangorestframework==3.14.0
+djangorestframework-simplejwt==5.3.0
+django-cors-headers==4.3.0
+mssql-django==1.6
+pyodbc>=4.0
+
+# Environment
 python-dotenv==1.0.0
-groq>=0.9.0
-openai>=1.0.0
-huggingface_hub>=0.20.0
-requests>=2.31.0,<3.0.0
-pdfplumber>=0.10.3
-python-docx>=0.8.11
-python-pptx>=0.6.21
-reportlab>=4.0.0
-markdown>=3.5.0
-SQLAlchemy>=2.0.30
-pyodbc>=5.1.0
-mssql-django>=1.4
+
+# AI / NLP
+groq>=1.0.0 --prefer-binary
+openai==1.0.0 --prefer-binary
+huggingface_hub==0.20.0 --prefer-binary
+httpx>=0.27.0,<1.0.0
+
+numpy==1.26.4 --prefer-binary
+
+# PDF / Docs / Excel / PPT
+pdfplumber==0.10.3
+python-docx==0.8.11
+python-pptx==0.6.21
+reportlab==4.0.0
+markdown==3.5.0
+pandas==2.1.1 --prefer-binary
+openpyxl==3.1.2
+
+# Database / ORM
+SQLAlchemy==2.0.46
+
+# Celery & Redis
+celery==5.3.4
+redis==5.0.1
+django-celery-beat==2.5.0
 spacy>=3.7.0,<3.8.0
-djangorestframework>=3.14.0
-djangorestframework-simplejwt>=5.3.0
-django-cors-headers>=4.3.0
-# Note: If you encounter pydantic compatibility issues with Python 3.12,
-# you may need to install: pip install "pydantic<2.0" or upgrade spacy
-pandas>=2.0.0
-openpyxl>=3.1.0
 
-# Celery & Redis (for Celery Beat automation - replaces Windows Task Scheduler)
-celery>=5.3.4
-redis>=5.0.1
-django-celery-beat>=2.5.0
-# SQLAlchemy needed if using SQLite broker (development fallback)
-# SQLAlchemy>=2.0.30  # Already in requirements above
 
-# Stripe (module purchase payments)
-stripe>=8.0.0
+# Stripe payments
+stripe==8.0.0
 
+# Production server
+gunicorn==21.2.0
+
+whitenoise==6.4.0

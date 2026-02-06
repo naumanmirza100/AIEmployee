@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, X } from 'lucide-react';
 import { companyApi } from '@/services/companyAuthService';
+import { API_BASE_URL } from '@/config/apiConfig';
 
 const ManualProjectCreation = ({ onProjectCreated }) => {
   const { toast } = useToast();
@@ -36,7 +37,7 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
   const fetchIndustries = async () => {
     try {
       setLoadingIndustries(true);
-      const response = await fetch('http://localhost:8000/api/industries/');
+      const response = await fetch(`${API_BASE_URL}/industries/`);
       if (response.ok) {
         const data = await response.json();
         setIndustries(data.data || []);
