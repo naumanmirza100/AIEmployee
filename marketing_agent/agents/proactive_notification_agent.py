@@ -314,7 +314,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'Low Open Rate Alert: {campaign.name}',
                 message=f'Open rate is {open_rate:.1f}% (below 15% threshold). Consider reviewing subject lines and send times.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'metric': 'open_rate',
                     'value': open_rate,
@@ -340,7 +340,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'High Bounce Rate Alert: {campaign.name}',
                 message=f'Bounce rate is {bounce_rate:.1f}% (above 5% threshold). Check email list quality and sender reputation.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'metric': 'bounce_rate',
                     'value': bounce_rate,
@@ -366,7 +366,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'Email Delivery Failures: {campaign.name}',
                 message=f'Email failure rate is {failure_rate:.1f}% (above 2% threshold). Immediate attention required.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'metric': 'failure_rate',
                     'value': failure_rate,
@@ -392,7 +392,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'High Engagement Opportunity: {campaign.name}',
                 message=f'Excellent open rate of {open_rate:.1f}%! Consider scaling this campaign or applying similar strategies to other campaigns.',
                 action_required=False,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'metric': 'open_rate',
                     'value': open_rate,
@@ -417,7 +417,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'High Click-Through Rate: {campaign.name}',
                 message=f'Strong click-through rate of {click_rate:.1f}%! Consider increasing email frequency or expanding this campaign.',
                 action_required=False,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'metric': 'click_rate',
                     'value': click_rate,
@@ -456,7 +456,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                             title=f'⚠️ No Engagement Detected: {campaign.name}',
                             message=f'Campaign "{campaign.name}" has sent {total_sent} emails but received ZERO clicks and ZERO replies. This indicates low engagement. Consider: 1) Improving subject lines, 2) Personalizing content, 3) Reviewing target audience, 4) Testing different send times.',
                             action_required=True,
-                            action_url=f'/marketing/campaigns/{campaign.id}/',
+                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                             metadata={
                                 'action': 'no_engagement_detected',
                                 'total_sent': total_sent,
@@ -489,7 +489,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                             title=f'📧 Emails Opened But No Clicks/Replies: {campaign.name}',
                             message=f'Campaign "{campaign.name}" has {emails_opened} email opens but ZERO clicks and ZERO replies from {total_sent} emails sent. People are opening but not engaging. Improve: 1) Call-to-action buttons, 2) Email content relevance, 3) Offer value, 4) Follow-up sequences.',
                             action_required=True,
-                            action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
                             metadata={
                                 'action': 'opens_but_no_clicks_replies',
                                 'total_sent': total_sent,
@@ -545,7 +545,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'Email Delivery Issues: {campaign.name}',
                 message=f'High email delivery failure rate ({failure_rate:.1f}%) in the last 24 hours. {failure_count} out of {recent_emails.count()} emails failed.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'failure_rate': failure_rate,
                     'failure_count': failure_count,
@@ -584,7 +584,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'Milestone Reached: {campaign.name}',
                     message=f'Lead target achieved! {actual_leads} leads generated (target: {campaign.target_leads}).',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'milestone': 'lead_target',
                         'actual': actual_leads,
@@ -647,7 +647,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'Performance Anomaly Detected: {campaign.name}',
                 message=f'Open rate dropped by {drop_percentage:.1f}% compared to previous week ({recent_open_rate:.1f}% vs {previous_open_rate:.1f}%). Investigate potential issues.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'metric': 'open_rate',
                     'recent': recent_open_rate,
@@ -691,7 +691,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Generate Leads: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is paused and has no leads! Generate or upload leads first, then create email sequences, and finally launch the campaign.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
                     metadata={
                         'action': 'generate_leads',
                         'status': 'paused',
@@ -712,7 +712,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📧 Create Email Sequences: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is paused with {leads_count} leads but no email sequences! Create follow-up email sequences, then launch the campaign.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'create_sequences_for_paused',
                         'status': 'paused',
@@ -733,7 +733,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🚀 Launch Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is paused but ready to launch! It has {leads_count} leads and {sequences.count()} email sequence(s). Activate the campaign to start sending emails.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
                     metadata={
                         'action': 'launch_paused_campaign',
                         'status': 'paused',
@@ -762,7 +762,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⏰ Scheduled Date Arrived – Action Required: {campaign.name}',
                     message=f'The scheduled start date ({campaign.start_date}) has arrived but campaign "{campaign.name}" cannot be activated. It has no email sequences or no leads. Upload leads, create email templates and sequences, then launch the campaign manually.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'scheduled_date_arrived_no_setup',
                         'status': 'scheduled',
@@ -785,7 +785,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Generate Leads for Scheduled Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is scheduled but has no leads! Generate or upload leads first, then create email sequences before the start date.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
                     metadata={
                         'action': 'generate_leads_for_scheduled',
                         'status': 'scheduled',
@@ -807,7 +807,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📧 Create Email Sequences: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is scheduled with {leads_count} leads but no email sequences! Create follow-up email sequences before the campaign starts.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'create_sequences_for_scheduled',
                         'status': 'scheduled',
@@ -831,7 +831,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         title=f'⏰ Scheduled Campaign Not Launched: {campaign.name}',
                         message=f'Campaign "{campaign.name}" is scheduled with start date {campaign.start_date} but has NOT been launched yet! It has {leads_count} leads and {sequences.count()} sequence(s) ready. Launch the campaign now to start sending emails.',
                         action_required=True,
-                        action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                        action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
                         metadata={
                             'action': 'launch_scheduled_campaign',
                             'status': 'scheduled',
@@ -856,7 +856,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                             title=f'🚀 Campaign Ready to Launch: {campaign.name}',
                             message=f'Campaign "{campaign.name}" is scheduled to start {campaign.start_date.strftime("%B %d, %Y")} ({days_until_start} day{"s" if days_until_start != 0 else ""} away). It has {leads_count} leads and {sequences.count()} sequence(s) ready. You can launch it now or wait for the scheduled date.',
                             action_required=False,
-                            action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                            action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
                             metadata={
                                 'action': 'campaign_ready_to_launch',
                                 'status': 'scheduled',
@@ -885,7 +885,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🚀 Activate Campaign: {campaign.name}',
                     message=f'Your campaign "{campaign.name}" is ready to activate! It has {campaign.leads.count()} leads and dates configured. Click to activate and start sending emails.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
                     metadata={
                         'action': 'activate_campaign',
                         'leads_count': campaign.leads.count(),
@@ -910,7 +910,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⏰ Campaign Start Date Passed: {campaign.name}',
                     message=f'Campaign "{campaign.name}" start date ({campaign.start_date}) has passed but campaign is still scheduled. Activate it now to start sending emails.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/edit/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/edit/',
                     metadata={
                         'action': 'activate_overdue_campaign',
                         'start_date': campaign.start_date.isoformat()
@@ -934,7 +934,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'📧 Create Email Sequences: {campaign.name}',
                 message=f'Campaign "{campaign.name}" has no email sequences set up! Create follow-up email sequences to engage with your {campaign.leads.count()} leads. Click to create sequences.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                 metadata={
                     'action': 'create_email_sequences',
                     'leads_count': campaign.leads.count(),
@@ -964,7 +964,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Increase Leads: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active but has no leads! Generate or upload more leads to start engaging with your target audience and improve campaign performance.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
                     metadata={
                         'action': 'increase_leads_for_active',
                         'status': 'active',
@@ -985,7 +985,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📧 Create Email Sequences: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active with {leads_count} leads but no email sequences! Create follow-up email sequences to engage with your leads and improve conversion rates.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'create_sequences_for_active',
                         'status': 'active',
@@ -1006,7 +1006,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📬 Start Sending Emails: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active with {leads_count} leads and {sequences.count()} sequence(s) but no emails have been sent yet! Trigger email sequences to start engaging with your leads.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'start_sending_emails',
                         'leads_count': leads_count,
@@ -1037,7 +1037,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         title=f'👥 Increase Lead Count: {campaign.name}',
                         message=f'Campaign "{campaign.name}" is performing well ({open_rate:.1f}% open rate) but only has {leads_count} leads. Consider adding more leads to scale the campaign and increase conversions.',
                         action_required=False,
-                        action_url=f'/marketing/campaigns/{campaign.id}/leads/upload/',
+                        action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
                         metadata={
                             'action': 'increase_leads_scale',
                             'status': 'active',
@@ -1087,7 +1087,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'👥 Add Leads to Active Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active but has no leads and no emails sent. Add leads first, then create email sequences to start the campaign.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/leads/upload/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/',
                     metadata={
                         'action': 'add_leads_to_active',
                         'leads_count': 0,
@@ -1109,7 +1109,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📧 Create Email Sequences for Active Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is active with {leads_count} leads but no email sequences. Create email sequences to start sending emails to your leads.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'create_sequences_for_active_no_emails',
                         'leads_count': leads_count,
@@ -1145,7 +1145,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'✏️ Improve Email Content: {campaign.name}',
                 message=f'Open rate is {open_rate:.1f}% (below 20%). Improve your emails by: 1) Writing better subject lines, 2) Personalizing content, 3) Testing send times, 4) A/B testing different approaches.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
                 metadata={
                     'action': 'improve_email_content',
                     'open_rate': open_rate,
@@ -1174,7 +1174,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'🎯 Optimize Call-to-Action: {campaign.name}',
                 message=f'Good open rate ({open_rate:.1f}%) but low click rate ({click_rate:.1f}%). Improve CTAs by: 1) Making buttons more prominent, 2) Using action-oriented language, 3) Reducing friction, 4) Testing different CTA placements.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
                 metadata={
                     'action': 'optimize_cta',
                     'open_rate': open_rate,
@@ -1217,7 +1217,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🔄 Create Follow-up Email Sequences: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has contacted {contacted_leads} leads but no follow-up sequences! Create follow-up email sequences to nurture leads and improve conversion rates.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'create_followup_sequences',
                         'contacted_leads': contacted_leads,
@@ -1241,7 +1241,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'🔄 Add More Follow-up Sequences: {campaign.name}',
                 message=f'Great engagement ({open_rate:.1f}% open rate)! Consider adding more follow-up email sequences to nurture leads further. You currently have {sequences.count()} sequence(s).',
                 action_required=False,
-                action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                 metadata={
                     'action': 'add_followup_sequences',
                     'open_rate': open_rate,
@@ -1272,7 +1272,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📅 Schedule More Emails: {campaign.name}',
                     message=f'Excellent performance! Open rate: {open_rate:.1f}%, Click rate: {click_rate:.1f}%. Only {recent_emails} emails sent in last 7 days. Consider scheduling more emails to maintain engagement.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={
                         'action': 'schedule_more_emails',
                         'open_rate': open_rate,
@@ -1324,7 +1324,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🎉 Positive Replies: {campaign.name}',
                     message=f'Campaign "{campaign.name}" received {reply_count} positive reply/replies from {unique_leads} lead(s) in the last 7 days! Latest from {latest_reply.lead.email}. Follow up to convert them.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'positive_replies', 'count': reply_count, 'unique_leads': unique_leads}
                 )
                 if notification:
@@ -1343,7 +1343,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📉 Negative Replies: {campaign.name}',
                     message=f'Campaign "{campaign.name}" received {reply_count} negative reply/replies (not interested) in the last 7 days. Consider: 1) Reviewing target audience, 2) Improving messaging, 3) Adjusting value proposition.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'negative_replies', 'count': reply_count}
                 )
                 if notification:
@@ -1362,7 +1362,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⚠️ Objections Received: {campaign.name}',
                     message=f'Campaign "{campaign.name}" received {reply_count} reply/replies with objections/concerns. Address these concerns in follow-up emails to improve conversion.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'objection_replies', 'count': reply_count}
                 )
                 if notification:
@@ -1381,7 +1381,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🚫 Unsubscribe Requests: {campaign.name}',
                     message=f'Campaign "{campaign.name}" received {reply_count} unsubscribe request(s) in the last 7 days. Review email frequency and content to reduce unsubscribes.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'unsubscribe_requests', 'count': reply_count}
                 )
                 if notification:
@@ -1400,7 +1400,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📧 Information Requests: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has {reply_count} lead(s) requesting more information! These are highly qualified leads. Respond promptly.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'info_requests', 'count': reply_count}
                 )
                 if notification:
@@ -1419,7 +1419,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'💬 Neutral Replies: {campaign.name}',
                     message=f'Campaign "{campaign.name}" received {reply_count} neutral reply/replies. These leads may need more nurturing. Consider creating follow-up sequences.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'neutral_replies', 'count': reply_count}
                 )
                 if notification:
@@ -1473,7 +1473,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⭐ Excellent Open Rate: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has an excellent open rate of {open_rate:.1f}% ({emails_opened} opens from {total_sent} emails)! This indicates strong subject lines and audience targeting. Consider scaling this campaign.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'excellent_open_rate', 'open_rate': open_rate, 'total_sent': total_sent}
                 )
                 if notification:
@@ -1499,7 +1499,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🎯 Good Click Rate: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has a good click rate of {click_rate:.1f}% ({emails_clicked} clicks from {total_sent} emails)! Your CTAs are working well. Consider increasing email frequency.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={'action': 'good_click_rate', 'click_rate': click_rate, 'total_sent': total_sent}
                 )
                 if notification:
@@ -1525,7 +1525,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'⚠️ Low Open Rate: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has a low open rate of {open_rate:.1f}% ({emails_opened} opens from {total_sent} emails). Improve: 1) Subject lines, 2) Send times, 3) Personalization, 4) Audience targeting.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
                     metadata={'action': 'low_open_rate', 'open_rate': open_rate, 'total_sent': total_sent}
                 )
                 if notification:
@@ -1551,7 +1551,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📉 Low Click Rate: {campaign.name}',
                     message=f'Campaign "{campaign.name}" has good open rate ({open_rate:.1f}%) but low click rate ({click_rate:.1f}%). Improve: 1) CTA buttons, 2) Email content relevance, 3) Offer value, 4) CTA placement.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/email-templates/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/email-templates/',
                     metadata={'action': 'low_click_rate', 'open_rate': open_rate, 'click_rate': click_rate}
                 )
                 if notification:
@@ -1587,14 +1587,14 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         f'Draft campaign "{campaign.name}" has no leads and no email sequences. '
                         'Next steps: 1) Upload your leads (CSV/Excel). 2) Create email sequences. 3) Schedule the campaign to start.'
                     )
-                    action_url = f'/marketing/campaigns/{campaign.id}/leads/upload/'
+                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/'
                 else:
                     title = f'📧 Create sequences: {campaign.name}'
                     message = (
                         f'Draft campaign "{campaign.name}" has {leads_count} lead(s) but no email sequences. '
                         'Create email sequences, then schedule the campaign to start sending.'
                     )
-                    action_url = f'/marketing/campaigns/{campaign.id}/sequences/'
+                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/sequences/'
             else:
                 title = f'📧 No Email Sequences: {campaign.name}'
                 if leads_count == 0:
@@ -1602,13 +1602,13 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                         f'{status_label} campaign "{campaign.name}" has no leads and no sequences. '
                         'Upload your leads first, then create email sequences.'
                     )
-                    action_url = f'/marketing/campaigns/{campaign.id}/leads/upload/'
+                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/leads/upload/'
                 else:
                     message = (
                         f'{status_label} campaign "{campaign.name}" has no email sequences. '
                         f'Create sequences to start sending emails to your {leads_count} lead(s).'
                     )
-                    action_url = f'/marketing/campaigns/{campaign.id}/sequences/'
+                    action_url = f'/marketing/dashboard/campaign/{campaign.id}/sequences/'
             notification = self._create_notification(
                 user=user,
                 campaign=campaign,
@@ -1635,7 +1635,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'⏸️ No Active Sequences: {campaign.name}',
                 message=f'{status_text.capitalize()} campaign "{campaign.name}" has {sequences_count} sequence(s) but NONE are active! Activate sequences to start sending emails.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                 metadata={'action': 'no_active_sequences', 'total_sequences': sequences_count, 'status': campaign.status}
             )
             if notification:
@@ -1663,7 +1663,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📬 No Emails Sent Yet: {campaign.name}',
                     message=f'{status_text.capitalize()} campaign "{campaign.name}" has {active_sequences} active sequence(s) and {leads_count} lead(s) but NO emails have been sent! Check sequence configuration and delays.',
                     action_required=True,
-                    action_url=f'/marketing/campaigns/{campaign.id}/sequences/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={'action': 'no_emails_sent', 'active_sequences': active_sequences, 'leads_count': leads_count, 'status': campaign.status}
                 )
                 if notification:
@@ -1682,7 +1682,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'📉 Low Email Activity: {campaign.name}',
                 message=f'{status_label} campaign "{campaign.name}" has sent {total_emails_sent} emails total but none in the last 7 days. Check: 1) Sequence delays, 2) Sequence completion, 3) Lead status.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={'action': 'low_email_activity', 'total_sent': total_emails_sent, 'recent_sent': 0}
             )
             if notification:
@@ -1724,7 +1724,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'🎉 Positive Replies Received: {campaign.name}',
                 message=f'Great news! Campaign "{campaign.name}" received {reply_count} positive reply/replies from {unique_leads} lead(s) in the last 7 days! Latest reply from {latest_reply.lead.email}. Follow up with these interested leads to convert them.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'action': 'positive_replies_received',
                     'reply_count': reply_count,
@@ -1757,7 +1757,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'📧 Information Requests: {campaign.name}',
                 message=f'Campaign "{campaign.name}" has {info_requests} lead(s) requesting more information! These are highly qualified leads. Respond promptly with detailed information to convert them.',
                 action_required=True,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={
                     'action': 'info_requests_received',
                     'request_count': info_requests
@@ -1855,7 +1855,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'📊 Weekly Progress Update: {campaign.name}',
                     message=f'Campaign "{campaign.name}" progress after {days_running} days:\n\n📧 Emails: {total_emails_sent} sent ({weekly_sent} this week)\n👁️ Opens: {emails_opened} ({open_rate:.1f}% open rate)\n🖱️ Clicks: {emails_clicked} ({click_rate:.1f}% click rate)\n💬 Replies: {total_replies} ({reply_rate:.1f}% reply rate, {positive_replies} positive)\n\n{"🎉 Great engagement!" if open_rate >= 25 else "💡 Consider optimizing subject lines and content."}',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'weekly_progress_update',
                         'days_running': days_running,
@@ -1893,7 +1893,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🎯 Milestone: 100 Emails Sent - {campaign.name}',
                     message=f'Campaign "{campaign.name}" has reached 100 emails sent! Current stats: {open_rate:.1f}% open rate, {click_rate:.1f}% click rate, {total_replies} replies. Keep up the momentum!',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': '100_emails_milestone',
                         'total_emails_sent': total_emails_sent,
@@ -1927,7 +1927,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     title=f'🚀 High Performance Campaign: {campaign.name}',
                     message=f'Campaign "{campaign.name}" is performing excellently! {open_rate:.1f}% open rate and {click_rate:.1f}% click rate. Consider: 1) Scaling this campaign, 2) Applying similar strategies to other campaigns, 3) Increasing email frequency.',
                     action_required=False,
-                    action_url=f'/marketing/campaigns/{campaign.id}/',
+                    action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                     metadata={
                         'action': 'high_performance_opportunity',
                         'open_rate': open_rate,
@@ -2003,7 +2003,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             title=f'Activity update: {campaign.name}',
             message=message,
             action_required=False,
-            action_url=f'/marketing/campaigns/{campaign.id}/',
+            action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
             metadata={
                 'action': 'activity_summary',
                 'sent_7d': total_sent,
@@ -2040,7 +2040,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'First email opened: {campaign.name}',
                 message=f'Campaign "{campaign.name}" had its first email open. Engagement has started.',
                 action_required=False,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={'action': 'first_open', 'total_sent': total_sent}
             )
             if n:
@@ -2055,7 +2055,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                 title=f'First click: {campaign.name}',
                 message=f'Campaign "{campaign.name}" had its first link click. Recipients are engaging with content.',
                 action_required=False,
-                action_url=f'/marketing/campaigns/{campaign.id}/',
+                action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
                 metadata={'action': 'first_click', 'total_sent': total_sent}
             )
             if n:
@@ -2090,7 +2090,7 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             title=f'Sub-sequence triggered: {campaign.name}',
             message=f'Campaign "{campaign.name}": {count} reply/replies from {unique_leads} lead(s) triggered follow-up sequence(s) ({sub_label}) in the last 7 days.',
             action_required=False,
-            action_url=f'/marketing/campaigns/{campaign.id}/',
+            action_url=f'/marketing/dashboard/campaign/{campaign.id}/',
             metadata={'action': 'sub_sequence_triggered', 'count': count, 'unique_leads': unique_leads}
         )
         if notification:

@@ -114,7 +114,41 @@ class EmailService:
             import re
             content = re.sub(r'\{\{[^}]+\}\}', '', content)
             return content
-    
+
+    def _get_lead_context(self, lead: Lead, campaign: Campaign) -> Dict:
+        """Build context variables for template rendering (first_name, last_name, etc.). Used by send_email and render_with_lead."""
+        first = (lead.first_name or '').strip()
+        last = (lead.last_name or '').strip()
+        email_local = (lead.email or '').split('@')[0].strip() if lead.email else ''
+        if not first and not last and email_local:
+            if '.' in email_local or '_' in email_local or '-' in email_local:
+                parts = re.split(r'[._\-]+', email_local, 1)
+                first = (parts[0] or '').strip().title()
+                last = (parts[1] or '').strip().title() if len(parts) > 1 else ''
+            else:
+                first = email_local.title()
+        lead_name = first or last or email_local or ''
+        full_name = f'{first} {last}'.strip() if (first or last) else lead_name
+        return {
+            'first_name': first or lead_name,
+            'last_name': last,
+            'name': full_name,
+            'lead_name': lead_name,
+            'full_name': full_name,
+            'lead_email': lead.email or '',
+            'campaign_name': campaign.name or '',
+            'lead_company': (lead.company or '').strip(),
+            'company': (lead.company or '').strip(),
+            'job_title': (getattr(lead, 'job_title', None) or '').strip(),
+        }
+
+    def render_with_lead(self, content: str, lead: Lead, campaign: Campaign) -> str:
+        """Render template content (e.g. subject line) with lead/campaign context. Use for display (e.g. pending emails list)."""
+        if not content:
+            return content
+        context_vars = self._get_lead_context(lead, campaign)
+        return self.render_email_content(content, context_vars)
+
     def send_email(
         self, 
         template: EmailTemplate,
@@ -129,26 +163,65 @@ class EmailService:
         Returns:
             Dict with success status, send_history_id, and any errors
         """
-        recipient_email = test_email or lead.email
+        recipient_email = test_email or (getattr(lead, 'email', None) or '')
         
-        # Prepare context variables
-        context_vars = {
-            'lead_name': lead.first_name or lead.email.split('@')[0],
-            'lead_email': lead.email,
-            'campaign_name': campaign.name,
-            'lead_company': lead.company or '',
-        }
+        # Ensure we have the latest lead data from DB (sequence sends may use cached contact.lead)
+        if getattr(lead, 'pk', None) and getattr(lead, '_state', None):
+            try:
+                lead.refresh_from_db(fields=['first_name', 'last_name', 'email', 'company', 'job_title'])
+            except (Lead.DoesNotExist, Exception):
+                pass
         
-        # Render email content
+        context_vars = self._get_lead_context(lead, campaign)
+        # Unconditionally ensure first_name/name are set when we have recipient (sequence sends often have blank lead)
+        if recipient_email and '@' in recipient_email:
+            has_first = bool((context_vars.get('first_name') or '').strip())
+            has_name = bool((context_vars.get('name') or '').strip())
+            if not has_first or not has_name:
+                local = recipient_email.split('@')[0].strip()
+                if local:
+                    if '.' in local or '_' in local or '-' in local:
+                        parts = re.split(r'[._\-]+', local, 1)
+                        context_vars['first_name'] = (parts[0] or '').strip().title()
+                        context_vars['last_name'] = (parts[1] or '').strip().title() if len(parts) > 1 else ''
+                    else:
+                        context_vars['first_name'] = local.title()
+                        context_vars['last_name'] = ''
+                    context_vars['lead_name'] = context_vars['first_name'] or context_vars.get('last_name') or local
+                    context_vars['full_name'] = f"{context_vars['first_name']} {context_vars['last_name']}".strip() or context_vars['lead_name']
+                    context_vars['name'] = context_vars['full_name']
+                    logger.info(f"Email send: filled first_name/name from recipient local part for {recipient_email}")
+
+        # Render email content (use empty string if template fields are None)
         try:
-            subject = self.render_email_content(template.subject, context_vars)
-            html_content = self.render_email_content(template.html_content, context_vars)
+            subject = self.render_email_content(template.subject or '', context_vars)
+            html_content = self.render_email_content(template.html_content or '', context_vars)
             text_content = template.text_content
             if text_content:
                 text_content = self.render_email_content(text_content, context_vars)
             else:
-                # Generate plain text from HTML
                 text_content = re.sub(r'<[^>]+>', '', html_content)
+            # Safety net: if output still has unreplaced placeholders, force context from recipient and re-render
+            if recipient_email and ('{{' in subject or '{{' in html_content):
+                local = recipient_email.split('@')[0].strip() if '@' in recipient_email else ''
+                if local:
+                    if '.' in local or '_' in local or '-' in local:
+                        parts = re.split(r'[._\-]+', local, 1)
+                        context_vars['first_name'] = (parts[0] or '').strip().title()
+                        context_vars['last_name'] = (parts[1] or '').strip().title() if len(parts) > 1 else ''
+                    else:
+                        context_vars['first_name'] = local.title()
+                        context_vars['last_name'] = ''
+                    context_vars['lead_name'] = context_vars['first_name'] or context_vars.get('last_name') or local
+                    context_vars['full_name'] = f"{context_vars['first_name']} {context_vars['last_name']}".strip() or context_vars['lead_name']
+                    context_vars['name'] = context_vars['full_name']
+                    subject = self.render_email_content(template.subject or '', context_vars)
+                    html_content = self.render_email_content(template.html_content or '', context_vars)
+                    if text_content and template.text_content:
+                        text_content = self.render_email_content(template.text_content or '', context_vars)
+                    else:
+                        text_content = re.sub(r'<[^>]+>', '', html_content)
+                    logger.warning(f"Email send: placeholders were still present; re-rendered with context from {recipient_email}")
         except Exception as e:
             logger.error(f"Error rendering email for lead {lead.id}: {str(e)}")
             return {
@@ -159,26 +232,29 @@ class EmailService:
         # Check rate limit
         self.check_rate_limit()
         
-        # Create send history record
-        send_history = EmailSendHistory.objects.create(
-            campaign=campaign,
-            lead=lead,
-            email_template=template,
-            subject=subject,
-            recipient_email=recipient_email,
-            status='pending',
-            is_ab_test=False,  # A/B testing removed
-            ab_test_variant='',
-            is_followup=template.email_type == 'followup',
-            followup_sequence_number=0,  # Sequences handle this now
-        )
+        # Test emails (when test_email is set) are not saved to history
+        save_to_history = test_email is None
+        send_history = None
         
-        # Generate tracking token
-        send_history.tracking_token = send_history.generate_tracking_token()
-        send_history.save()
-        
-        # Add tracking to HTML content
-        html_content = self._add_email_tracking(html_content, send_history)
+        if save_to_history:
+            # Create send history record
+            send_history = EmailSendHistory.objects.create(
+                campaign=campaign,
+                lead=lead,
+                email_template=template,
+                subject=subject,
+                recipient_email=recipient_email,
+                status='pending',
+                is_ab_test=False,  # A/B testing removed
+                ab_test_variant='',
+                is_followup=template.email_type == 'followup',
+                followup_sequence_number=0,  # Sequences handle this now
+            )
+            # Generate tracking token
+            send_history.tracking_token = send_history.generate_tracking_token()
+            send_history.save()
+            # Add tracking to HTML content
+            html_content = self._add_email_tracking(html_content, send_history)
         
         # Send email
         try:
@@ -231,11 +307,12 @@ class EmailService:
             
             email.send()
             
-            # Update send history with Message-ID
-            send_history.status = 'sent'
-            send_history.sent_at = timezone.now()
-            send_history.message_id = message_id.strip('<>')  # Store without < >
-            send_history.save()
+            if send_history:
+                # Update send history with Message-ID
+                send_history.status = 'sent'
+                send_history.sent_at = timezone.now()
+                send_history.message_id = message_id.strip('<>')  # Store without < >
+                send_history.save()
             
             self.sent_count += 1
             
@@ -247,24 +324,24 @@ class EmailService:
             
             logger.info(f"Email sent successfully to {recipient_email} (Campaign: {campaign.name}, Template: {template.name})")
             
-            return {
-                'success': True,
-                'send_history_id': send_history.id,
-                'message': 'Email sent successfully'
-            }
+            result = {'success': True, 'message': 'Email sent successfully'}
+            if send_history:
+                result['send_history_id'] = send_history.id
+            return result
             
         except Exception as e:
-            # Update send history with error
-            send_history.status = 'failed'
-            send_history.error_message = str(e)
-            send_history.save()
+            if send_history:
+                # Update send history with error
+                send_history.status = 'failed'
+                send_history.error_message = str(e)
+                send_history.save()
             
             logger.error(f"Error sending email to {recipient_email}: {str(e)}")
             
             return {
                 'success': False,
                 'error': str(e),
-                'send_history_id': send_history.id
+                **({'send_history_id': send_history.id} if send_history else {}),
             }
     
     def _add_email_tracking(self, html_content: str, send_history: EmailSendHistory) -> str:
@@ -319,13 +396,24 @@ class EmailService:
             # Add tracking pixel using simple token URL format: /token?t=TOKEN
             # This is simpler and works better with email clients
             tracking_pixel_url = f"{base_url}/token?t={tracking_token}"
+            # "View in browser" link: when user clicks it we count as open (works when pixel is blocked by Gmail etc.)
+            view_in_browser_link = (
+                f'<p style="font-size:11px;color:#888;margin:0 0 12px 0;">'
+                f'<a href="{tracking_pixel_url}" style="color:#888;text-decoration:underline;">View in browser</a>'
+                f'</p>'
+            )
             # Use multiple pixel methods for better email client compatibility
-            # Some email clients block display:none, so we use multiple approaches
             tracking_pixel = (
                 f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none; width:1px; height:1px; border:0;" alt="" />'
                 f'<img src="{tracking_pixel_url}" width="1" height="1" border="0" alt="" style="position:absolute; visibility:hidden; width:1px; height:1px;" />'
             )
-            
+            # Inject "View in browser" at the start so open is counted when user clicks if pixel is blocked
+            if '<body' in html_content.lower():
+                html_content = re.sub(r'(<body[^>]*>)', r'\1' + view_in_browser_link, html_content, count=1, flags=re.IGNORECASE)
+            elif '<html' in html_content.lower():
+                html_content = re.sub(r'(<html[^>]*>)\s*', r'\1' + view_in_browser_link, html_content, count=1, flags=re.IGNORECASE)
+            else:
+                html_content = view_in_browser_link + html_content
             # Try to inject before </body>
             if '</body>' in html_content.lower():
                 html_content = re.sub(r'</body>', tracking_pixel + '</body>', html_content, flags=re.IGNORECASE)

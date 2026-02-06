@@ -96,6 +96,7 @@ venv.bak/
 # Python - Other
 .python-version
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
 *.sage.py
 .spyderproject

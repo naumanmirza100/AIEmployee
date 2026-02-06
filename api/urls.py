@@ -249,6 +249,7 @@ urlpatterns = [
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/?$', marketing_agent.create_template, name='marketing_create_template'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/update/?$', marketing_agent.update_template, name='marketing_update_template'),  # PUT/PATCH
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/delete/?$', marketing_agent.delete_template, name='marketing_delete_template'),  # POST
+    re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/test/?$', marketing_agent.test_email_template, name='marketing_test_email_template'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/email-status/full/?$', marketing_agent.get_email_status_full, name='marketing_email_status_full'),  # GET
     re_path(r'^marketing/email-accounts/?$', marketing_agent.list_email_accounts, name='marketing_list_email_accounts'),  # GET
     re_path(r'^marketing/email-accounts/create/?$', marketing_agent.create_email_account, name='marketing_create_email_account'),  # POST

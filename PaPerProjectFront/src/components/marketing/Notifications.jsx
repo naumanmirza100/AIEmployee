@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -8,6 +9,19 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, RefreshCw, Search, Trash2, CheckCheck, Inbox, History, BarChart3 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { cn } from '@/lib/utils';
+
+/** Backend may send /marketing/campaigns/{id}/ (old) or /marketing/dashboard/campaign/{id} (new). Normalize to in-app path. */
+const normalizeCampaignActionUrl = (actionUrl) => {
+  if (!actionUrl || typeof actionUrl !== 'string') return null;
+  const u = actionUrl.replace(/\/+$/, '').trim();
+  if (u.startsWith('/marketing/dashboard/campaign/')) return u;
+  const match = u.match(/^\/marketing\/campaigns\/(\d+)(?:\/(.*))?$/);
+  if (!match) return null;
+  const [, id, sub] = match;
+  const base = `/marketing/dashboard/campaign/${id}`;
+  if (sub === 'sequences') return `${base}/sequences`;
+  return base;
+};
 
 /**
  * Proactive Notification sub-agent (PayPerProject backend).
@@ -224,16 +238,21 @@ const Notifications = ({ onUnreadCountChange }) => {
             <time dateTime={n.created_at}>
               {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
             </time>
-            {n.action_url && (
-              <a
-                href={n.action_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-primary hover:underline"
-              >
-                View campaign
-              </a>
-            )}
+            {n.action_url && (() => {
+              const to = normalizeCampaignActionUrl(n.action_url);
+              if (to) {
+                return (
+                  <Link to={to} className="font-medium text-primary hover:underline">
+                    View campaign
+                  </Link>
+                );
+              }
+              return (
+                <a href={n.action_url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
+                  View campaign
+                </a>
+              );
+            })()}
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-1">
