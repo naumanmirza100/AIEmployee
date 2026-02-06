@@ -2363,3 +2363,340 @@ def recruitment_analytics(request):
             'message': f'Failed to generate analytics: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ---------- AI Interview Questions (no history saved) ----------
+
+INTERVIEW_QUESTIONS_SYSTEM_PROMPT = """You are an expert technical recruiter. Given a candidate's profile summary and a job description, generate 5 to 10 interview questions that are specific to this candidate and this role.
+
+Rules:
+- Mix technical questions (skills, experience, projects) and behavioural questions (how they work, challenges, teamwork).
+- Questions should be tailored to the candidate's background and the job requirements.
+- Return valid JSON only, no markdown. Format: {"questions": [{"type": "technical" or "behavioural", "question": "Your question here?"}, ...]}
+- Generate between 5 and 10 questions. At least 2 technical and 2 behavioural."""
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def suggest_interview_questions(request):
+    """
+    Generate AI-suggested interview questions from candidate CV + job description.
+    No history saved - on-demand only.
+    POST: JSON { "cv_record_id": int, "job_description_id": int }
+    """
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        cv_record_id = data.get('cv_record_id')
+        job_description_id = data.get('job_description_id')
+        if not cv_record_id or not job_description_id:
+            return Response({
+                'status': 'error',
+                'message': 'cv_record_id and job_description_id are required.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        cv_record = CVRecord.objects.filter(
+            id=cv_record_id,
+            job_description__company_user=company_user
+        ).first()
+        if not cv_record:
+            return Response({'status': 'error', 'message': 'CV record not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        job = JobDescription.objects.filter(
+            id=job_description_id,
+            company_user=company_user
+        ).first()
+        if not job:
+            return Response({'status': 'error', 'message': 'Job description not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        parsed = json.loads(cv_record.parsed_json) if cv_record.parsed_json else {}
+        insights = json.loads(cv_record.insights_json) if cv_record.insights_json else {}
+        candidate_summary_parts = [
+            f"Name: {parsed.get('name') or cv_record.file_name}",
+            f"Email: {parsed.get('email', 'N/A')}",
+            f"Skills: {', '.join(parsed.get('skills') or [])}",
+            f"Experience: {json.dumps(parsed.get('experience') or [])[:1500]}",
+            f"Education: {json.dumps(parsed.get('education') or [])[:800]}",
+        ]
+        if insights:
+            candidate_summary_parts.append(f"Insights/summary: {json.dumps(insights)[:1000]}")
+        candidate_text = "\n".join(candidate_summary_parts)
+
+        job_text = f"Job title: {job.title}\nDescription: {job.description[:3000]}"
+        if job.requirements:
+            job_text += f"\nRequirements: {job.requirements[:1500]}"
+
+        user_prompt = f"## Candidate profile\n{candidate_text}\n\n## Job description\n{job_text}"
+
+        agents = get_agents()
+        groq_client = agents.get('groq_client')
+        if not groq_client:
+            return Response({'status': 'error', 'message': 'AI service not available.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        raw = groq_client.send_prompt(INTERVIEW_QUESTIONS_SYSTEM_PROMPT, user_prompt)
+        questions = raw.get('questions') or []
+        if not isinstance(questions, list):
+            questions = []
+
+        return Response({
+            'status': 'success',
+            'questions': questions,
+            'candidate_name': parsed.get('name') or cv_record.file_name,
+            'job_title': job.title,
+        })
+    except Exception as e:
+        logger.exception("suggest_interview_questions error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- Per-agent APIs (call each agent individually) ----------
+
+def _cv_record_for_company_user(cv_record_id, company_user):
+    """Get CVRecord by id scoped to company user (via job_description)."""
+    return CVRecord.objects.filter(
+        id=cv_record_id,
+        job_description__company_user=company_user
+    ).first()
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_cv_parse(request):
+    """
+    CV Parser agent only. Returns structured CV JSON.
+    POST: multipart/form-data with 'file' (PDF/DOCX/TXT) OR
+          JSON body with {"text": "raw cv text"}.
+    """
+    try:
+        company_user = request.user
+        agents = get_agents()
+        cv_agent = agents['cv_agent']
+        # Option 1: Uploaded file
+        file = request.FILES.get('file')
+        if file:
+            suffix = Path(file.name).suffix.lower()
+            if suffix not in ('.pdf', '.docx', '.txt'):
+                return Response({
+                    'status': 'error',
+                    'message': 'Unsupported file type. Use PDF, DOCX, or TXT.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                for chunk in file.chunks():
+                    tmp.write(chunk)
+                temp_path = Path(tmp.name)
+            try:
+                parsed = cv_agent.parse_file(str(temp_path))
+                return Response({'status': 'success', 'parsed': parsed})
+            finally:
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+        # Option 2: JSON body with raw text
+        text = request.data.get('text') if isinstance(request.data, dict) else None
+        if text:
+            parsed = cv_agent.parse_text(text)
+            return Response({'status': 'success', 'parsed': parsed})
+        return Response({
+            'status': 'error',
+            'message': "Provide 'file' (upload) or 'text' (raw CV text)."
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.exception("api_cv_parse error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_cv_summarize(request):
+    """
+    Summarization agent only. Returns insights for a parsed CV.
+    POST: JSON with {"parsed_json": {...}} and optional "job_keywords": ["kw1", "kw2"]
+          OR {"cv_record_id": 123} to load parsed from DB (optional job_keywords).
+    """
+    try:
+        company_user = request.user
+        agents = get_agents()
+        sum_agent = agents['sum_agent']
+        data = request.data if isinstance(request.data, dict) else {}
+        parsed = None
+        job_keywords = data.get('job_keywords')
+        if job_keywords is not None and not isinstance(job_keywords, list):
+            job_keywords = [k.strip() for k in str(job_keywords).split(',') if k.strip()]
+        cv_record_id = data.get('cv_record_id')
+        if cv_record_id:
+            record = _cv_record_for_company_user(cv_record_id, company_user)
+            if not record:
+                return Response({'status': 'error', 'message': 'CV record not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if record.parsed_json:
+                parsed = json.loads(record.parsed_json)
+            if not parsed:
+                return Response({'status': 'error', 'message': 'CV record has no parsed_json.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not parsed and data.get('parsed_json'):
+            parsed = data['parsed_json']
+        if not parsed:
+            return Response({'status': 'error', 'message': "Provide 'parsed_json' or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
+        insights = sum_agent.summarize(parsed, job_keywords=job_keywords)
+        return Response({'status': 'success', 'insights': insights})
+    except Exception as e:
+        logger.exception("api_cv_summarize error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_cv_enrich(request):
+    """
+    Lead enrichment agent only. Returns enriched data for a parsed CV + insights.
+    POST: JSON with {"parsed_json": {...}, "insights_json": {...}}
+          OR {"cv_record_id": 123} to load both from DB.
+    """
+    try:
+        company_user = request.user
+        agents = get_agents()
+        enrich_agent = agents['enrich_agent']
+        data = request.data if isinstance(request.data, dict) else {}
+        parsed = None
+        insights = None
+        cv_record_id = data.get('cv_record_id')
+        if cv_record_id:
+            record = _cv_record_for_company_user(cv_record_id, company_user)
+            if not record:
+                return Response({'status': 'error', 'message': 'CV record not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if record.parsed_json:
+                parsed = json.loads(record.parsed_json)
+            if record.insights_json:
+                insights = json.loads(record.insights_json)
+            if not parsed or not insights:
+                return Response({'status': 'error', 'message': 'CV record must have parsed_json and insights_json.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not parsed and data.get('parsed_json'):
+            parsed = data['parsed_json']
+        if not insights and data.get('insights_json'):
+            insights = data['insights_json']
+        if not parsed or not insights:
+            return Response({'status': 'error', 'message': "Provide 'parsed_json' and 'insights_json', or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
+        enrichment = enrich_agent.enrich(parsed, insights)
+        return Response({'status': 'success', 'enrichment': enrichment})
+    except Exception as e:
+        logger.exception("api_cv_enrich error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_cv_qualify(request):
+    """
+    Lead qualification agent only. Returns INTERVIEW/HOLD/REJECT with confidence and reasoning.
+    POST: JSON with parsed_json, insights_json (or cv_record_id), optional job_keywords,
+          enriched_json, interview_threshold, hold_threshold.
+    """
+    try:
+        company_user = request.user
+        agents = get_agents()
+        qualify_agent = agents['qualify_agent']
+        data = request.data if isinstance(request.data, dict) else {}
+        parsed = None
+        insights = None
+        enriched = data.get('enriched_json')
+        job_keywords = data.get('job_keywords')
+        if job_keywords is not None and not isinstance(job_keywords, list):
+            job_keywords = [k.strip() for k in str(job_keywords).split(',') if k.strip()]
+        interview_threshold = data.get('interview_threshold')
+        hold_threshold = data.get('hold_threshold')
+        if interview_threshold is not None:
+            interview_threshold = int(interview_threshold)
+        if hold_threshold is not None:
+            hold_threshold = int(hold_threshold)
+        cv_record_id = data.get('cv_record_id')
+        if cv_record_id:
+            record = _cv_record_for_company_user(cv_record_id, company_user)
+            if not record:
+                return Response({'status': 'error', 'message': 'CV record not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if record.parsed_json:
+                parsed = json.loads(record.parsed_json)
+            if record.insights_json:
+                insights = json.loads(record.insights_json)
+            if not enriched and record.enriched_json:
+                enriched = json.loads(record.enriched_json)
+            if not parsed or not insights:
+                return Response({'status': 'error', 'message': 'CV record must have parsed_json and insights_json.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not parsed and data.get('parsed_json'):
+            parsed = data['parsed_json']
+        if not insights and data.get('insights_json'):
+            insights = data['insights_json']
+        if not parsed or not insights:
+            return Response({'status': 'error', 'message': "Provide 'parsed_json' and 'insights_json', or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
+        if interview_threshold is None or hold_threshold is None:
+            settings_obj = RecruiterQualificationSettings.objects.filter(
+                company_user=company_user
+            ).first() or RecruiterQualificationSettings.objects.filter(
+                recruiter=company_user.user
+            ).first()
+            if settings_obj and getattr(settings_obj, 'use_custom_thresholds', False):
+                if interview_threshold is None:
+                    interview_threshold = settings_obj.interview_threshold
+                if hold_threshold is None:
+                    hold_threshold = settings_obj.hold_threshold
+            if interview_threshold is None:
+                interview_threshold = 65
+            if hold_threshold is None:
+                hold_threshold = 45
+        qualification = qualify_agent.qualify(
+            parsed, insights, job_keywords=job_keywords, enriched_data=enriched,
+            interview_threshold=interview_threshold, hold_threshold=hold_threshold,
+        )
+        return Response({'status': 'success', 'qualification': qualification})
+    except Exception as e:
+        logger.exception("api_cv_qualify error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_job_description_parse(request):
+    """
+    Job description parser agent only. Returns extracted keywords and requirements.
+    POST: multipart with 'file' (PDF/DOCX/TXT) OR JSON with {"text": "job description text"}.
+    """
+    try:
+        company_user = request.user
+        agents = get_agents()
+        job_desc_agent = agents['job_desc_agent']
+        file = request.FILES.get('file')
+        if file:
+            suffix = Path(file.name).suffix.lower()
+            if suffix not in ('.pdf', '.docx', '.txt'):
+                return Response({
+                    'status': 'error',
+                    'message': 'Unsupported file type. Use PDF, DOCX, or TXT.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                for chunk in file.chunks():
+                    tmp.write(chunk)
+                temp_path = Path(tmp.name)
+            try:
+                result = job_desc_agent.parse_file(str(temp_path))
+                return Response({'status': 'success', **result})
+            finally:
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+        data = request.data if isinstance(request.data, dict) else {}
+        text = data.get('text')
+        if text:
+            result = job_desc_agent.parse_text(text)
+            return Response({'status': 'success', **result})
+        return Response({
+            'status': 'error',
+            'message': "Provide 'file' (upload) or 'text' (job description)."
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.exception("api_job_description_parse error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

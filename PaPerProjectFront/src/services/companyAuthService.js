@@ -30,10 +30,11 @@ const companyApiRequest = async (endpoint, options = {}) => {
   const token = getCompanyToken();
   const wantBlob = options.responseType === 'blob';
 
-  const defaultHeaders = {
-    'Content-Type': 'application/json',
-  };
-
+  const isFormData = options.body instanceof FormData;
+  const defaultHeaders = {};
+  if (!isFormData) {
+    defaultHeaders['Content-Type'] = 'application/json';
+  }
   // Add token-based authentication
   if (token) {
     defaultHeaders['Authorization'] = `Token ${token}`;
@@ -183,10 +184,12 @@ export const companyApi = {
     }
     return companyApiRequest(url, requestOptions);
   },
-  post: (endpoint, data = {}) => {
+  post: (endpoint, data = {}, options = {}) => {
+    const isFormData = data instanceof FormData;
     return companyApiRequest(endpoint, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: isFormData ? data : JSON.stringify(data),
+      ...options,
     });
   },
   put: (endpoint, data = {}) => {

@@ -208,7 +208,13 @@ urlpatterns = [
     re_path(r'^company/applications/(?P<id>\d+)/status/?$', company_jobs.update_company_application_status, name='update_company_application_status'),
     
     # Recruitment Agent endpoints (Company User)
-    re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST
+    re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST (full pipeline)
+    re_path(r'^recruitment/agents/cv/parse/?$', recruitment_agent.api_cv_parse, name='recruitment_api_cv_parse'),  # POST
+    re_path(r'^recruitment/agents/cv/summarize/?$', recruitment_agent.api_cv_summarize, name='recruitment_api_cv_summarize'),  # POST
+    re_path(r'^recruitment/agents/cv/enrich/?$', recruitment_agent.api_cv_enrich, name='recruitment_api_cv_enrich'),  # POST
+    re_path(r'^recruitment/agents/cv/qualify/?$', recruitment_agent.api_cv_qualify, name='recruitment_api_cv_qualify'),  # POST
+    re_path(r'^recruitment/agents/job-description/parse/?$', recruitment_agent.api_job_description_parse, name='recruitment_api_job_description_parse'),  # POST
+    re_path(r'^recruitment/ai/suggest-interview-questions/?$', recruitment_agent.suggest_interview_questions, name='recruitment_suggest_interview_questions'),  # POST
     re_path(r'^recruitment/job-descriptions/?$', recruitment_agent.list_job_descriptions, name='recruitment_list_job_descriptions'),  # GET
     re_path(r'^recruitment/job-descriptions/generate/?$', recruitment_agent.generate_job_description, name='recruitment_generate_job_description'),  # POST
     re_path(r'^recruitment/job-descriptions/create/?$', recruitment_agent.create_job_description, name='recruitment_create_job_description'),  # POST

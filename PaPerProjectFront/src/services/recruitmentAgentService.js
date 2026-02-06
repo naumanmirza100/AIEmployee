@@ -73,6 +73,113 @@ export const processCVs = async (files, jobDescriptionId = null, jobDescriptionT
   }
 };
 
+// ---------- Per-agent APIs (call each agent individually) ----------
+
+/**
+ * CV Parser agent only. Returns structured parsed CV.
+ * @param {File|undefined} file - PDF/DOCX/TXT file (optional)
+ * @param {string|undefined} text - Raw CV text (optional, used if file not provided)
+ */
+export const apiCvParse = async (file, text) => {
+  if (file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    // Do not set Content-Type manually - axios adds multipart/form-data with boundary
+    const response = await companyApi.post('/recruitment/agents/cv/parse', formData);
+    return response;
+  }
+  if (text) {
+    const response = await companyApi.post('/recruitment/agents/cv/parse', { text });
+    return response;
+  }
+  throw new Error("Provide 'file' or 'text'");
+};
+
+/**
+ * Summarization agent only. Returns insights for a parsed CV.
+ * @param {object|undefined} parsedJson - Parsed CV object (optional if cvRecordId provided)
+ * @param {number|undefined} cvRecordId - CV record ID to load parsed from DB (optional)
+ * @param {string[]|string|undefined} jobKeywords - Optional keywords (array or comma-separated)
+ */
+export const apiCvSummarize = async (parsedJson, cvRecordId, jobKeywords) => {
+  const body = {};
+  if (parsedJson) body.parsed_json = parsedJson;
+  if (cvRecordId) body.cv_record_id = cvRecordId;
+  if (jobKeywords !== undefined) body.job_keywords = Array.isArray(jobKeywords) ? jobKeywords : jobKeywords;
+  const response = await companyApi.post('/recruitment/agents/cv/summarize', body);
+  return response;
+};
+
+/**
+ * Lead enrichment agent only. Returns enriched data.
+ * @param {object|undefined} parsedJson - Parsed CV (optional if cvRecordId provided)
+ * @param {object|undefined} insightsJson - Insights from summarize (optional if cvRecordId provided)
+ * @param {number|undefined} cvRecordId - CV record ID to load from DB (optional)
+ */
+export const apiCvEnrich = async (parsedJson, insightsJson, cvRecordId) => {
+  const body = {};
+  if (parsedJson) body.parsed_json = parsedJson;
+  if (insightsJson) body.insights_json = insightsJson;
+  if (cvRecordId) body.cv_record_id = cvRecordId;
+  const response = await companyApi.post('/recruitment/agents/cv/enrich', body);
+  return response;
+};
+
+/**
+ * Lead qualification agent only. Returns INTERVIEW/HOLD/REJECT with confidence and reasoning.
+ * @param {object|undefined} parsedJson - Parsed CV (optional if cvRecordId provided)
+ * @param {object|undefined} insightsJson - Insights (optional if cvRecordId provided)
+ * @param {number|undefined} cvRecordId - CV record ID to load from DB (optional)
+ * @param {string[]|string|undefined} jobKeywords - Optional job keywords
+ * @param {object|undefined} enrichedJson - Optional enrichment from enrich agent
+ * @param {number|undefined} interviewThreshold - Optional (default from settings)
+ * @param {number|undefined} holdThreshold - Optional (default from settings)
+ */
+export const apiCvQualify = async (parsedJson, insightsJson, cvRecordId, jobKeywords, enrichedJson, interviewThreshold, holdThreshold) => {
+  const body = {};
+  if (parsedJson) body.parsed_json = parsedJson;
+  if (insightsJson) body.insights_json = insightsJson;
+  if (cvRecordId) body.cv_record_id = cvRecordId;
+  if (jobKeywords !== undefined) body.job_keywords = Array.isArray(jobKeywords) ? jobKeywords : jobKeywords;
+  if (enrichedJson) body.enriched_json = enrichedJson;
+  if (interviewThreshold != null) body.interview_threshold = interviewThreshold;
+  if (holdThreshold != null) body.hold_threshold = holdThreshold;
+  const response = await companyApi.post('/recruitment/agents/cv/qualify', body);
+  return response;
+};
+
+/**
+ * Job description parser agent only. Returns extracted keywords and requirements.
+ * @param {File|undefined} file - PDF/DOCX/TXT file (optional)
+ * @param {string|undefined} text - Job description text (optional, used if file not provided)
+ */
+export const apiJobDescriptionParse = async (file, text) => {
+  if (file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await companyApi.post('/recruitment/agents/job-description/parse', formData);
+    return response;
+  }
+  if (text) {
+    const response = await companyApi.post('/recruitment/agents/job-description/parse', { text });
+    return response;
+  }
+  throw new Error("Provide 'file' or 'text'");
+};
+
+/**
+ * AI-suggested interview questions from candidate CV + job (no history saved).
+ * @param {number} cvRecordId - CV record ID
+ * @param {number} jobDescriptionId - Job description ID
+ */
+export const suggestInterviewQuestions = async (cvRecordId, jobDescriptionId) => {
+  const response = await companyApi.post('/recruitment/ai/suggest-interview-questions', {
+    cv_record_id: cvRecordId,
+    job_description_id: jobDescriptionId,
+  });
+  return response;
+};
+
 /**
  * Get all job descriptions for the company user
  */
