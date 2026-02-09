@@ -4,6 +4,7 @@
  */
 
 import { companyApi } from './companyAuthService';
+import { API_BASE_URL } from '@/config/apiConfig';
 
 /**
  * Get marketing dashboard stats and overview
@@ -158,6 +159,20 @@ export const deleteTemplate = async (campaignId, templateId) => {
     return response;
   } catch (error) {
     console.error('Delete template error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send test email for a template (to verify dynamic values like {{ first_name }}).
+ * Body: { test_email: "you@example.com", lead_id?: number }. If lead_id omitted, uses sample data.
+ */
+export const testEmailTemplate = async (campaignId, templateId, data) => {
+  try {
+    const response = await companyApi.post(`/marketing/campaigns/${campaignId}/templates/${templateId}/test`, data);
+    return response;
+  } catch (error) {
+    console.error('Test email template error:', error);
     throw error;
   }
 };
@@ -325,7 +340,7 @@ export const uploadCampaignLeads = async (campaignId, file) => {
   try {
     const token = localStorage.getItem('company_auth_token');
     // Base URL must not end with slash so we get /api/marketing/... not /api//marketing/...
-    const base = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/+$/, '');
+    const base = API_BASE_URL.replace(/\/+$/, '');
     const formData = new FormData();
     formData.append('file', file);
     const url = `${base}/marketing/campaigns/${campaignId}/leads/upload`;
@@ -340,13 +355,13 @@ export const uploadCampaignLeads = async (campaignId, file) => {
       try {
         data = await response.json();
       } catch (_) {
-        if (!response.ok) throw new Error(`Upload failed (${response.status}): ${response.statusText}. Check VITE_API_URL (e.g. http://localhost:8000/api).`);
+        if (!response.ok) throw new Error(`Upload failed (${response.status}): ${response.statusText}. Check API configuration.`);
         throw new Error('Invalid JSON response from server.');
       }
     } else {
       const text = await response.text();
       if (!response.ok) {
-        throw new Error(`Upload failed (${response.status}): ${response.statusText}. Ensure VITE_API_URL points to the API root (e.g. http://localhost:8000/api).`);
+        throw new Error(`Upload failed (${response.status}): ${response.statusText}. Check API configuration.`);
       }
       throw new Error('Server did not return JSON. Check API URL and server.');
     }
@@ -363,7 +378,6 @@ export const uploadCampaignLeads = async (campaignId, file) => {
  * Get URL for exporting campaign leads (CSV). Use with fetch + blob for download with auth.
  */
 export const getExportLeadsUrl = (campaignId) => {
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
   return `${API_BASE_URL}/marketing/campaigns/${campaignId}/leads/export/`;
 };
 
@@ -430,7 +444,6 @@ export const outreachCampaign = async (action, campaignData = {}, campaignId = n
       formData.append('file', file);
 
       const token = localStorage.getItem('company_auth_token');
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
       const response = await fetch(`${API_BASE_URL}/marketing/outreach-campaign`, {
         method: 'POST',
@@ -637,6 +650,7 @@ export default {
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  testEmailTemplate,
   listEmailAccounts,
   createEmailAccount,
   getEmailAccount,

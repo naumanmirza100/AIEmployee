@@ -1,6 +1,17 @@
 """
 Email Tracking Views for Marketing Campaigns
-Handles email open and click tracking
+Handles email open and click tracking.
+
+How open/click rate is tracked:
+- Open: A 1x1 tracking pixel is embedded in sent emails; when the client loads images,
+  GET /marketing/track/email/<token>/open/ (or /token?t=<token>) is hit and EmailSendHistory
+  status is set to 'opened'. Reply also implies open: when a Reply is saved with
+  triggering_email, that send is marked 'opened' (see Reply post_save signal in models.py).
+- Click: Links in emails are wrapped with a redirect URL; when the user clicks,
+  GET /marketing/track/email/<token>/click/?url=... is hit, status is set to 'clicked',
+  then redirect to the original URL.
+- Open rate = (count of sends with status in ['opened','clicked']) / total_sent * 100.
+- Click rate = (count of sends with status 'clicked') / total_sent * 100.
 """
 from django.shortcuts import get_object_or_404
 from django.http import HttpResponse, HttpResponseRedirect
@@ -353,7 +364,21 @@ def simple_track_open(request, tracking_token=None):
                 send_history.opened_at = timezone.now()
                 send_history.save()
         
-        # Return 1x1 transparent GIF pixel
+        # If request is from a browser (user clicked "View in browser" link), return HTML page
+        # so open is still counted and they see a message. Email client pixel request gets image.
+        accept = (request.META.get('HTTP_ACCEPT') or '').lower()
+        prefers_html = 'text/html' in accept and accept.strip().split(',')[0].strip().startswith('text/html')
+        if prefers_html:
+            html = (
+                '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Email displayed</title></head><body style="font-family:sans-serif;padding:20px;text-align:center;">'
+                '<p style="color:#555;">Email displayed. You can close this window.</p>'
+                '</body></html>'
+            )
+            response = HttpResponse(html, content_type='text/html; charset=utf-8')
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            return response
+        
+        # Return 1x1 transparent GIF pixel (for email client image load)
         pixel = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x04\x01\x00\x3b'
         response = HttpResponse(pixel, content_type='image/gif')
         response['Cache-Control'] = 'no-cache, no-store, must-revalidate'

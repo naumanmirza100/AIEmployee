@@ -441,8 +441,7 @@ const AdminDashboardPage = () => {
 
   const getFileUrl = (attachmentPath) => {
     if (!attachmentPath) return null;
-    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-    return `${apiBaseUrl.replace('/api', '')}/${attachmentPath}`;
+    return `${API_BASE_URL.replace('/api', '')}/${attachmentPath}`;
   };
 
   // AI Predictions Functions
@@ -540,8 +539,7 @@ const AdminDashboardPage = () => {
 
   const getResumeUrl = (resumePath) => {
     if (!resumePath) return null;
-    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    return `${apiBaseUrl.replace('/api', '')}/${resumePath}`;
+    return `${API_BASE_URL.replace('/api', '')}/${resumePath}`;
   };
 
   const getStatusColor = (status) => {

@@ -29,15 +29,16 @@ class FrontlineAgent(BaseAgent):
     Never guesses or assumes - only provides verified answers.
     """
     
-    def __init__(self):
+    def __init__(self, company_id: Optional[int] = None):
         """Initialize Frontline Agent"""
         super().__init__()
-        self.knowledge_service = KnowledgeService()
+        self.company_id = company_id
+        self.knowledge_service = KnowledgeService(company_id=company_id)
         self.ticket_service = TicketAutomationService()
         self.system_prompt = FRONTLINE_SYSTEM_PROMPT
-        logger.info("FrontlineAgent initialized")
+        logger.info(f"FrontlineAgent initialized (company_id: {company_id})")
     
-    def answer_question(self, question: str) -> Dict:
+    def answer_question(self, question: str, company_id: Optional[int] = None) -> Dict:
         """
         Answer a question using only verified knowledge base information.
         
@@ -47,10 +48,13 @@ class FrontlineAgent(BaseAgent):
         Returns:
             Dictionary with answer or indication that no verified info exists
         """
-        logger.info(f"Processing question: {question[:100]}")
+        logger.info(f"Processing question: {question[:100]} (company_id: {company_id})")
+        
+        # Use provided company_id or instance company_id
+        search_company_id = company_id or self.company_id
         
         # Search knowledge base
-        knowledge_result = self.knowledge_service.get_answer(question)
+        knowledge_result = self.knowledge_service.get_answer(question, company_id=search_company_id)
         
         if not knowledge_result.get('has_verified_info', False):
             logger.info("No verified information found, cannot answer")
@@ -141,18 +145,20 @@ class FrontlineAgent(BaseAgent):
         
         return result
     
-    def search_knowledge(self, query: str) -> Dict:
+    def search_knowledge(self, query: str, company_id: Optional[int] = None) -> Dict:
         """
         Search knowledge base for information.
         
         Args:
             query: Search query
+            company_id: Optional company ID to search company-specific documents
             
         Returns:
             Search results dictionary
         """
-        logger.info(f"Searching knowledge base: {query[:100]}")
-        return self.knowledge_service.search_knowledge(query)
+        search_company_id = company_id or self.company_id
+        logger.info(f"Searching knowledge base: {query[:100]} (company_id: {search_company_id})")
+        return self.knowledge_service.search_knowledge(query, company_id=search_company_id)
     
     def process(self, action: str, **kwargs) -> Dict:
         """

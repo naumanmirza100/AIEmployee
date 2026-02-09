@@ -19,11 +19,13 @@ import { getPurchasedModules } from '@/services/modulePurchaseService';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import { API_BASE_URL } from '@/config/apiConfig';
 import { 
   Building2, Plus, Briefcase, Users, Eye, 
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, Megaphone, UserPlus, Edit, Trash2, Mail,
-  CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft
+  CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
+  Headphones
 } from 'lucide-react';
 
 const CompanyDashboardPage = () => {
@@ -229,7 +231,7 @@ const CompanyDashboardPage = () => {
       let errorMessage = 'Failed to load jobs';
       
       if (error.isNetworkError) {
-        errorMessage = 'Cannot connect to server. Please check if the backend is running on http://localhost:8000';
+        errorMessage = `Cannot connect to server. Please check if the backend is running on ${API_BASE_URL.replace('/api', '')}`;
       } else if (error.data?.message) {
         errorMessage = error.data.message;
       } else if (error.message) {
@@ -693,8 +695,7 @@ const CompanyDashboardPage = () => {
 
   const getResumeUrl = (resumePath) => {
     if (!resumePath) return null;
-    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-    return `${apiBaseUrl.replace('/api', '')}/${resumePath}`;
+    return `${API_BASE_URL.replace('/api', '')}/${resumePath}`;
   };
 
   const getStatusColor = (status) => {
@@ -798,6 +799,13 @@ const CompanyDashboardPage = () => {
               icon: Megaphone,
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
+            }] : []),
+            // Only show Frontline Agent if purchased
+            ...(purchasedModules.includes('frontline_agent') ? [{
+              label: 'Frontline Agent',
+              icon: Headphones,
+              section: 'frontline',
+              onClick: () => navigate('/frontline/dashboard'),
             }] : []),
           ]}
         />

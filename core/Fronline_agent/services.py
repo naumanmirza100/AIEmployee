@@ -16,25 +16,27 @@ logger = logging.getLogger(__name__)
 class KnowledgeService:
     """
     Service for retrieving knowledge from PayPerProject database.
-    Provides read-only access to FAQs, policies, and manuals.
+    Provides read-only access to FAQs, policies, manuals, and uploaded documents.
     """
     
-    def __init__(self):
+    def __init__(self, company_id: Optional[int] = None):
         self.db_service = PayPerProjectDatabaseService()
-        logger.info("KnowledgeService initialized")
+        self.company_id = company_id
+        logger.info(f"KnowledgeService initialized (company_id: {company_id})")
     
-    def search_knowledge(self, query: str, max_results: int = 5) -> Dict:
+    def search_knowledge(self, query: str, max_results: int = 5, company_id: Optional[int] = None) -> Dict:
         """
-        Search knowledge base (FAQs, policies, manuals) for relevant information.
+        Search knowledge base (FAQs, policies, manuals, uploaded documents) for relevant information.
         
         Args:
             query: Search query
             max_results: Maximum number of results per category
+            company_id: Optional company ID to filter documents
             
         Returns:
             Dictionary with search results and metadata
         """
-        logger.info(f"Searching knowledge base for: {query[:100]}")
+        logger.info(f"Searching knowledge base for: {query[:100]} (company_id: {company_id})")
         
         try:
             # Search all knowledge sources
@@ -74,7 +76,22 @@ class KnowledgeService:
                     'source': 'PayPerProject Database'
                 })
             
-            logger.info(f"Found {len(all_results)} knowledge base results")
+            # Search uploaded documents if company_id is provided
+            documents_count = 0
+            if company_id:
+                documents = self._search_documents(query, company_id, max_results)
+                documents_count = len(documents)
+                for doc in documents:
+                    all_results.append({
+                        'type': 'document',
+                        'title': doc.get('title', ''),
+                        'content': doc.get('content', ''),
+                        'document_id': doc.get('id'),
+                        'file_format': doc.get('file_format', ''),
+                        'source': 'Uploaded Document'
+                    })
+            
+            logger.info(f"Found {len(all_results)} knowledge base results (including {documents_count} documents)")
             
             return {
                 'success': True,
@@ -84,7 +101,8 @@ class KnowledgeService:
                 'sources': {
                     'faqs': len(faqs),
                     'policies': len(policies),
-                    'manuals': len(manuals)
+                    'manuals': len(manuals),
+                    'documents': documents_count
                 }
             }
         except Exception as e:
@@ -96,19 +114,90 @@ class KnowledgeService:
                 'count': 0
             }
     
-    def get_answer(self, question: str) -> Dict:
+    def _search_documents(self, query: str, company_id: int, max_results: int) -> List[Dict]:
+        """Search uploaded documents for company"""
+        try:
+            from Frontline_agent.models import Document
+            from django.db.models import Q
+            
+            # Search in document title, description, and content
+            documents = Document.objects.filter(
+                company_id=company_id,
+                is_indexed=True,
+                processed=True
+            ).filter(
+                Q(title__icontains=query) |
+                Q(description__icontains=query) |
+                Q(document_content__icontains=query)
+            )[:max_results]
+            
+            results = []
+            for doc in documents:
+                # Extract relevant snippet from content
+                content = doc.document_content or ''
+                if query.lower() in content.lower():
+                    # Find snippet around query
+                    query_lower = query.lower()
+                    content_lower = content.lower()
+                    idx = content_lower.find(query_lower)
+                    if idx >= 0:
+                        start = max(0, idx - 100)
+                        end = min(len(content), idx + len(query) + 100)
+                        snippet = content[start:end]
+                        if start > 0:
+                            snippet = '...' + snippet
+                        if end < len(content):
+                            snippet = snippet + '...'
+                    else:
+                        snippet = content[:200] + '...' if len(content) > 200 else content
+                else:
+                    snippet = content[:200] + '...' if len(content) > 200 else content
+                
+                results.append({
+                    'id': doc.id,
+                    'title': doc.title,
+                    'content': snippet,
+                    'file_format': doc.file_format,
+                    'document_type': doc.document_type,
+                })
+            
+            return results
+        except Exception as e:
+            logger.error(f"Document search failed: {e}", exc_info=True)
+            return []
+    
+    def get_answer(self, question: str, company_id: Optional[int] = None) -> Dict:
         """
-        Get answer to a question from knowledge base.
+        Get answer to a question from knowledge base and uploaded documents.
         
         Args:
             question: User's question
+            company_id: Optional company ID to search company-specific documents
             
         Returns:
             Dictionary with answer or indication that no answer was found
         """
-        logger.info(f"Getting answer for question: {question[:100]}")
+        logger.info(f"Getting answer for question: {question[:100]} (company_id: {company_id})")
         
-        search_results = self.search_knowledge(question, max_results=3)
+        # Try full question first
+        search_results = self.search_knowledge(question, max_results=5, company_id=company_id)
+        
+        # If no results, try extracting keywords and searching again
+        if not search_results['success'] or search_results['count'] == 0:
+            # Extract keywords (remove common words)
+            import re
+            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'what', 'when', 'where', 'who', 'why', 'how', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'}
+            words = re.findall(r'\b\w+\b', question.lower())
+            keywords = [w for w in words if w not in stop_words and len(w) > 2]
+            
+            if keywords:
+                # Try searching with individual keywords
+                for keyword in keywords[:3]:  # Try top 3 keywords
+                    keyword_results = self.search_knowledge(keyword, max_results=3, company_id=company_id)
+                    if keyword_results['success'] and keyword_results['count'] > 0:
+                        search_results = keyword_results
+                        logger.info(f"Found results using keyword: {keyword}")
+                        break
         
         if search_results['success'] and search_results['count'] > 0:
             # Return the most relevant result
@@ -116,16 +205,19 @@ class KnowledgeService:
             
             if best_match['type'] == 'faq':
                 answer = best_match.get('answer', '')
+            elif best_match['type'] == 'document':
+                answer = best_match.get('content', '')
             else:
                 answer = best_match.get('content', '')
             
-            logger.info(f"Found answer in knowledge base")
+            logger.info(f"Found answer in knowledge base (type: {best_match.get('type')})")
             return {
                 'success': True,
                 'answer': answer,
                 'source': best_match.get('source', 'PayPerProject Database'),
                 'type': best_match.get('type', 'unknown'),
-                'has_verified_info': True
+                'has_verified_info': True,
+                'document_id': best_match.get('document_id') if best_match.get('type') == 'document' else None
             }
         else:
             logger.info("No verified information found in knowledge base")

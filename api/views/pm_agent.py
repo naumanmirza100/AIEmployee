@@ -787,7 +787,7 @@ def task_prioritization(request):
             }
             for m in members
         ]
-        
+
         # Calculate workload analysis for each team member
         workload_analysis = {}
         for member in team:
@@ -815,7 +815,7 @@ def task_prioritization(request):
             "workload_by_user": workload_analysis,
             "team_size": len(team),
             "total_active_tasks": len([t for t in tasks if t.get('status') in ['todo', 'in_progress', 'review']])
-        }
+            }
 
         # Get action from request (default to 'prioritize')
         action = request.data.get("action", "prioritize")
@@ -867,7 +867,7 @@ def task_prioritization(request):
                     result["bottlenecks"] = result.get("analysis", {}).get("bottlenecks", [])
                     if "summary" in result.get("analysis", {}):
                         result["summary"] = result["analysis"]["summary"]
-                else:
+            else:
                     # Fallback - create empty structure
                     result["bottlenecks"] = []
                     result["summary"] = {"message": "No bottlenecks found"}
@@ -1127,7 +1127,7 @@ def timeline_gantt(request):
                     "actual_hours": float(t.actual_hours) if t.actual_hours else None,
                     "dependencies": [dep.id for dep in t.depends_on.all()],
                     "assignee_id": t.assignee.id if t.assignee else None,
-                }
+            }
             for t in tasks_queryset
         ]
 

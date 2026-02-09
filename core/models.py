@@ -576,6 +576,7 @@ class CompanyModulePurchase(models.Model):
         ('recruitment_agent', 'Recruitment Agent'),
         ('marketing_agent', 'Marketing Agent'),
         ('project_manager_agent', 'Project Manager Agent'),
+        ('frontline_agent', 'Frontline Agent'),
     ]
     
     STATUS_CHOICES = [

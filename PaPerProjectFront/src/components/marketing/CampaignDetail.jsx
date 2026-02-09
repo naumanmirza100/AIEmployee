@@ -114,9 +114,10 @@ const formatDateTime = (iso) => {
   }
 };
 
+import { API_BASE_URL } from '@/config/apiConfig';
+
 const getBackendBase = () => {
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-  return apiUrl.replace(/\/api\/?$/, '');
+  return API_BASE_URL.replace(/\/api\/?$/, '');
 };
 
 const getBackendCampaignUrl = (campaignId) => `${getBackendBase()}/marketing/campaigns/${campaignId}/`;
@@ -226,10 +227,10 @@ const CampaignDetail = () => {
   const [editingLead, setEditingLead] = useState(null);
   const [editLeadForm, setEditLeadForm] = useState({});
 
-  const fetchDetail = useCallback(async () => {
+  const fetchDetail = useCallback(async (silent = false) => {
     if (!id) return;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const response = await marketingAgentService.getCampaign(id, { detail: 1 });
       if (response?.status === 'success' && response?.data) {
         const d = response.data;
@@ -248,20 +249,32 @@ const CampaignDetail = () => {
         setLeads([]);
       }
     } catch {
-      setCampaign(null);
-      setEmailStats(null);
-      setAnalytics(null);
-      setChartData(null);
-      setEmailSends([]);
-      setLeads([]);
+      if (!silent) {
+        setCampaign(null);
+        setEmailStats(null);
+        setAnalytics(null);
+        setChartData(null);
+        setEmailSends([]);
+        setLeads([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [id, toast]);
 
   useEffect(() => {
     fetchDetail();
   }, [fetchDetail]);
+
+  // Auto-refresh Analytics & dashboard every 30 seconds (silent refresh, no loading spinner)
+  const POLL_INTERVAL_MS = 30 * 1000;
+  useEffect(() => {
+    if (!id || loading) return;
+    const interval = setInterval(() => {
+      fetchDetail(true);
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [id, loading, fetchDetail]);
 
   const handleLaunch = async () => {
     if (!launchStart) {
@@ -706,7 +719,9 @@ const CampaignDetail = () => {
                   <BarChart3 className="h-5 w-5" />
                   Analytics & dashboard
                 </CardTitle>
-                <CardDescription>Campaign performance and engagement</CardDescription>
+                <CardDescription>
+                  Campaign performance and engagement. Auto-refreshes every 30s.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
@@ -733,7 +748,12 @@ const CampaignDetail = () => {
                   <div className="rounded-lg border p-4 text-center">
                     <TrendingUp className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
                     <div className="text-2xl font-bold">{analytics.engagement ?? 0}%</div>
-                    <div className="text-xs text-muted-foreground">Engagement</div>
+                    <div className="text-xs text-muted-foreground">
+                      Leads engagement
+                      {(emailStats.leads_sent_to != null && emailStats.leads_sent_to > 0) && (
+                        <span className="block mt-0.5">{emailStats.engaged_leads_count ?? 0} of {emailStats.leads_sent_to} leads</span>
+                      )}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 text-center">
                     <AlertCircle className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
@@ -750,7 +770,7 @@ const CampaignDetail = () => {
                           <div className="flex justify-between items-center mb-2">
                             <span className="font-semibold text-muted-foreground">Conversions Target</span>
                             <span className="font-semibold text-foreground">
-                              {emailStats.total_clicked ?? 0} / {analytics.target_conversions}
+                              {emailStats.positive_replies ?? 0} / {analytics.target_conversions}
                             </span>
                           </div>
                           <div className="w-full h-4 bg-muted rounded-lg overflow-hidden">

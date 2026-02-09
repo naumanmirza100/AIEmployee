@@ -606,6 +606,8 @@ class Command(BaseCommand):
         
         # Send the email
         if should_send:
+            if lead and lead.pk:
+                lead.refresh_from_db(fields=['email', 'first_name', 'last_name', 'company', 'job_title'])
             self.stdout.write(f'    Sending Sub-Sequence Step {next_step_number}: {next_step.template.subject}')
             self.stdout.write(f'      Reason: {send_reason}')
             
@@ -720,6 +722,8 @@ class Command(BaseCommand):
     def _send_sequence_email(self, contact, campaign, sequence, next_step, next_step_number, step_count, dry_run):
         """Send an email for a sequence step. Returns 'sent' or 'stopped'"""
         lead = contact.lead
+        if lead and lead.pk:
+            lead.refresh_from_db(fields=['email', 'first_name', 'last_name', 'company', 'job_title'])
         
         self.stdout.write(f'    Sending Step {next_step_number}: {next_step.template.subject}')
         self.stdout.write(f'      Delay: {next_step.delay_days}d {next_step.delay_hours}h {next_step.delay_minutes}m')

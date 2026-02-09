@@ -10,6 +10,7 @@ import {
   Building2, 
   BrainCircuit, 
   Megaphone,
+  Headphones,
   Loader2,
   Lock
 } from 'lucide-react';
@@ -235,6 +236,13 @@ const RecruitmentAgentPage = () => {
               icon: Megaphone,
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
+            }] : []),
+            // Show Frontline Agent if purchased
+            ...(purchasedModules.includes('frontline_agent') ? [{
+              label: 'Frontline Agent',
+              icon: Headphones,
+              section: 'frontline',
+              onClick: () => navigate('/frontline/dashboard'),
             }] : []),
           ]}
         />

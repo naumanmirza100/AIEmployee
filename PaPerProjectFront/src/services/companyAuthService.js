@@ -1,7 +1,6 @@
 // Company Auth Service
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-
+import { API_BASE_URL } from '@/config/apiConfig';
 /**
  * Get company authentication token from localStorage
  */

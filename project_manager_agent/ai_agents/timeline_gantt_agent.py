@@ -1588,7 +1588,7 @@ CALCULATE AND RETURN JSON:
                     actual_span_days = (latest_date - earliest_date).days + 1
             except Exception as e:
                 self.log_action("Error calculating actual span", {"error": str(e)})
-                actual_span_days = None
+            actual_span_days = None
         
         # Build estimates dictionary
         estimates = {
@@ -1795,20 +1795,20 @@ CALCULATE AND RETURN JSON:
                         days_until = remaining_time_days
                         urgency = 'critical' if remaining_percentage < 5 else ('high' if remaining_percentage < 10 else 'medium')
                         
-                        alerts.append({
+            alerts.append({
                             'type': 'upcoming',
-                            'task_id': task.id,
+                'task_id': task.id,
                             'task_title': task.title,
-                            'title': task.title,
+                'title': task.title,
                             'due_date': task_due_datetime.isoformat(),
                             'days_until': int(days_until) if days_until > 0 else 0,
                             'urgency': urgency,
-                            'status': task.status,
-                            'priority': task.priority,
+                'status': task.status,
+                'priority': task.priority,
                             'assignee': task.assignee.username if task.assignee else None,
                             'assignee_name': task.assignee.username if task.assignee else 'Unassigned',
                             'remaining_percentage': round(remaining_percentage, 1)
-                        })
+            })
         
         # Check project deadline
         if project.end_date:

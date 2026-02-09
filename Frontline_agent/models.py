@@ -204,13 +204,28 @@ class Document(models.Model):
         ('other', 'Other'),
     ]
     
+    FILE_FORMAT_CHOICES = [
+        ('pdf', 'PDF'),
+        ('docx', 'DOCX'),
+        ('doc', 'DOC'),
+        ('txt', 'TXT'),
+        ('md', 'Markdown'),
+        ('html', 'HTML'),
+        ('other', 'Other'),
+    ]
+    
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES, default='other')
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES, default='knowledge_base')
     file_path = models.CharField(max_length=1000, help_text="Path to stored document file")
     file_size = models.IntegerField(null=True, blank=True, help_text="File size in bytes")
     mime_type = models.CharField(max_length=100, blank=True)
+    file_format = models.CharField(max_length=10, choices=FILE_FORMAT_CHOICES, default='other', help_text="File format/extension")
     uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_documents')
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, null=True, blank=True, related_name='frontline_documents', help_text="Company that owns this document")
+    document_content = models.TextField(blank=True, help_text="Extracted text content from document")
+    is_indexed = models.BooleanField(default=False, help_text="Whether document content is indexed for search")
+    file_hash = models.CharField(max_length=64, blank=True, help_text="SHA256 hash for duplicate detection")
     processed = models.BooleanField(default=False)
     processed_data = models.JSONField(default=dict, blank=True, help_text="Extracted/processed content from document")
     related_ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
@@ -224,6 +239,8 @@ class Document(models.Model):
         indexes = [
             models.Index(fields=['document_type', 'processed']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['company', 'is_indexed']),
+            models.Index(fields=['file_hash']),
         ]
     
     def __str__(self):
