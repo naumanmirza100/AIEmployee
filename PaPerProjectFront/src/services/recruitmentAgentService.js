@@ -20,6 +20,7 @@ const getCompanyToken = () => {
  * @param {number|null} topN - Optional limit for top N results
  * @param {boolean} parseOnly - If true, only parse CVs without ranking
  */
+
 export const processCVs = async (files, jobDescriptionId = null, jobDescriptionText = '', jobKeywords = '', topN = null, parseOnly = false) => {
   try {
     const token = getCompanyToken();
@@ -177,6 +178,51 @@ export const suggestInterviewQuestions = async (cvRecordId, jobDescriptionId) =>
     cv_record_id: cvRecordId,
     job_description_id: jobDescriptionId,
   });
+  return response;
+};
+
+/**
+ * Recruitment Knowledge Q&A. Ask questions about jobs, candidates, best fit, settings.
+ * Returns { status, data: { answer, insights } }.
+ */
+export const recruitmentQA = async (question) => {
+  const response = await companyApi.post('/recruitment/qa', { question });
+  return response;
+};
+
+/**
+ * List all QA chats (stored in DB)
+ */
+export const listQAChats = async () => {
+  const response = await companyApi.get('/recruitment/qa/chats');
+  return response;
+};
+
+/**
+ * Create a new QA chat with optional messages
+ * @param {{ title?: string, messages?: Array<{role, content, responseData?}> }} data
+ */
+export const createQAChat = async (data) => {
+  const response = await companyApi.post('/recruitment/qa/chats/create', data);
+  return response;
+};
+
+/**
+ * Update a QA chat (add messages, optional title)
+ * @param {number|string} chatId
+ * @param {{ title?: string, messages?: Array<{role, content, responseData?}> }} data
+ */
+export const updateQAChat = async (chatId, data) => {
+  const response = await companyApi.patch(`/recruitment/qa/chats/${chatId}/update`, data);
+  return response;
+};
+
+/**
+ * Delete a QA chat and all its messages
+ * @param {number|string} chatId
+ */
+export const deleteQAChat = async (chatId) => {
+  const response = await companyApi.delete(`/recruitment/qa/chats/${chatId}/delete`);
   return response;
 };
 
@@ -524,6 +570,11 @@ export default {
   getQualificationSettings,
   updateQualificationSettings,
   getRecruitmentAnalytics,
+  recruitmentQA,
+  listQAChats,
+  createQAChat,
+  updateQAChat,
+  deleteQAChat,
 };
 
 

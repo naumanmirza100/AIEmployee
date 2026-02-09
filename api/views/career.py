@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -30,6 +31,16 @@ def list_job_positions(request):
         company_id = request.GET.get('company_id')
         if company_id:
             jobs = jobs.filter(company_id=company_id)
+        
+        # Filter by search (title, description, department) if provided
+        search = request.GET.get('search', '').strip()
+        if search:
+            jobs = jobs.filter(
+                Q(title__icontains=search) |
+                Q(description__icontains=search) |
+                Q(department__icontains=search) |
+                Q(location__icontains=search)
+            )
         
         # Filter by location if provided
         location = request.GET.get('location')
@@ -74,6 +85,7 @@ def submit_career_application(request):
         
         # Map field names (handle both camelCase and snake_case)
         position_id = data.get('positionId') or data.get('position_id')
+        position_title = data.get('positionTitle') or data.get('position_title')
         applicant_name = data.get('applicantName') or data.get('applicant_name') or data.get('name')
         email = data.get('email')
         phone = data.get('phone')
@@ -87,7 +99,7 @@ def submit_career_application(request):
         
         # Get position if provided and determine position title
         position = None
-        final_position_title = position_title if position_title else 'General Application'
+        final_position_title = (position_title or '').strip() or 'General Application'
         
         if position_id:
             try:

@@ -172,7 +172,7 @@ const RecruitmentApiTester = () => {
   };
 
   return (
-    <div className="space-y-6 w-full max-w-4xl">
+    <div className="space-y-6 w-full max-w-full">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
