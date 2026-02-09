@@ -453,10 +453,10 @@ const FrontlineDashboard = () => {
               {answer && (
                 <div 
                   className={answer.has_verified_info 
-                    ? 'rounded-lg border border-green-200 bg-green-50 dark:bg-gray-900 dark:border-green-800' 
-                    : 'rounded-lg border border-yellow-200 bg-yellow-50 dark:bg-gray-900 dark:border-yellow-800'}
+                    ? 'rounded-lg border border-green-200 bg-green-50 dark:!bg-card dark:border-green-800' 
+                    : 'rounded-lg border border-yellow-200 bg-yellow-50 dark:!bg-card dark:border-yellow-800'}
                 >
-                  <div className="p-6 pt-6 rounded-lg">
+                  <div className="p-6 pt-6 rounded-lg" style={{ backgroundColor: '#0A0A0A' }}>
                     <div className="flex items-start space-x-3">
                       {answer.has_verified_info ? (
                         <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
@@ -464,17 +464,17 @@ const FrontlineDashboard = () => {
                         <XCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium mb-2 text-foreground dark:text-white">Answer:</p>
-                        <div className="text-sm text-foreground dark:text-gray-200 whitespace-pre-wrap break-words">
+                        <p className="text-sm font-medium mb-2 text-foreground">Answer:</p>
+                        <div className="text-sm text-foreground whitespace-pre-wrap break-words">
                           {answer.answer || 'No answer available. Please try rephrasing your question.'}
                         </div>
                         {answer.source && (
-                          <p className="text-xs text-muted-foreground dark:text-gray-400 mt-3">
+                          <p className="text-xs text-muted-foreground mt-3">
                             Source: {answer.source}
                           </p>
                         )}
                         {answer.type && (
-                          <p className="text-xs text-muted-foreground dark:text-gray-400 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                             Type: {answer.type}
                           </p>
                         )}

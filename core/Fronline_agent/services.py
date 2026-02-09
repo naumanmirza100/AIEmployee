@@ -9,6 +9,7 @@ from django.db import transaction
 
 from .database_service import PayPerProjectDatabaseService
 from .rules import TicketClassificationRules
+from .embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,8 @@ class KnowledgeService:
     def __init__(self, company_id: Optional[int] = None):
         self.db_service = PayPerProjectDatabaseService()
         self.company_id = company_id
-        logger.info(f"KnowledgeService initialized (company_id: {company_id})")
+        self.embedding_service = EmbeddingService()
+        logger.info(f"KnowledgeService initialized (company_id: {company_id}, embeddings: {self.embedding_service.is_available()})")
     
     def search_knowledge(self, query: str, max_results: int = 5, company_id: Optional[int] = None) -> Dict:
         """
@@ -115,17 +117,114 @@ class KnowledgeService:
             }
     
     def _search_documents(self, query: str, company_id: int, max_results: int) -> List[Dict]:
-        """Search uploaded documents for company"""
+        """
+        Search uploaded documents for company using semantic search (embeddings) with keyword fallback.
+        """
         try:
             from Frontline_agent.models import Document
             from django.db.models import Q
             
-            # Search in document title, description, and content
-            documents = Document.objects.filter(
+            # Get all indexed documents for the company
+            all_documents = Document.objects.filter(
                 company_id=company_id,
                 is_indexed=True,
                 processed=True
-            ).filter(
+            )
+            
+            # Try semantic search first if embeddings are available
+            if self.embedding_service.is_available():
+                try:
+                    # Generate query embedding
+                    query_embedding = self.embedding_service.generate_embedding(query)
+                    
+                    # If embedding generation failed (e.g., quota exceeded), fall back to keyword search
+                    if not query_embedding:
+                        logger.info("Query embedding generation failed, falling back to keyword search")
+                        raise ValueError("Embedding generation failed")
+                    
+                    if query_embedding:
+                        # Get documents with embeddings
+                        documents_with_embeddings = all_documents.exclude(embedding__isnull=True).exclude(embedding=[])
+                        
+                        if documents_with_embeddings.exists():
+                            # Prepare document embeddings for similarity search
+                            doc_embeddings = []
+                            for doc in documents_with_embeddings:
+                                if doc.embedding:  # Ensure embedding exists
+                                    doc_embeddings.append({
+                                        'document_id': doc.id,
+                                        'embedding': doc.embedding,
+                                        'metadata': {
+                                            'title': doc.title,
+                                            'description': doc.description,
+                                            'document_type': doc.document_type,
+                                            'file_format': doc.file_format,
+                                        }
+                                    })
+                            
+                            if doc_embeddings:
+                                # Find similar documents using cosine similarity
+                                similar_docs = self.embedding_service.find_similar_documents(
+                                    query_embedding=query_embedding,
+                                    document_embeddings=doc_embeddings,
+                                    top_k=max_results,
+                                    similarity_threshold=0.5  # Minimum similarity score
+                                )
+                                
+                                if similar_docs:
+                                    # Get full document objects
+                                    doc_ids = [d['document_id'] for d in similar_docs]
+                                    documents = Document.objects.filter(id__in=doc_ids)
+                                    
+                                    # Create a map for similarity scores
+                                    similarity_map = {d['document_id']: d['similarity'] for d in similar_docs}
+                                    
+                                    # Sort by similarity
+                                    documents = sorted(documents, key=lambda d: similarity_map.get(d.id, 0), reverse=True)
+                                    
+                                    results = []
+                                    for doc in documents:
+                                        content = doc.document_content or ''
+                                        similarity = similarity_map.get(doc.id, 0)
+                                        
+                                        # Extract snippet (first 500 chars or around query)
+                                        if query.lower() in content.lower():
+                                            query_lower = query.lower()
+                                            content_lower = content.lower()
+                                            idx = content_lower.find(query_lower)
+                                            if idx >= 0:
+                                                start = max(0, idx - 150)
+                                                end = min(len(content), idx + len(query) + 150)
+                                                snippet = content[start:end]
+                                                if start > 0:
+                                                    snippet = '...' + snippet
+                                                if end < len(content):
+                                                    snippet = snippet + '...'
+                                            else:
+                                                snippet = content[:500] + '...' if len(content) > 500 else content
+                                        else:
+                                            snippet = content[:500] + '...' if len(content) > 500 else content
+                                        
+                                        results.append({
+                                            'id': doc.id,
+                                            'title': doc.title,
+                                            'content': snippet,
+                                            'file_format': doc.file_format,
+                                            'document_type': doc.document_type,
+                                            'similarity_score': round(similarity, 3),  # Add similarity score
+                                            'search_method': 'semantic'
+                                        })
+                                    
+                                    logger.info(f"Semantic search found {len(results)} documents")
+                                    return results
+                                
+                                logger.info("Semantic search found no similar documents, falling back to keyword search")
+                except Exception as e:
+                    logger.warning(f"Semantic search failed, falling back to keyword search: {e}")
+            
+            # Fallback to keyword search
+            logger.info("Using keyword-based search")
+            documents = all_documents.filter(
                 Q(title__icontains=query) |
                 Q(description__icontains=query) |
                 Q(document_content__icontains=query)
@@ -159,6 +258,7 @@ class KnowledgeService:
                     'content': snippet,
                     'file_format': doc.file_format,
                     'document_type': doc.document_type,
+                    'search_method': 'keyword'
                 })
             
             return results
