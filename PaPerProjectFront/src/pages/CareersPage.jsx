@@ -300,8 +300,16 @@ const CareersPage = ({ scrollToJobs = false }) => {
                         <div className="flex-1">
                           <h3 className="text-xl font-bold text-primary">{position.title}</h3>
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground mt-2">
-                            <span className="flex items-center gap-1.5"><Briefcase className="h-4 w-4" /> {position.department}</span>
-                            <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4" /> {position.location}</span>
+                            {(position.department || position.location) && (
+                              <>
+                                {position.department && (
+                                  <span className="flex items-center gap-1.5"><Briefcase className="h-4 w-4" /> {position.department}</span>
+                                )}
+                                {position.location && (
+                                  <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4" /> {position.location}</span>
+                                )}
+                              </>
+                            )}
                             {position.type && (
                               <span className="flex items-center gap-1.5 text-sm bg-secondary px-2 py-1 rounded">
                                 {position.type}

@@ -164,6 +164,20 @@ export const deleteTemplate = async (campaignId, templateId) => {
 };
 
 /**
+ * Send test email for a template (to verify dynamic values like {{ first_name }}).
+ * Body: { test_email: "you@example.com", lead_id?: number }. If lead_id omitted, uses sample data.
+ */
+export const testEmailTemplate = async (campaignId, templateId, data) => {
+  try {
+    const response = await companyApi.post(`/marketing/campaigns/${campaignId}/templates/${templateId}/test`, data);
+    return response;
+  } catch (error) {
+    console.error('Test email template error:', error);
+    throw error;
+  }
+};
+
+/**
  * List email accounts
  */
 export const listEmailAccounts = async () => {
@@ -636,6 +650,7 @@ export default {
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  testEmailTemplate,
   listEmailAccounts,
   createEmailAccount,
   getEmailAccount,

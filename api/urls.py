@@ -209,7 +209,18 @@ urlpatterns = [
     re_path(r'^company/applications/(?P<id>\d+)/status/?$', company_jobs.update_company_application_status, name='update_company_application_status'),
     
     # Recruitment Agent endpoints (Company User)
-    re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST
+    re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST (full pipeline)
+    re_path(r'^recruitment/agents/cv/parse/?$', recruitment_agent.api_cv_parse, name='recruitment_api_cv_parse'),  # POST
+    re_path(r'^recruitment/agents/cv/summarize/?$', recruitment_agent.api_cv_summarize, name='recruitment_api_cv_summarize'),  # POST
+    re_path(r'^recruitment/agents/cv/enrich/?$', recruitment_agent.api_cv_enrich, name='recruitment_api_cv_enrich'),  # POST
+    re_path(r'^recruitment/agents/cv/qualify/?$', recruitment_agent.api_cv_qualify, name='recruitment_api_cv_qualify'),  # POST
+    re_path(r'^recruitment/agents/job-description/parse/?$', recruitment_agent.api_job_description_parse, name='recruitment_api_job_description_parse'),  # POST
+    re_path(r'^recruitment/ai/suggest-interview-questions/?$', recruitment_agent.suggest_interview_questions, name='recruitment_suggest_interview_questions'),  # POST
+    re_path(r'^recruitment/qa/?$', recruitment_agent.recruitment_qa, name='recruitment_qa'),  # POST
+    re_path(r'^recruitment/qa/chats/?$', recruitment_agent.list_qa_chats, name='recruitment_qa_chats_list'),  # GET
+    re_path(r'^recruitment/qa/chats/create/?$', recruitment_agent.create_qa_chat, name='recruitment_qa_chats_create'),  # POST
+    re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/update/?$', recruitment_agent.update_qa_chat, name='recruitment_qa_chats_update'),  # PATCH/PUT
+    re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/delete/?$', recruitment_agent.delete_qa_chat, name='recruitment_qa_chats_delete'),  # DELETE
     re_path(r'^recruitment/job-descriptions/?$', recruitment_agent.list_job_descriptions, name='recruitment_list_job_descriptions'),  # GET
     re_path(r'^recruitment/job-descriptions/generate/?$', recruitment_agent.generate_job_description, name='recruitment_generate_job_description'),  # POST
     re_path(r'^recruitment/job-descriptions/create/?$', recruitment_agent.create_job_description, name='recruitment_create_job_description'),  # POST
@@ -250,6 +261,7 @@ urlpatterns = [
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/?$', marketing_agent.create_template, name='marketing_create_template'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/update/?$', marketing_agent.update_template, name='marketing_update_template'),  # PUT/PATCH
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/delete/?$', marketing_agent.delete_template, name='marketing_delete_template'),  # POST
+    re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/test/?$', marketing_agent.test_email_template, name='marketing_test_email_template'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/email-status/full/?$', marketing_agent.get_email_status_full, name='marketing_email_status_full'),  # GET
     re_path(r'^marketing/email-accounts/?$', marketing_agent.list_email_accounts, name='marketing_list_email_accounts'),  # GET
     re_path(r'^marketing/email-accounts/create/?$', marketing_agent.create_email_account, name='marketing_create_email_account'),  # POST

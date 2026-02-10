@@ -42,7 +42,9 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         5. Presentations
         
         Always create well-structured, professional documents with clear sections, proper formatting, and actionable insights.
-        Use the provided campaign data and context to create accurate, relevant documents."""
+        Use the provided campaign data and context to create accurate, relevant documents.
+        
+        CRITICAL - NO REPETITION: Never repeat the same sentences, bullet points, or paragraphs anywhere in the document. Each section must contain unique content. If you need to reach the required length, add NEW content only: different angles, implications, interpretations, recommendations, or analysis related to the campaign—never duplicate or rephrase the same points to fill space."""
     
     def process(self, action: str, user_id: int, document_type: str, document_data: Optional[Dict] = None, campaign_id: Optional[int] = None, document_id: Optional[int] = None, context: Optional[Dict] = None) -> Dict:
         """
@@ -164,7 +166,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             prompt=prompt,
             system_prompt=self.system_prompt,
             temperature=0.35,  # Lower = more consistent, especially on retry
-            max_tokens=max(max_tokens_needed, 8000)
+            max_tokens=max(max_tokens_needed, 16384)  # Allow long documents so content is not truncated
         )
         
         # Post-process: ensure Phase 2 is never missing in timeline sections (strategy and brief)
@@ -268,7 +270,7 @@ ADDITIONAL KEY POINTS (what the user wants in this document - YOU MUST ADDRESS T
 
 LENGTH AND FORMAT REQUIREMENTS (USER-SPECIFIED - MANDATORY, NO EXCEPTIONS):
 
-**PAGE COUNT (STRICT):** Target = {target_pages} page(s). One rendered page ≈ 450 words. Your output MUST be at least {target_pages * 450} words ({target_pages * 450} words minimum). Write detailed paragraphs—do NOT stop early. If you finish a section and are under the minimum, expand with more analysis, examples, and detail. Count roughly: aim for at least {target_pages * 450} words total.
+**PAGE COUNT (STRICT):** Target = {target_pages} page(s). One rendered page ≈ 450 words. Your output MUST be at least {target_pages * 450} words ({target_pages * 450} words minimum). Write detailed paragraphs—do NOT stop early. If you finish a section and are under the minimum, expand with NEW unique content only: additional analysis, implications, recommendations, or interpretations related to the campaign. NEVER fill space by repeating or rephrasing the same content—every paragraph and bullet must be unique.
 
 **TABLES:** {"User requested ZERO tables. You MUST NOT include any markdown tables (no | column | format). Present ALL metrics, lead data, timelines, and information using bullet lists (•) or numbered lists or paragraphs ONLY. Do NOT use pipe characters (|) to create tables. This overrides any other instruction." if target_tables == 0 else f"Include exactly {target_tables} markdown table(s). Table types: {table_types_str}. Create tables in | col | col | format."}
 {f'''- CHARTS (MANDATORY): Include exactly {target_charts} chart(s) using [CHART]...[/CHART] blocks. Chart type: {chart_type}. You MUST insert these chart blocks—do NOT skip them.
@@ -304,14 +306,24 @@ You MUST cater to this in the document:
         
         # Add campaign data if available
         if campaign_data:
+            # Hint when campaign has no email/lead data so report/brief don't invent or look wrong
+            has_email_data = campaign_data.get('emails_sent') is not None or campaign_data.get('emails_sent') == 0
+            has_lead_data = (campaign_data.get('leads_count') or 0) > 0 or (campaign_data.get('leads') or [])
+            sparse_hint = ''
+            if document_type in ('report', 'brief'):
+                if not has_email_data and not campaign_data.get('open_rate') is not None:
+                    sparse_hint = '\nNOTE: This campaign has NO email sending activity in the database yet (no emails sent, no open/click rates). In the document, state that clearly (e.g. "Email campaign not yet launched" or "No email metrics available yet") in the Email Performance section and focus on campaign setup, targets, timeline, and recommendations for launch. Do NOT invent email metrics or fake numbers.\n'
+                elif not has_lead_data:
+                    sparse_hint = '\nNOTE: This campaign has NO leads in the database yet. In the document, state that clearly (e.g. "No leads added yet" or "Lead list pending") in the Lead section and focus on campaign objectives, target audience, and how to add leads. Do NOT invent or list fake leads.\n'
             prompt += f"""
 ═══════════════════════════════════════════════════════════════
 CAMPAIGN DATA (REAL DATA FROM DATABASE - USE ALL OF THIS):
 ═══════════════════════════════════════════════════════════════
 {self._format_campaign_data(campaign_data)}
 ═══════════════════════════════════════════════════════════════
-
+{sparse_hint}
 CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
+0. NO REPETITION: Do NOT repeat the same sentences, bullets, or ideas anywhere in the document. For Campaign Brief and Performance Report especially: if you need more content to meet the page minimum, add NEW unique content—e.g. different implications, alternative recommendations, deeper analysis of the same metrics, or additional angles on the campaign—never copy, paste, or rephrase existing content to fill space.
 1. For briefs/reports: address what the user asked for (e.g. issues, improvement, engagement). For strategy/proposal: produce a full, professional document with all sections; if the user gave a title or notes (or specific details like budget, timeline, audience), incorporate those in the relevant sections—budget in Resource Breakdown, timeline in Timeline, audience/industry in Target Audience, etc. Do not ignore or genericize user-provided details.
 2. ALL data above is REAL data fetched from the database for this specific campaign
 3. You MUST include ALL performance metrics, statistics, and data points provided above
@@ -368,7 +380,7 @@ DETAIL AND DEPTH REQUIREMENTS:
 4. Create dedicated sections for performance metrics with full breakdowns
 5. Include multiple paragraphs per section explaining the data
 6. Add context and interpretation for all metrics
-7. Output MUST be at least {target_pages * 450} words ({target_pages} pages). Do not stop until you reach this minimum. Expand sections with more detail if needed.
+7. Output MUST be at least {target_pages * 450} words ({target_pages} pages). Do not stop until you reach this minimum. Expand with NEW unique content only (e.g. extra analysis, implications, recommendations)—never repeat or rephrase the same content to fill space.
 
 PERFORMANCE METRICS SECTION REQUIREMENTS:
 If campaign data includes performance metrics, you MUST create a detailed section like:
@@ -405,6 +417,7 @@ The conclusion MUST be a proper, professional ending that:
 
 **FINAL REMINDERS BEFORE YOU WRITE:**
 - Minimum length: {target_pages * 450} words ({target_pages} pages). Do not stop early.
+- NO REPETITION: Every paragraph and bullet must be unique. To reach the minimum length, add NEW campaign-related content (e.g. more analysis, implications, recommendations)—never duplicate or rephrase existing content.
 - Tables: {"ZERO. Use lists and paragraphs only—no | table | format." if target_tables == 0 else f"Exactly {target_tables} markdown tables."}
 - Use ALL REAL campaign data provided above
 - Write in DETAIL with comprehensive analysis
@@ -706,6 +719,8 @@ End the proposal here. Do NOT add Performance Metrics and Analysis, Email Campai
             'report': """
 Create a LONG, detailed Performance Report (full paragraphs throughout—not short bullets). Use ## for main sections only; do NOT use ### (H3) subsections—use **bold** labels or bullet points followed by full paragraphs.
 
+NO REPETITION: Do not repeat the same content. If you need more length, add NEW unique analysis, implications, or recommendations related to the campaign—never duplicate or rephrase existing paragraphs or bullets.
+
 Sections:
 - Executive Summary (2–3 full paragraphs)
 - Campaign Overview: present campaign info, target audience, goals/targets in flowing prose and bullet lists where useful; then add a short paragraph summarizing the campaign. Do NOT use ### under Campaign Overview.
@@ -730,6 +745,8 @@ MANDATORY:
 """,
             'brief': """
 Create a DETAILED Campaign Brief that reads like a proper campaign briefing. Use ONLY the campaign data provided above. Use ## for main sections only; do NOT use ### or ####. Every section MUST have substantive content (paragraphs or bullets with explanation)—do NOT leave sections empty or one-line.
+
+NO REPETITION: Do not repeat the same content anywhere. If you need more length, add NEW unique content related to the campaign (e.g. extra implications, recommendations, or analysis)—never duplicate or rephrase existing text to fill space.
 
 Sections (use ONLY these—do NOT add "Performance Metrics and Analysis", "Lead Engagement Metrics", "Engagement Analysis", "Improvement Opportunities", or "Action Items" as extra ## sections):
 

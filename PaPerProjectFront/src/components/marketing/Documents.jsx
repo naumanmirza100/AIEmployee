@@ -67,11 +67,6 @@ const Documents = () => {
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [campaignId, setCampaignId] = useState('');
-  const [pages, setPages] = useState(5);
-  const [tables, setTables] = useState(3);
-  const [charts, setCharts] = useState(1);
-  const [chartType, setChartType] = useState('bar');
-  const [tableTypes, setTableTypes] = useState('metrics, timeline, lead details');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
@@ -117,13 +112,6 @@ const Documents = () => {
   useEffect(() => {
     fetchCampaigns();
   }, [fetchCampaigns]);
-
-  // Performance Report: ensure at least 6 pages when selected
-  useEffect(() => {
-    if (documentType === 'report' && (typeof pages !== 'number' || pages < 6)) {
-      setPages(6);
-    }
-  }, [documentType]);
 
   const openDetail = async (id) => {
     setSelectedDocumentId(id);
@@ -204,15 +192,6 @@ const Documents = () => {
       const documentData = {};
       if (title?.trim()) documentData.title = title.trim();
       if (notes?.trim()) documentData.notes = notes.trim();
-      const minPages = documentType === 'report' ? 6 : 1;
-      const defaultPages = documentType === 'report' ? 6 : 5;
-      documentData.pages = Math.min(20, Math.max(minPages, parseInt(pages, 10) || defaultPages));
-      documentData.tables = Math.max(0, parseInt(tables, 10) ?? 3);
-      if (tableTypes?.trim()) documentData.table_types = String(tableTypes).trim();
-      if (documentType === 'report') {
-        documentData.charts = Math.max(0, parseInt(charts, 10) ?? 1);
-        documentData.chart_type = chartType || 'bar';
-      }
       const campaignIdNum = hasCampaign ? Number(campaignId) : null;
       const response = await marketingAgentService.documentAuthoring('create', documentType, documentData, campaignIdNum, {});
       if (response.status === 'error') {
@@ -340,75 +319,6 @@ const Documents = () => {
                 <Label>Notes / key points (optional)</Label>
                 <Textarea placeholder="Context, requirements..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="resize-none" />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-2">
-                  <Label>Target pages (1–20)</Label>
-                  <Input
-                    type="number"
-                    min={documentType === 'report' ? 6 : 1}
-                    max={20}
-                    value={pages}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      const minP = documentType === 'report' ? 6 : 1;
-                      const defaultP = documentType === 'report' ? 6 : 5;
-                      setPages(isNaN(v) ? defaultP : Math.min(20, Math.max(minP, v)));
-                    }}
-                    placeholder={documentType === 'report' ? '6' : '5'}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {documentType === 'report' ? 'Performance Report: min 6 pages. ' : ''}Max: 20 pages. No word limit.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Number of tables</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={tables}
-                    onChange={(e) => setTables(e.target.value)}
-                    placeholder="3"
-                  />
-                  <p className="text-xs text-muted-foreground">Tables to include in the document.</p>
-                </div>
-                <div className="space-y-2 lg:col-span-2">
-                  <Label>Table types (what kind of tables)</Label>
-                  <Input
-                    placeholder="e.g. metrics, timeline, lead details, comparison, budget"
-                    value={tableTypes}
-                    onChange={(e) => setTableTypes(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">Comma-separated: metrics, timeline, lead details, comparison, budget, etc.</p>
-                </div>
-              </div>
-              {documentType === 'report' && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Number of charts (Performance Report)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={10}
-                      value={charts}
-                      onChange={(e) => setCharts(e.target.value)}
-                      placeholder="1"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Chart type</Label>
-                    <Select value={chartType} onValueChange={setChartType}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="bar">Bar chart</SelectItem>
-                        <SelectItem value="pie">Pie chart</SelectItem>
-                        <SelectItem value="line">Line chart</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">Type of chart to insert in the report.</p>
-                  </div>
-                </div>
-              )}
               {error && <p className="text-sm text-destructive">{error}</p>}
               {result && result.document_id && (
                 <p className="text-sm text-muted-foreground">Document created. Opening it in the viewer.</p>

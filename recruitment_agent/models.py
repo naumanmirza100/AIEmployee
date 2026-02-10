@@ -379,6 +379,59 @@ class Interview(models.Model):
         return settings.min_hours_between_followups
 
 
+class RecruitmentQAChat(models.Model):
+    """Knowledge Q&A chat sessions for recruiters. Each chat contains multiple messages."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='recruitment_qa_chats',
+        help_text='Company user who owns this chat',
+    )
+    title = models.CharField(max_length=255, default='Chat', help_text='Chat title (e.g. first question snippet)')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_recruitment_agent_recruitmentqachat'
+        ordering = ['-updated_at']
+        verbose_name = 'Recruitment QA Chat'
+        verbose_name_plural = 'Recruitment QA Chats'
+
+    def __str__(self):
+        return f"QA Chat: {self.title[:40]}... ({self.id})"
+
+
+class RecruitmentQAChatMessage(models.Model):
+    """Individual messages in a Recruitment QA chat."""
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('assistant', 'Assistant'),
+    ]
+    chat = models.ForeignKey(
+        RecruitmentQAChat,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        help_text='Chat this message belongs to',
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField(help_text='Message content')
+    response_data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='For assistant: full API response { answer, insights }',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'ppp_recruitment_agent_recruitmentqachatmessage'
+        ordering = ['created_at']
+        verbose_name = 'Recruitment QA Chat Message'
+        verbose_name_plural = 'Recruitment QA Chat Messages'
+
+    def __str__(self):
+        return f"{self.role}: {self.content[:50]}..."
+
+
 class CareerApplication(models.Model):
     """Job applications - maps to ppp_career_applications"""
     STATUS_CHOICES = [
