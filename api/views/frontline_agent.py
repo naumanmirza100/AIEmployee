@@ -26,6 +26,7 @@ from core.models import CompanyUser, Company
 from Frontline_agent.models import Document, Ticket, KnowledgeBase
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
+from core.Fronline_agent.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -254,28 +255,64 @@ def upload_document(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Generate embedding for semantic search
+        embedding = None
+        embedding_model = None
+        extracted_text = processing_result.get('extracted_text', '')
+        
+        if extracted_text:
+            try:
+                embedding_service = EmbeddingService()
+                if embedding_service.is_available():
+                    # Create searchable text: title + description + content
+                    searchable_text = f"{title}\n{description}\n{extracted_text}".strip()
+                    embedding = embedding_service.generate_embedding(searchable_text)
+                    embedding_model = embedding_service.embedding_model if embedding else None
+                    
+                    if embedding:
+                        logger.info(f"Generated embedding for document {title} (dimension: {len(embedding)})")
+                    # Note: If embedding is None, it's already logged in embedding_service
+                    # No need to log again here to avoid duplicate messages
+                else:
+                    logger.warning("Embedding service not available, skipping embedding generation")
+            except Exception as e:
+                # Only log unexpected errors (quota errors are handled in embedding_service)
+                error_str = str(e)
+                if '429' not in error_str and 'quota' not in error_str.lower():
+                    logger.error(f"Unexpected error generating embedding: {e}", exc_info=True)
+                # Continue without embedding - keyword search will still work
+        
         # Create document record
-        document = Document.objects.create(
-            title=title,
-            description=description,
-            document_type=document_type,
-            file_path=str(file_path.relative_to(settings.MEDIA_ROOT)),
-            file_size=uploaded_file.size,
-            mime_type=uploaded_file.content_type,
-            file_format=file_format,
-            uploaded_by=user,
-            company=company,
-            document_content=processing_result.get('extracted_text', ''),
-            is_indexed=True,  # Auto-index if processing succeeded
-            file_hash=processing_result.get('file_hash', ''),
-            processed=True,
-            processed_data={
+        document_data = {
+            'title': title,
+            'description': description,
+            'document_type': document_type,
+            'file_path': str(file_path.relative_to(settings.MEDIA_ROOT)),
+            'file_size': uploaded_file.size,
+            'mime_type': uploaded_file.content_type,
+            'file_format': file_format,
+            'uploaded_by': user,
+            'company': company,
+            'document_content': extracted_text,
+            'is_indexed': True,  # Auto-index if processing succeeded
+            'file_hash': processing_result.get('file_hash', ''),
+            'processed': True,
+            'processed_data': {
                 'extraction_success': True,
                 'file_format': file_format,
+                'embedding_generated': embedding is not None,
             }
-        )
+        }
         
-        logger.info(f"Document uploaded and processed: {document.id} by company {company.id}")
+        # Only add embedding fields if embedding was generated
+        if embedding is not None:
+            document_data['embedding'] = embedding
+        if embedding_model:
+            document_data['embedding_model'] = embedding_model
+        
+        document = Document.objects.create(**document_data)
+        
+        logger.info(f"Document uploaded and processed: {document.id} by company {company.id} (embedding: {'yes' if embedding else 'no'})")
         
         return Response({
             'status': 'success',
@@ -479,4 +516,8 @@ def create_ticket(request):
             {'status': 'error', 'message': 'Failed to create ticket', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+
+
 
