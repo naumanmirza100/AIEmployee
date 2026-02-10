@@ -228,7 +228,7 @@ class Document(models.Model):
     file_hash = models.CharField(max_length=64, blank=True, help_text="SHA256 hash for duplicate detection")
     processed = models.BooleanField(default=False)
     processed_data = models.JSONField(default=dict, blank=True, help_text="Extracted/processed content from document")
-    embedding = models.JSONField(null=True, blank=True, help_text="Vector embedding for semantic search (stored as list)")
+    embedding = models.TextField(null=True, blank=True, help_text="Vector embedding for semantic search (stored as JSON string to support large embeddings)")
     embedding_model = models.CharField(max_length=100, blank=True, null=True, help_text="Model used to generate embedding (e.g., text-embedding-3-large)")
     related_ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
     related_knowledge = models.ForeignKey(KnowledgeBase, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')

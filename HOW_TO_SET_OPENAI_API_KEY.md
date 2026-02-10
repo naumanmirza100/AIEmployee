@@ -1,6 +1,57 @@
-# How to Set OPENAI_API_KEY
+# How to Set API Keys for Frontline Agent Embeddings
 
-## Quick Steps
+## Overview
+
+The Frontline Agent uses **embeddings** for semantic search. The system supports:
+- **OpenRouter** (tried first if `OPENROUTER_API_KEY` is set) - **Recommended** ⭐
+- **DeepSeek** (tried second if `DEEPSEEK_API_KEY` is set)
+- **Groq** (tried third if `GROQ_API_KEY` is set)
+- **OpenAI** (fallback if others don't support embeddings)
+
+**Priority Order**: OpenRouter → DeepSeek → Groq → OpenAI
+
+**Note**: OpenRouter provides access to multiple models including DeepSeek models. If the specified model doesn't support embeddings, the system will automatically try alternative embedding models.
+
+## Option 1: Use OpenRouter (Recommended) ⭐
+
+OpenRouter provides access to multiple models including DeepSeek, and is very cost-effective.
+
+### Steps:
+1. Get your OpenRouter API key from [OpenRouter Platform](https://openrouter.ai/)
+2. Add to your `.env` file:
+   ```env
+   OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   OPENROUTER_EMBEDDING_MODEL=deepseek/deepseek-r1-0528:free
+   ```
+3. Restart Django server
+
+**Note**: If `deepseek/deepseek-r1-0528:free` doesn't support embeddings, the system will automatically try alternative embedding models like `text-embedding-3-large`.
+
+## Option 2: Use DeepSeek Directly
+
+DeepSeek provides excellent embeddings and is cost-effective.
+
+### Steps:
+1. Get your DeepSeek API key from [DeepSeek Platform](https://platform.deepseek.com/)
+2. Add to your `.env` file:
+   ```env
+   DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   DEEPSEEK_EMBEDDING_MODEL=deepseek/deepseek-r1-0528
+   ```
+3. Restart Django server
+
+**Note**: If `deepseek/deepseek-r1-0528` doesn't support embeddings, the system will automatically use `deepseek-embedding-v3`.
+
+## Option 3: Use Groq (with OpenAI fallback)
+
+If you already have `GROQ_API_KEY` set, the system will automatically try Groq first, then fall back to OpenAI for embeddings.
+
+### Steps:
+1. Make sure `GROQ_API_KEY` is in your `.env` file
+2. Add `OPENAI_API_KEY` as a fallback (required for embeddings)
+3. Restart Django server
+
+## Option 4: Use OpenAI Only
 
 ### 1. Get Your OpenAI API Key
 
@@ -49,13 +100,40 @@ DB_USER=your_user
 DB_PASSWORD=your_password
 
 # API Keys
+# OpenRouter is used for embeddings (semantic search) - Recommended ⭐
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+OPENROUTER_EMBEDDING_MODEL=deepseek/deepseek-r1-0528:free
+
+# DeepSeek is used for embeddings (semantic search) - Alternative
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DEEPSEEK_EMBEDDING_MODEL=deepseek/deepseek-r1-0528
+
+# Groq is used for LLM tasks (Q&A, etc.)
 GROQ_API_KEY=your_groq_key_here
+
+# OpenAI is used for embeddings (semantic search) - Fallback
+# Note: Only needed if OpenRouter/DeepSeek/Groq don't work
 OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Other settings...
 FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:8000
 ```
+
+## How It Works
+
+1. **System tries OpenRouter first** (if `OPENROUTER_API_KEY` is set) - Highest Priority
+2. **If OpenRouter fails**, tries DeepSeek (if `DEEPSEEK_API_KEY` is set)
+3. **If DeepSeek fails**, tries Groq (if `GROQ_API_KEY` is set)
+4. **If Groq doesn't support embeddings**, falls back to OpenAI
+5. **OpenAI handles embeddings** as final fallback
+
+This means:
+- ✅ OpenRouter is preferred for embeddings (access to multiple models, cost-effective)
+- ✅ DeepSeek is a great alternative (high quality, cost-effective)
+- ✅ Groq can be used for fast LLM inference (Q&A, ticket automation, etc.)
+- ✅ OpenAI is available as fallback
+- ✅ System works automatically with the available keys
 
 ## Verify It's Working
 

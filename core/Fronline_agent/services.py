@@ -134,7 +134,8 @@ class KnowledgeService:
             # Try semantic search first if embeddings are available
             if self.embedding_service.is_available():
                 try:
-                    # Generate query embedding
+                    # Generate query embedding for semantic search
+                    logger.info(f"Generating query embedding for semantic search: {query[:100]}")
                     query_embedding = self.embedding_service.generate_embedding(query)
                     
                     # If embedding generation failed (e.g., quota exceeded), fall back to keyword search
@@ -142,9 +143,13 @@ class KnowledgeService:
                         logger.info("Query embedding generation failed, falling back to keyword search")
                         raise ValueError("Embedding generation failed")
                     
+                    logger.info(f"Query embedding generated successfully (dimension: {len(query_embedding)})")
+                    
                     if query_embedding:
                         # Get documents with embeddings
                         documents_with_embeddings = all_documents.exclude(embedding__isnull=True).exclude(embedding=[])
+                        
+                        logger.info(f"Found {documents_with_embeddings.count()} documents with embeddings for company {company_id}")
                         
                         if documents_with_embeddings.exists():
                             # Prepare document embeddings for similarity search
@@ -163,21 +168,61 @@ class KnowledgeService:
                                     })
                             
                             if doc_embeddings:
-                                # Find similar documents using cosine similarity
-                                similar_docs = self.embedding_service.find_similar_documents(
-                                    query_embedding=query_embedding,
-                                    document_embeddings=doc_embeddings,
-                                    top_k=max_results,
-                                    similarity_threshold=0.5  # Minimum similarity score
-                                )
+                                logger.info(f"Processing {len(doc_embeddings)} documents with embeddings for similarity search")
+                                
+                                # Calculate all similarities first for debugging
+                                all_scores = []
+                                for doc_data in doc_embeddings:
+                                    try:
+                                        doc_embedding = doc_data['embedding']
+                                        # Ensure embedding is a list (not JSON string)
+                                        if isinstance(doc_embedding, str):
+                                            import json
+                                            doc_embedding = json.loads(doc_embedding)
+                                        
+                                        similarity = self.embedding_service.cosine_similarity(query_embedding, doc_embedding)
+                                        all_scores.append({
+                                            'id': doc_data['document_id'],
+                                            'score': similarity,
+                                            'title': doc_data['metadata'].get('title', 'Unknown')
+                                        })
+                                    except Exception as e:
+                                        logger.error(f"Error calculating similarity for doc {doc_data['document_id']}: {e}")
+                                
+                                # Sort by similarity
+                                all_scores.sort(key=lambda x: x['score'], reverse=True)
+                                
+                                # Log top 5 scores for debugging
+                                top_5 = all_scores[:5] if len(all_scores) >= 5 else all_scores
+                                logger.warning(f"Top 5 similarity scores: {[(d['id'], round(d['score'], 3), d['title'][:50]) for d in top_5]}")
+                                
+                                # Log ALL scores for debugging (to see if document 8 is included)
+                                logger.info(f"All similarity scores (total: {len(all_scores)}): {[(d['id'], round(d['score'], 3), d['title'][:30]) for d in all_scores]}")
+                                
+                                # Use top results regardless of threshold
+                                # Some embedding models produce lower similarity scores, so we'll take the top N
+                                # and let the user see the results even if scores seem low
+                                if all_scores:
+                                    # Take top max_results documents (always return something if we have documents)
+                                    similar_docs = all_scores[:max_results]
+                                    scores = [round(d['score'], 3) for d in similar_docs]
+                                    logger.warning(f"Returning top {len(similar_docs)} documents (max_results={max_results}) with similarity scores: {scores}")
+                                    logger.info(f"Document IDs being returned: {[d['id'] for d in similar_docs]}")
+                                    
+                                    # Check if document 8 is in the results
+                                    doc_8_in_results = any(d['id'] == 8 for d in similar_docs)
+                                    logger.info(f"Document 8 (nlp) in results: {doc_8_in_results}")
+                                else:
+                                    similar_docs = []
+                                    logger.warning(f"No documents with embeddings found. Total documents processed: {len(all_scores)}")
                                 
                                 if similar_docs:
                                     # Get full document objects
-                                    doc_ids = [d['document_id'] for d in similar_docs]
+                                    doc_ids = [d['id'] for d in similar_docs]
                                     documents = Document.objects.filter(id__in=doc_ids)
                                     
                                     # Create a map for similarity scores
-                                    similarity_map = {d['document_id']: d['similarity'] for d in similar_docs}
+                                    similarity_map = {d['id']: d['score'] for d in similar_docs}
                                     
                                     # Sort by similarity
                                     documents = sorted(documents, key=lambda d: similarity_map.get(d.id, 0), reverse=True)
@@ -187,23 +232,62 @@ class KnowledgeService:
                                         content = doc.document_content or ''
                                         similarity = similarity_map.get(doc.id, 0)
                                         
-                                        # Extract snippet (first 500 chars or around query)
-                                        if query.lower() in content.lower():
-                                            query_lower = query.lower()
-                                            content_lower = content.lower()
-                                            idx = content_lower.find(query_lower)
-                                            if idx >= 0:
-                                                start = max(0, idx - 150)
-                                                end = min(len(content), idx + len(query) + 150)
-                                                snippet = content[start:end]
-                                                if start > 0:
-                                                    snippet = '...' + snippet
-                                                if end < len(content):
-                                                    snippet = snippet + '...'
+                                        # Extract snippet - try to find the most relevant section
+                                        query_lower = query.lower()
+                                        content_lower = content.lower()
+                                        
+                                        # Extract keywords from query (remove common words)
+                                        import re
+                                        query_words = re.findall(r'\b\w+\b', query_lower)
+                                        stop_words = {'what', 'is', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'how', 'do', 'does', 'can', 'will'}
+                                        keywords = [w for w in query_words if w not in stop_words and len(w) > 2]
+                                        
+                                        # Try to find the most relevant section by searching for keywords
+                                        best_snippet = None
+                                        best_start = 0
+                                        
+                                        if keywords:
+                                            # Search for each keyword and find the best match
+                                            for keyword in keywords:
+                                                idx = content_lower.find(keyword)
+                                                if idx >= 0:
+                                                    # Extract large context around keyword (3000 chars)
+                                                    start = max(0, idx - 1000)
+                                                    end = min(len(content), idx + len(keyword) + 2000)
+                                                    snippet = content[start:end]
+                                                    if start > 0:
+                                                        snippet = '...' + snippet
+                                                    if end < len(content):
+                                                        snippet = snippet + '...'
+                                                    
+                                                    # Use this snippet if it's better (contains more keywords or is longer)
+                                                    if best_snippet is None or len(snippet) > len(best_snippet):
+                                                        best_snippet = snippet
+                                                        best_start = start
+                                            
+                                            if best_snippet:
+                                                snippet = best_snippet
                                             else:
-                                                snippet = content[:500] + '...' if len(content) > 500 else content
+                                                # No keywords found, use first 3000 chars
+                                                snippet = content[:3000] + '...' if len(content) > 3000 else content
                                         else:
-                                            snippet = content[:500] + '...' if len(content) > 500 else content
+                                            # No keywords, use first 3000 chars
+                                            snippet = content[:3000] + '...' if len(content) > 3000 else content
+                                        
+                                        # For semantic search results, we want more content since we know it's relevant
+                                        # Use up to 5000 chars to give LLM enough context
+                                        if len(snippet) < 5000 and len(content) > len(snippet):
+                                            # Try to expand the snippet if there's more content
+                                            remaining = min(5000 - len(snippet), len(content) - len(snippet))
+                                            if best_start > 0:
+                                                # Add content before
+                                                add_before = min(remaining // 2, best_start)
+                                                snippet = content[best_start - add_before:best_start] + snippet
+                                            if len(snippet) < 5000:
+                                                # Add content after
+                                                add_after = min(5000 - len(snippet), len(content) - (best_start + len(snippet)))
+                                                if add_after > 0:
+                                                    snippet = snippet + content[best_start + len(snippet):best_start + len(snippet) + add_after]
                                         
                                         results.append({
                                             'id': doc.id,
@@ -269,6 +353,7 @@ class KnowledgeService:
     def get_answer(self, question: str, company_id: Optional[int] = None) -> Dict:
         """
         Get answer to a question from knowledge base and uploaded documents.
+        Uses semantic search (embeddings) if available, with keyword fallback.
         
         Args:
             question: User's question
@@ -279,7 +364,14 @@ class KnowledgeService:
         """
         logger.info(f"Getting answer for question: {question[:100]} (company_id: {company_id})")
         
-        # Try full question first
+        # Check if embeddings are available for semantic search
+        use_semantic = self.embedding_service.is_available()
+        if use_semantic:
+            logger.info("Using semantic search (embeddings) for query")
+        else:
+            logger.info("Using keyword search (embeddings not available)")
+        
+        # Try full question first - this will use semantic search if embeddings are available
         search_results = self.search_knowledge(question, max_results=5, company_id=company_id)
         
         # If no results, try extracting keywords and searching again
@@ -300,24 +392,92 @@ class KnowledgeService:
                         break
         
         if search_results['success'] and search_results['count'] > 0:
-            # Return the most relevant result
+            # Get the most relevant result
             best_match = search_results['results'][0]
+            similarity_score = best_match.get('similarity_score', 0)
+            
+            # Check if similarity is too low - might be irrelevant document
+            if similarity_score < 0.2:
+                logger.warning(f"Similarity score too low ({similarity_score}), document might not be relevant")
             
             if best_match['type'] == 'faq':
                 answer = best_match.get('answer', '')
             elif best_match['type'] == 'document':
-                answer = best_match.get('content', '')
+                # For documents, fetch full content and let LLM extract the answer
+                content = best_match.get('content', '')
+                document_id = best_match.get('id') or best_match.get('document_id')
+                
+                # Always fetch full document content
+                if document_id:
+                    try:
+                        from Frontline_agent.models import Document
+                        doc = Document.objects.filter(id=document_id).first()
+                        if doc and doc.document_content:
+                            full_content = doc.document_content
+                            
+                            # Extract keywords from question to verify relevance
+                            import re
+                            query_lower = question.lower()
+                            query_words = re.findall(r'\b\w+\b', query_lower)
+                            stop_words = {'what', 'is', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'how', 'do', 'does', 'can', 'will', 'are', 'was', 'were'}
+                            keywords = [w for w in query_words if w not in stop_words and len(w) > 2]
+                            
+                            # Check if document contains any keywords (basic relevance check)
+                            content_lower = full_content.lower()
+                            has_keywords = any(kw in content_lower for kw in keywords) if keywords else True
+                            
+                            if not has_keywords and similarity_score < 0.3:
+                                # Document doesn't seem relevant, return None to trigger "no info" response
+                                logger.warning(f"Document {document_id} doesn't contain keywords {keywords} and similarity is low ({similarity_score})")
+                                return {
+                                    'success': True,
+                                    'answer': None,
+                                    'has_verified_info': False,
+                                    'message': 'No verified information found in knowledge base'
+                                }
+                            
+                            # SIMPLE APPROACH: Use reasonable amount of content
+                            # Semantic search already found this document as relevant
+                            # Pass enough content for LLM to find answer, but not so much it gets confused
+                            
+                            # For documents up to 15000 chars, use full content
+                            # For larger documents, use first 15000 chars (enough for LLM to find answer)
+                            if len(full_content) <= 15000:
+                                answer = full_content
+                                logger.info(f"Using full document content (length: {len(answer)}, doc_id: {document_id}, has_keywords: {has_keywords})")
+                            else:
+                                # Large document - use first 15000 chars
+                                # Semantic search found this doc, so relevant info is likely in the content
+                                answer = full_content[:15000]
+                                logger.info(f"Using first 15000 chars of document (total: {len(full_content)}, doc_id: {document_id}, has_keywords: {has_keywords})")
+                            
+                            # Log content preview for debugging
+                            logger.info(f"Document content preview: {answer[:500]}")
+                        else:
+                            answer = content
+                            logger.warning(f"Document {document_id} not found or has no content, using snippet")
+                    except Exception as e:
+                        logger.error(f"Error fetching full document content: {e}", exc_info=True)
+                        answer = content
+                else:
+                    answer = content
+                    logger.warning(f"No document_id in best_match, using snippet content")
             else:
                 answer = best_match.get('content', '')
             
-            logger.info(f"Found answer in knowledge base (type: {best_match.get('type')})")
+            # Ensure we have actual content
+            if not answer or len(answer.strip()) == 0:
+                logger.warning(f"Document found but content is empty. Document ID: {best_match.get('id')}")
+                answer = "I found a document in the knowledge base, but it appears to be empty or could not be processed."
+            
+            logger.info(f"Found answer in knowledge base (type: {best_match.get('type')}, answer length: {len(answer)}, similarity: {best_match.get('similarity_score', 'N/A')})")
             return {
                 'success': True,
                 'answer': answer,
                 'source': best_match.get('source', 'PayPerProject Database'),
                 'type': best_match.get('type', 'unknown'),
                 'has_verified_info': True,
-                'document_id': best_match.get('document_id') if best_match.get('type') == 'document' else None
+                'document_id': best_match.get('id') or best_match.get('document_id') if best_match.get('type') == 'document' else None
             }
         else:
             logger.info("No verified information found in knowledge base")
