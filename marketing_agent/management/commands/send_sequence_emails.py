@@ -17,8 +17,8 @@ from django.utils import timezone
 from django.db.models import Q, F
 from datetime import timedelta, datetime
 from marketing_agent.models import (
-    Campaign, EmailSequence, EmailSequenceStep, EmailSendHistory, 
-    Lead, CampaignContact
+    Campaign, EmailSequence, EmailSequenceStep, EmailSendHistory,
+    Lead, CampaignContact, Reply
 )
 from marketing_agent.services.email_service import email_service
 import logging
@@ -388,15 +388,46 @@ class Command(BaseCommand):
         # Send the email
         return self._send_sequence_email(contact, campaign, sequence, next_step, next_step_number, step_count, dry_run)
     
+    def _reply_was_to_sub_sequence_email(self, contact, campaign):
+        """True if the contact's most recent reply was to a sub-sequence email (not main sequence). Sub-seq emails should only be sent to contacts who replied to main sequence."""
+        latest = (
+            Reply.objects.filter(campaign=campaign, lead=contact.lead)
+            .select_related('triggering_email', 'triggering_email__email_template')
+            .order_by('-replied_at')
+            .first()
+        )
+        if not latest or not latest.triggering_email_id or not latest.triggering_email.email_template_id:
+            return False
+        template = latest.triggering_email.email_template
+        steps = list(template.sequence_steps.select_related('sequence').all())
+        if not steps:
+            return False
+        return all(step.sequence.is_sub_sequence for step in steps)
+
     def _process_sub_sequence_contact(self, contact, campaign, dry_run):
         """Process a contact in a sub-sequence (after they replied). Returns 'sent', 'skipped', or 'stopped'"""
         lead = contact.lead
         sub_sequence = contact.sub_sequence
-        
+
         if not sub_sequence:
             self.stdout.write(self.style.WARNING(f'   Sub-sequence contact {lead.email} has no sub_sequence assigned'))
             return 'skipped'
-        
+
+        # Only send sub-sequence emails to contacts who replied to MAIN sequence emails (not to sub-sequence emails)
+        if self._reply_was_to_sub_sequence_email(contact, campaign):
+            self.stdout.write(
+                self.style.WARNING(
+                    f'   Skipping {lead.email}: their last reply was to a sub-sequence email. '
+                    f'Sub-sequence emails are only sent to contacts who replied to main sequence.'
+                )
+            )
+            contact.sub_sequence = None
+            contact.sub_sequence_step = 0
+            contact.sub_sequence_last_sent_at = None
+            contact.sub_sequence_completed = False
+            contact.save()
+            return 'skipped'
+
         # Verify that the contact's reply interest level matches the sub-sequence's interest level
         if sub_sequence.interest_level != 'any':
             if not contact.reply_interest_level or contact.reply_interest_level != sub_sequence.interest_level:
