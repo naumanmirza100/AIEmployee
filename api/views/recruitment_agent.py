@@ -22,10 +22,20 @@ from recruitment_agent.agents.lead_enrichment import LeadResearchEnrichmentAgent
 from recruitment_agent.agents.lead_qualification import LeadQualificationAgent
 from recruitment_agent.agents.job_description_parser import JobDescriptionParserAgent
 from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAgent
+from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
 from recruitment_agent.core import GroqClient
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
-from recruitment_agent.models import Interview, CVRecord, JobDescription, RecruiterEmailSettings, RecruiterInterviewSettings, RecruiterQualificationSettings
+from recruitment_agent.models import (
+    Interview,
+    CVRecord,
+    JobDescription,
+    RecruiterEmailSettings,
+    RecruiterInterviewSettings,
+    RecruiterQualificationSettings,
+    RecruitmentQAChat,
+    RecruitmentQAChatMessage,
+)
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
@@ -628,6 +638,9 @@ def create_job_description(request):
         department = request.data.get('department', '').strip() or None
         job_type = request.data.get('type', 'Full-time').strip()
         requirements = request.data.get('requirements', '').strip() or None
+        is_active = request.data.get('is_active', True)
+        if isinstance(is_active, str):
+            is_active = is_active.lower() in ('true', '1', 'yes')
         
         if not title or not description:
             return Response({
@@ -650,7 +663,7 @@ def create_job_description(request):
             keywords_json=keywords_json,
             company=company,
             company_user=company_user,
-            is_active=True,
+            is_active=is_active,
             location=location,
             department=department,
             type=job_type,
@@ -2446,6 +2459,183 @@ def suggest_interview_questions(request):
         })
     except Exception as e:
         logger.exception("suggest_interview_questions error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def recruitment_qa(request):
+    """
+    Recruitment Knowledge Q&A. Answer questions about jobs, candidates, best fit,
+    interviews, and recruitment settings. Returns markdown-formatted answer + insights.
+    POST: JSON { "question": "Which job is active?" }
+    """
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        question = (data.get('question') or '').strip()
+        if not question:
+            return Response({
+                'status': 'error',
+                'message': 'question is required.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        agents = get_agents()
+        groq_client = agents.get('groq_client')
+        if not groq_client:
+            return Response({
+                'status': 'error',
+                'message': 'AI service not available.',
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        qa_agent = RecruitmentQAAgent(groq_client=groq_client)
+        result = qa_agent.process(question=question, company_user=company_user)
+        return Response({
+            'status': 'success',
+            'data': {
+                'answer': result.get('answer', ''),
+                'insights': result.get('insights', []),
+            },
+        })
+    except Exception as e:
+        logger.exception("recruitment_qa error")
+        return Response({
+            'status': 'error',
+            'message': str(e),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- Recruitment QA Chats (persisted in DB) ----------
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_qa_chats(request):
+    """List all QA chats for the company user. Returns chats with messages."""
+    try:
+        company_user = request.user
+        chats = RecruitmentQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        result = []
+        for chat in chats:
+            messages = []
+            for msg in chat.messages.order_by('created_at'):
+                m = {'role': msg.role, 'content': msg.content}
+                if msg.response_data:
+                    m['responseData'] = msg.response_data
+                messages.append(m)
+            result.append({
+                'id': str(chat.id),
+                'title': chat.title or 'Chat',
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.exception("list_qa_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_qa_chat(request):
+    """Create a new QA chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = RecruitmentQAChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            RecruitmentQAChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            m = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                m['responseData'] = msg.response_data
+            messages.append(m)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("create_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_qa_chat(request, chat_id):
+    """Update a QA chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = RecruitmentQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                RecruitmentQAChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            m = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                m['responseData'] = msg.response_data
+            messages.append(m)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_qa_chat(request, chat_id):
+    """Delete a QA chat and all its messages (CASCADE)."""
+    try:
+        company_user = request.user
+        chat = RecruitmentQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

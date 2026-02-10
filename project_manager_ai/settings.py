@@ -479,7 +479,7 @@ SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 # CORS Configuration
 # --------------------
 # Read CORS allowed origins from .env (comma-separated list). Set CORS_ALLOWED_ORIGINS in .env for your frontend URL(s).
-cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
+cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
 
 # If no origins in env, add default localhost for development

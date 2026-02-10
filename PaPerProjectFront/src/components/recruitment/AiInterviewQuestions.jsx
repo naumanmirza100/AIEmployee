@@ -1,299 +1,445 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { useToast } from '@/components/ui/use-toast';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, HelpCircle, Copy, Printer } from 'lucide-react';
-import { getJobDescriptions, getCVRecords, suggestInterviewQuestions } from '@/services/recruitmentAgentService';
+import { useToast } from '@/components/ui/use-toast';
+import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2 } from 'lucide-react';
+import { recruitmentQA, listQAChats, createQAChat, updateQAChat, deleteQAChat } from '@/services/recruitmentAgentService';
+
+/** Markdown to HTML for Q&A answers - readable paragraphs, headings, bullets, tables */
+function markdownToHtml(markdown) {
+  if (!markdown || typeof markdown !== 'string') return '';
+  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
+  const lines = markdown.split('\n');
+  const out = [];
+  let inList = false;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+    if (t.startsWith('|') && t.endsWith('|')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      const tableRows = [];
+      let j = i;
+      while (j < lines.length && lines[j].trim().startsWith('|')) {
+        const cells = lines[j].trim().split('|').map(c => c.trim()).filter(Boolean);
+        if (cells.length > 0 && cells.every(c => /^[-:\s]+$/.test(c))) { j++; continue; }
+        tableRows.push(cells);
+        j++;
+      }
+      i = j;
+      if (tableRows.length > 0) {
+        out.push('<div class="my-5 rounded-lg border border-border"><table class="w-full text-base">');
+        out.push('<thead><tr class="bg-muted">');
+        tableRows[0].forEach(cell => out.push(`<th class="px-4 py-3 text-left font-semibold">${bold(escape(cell))}</th>`));
+        out.push('</tr></thead><tbody>');
+        tableRows.slice(1).forEach((row, idx) => {
+          out.push(`<tr class="${idx % 2 === 0 ? 'bg-muted/30' : ''}">`);
+          row.forEach(cell => out.push(`<td class="px-4 py-3 border-t border-border text-base">${bold(escape(cell))}</td>`));
+          out.push('</tr>');
+        });
+        out.push('</tbody></table></div>');
+      }
+      continue;
+    }
+    if (/^---+$/.test(t)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push('<hr class="my-5 border-border"/>');
+      i++; continue;
+    }
+    if (/^## /.test(t)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t.slice(3)))}</h2>`);
+      i++; continue;
+    }
+    if (/^### /.test(t)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h3 class="text-lg font-bold mt-4 mb-2 text-foreground">${bold(escape(t.slice(4)))}</h3>`);
+      i++; continue;
+    }
+    if (t.endsWith(':') && t.length > 10 && !t.startsWith('-') && !t.startsWith('*')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t))}</h2>`);
+      i++; continue;
+    }
+    if (/^[\s]*(?:•|-|\*|\d+\.)\s+/.test(t)) {
+      if (!inList) { out.push('<ul class="list-disc pl-6 my-4 space-y-2">'); inList = true; }
+      const content = t.replace(/^[\s]*(?:•|-|\*|\d+\.)\s+/, '');
+      out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
+      i++; continue;
+    }
+    if (t === '' && inList) {
+      out.push('</ul>');
+      inList = false;
+      i++; continue;
+    }
+    if (t && !t.startsWith('<')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<p class="my-4 text-base leading-relaxed">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
+    }
+    i++;
+  }
+  if (inList) out.push('</ul>');
+  return out.join('\n');
+}
+
+/** Suggested questions – recruitment data + stack/interview knowledge */
+const SUGGESTED_QUESTIONS = [
+  { group: 'Your Data (Jobs, Candidates, CVs)', options: [
+    'Which candidates are best suited for the open role?',
+    'How many jobs do I have? Which are active?',
+    'Summarize the top candidates for this job.',
+    'What are my qualification settings?',
+  ]},
+  { group: 'Tech Stack Interview Questions', options: [
+    'What are basic and advanced React interview questions?',
+    'Suggest MERN stack questions for a fresher candidate',
+    'Python Django interview questions for senior developers',
+    'Node.js questions to ask in technical screening',
+    'What JavaScript/TypeScript questions should I ask?',
+  ]},
+  { group: 'General Interview & Recruitment', options: [
+    'What questions to ask a Java Spring Boot candidate?',
+    'How to assess a frontend developer in an interview?',
+    'Best practices for technical phone screening',
+    'What to ask a DevOps engineer in first round?',
+    'Recruitment tips for hiring full-stack developers',
+  ]},
+];
+
+/** Normalize chat from API shape to component shape */
+function normalizeChat(chat) {
+  if (!chat) return chat;
+  return {
+    ...chat,
+    id: String(chat.id),
+    title: chat.title || 'Chat',
+    messages: chat.messages || [],
+    updatedAt: chat.updatedAt || chat.timestamp,
+    timestamp: chat.updatedAt || chat.timestamp,
+  };
+}
 
 const AiInterviewQuestions = () => {
   const { toast } = useToast();
-  const [jobs, setJobs] = useState([]);
-  const [candidates, setCandidates] = useState([]);
-  const [selectedJobId, setSelectedJobId] = useState('');
-  const [selectedCvId, setSelectedCvId] = useState('');
+  const [chats, setChats] = useState([]);
+  const [selectedChatId, setSelectedChatId] = useState(null);
+  const [question, setQuestion] = useState('');
+  const [suggestedValue, setSuggestedValue] = useState('__none__');
   const [loading, setLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [questions, setQuestions] = useState([]);
-  const [meta, setMeta] = useState(null);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const messagesEndRef = useRef(null);
 
-  useEffect(() => {
-    getJobDescriptions()
-      .then((res) => {
-        const data = res?.data !== undefined ? res.data : res;
-        setJobs(Array.isArray(data) ? data : (data?.data || []));
-      })
-      .catch(() => setJobs([]));
-  }, []);
-
-  useEffect(() => {
-    if (!selectedJobId) {
-      setCandidates([]);
-      setSelectedCvId('');
-      return;
-    }
-    setLoading(true);
-    getCVRecords({ job_id: selectedJobId })
-      .then((res) => {
-        const data = res?.data !== undefined ? res.data : res;
-        const list = Array.isArray(data) ? data : (data?.data || []);
-        setCandidates(list);
-        setSelectedCvId('');
-        setQuestions([]);
-        setMeta(null);
-      })
-      .catch(() => setCandidates([]))
-      .finally(() => setLoading(false));
-  }, [selectedJobId]);
-
-  const handleGenerate = async () => {
-    if (!selectedJobId || !selectedCvId) {
-      toast({ title: 'Select job and candidate', variant: 'destructive' });
-      return;
-    }
-    setGenerating(true);
-    setQuestions([]);
-    setMeta(null);
+  const loadChatsFromApi = async () => {
     try {
-      const res = await suggestInterviewQuestions(Number(selectedCvId), Number(selectedJobId));
-      const data = res?.data !== undefined ? res.data : res;
-      if (data?.status === 'success' && Array.isArray(data.questions)) {
-        setQuestions(data.questions);
-        setMeta({ candidate_name: data.candidate_name, job_title: data.job_title });
-        toast({ title: 'Questions generated', description: `${data.questions.length} questions ready.` });
+      setLoadingChats(true);
+      const res = await listQAChats();
+      if (res.status === 'success' && res.data) {
+        setChats((res.data || []).map(normalizeChat));
       } else {
-        toast({ title: 'Generation failed', description: data?.message || 'No questions returned.', variant: 'destructive' });
+        setChats([]);
       }
     } catch (err) {
-      const msg = err?.data?.message || err?.message || 'Failed to generate questions.';
-      toast({ title: 'Error', description: msg, variant: 'destructive' });
+      console.error('Load QA chats error:', err);
+      setChats([]);
     } finally {
-      setGenerating(false);
+      setLoadingChats(false);
     }
   };
 
-  const copyAll = () => {
-    const text = questions
-      .map((q) => `[${q.type}]\n${q.question}`)
-      .join('\n\n');
-    navigator.clipboard.writeText(text).then(() => toast({ title: 'Copied to clipboard' }));
+  useEffect(() => {
+    loadChatsFromApi();
+  }, []);
+
+  const selectedChat = chats.find((c) => c.id === selectedChatId);
+  const currentMessages = selectedChat?.messages ?? [];
+
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+
+  const fillFromSuggestion = (value) => {
+    const v = value || '__none__';
+    setSuggestedValue(v);
+    if (v !== '__none__') setQuestion(v);
   };
 
-  const printAll = () => {
-    const candidateName = meta?.candidate_name || 'Candidate';
-    const jobTitle = meta?.job_title || 'Position';
-    const title = `${candidateName} – ${jobTitle}`;
-    const dateStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-    const questionsHtml = questions
-      .map(
-        (q, i) => `
-        <tr>
-          <td class="num">${i + 1}</td>
-          <td class="type ${q.type}">${q.type}</td>
-          <td class="question">${String(q.question).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
-        </tr>`
-      )
-      .join('');
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast({ title: 'Print blocked', description: 'Allow popups to print.', variant: 'destructive' });
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!question.trim()) {
+      toast({ title: 'Error', description: 'Please enter a question.', variant: 'destructive' });
       return;
     }
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Interview Questions - ${title.replace(/</g, '&lt;')}</title>
-          <style>
-            * { box-sizing: border-box; }
-            body {
-              font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-              margin: 0;
-              padding: 40px 50px;
-              color: #1a1a1a;
-              font-size: 11pt;
-              line-height: 1.5;
+    const q = question.trim();
+    try {
+      setLoading(true);
+      const result = await recruitmentQA(q);
+      if (result.status === 'success' && result.data) {
+        const response = result.data;
+        const answer = response.answer || 'No answer provided.';
+        const insights = response.insights || [];
+        let responseText = answer;
+        if (insights.length > 0) {
+          responseText += '\n\n**Key Insights & Metrics**\n';
+          insights.forEach((i) => {
+            responseText += `• **${i.title || 'N/A'}**: ${i.value || 'N/A'}\n`;
+          });
+        }
+        const userMsg = { role: 'user', content: q };
+        const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
+        const title = q.slice(0, 40);
+
+        if (selectedChatId) {
+          const existing = chats.find((c) => c.id === selectedChatId);
+          if (existing) {
+            const newMessages = [...(existing.messages || []), userMsg, assistantMsg];
+            const updRes = await updateQAChat(selectedChatId, {
+              messages: [userMsg, assistantMsg],
+              title: existing.title || title,
+            });
+            if (updRes.status === 'success' && updRes.data) {
+              const updatedChat = normalizeChat(updRes.data);
+              setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
+            } else {
+              throw new Error(updRes.message || 'Failed to save chat');
             }
-            .header {
-              border-bottom: 2px solid #2563eb;
-              padding-bottom: 16px;
-              margin-bottom: 24px;
+          } else {
+            const createRes = await createQAChat({
+              title,
+              messages: [userMsg, assistantMsg],
+            });
+            if (createRes.status === 'success' && createRes.data) {
+              const newChat = normalizeChat(createRes.data);
+              setChats((prev) => [newChat, ...prev]);
+              setSelectedChatId(newChat.id);
+            } else {
+              throw new Error(createRes.message || 'Failed to create chat');
             }
-            .header h1 {
-              margin: 0 0 4px 0;
-              font-size: 18pt;
-              font-weight: 600;
-              color: #1e40af;
-            }
-            .header .sub {
-              font-size: 10pt;
-              color: #64748b;
-              margin: 0;
-            }
-            .header .date {
-              font-size: 9pt;
-              color: #94a3b8;
-              margin-top: 6px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            tr {
-              border-bottom: 1px solid #e2e8f0;
-            }
-            tr:last-child { border-bottom: none; }
-            td {
-              padding: 12px 10px 12px 0;
-              vertical-align: top;
-            }
-            td.num {
-              width: 28px;
-              font-weight: 600;
-              color: #64748b;
-              font-size: 10pt;
-            }
-            td.type {
-              width: 90px;
-              font-size: 9pt;
-              font-weight: 600;
-              text-transform: capitalize;
-            }
-            td.type.technical {
-              color: #0369a1;
-            }
-            td.type.behavioural {
-              color: #15803d;
-            }
-            td.question {
-              font-size: 11pt;
-            }
-            .footer {
-              margin-top: 32px;
-              padding-top: 12px;
-              border-top: 1px solid #e2e8f0;
-              font-size: 9pt;
-              color: #94a3b8;
-            }
-            @media print {
-              body { padding: 20px 30px; }
-              .header { page-break-after: avoid; }
-              tr { page-break-inside: avoid; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>Interview Questions</h1>
-            <p class="sub">${candidateName.replace(/</g, '&lt;')} · ${jobTitle.replace(/</g, '&lt;')}</p>
-            <p class="date">Generated on ${dateStr}</p>
-          </div>
-          <table>
-            <tbody>${questionsHtml}</tbody>
-          </table>
-          <div class="footer">AI-suggested questions for interview preparation. Confidential.</div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    setTimeout(() => {
-      try {
-        printWindow.focus();
-        printWindow.print();
-        toast({ title: 'Print dialog opened' });
-      } catch (e) {
-        toast({ title: 'Print failed', description: 'Try allowing popups and click Print again.', variant: 'destructive' });
+          }
+        } else {
+          const createRes = await createQAChat({
+            title,
+            messages: [userMsg, assistantMsg],
+          });
+          if (createRes.status === 'success' && createRes.data) {
+            const newChat = normalizeChat(createRes.data);
+            setChats((prev) => [newChat, ...prev]);
+            setSelectedChatId(newChat.id);
+          } else {
+            throw new Error(createRes.message || 'Failed to create chat');
+          }
+        }
+        setQuestion('');
+        setSuggestedValue('__none__');
+        setTimeout(scrollToBottom, 100);
+      } else {
+        throw new Error(result.message || 'Failed to get response');
       }
-      setTimeout(() => printWindow.close(), 1000);
-    }, 300);
+    } catch (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const newChat = () => {
+    setSelectedChatId(null);
+    setQuestion('');
+    setSuggestedValue('__none__');
+  };
+
+  const deleteChat = async (e, chatId) => {
+    e.stopPropagation();
+    try {
+      const res = await deleteQAChat(chatId);
+      if (res.status === 'success') {
+        setChats((prev) => prev.filter((c) => c.id !== chatId));
+        if (selectedChatId === chatId) setSelectedChatId(null);
+        toast({ title: 'Chat deleted' });
+      } else {
+        throw new Error(res.message || 'Failed to delete chat');
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Could not delete chat', variant: 'destructive' });
+    }
+  };
+
+  const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
+  const formatDate = (iso) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
   };
 
   return (
-    <div className="space-y-6 w-full max-w-3xl">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <HelpCircle className="h-5 w-5" />
-            AI Interview Questions
-          </CardTitle>
-          <CardDescription>
-            Select a job and candidate. AI will suggest 5–10 tailored interview questions (technical + behavioural). Not saved – generate on demand.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Job</Label>
-              <Select value={selectedJobId} onValueChange={setSelectedJobId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select job" />
-                </SelectTrigger>
-                <SelectContent>
-                  {jobs.filter((j) => j.is_active !== false).map((j) => (
-                    <SelectItem key={j.id} value={String(j.id)}>
-                      {j.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Candidate</Label>
-              <Select value={selectedCvId} onValueChange={setSelectedCvId} disabled={!selectedJobId || loading}>
-                <SelectTrigger>
-                  <SelectValue placeholder={loading ? 'Loading…' : 'Select candidate'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {candidates.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.parsed?.name || c.file_name || `Candidate #${c.id}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <Button onClick={handleGenerate} disabled={!selectedJobId || !selectedCvId || generating}>
-            {generating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <HelpCircle className="h-4 w-4 mr-2" />}
-            {generating ? 'Generating…' : 'Generate questions'}
+    <div className="flex gap-4 w-full max-w-full">
+      {/* Sidebar - Previous chats */}
+      <div className="w-64 shrink-0 rounded-lg border bg-card">
+        <div className="p-3 border-b flex items-center justify-between">
+          <span className="text-sm font-semibold">Previous conversations</span>
+          <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
+            <Plus className="h-4 w-4" />
           </Button>
-
-          {meta && (
-            <p className="text-sm text-muted-foreground">
-              For <strong>{meta.candidate_name}</strong> × <strong>{meta.job_title}</strong>
-            </p>
-          )}
-
-          {questions.length > 0 && (
-            <div className="rounded-lg border p-4 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <span className="font-medium">Suggested questions</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={copyAll}>
-                    <Copy className="h-4 w-4 mr-1" />
-                    Copy
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={printAll}>
-                    <Printer className="h-4 w-4 mr-1" />
-                    Print
+        </div>
+        <div>
+          {loadingChats ? (
+            <div className="p-4 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : chats.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
+          ) : (
+            <div className="p-2 space-y-1">
+              {chats.map((c) => (
+                <div
+                  key={c.id}
+                  className={`flex items-center gap-1 rounded-lg text-sm transition-colors ${
+                    selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedChatId(c.id)}
+                    className="flex-1 min-w-0 text-left p-3 rounded-lg"
+                  >
+                    <div className="font-medium truncate">{truncate(c.title || (c.messages?.[0]?.content) || c.question || 'Chat', 40)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.updatedAt || c.timestamp)}</div>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={(e) => deleteChat(e, c.id)}
+                    title="Delete chat"
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-              </div>
-              <ul className="space-y-2">
-                {questions.map((q, i) => (
-                  <li key={i} className="flex gap-2 items-start text-sm">
-                    <Badge variant={q.type === 'technical' ? 'default' : 'secondary'} className="shrink-0 mt-0.5">
-                      {q.type}
-                    </Badge>
-                    <span className="flex-1">{q.question}</span>
-                  </li>
-                ))}
-              </ul>
+              ))}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Main chat area */}
+      <Card className="flex-1 min-w-0">
+        <CardHeader className="shrink-0">
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" />
+            Knowledge Q&A
+          </CardTitle>
+          <CardDescription>
+            Ask about your jobs & candidates, or get tech stack interview questions (React, Node, MERN, etc.) and recruitment tips.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {/* Messages area - flows naturally like JobDescriptions, no inner scroll */}
+          <div className="px-4 pb-4 space-y-4">
+            {!selectedChatId && chats.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
+                <p className="font-medium">Ask your first question</p>
+                <p className="text-sm">Select from suggested questions or type your own.</p>
+              </div>
+            )}
+            {!selectedChatId && chats.length > 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
+                <p className="font-medium">Select a conversation or ask a new question</p>
+                <p className="text-sm">Click a previous chat in the sidebar to view it.</p>
+              </div>
+            )}
+            {currentMessages.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                    msg.role === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted border'
+                  }`}
+                >
+                  {msg.role === 'user' ? (
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  ) : (
+                    <>
+                      <div
+                        className="prose prose-base max-w-none [&_h2]:text-violet-600 [&_h2]:dark:text-violet-400 [&_strong]:font-semibold [&_p]:text-base [&_li]:text-base"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.responseData?.answer ?? msg.content) }}
+                      />
+                      {msg.responseData?.insights?.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-border/50">
+                          <p className="text-xs font-semibold mb-2">Key Insights</p>
+                          <div>
+                            <table className="w-full text-xs">
+                              <tbody>
+                                {msg.responseData.insights.map((insight, j) => (
+                                  <tr key={j} className="border-b border-border/30">
+                                    <td className="py-1 pr-2 font-medium">{insight.title || 'N/A'}</td>
+                                    <td className="py-1 text-muted-foreground">{insight.value || 'N/A'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">Analyzing...</span>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input form */}
+          <form onSubmit={handleSubmit} className="shrink-0 border-t p-4 space-y-3 bg-muted/30">
+            <div className="flex gap-2">
+              <Textarea
+                placeholder="Ask a recruitment question..."
+                value={question}
+                onChange={(e) => { setQuestion(e.target.value); setSuggestedValue('__none__'); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
+                rows={2}
+                disabled={loading}
+                className="min-h-[60px] resize-none"
+              />
+              <Button type="submit" disabled={loading} size="icon" className="h-[60px] w-12 shrink-0">
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <Select value={suggestedValue} onValueChange={fillFromSuggestion}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Suggested questions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Suggested questions</SelectItem>
+                  {SUGGESTED_QUESTIONS.map((g) => (
+                    <React.Fragment key={g.group}>
+                      {g.options.map((opt) => (
+                        <SelectItem key={opt} value={opt}>{truncate(opt, 45)}</SelectItem>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </form>
         </CardContent>
       </Card>
     </div>
