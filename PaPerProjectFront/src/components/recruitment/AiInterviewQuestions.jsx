@@ -326,7 +326,7 @@ const AiInterviewQuestions = () => {
       </div>
 
       {/* Main chat area */}
-      <Card className="flex-1 min-w-0">
+      <Card className="flex-1 min-w-0 flex flex-col max-h-[calc(100vh-40px)]">
         <CardHeader className="shrink-0">
           <CardTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
@@ -336,9 +336,9 @@ const AiInterviewQuestions = () => {
             Ask about your jobs & candidates, or get tech stack interview questions (React, Node, MERN, etc.) and recruitment tips.
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          {/* Messages area - flows naturally like JobDescriptions, no inner scroll */}
-          <div className="px-4 pb-4 space-y-4">
+        <CardContent className="p-0 flex flex-col flex-1 min-h-0">
+          {/* Messages area - scrollable when content is long */}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pb-4 space-y-4">
             {!selectedChatId && chats.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
