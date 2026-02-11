@@ -125,6 +125,33 @@ Return your analysis in a structured format."""
                 'analysis': 'Reply expresses doubt or objection about the approach (e.g. "I dont think it can be done like this"). Classified as Has Objection/Concern.',
                 'confidence': 90
             }
+        # Early rule: polite brush-off / "we'll keep you in mind" / busy = negative (not interested)
+        if any(phrase in combined_lower for phrase in [
+            "we'll keep you in mind", "we will keep you in mind", "keep you in mind",
+            "we're quite busy", "we are quite busy", "haven't allocated time", "havent allocated time",
+            "priorities change", "checking back in a few months", "check back in a few months",
+            "passed this along", "passed along to our team", "we're all set for now", "we are all set for now",
+            "not looking at the moment", "not evaluating new tools", "stick with what we have",
+            "budget and bandwidth are tight", "not planning to switch", "decided to stick with"
+        ]):
+            return {
+                'interest_level': 'negative',
+                'analysis': 'Polite brush-off or "not right now" (e.g. we\'ll keep you in mind, we\'re quite busy, stick with what we have). Classified as Not Interested.',
+                'confidence': 90
+            }
+
+        # Early rule: asking for pricing / integration / timeline before committing = requested_info
+        if any(phrase in combined_lower for phrase in [
+            'ballpark pricing', 'pricing and whether', 'different tiers', 'integrate with',
+            'implementation timeline', 'before we take this further', 'before we take it further',
+            'need to understand a few things', 'typical implementation'
+        ]) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe", "not interested", "no thanks"]):
+            return {
+                'interest_level': 'requested_info',
+                'analysis': 'Reply asks for pricing, integration, or timeline before committing. Classified as Requested More Information.',
+                'confidence': 92
+            }
+
         # Early rule: "not the correct way" / "do in some other way" = objection (feedback about approach, willing to engage differently)
         if any(phrase in combined_lower for phrase in [
             "not the correct way", "not the right way", "isn't the correct way", "isnt the correct way",
