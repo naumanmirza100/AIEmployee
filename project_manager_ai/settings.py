@@ -418,6 +418,18 @@ GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
 GROQ_REC_API_KEY = os.getenv('GROQ_REC_API_KEY', '')
 
+# OpenRouter API Settings (Highest Priority)
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '')
+OPENROUTER_EMBEDDING_MODEL = os.getenv('OPENROUTER_EMBEDDING_MODEL', 'deepseek/deepseek-r1-0528:free')
+
+# DeepSeek API Settings
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+DEEPSEEK_EMBEDDING_MODEL = os.getenv('DEEPSEEK_EMBEDDING_MODEL', 'deepseek/deepseek-r1-0528')
+
+# Embedding Provider Settings
+EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'auto')  # 'auto', 'openrouter', 'deepseek', 'groq', or 'openai'
+OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
+
 
 # --------------------
 # Email Configuration

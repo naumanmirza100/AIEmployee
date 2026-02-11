@@ -67,7 +67,38 @@ class FrontlineAgent(BaseAgent):
         
         # Use LLM to format the answer nicely, but only using verified information
         try:
+            # Log what we're passing to the prompt
+            logger.info(f"Knowledge result keys: {knowledge_result.keys()}")
+            answer_content = knowledge_result.get('answer', '')
+            logger.info(f"Knowledge result answer length: {len(answer_content)}")
+            logger.info(f"Knowledge result answer preview (first 500): {answer_content[:500]}")
+            
+            # Check if keywords are in the content
+            question_lower = question.lower()
+            import re
+            query_words = re.findall(r'\b\w+\b', question_lower)
+            stop_words = {'what', 'is', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'how', 'do', 'does', 'can', 'will', 'are', 'was', 'were'}
+            keywords = [w for w in query_words if w not in stop_words and len(w) > 2]
+            
+            for keyword in keywords:
+                if keyword in answer_content.lower():
+                    # Find the context around the keyword
+                    idx = answer_content.lower().find(keyword)
+                    start = max(0, idx - 200)
+                    end = min(len(answer_content), idx + 500)
+                    logger.info(f"Found keyword '{keyword}' at position {idx}, context: {answer_content[start:end]}")
+            
             prompt = get_knowledge_prompt(question, [knowledge_result])
+            
+            # Log the prompt to see what's being sent to LLM
+            logger.info(f"Prompt length: {len(prompt)}")
+            logger.info(f"Prompt preview (first 1000): {prompt[:1000]}")
+            
+            # Check if the prompt contains the relevant section
+            if any(kw in prompt.lower() for kw in keywords):
+                logger.info(f"Prompt contains keywords: {keywords}")
+            else:
+                logger.warning(f"Prompt does NOT contain keywords: {keywords}")
             
             formatted_answer = self._call_llm(
                 prompt=prompt,

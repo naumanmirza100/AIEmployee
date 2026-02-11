@@ -37,19 +37,25 @@ YOUR LIMITATIONS:
 Remember: Your primary goal is to help users with verified information and route complex issues to human experts."""
 
 
-FRONTLINE_KNOWLEDGE_PROMPT = """Based on the following verified information from the PayPerProject knowledge base, provide a helpful answer to the user's question.
+FRONTLINE_KNOWLEDGE_PROMPT = """You are answering a user's question using information from uploaded documents.
 
-KNOWLEDGE BASE RESULTS:
+DOCUMENT CONTENT:
 {knowledge_results}
 
 USER QUESTION: {user_question}
 
-INSTRUCTIONS:
-1. If the knowledge base contains relevant information, provide a clear, helpful answer using ONLY that information.
-2. If the knowledge base does not contain relevant information, respond: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
-3. NEVER add information that wasn't in the knowledge base results above.
-4. Be concise but thorough.
-5. If providing steps, number them clearly.
+CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. The document content above may contain information about MANY different topics. You must ONLY extract and provide information that directly answers the user's question.
+2. DO NOT copy the entire document. DO NOT list all topics. DO NOT include information about unrelated topics.
+3. Search through the document content for sections that mention keywords from the user's question.
+4. Extract ONLY those relevant sections and provide a clear, concise answer.
+5. If the document does NOT contain information about what the user asked, you MUST say: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
+6. DO NOT provide information about topics that are not related to the user's question, even if they are in the document.
+7. Your answer should be focused and specific to the user's question only.
+
+EXAMPLE:
+- If user asks "what is vector database" and the document talks about "Project Manager Agent" and "vector database", ONLY provide information about vector database. Ignore Project Manager Agent information.
+- If user asks "what is Project Manager Agent" and the document talks about both topics, ONLY provide information about Project Manager Agent.
 
 RESPONSE:"""
 
@@ -112,7 +118,7 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
     
     Args:
         user_question: User's question
-        knowledge_results: List of knowledge base results
+        knowledge_results: List of knowledge base results (can be from get_answer or search_knowledge)
         
     Returns:
         Formatted prompt string
@@ -123,10 +129,38 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
         knowledge_items = []
         for idx, result in enumerate(knowledge_results[:5], 1):  # Limit to top 5
             item_text = f"\n{idx}. "
-            if 'question' in result:
+            
+            # Handle format from get_answer (has 'answer' key directly)
+            if 'answer' in result and 'type' in result:
+                # This is from get_answer - it already has the answer content
+                answer_content = result.get('answer', '')
+                source = result.get('source', 'Unknown')
+                doc_type = result.get('type', 'unknown')
+                
+                # Use the content as-is (already preprocessed by get_answer)
+                # Only truncate if extremely long (over 15000 chars) to avoid token limits
+                if len(answer_content) > 15000:
+                    answer_content = answer_content[:15000] + '\n\n[... content truncated ...]'
+                
+                item_text += f"Source: {source}\n   Type: {doc_type}\n   Content Length: {len(answer_content)} chars\n\nDocument Content:\n{answer_content}"
+            
+            # Handle format from search_knowledge (has 'question' or 'title' keys)
+            elif 'question' in result:
                 item_text += f"Q: {result.get('question', 'N/A')}\n   A: {result.get('answer', 'N/A')}"
             elif 'title' in result:
-                item_text += f"Title: {result.get('title', 'N/A')}\n   Content: {result.get('content', 'N/A')[:500]}"
+                # Use more content for documents to help LLM generate better answers
+                content = result.get('content', 'N/A')
+                # For documents, use up to 3000 chars to give LLM more context
+                if len(content) > 3000:
+                    content_preview = content[:3000] + '...'
+                else:
+                    content_preview = content
+                similarity = result.get('similarity_score', 'N/A')
+                item_text += f"Title: {result.get('title', 'N/A')}\n   Similarity Score: {similarity}\n   Content: {content_preview}"
+            else:
+                # Fallback: try to extract any available information
+                item_text += f"Result: {str(result)[:500]}"
+            
             knowledge_items.append(item_text)
         knowledge_text = "\n".join(knowledge_items)
     

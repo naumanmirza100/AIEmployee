@@ -1,6 +1,8 @@
 """
 Document Processing Service for Frontline Agent
 Handles document parsing and text extraction from various file formats
+
+Supports extraction of 100+ page PDFs. Uses pdfplumber (preferred) or PyPDF2 as fallback.
 """
 import os
 import hashlib
@@ -25,8 +27,8 @@ class DocumentProcessor:
         '.htm': 'html',
     }
     
-    # Max file size (10MB)
-    MAX_FILE_SIZE = 10 * 1024 * 1024
+    # Max file size (50MB) - increased to support large documents with 100+ pages
+    MAX_FILE_SIZE = 50 * 1024 * 1024
     
     @staticmethod
     def get_file_hash(file_path: str) -> str:
@@ -123,31 +125,108 @@ class DocumentProcessor:
     
     @staticmethod
     def _extract_pdf(file_path: str) -> Tuple[bool, str, Optional[str]]:
-        """Extract text from PDF file"""
+        """Extract text from PDF file - extracts ALL pages (up to 100+ pages)"""
+        # Try pdfplumber first (better for large/complex PDFs)
+        try:
+            import pdfplumber
+            text_parts = []
+            with pdfplumber.open(file_path) as pdf:
+                total_pages = len(pdf.pages)
+                logger.info(f"Using pdfplumber to extract text from PDF with {total_pages} pages")
+                
+                # Explicitly iterate through ALL pages - no limits
+                for page_num in range(1, total_pages + 1):
+                    try:
+                        page = pdf.pages[page_num - 1]  # 0-indexed
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+                        
+                        # Log progress every 10 pages and at milestones
+                        if page_num % 10 == 0 or page_num == total_pages:
+                            logger.info(f"Extracted {page_num}/{total_pages} pages ({len(''.join(text_parts))} chars so far)")
+                    except Exception as page_error:
+                        logger.warning(f"Error extracting page {page_num}/{total_pages}: {page_error}, continuing...")
+                        # Continue with other pages even if one fails
+                        continue
+                
+                full_text = "\n".join(text_parts)
+                logger.info(f"PDF extraction complete (pdfplumber): {len(full_text)} characters from {len(text_parts)}/{total_pages} pages")
+                
+                if len(text_parts) < total_pages:
+                    logger.warning(f"Only extracted {len(text_parts)} out of {total_pages} pages. Some pages may have failed.")
+                
+                return True, full_text.strip(), None
+        except ImportError:
+            logger.info("pdfplumber not available, trying PyPDF2...")
+        except Exception as e:
+            logger.warning(f"pdfplumber extraction failed: {e}, trying PyPDF2...")
+        
+        # Fallback to PyPDF2
         try:
             import PyPDF2
-            text = ""
+            text_parts = []
             with open(file_path, 'rb') as f:
                 pdf_reader = PyPDF2.PdfReader(f)
-                for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
-            return True, text.strip(), None
+                total_pages = len(pdf_reader.pages)
+                logger.info(f"Using PyPDF2 to extract text from PDF with {total_pages} pages")
+                
+                # Explicitly iterate through ALL pages - no limits
+                for page_num in range(1, total_pages + 1):
+                    try:
+                        page = pdf_reader.pages[page_num - 1]  # 0-indexed
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+                        
+                        # Log progress every 10 pages and at milestones
+                        if page_num % 10 == 0 or page_num == total_pages:
+                            logger.info(f"Extracted {page_num}/{total_pages} pages ({len(''.join(text_parts))} chars so far)")
+                    except Exception as page_error:
+                        logger.warning(f"Error extracting page {page_num}/{total_pages}: {page_error}, continuing...")
+                        # Continue with other pages even if one fails
+                        continue
+                
+                full_text = "\n".join(text_parts)
+                logger.info(f"PDF extraction complete (PyPDF2): {len(full_text)} characters from {len(text_parts)}/{total_pages} pages")
+                
+                if len(text_parts) < total_pages:
+                    logger.warning(f"Only extracted {len(text_parts)} out of {total_pages} pages. Some pages may have failed.")
+                
+                return True, full_text.strip(), None
         except ImportError:
-            return False, '', "PyPDF2 library not installed. Install with: pip install PyPDF2"
+            return False, '', "Neither pdfplumber nor PyPDF2 library installed. Install with: pip install pdfplumber PyPDF2"
         except Exception as e:
+            logger.error(f"Error extracting PDF with PyPDF2: {e}", exc_info=True)
             return False, '', f"Error extracting PDF: {str(e)}"
     
     @staticmethod
     def _extract_docx(file_path: str) -> Tuple[bool, str, Optional[str]]:
-        """Extract text from DOCX file"""
+        """Extract text from DOCX file - extracts ALL content including tables"""
         try:
             from docx import Document
             doc = Document(file_path)
-            text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-            return True, text, None
+            text_parts = []
+            
+            # Extract paragraphs
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    text_parts.append(paragraph.text)
+            
+            # Extract tables (important for structured documents)
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = " | ".join([cell.text.strip() for cell in row.cells if cell.text.strip()])
+                    if row_text:
+                        text_parts.append(row_text)
+            
+            full_text = "\n".join(text_parts)
+            logger.info(f"DOCX extraction complete: {len(full_text)} characters")
+            return True, full_text, None
         except ImportError:
             return False, '', "python-docx library not installed. Install with: pip install python-docx"
         except Exception as e:
+            logger.error(f"Error extracting DOCX: {e}", exc_info=True)
             return False, '', f"Error extracting DOCX: {str(e)}"
     
     @staticmethod
