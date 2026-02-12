@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Send, MessageSquare, Plus, MessageCircle } from 'lucide-react';
+import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 
 const STORAGE_KEY = 'marketing_qa_chats';
@@ -212,6 +212,15 @@ const MarketingQA = () => {
     setSuggestedValue('__none__');
   };
 
+  const deleteChat = (e, chatId) => {
+    e.stopPropagation();
+    const updated = chats.filter((c) => c.id !== chatId);
+    setChats(updated);
+    saveChats(updated);
+    if (selectedChatId === chatId) setSelectedChatId(null);
+    toast({ title: 'Deleted', description: 'Conversation removed.' });
+  };
+
   const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
   const formatDate = (iso) => {
     try {
@@ -238,17 +247,31 @@ const MarketingQA = () => {
           ) : (
             <div className="p-2 space-y-1">
               {chats.map((c) => (
-                <button
+                <div
                   key={c.id}
-                  type="button"
-                  onClick={() => setSelectedChatId(c.id)}
-                  className={`w-full text-left p-3 rounded-lg text-sm transition-colors ${
+                  className={`group flex items-start gap-1 w-full text-left p-3 rounded-lg text-sm transition-colors cursor-pointer ${
                     selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
                   }`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedChatId(c.id)}
+                  onKeyDown={(e) => e.key === 'Enter' && setSelectedChatId(c.id)}
                 >
-                  <div className="font-medium truncate">{truncate(c.question, 40)}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.timestamp)}</div>
-                </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{truncate(c.question, 40)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.timestamp)}</div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={(e) => deleteChat(e, c.id)}
+                    title="Delete conversation"
+                  >
+                    <Trash2 className="h-3.5 w-4" />
+                  </Button>
+                </div>
               ))}
             </div>
           )}
