@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -25,7 +25,9 @@ import {
   Headphones,
   CheckCircle2,
   XCircle,
-  Send
+  Send,
+  Plus,
+  MessageCircle
 } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 
@@ -44,10 +46,13 @@ const FrontlineDashboard = () => {
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadDescription, setUploadDescription] = useState('');
   
-  // Knowledge Q&A
+  // Knowledge Q&A (chat-based)
+  const [chats, setChats] = useState([]);
+  const [selectedChatId, setSelectedChatId] = useState(null);
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState(null);
   const [answering, setAnswering] = useState(false);
+  const [loadingChats, setLoadingChats] = useState(false);
+  const messagesEndRef = useRef(null);
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
@@ -167,55 +172,138 @@ const FrontlineDashboard = () => {
     }
   };
 
-  const handleAskQuestion = async () => {
+  /** Normalize chat from API shape to component shape */
+  const normalizeChat = (chat) => {
+    if (!chat) return chat;
+    return {
+      ...chat,
+      id: String(chat.id),
+      title: chat.title || 'Chat',
+      messages: chat.messages || [],
+      updatedAt: chat.updatedAt || chat.timestamp,
+      timestamp: chat.updatedAt || chat.timestamp,
+    };
+  };
+
+  const loadChatsFromApi = async () => {
+    try {
+      setLoadingChats(true);
+      const res = await frontlineAgentService.listQAChats();
+      if (res.status === 'success' && res.data) {
+        setChats((res.data || []).map(normalizeChat));
+      } else {
+        setChats([]);
+      }
+    } catch (err) {
+      console.error('Load QA chats error:', err);
+      setChats([]);
+    } finally {
+      setLoadingChats(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'qa') {
+      loadChatsFromApi();
+    }
+  }, [activeTab]);
+
+  const selectedChat = chats.find((c) => c.id === selectedChatId);
+  const currentMessages = selectedChat?.messages ?? [];
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+
+  const newChat = () => {
+    setSelectedChatId(null);
+    setQuestion('');
+  };
+
+  const deleteChat = async (e, chatId) => {
+    e.stopPropagation();
+    try {
+      const res = await frontlineAgentService.deleteQAChat(chatId);
+      if (res.status === 'success') {
+        setChats((prev) => prev.filter((c) => c.id !== chatId));
+        if (selectedChatId === chatId) setSelectedChatId(null);
+        toast({ title: 'Chat deleted' });
+      } else {
+        throw new Error(res.message || 'Failed to delete chat');
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Could not delete chat', variant: 'destructive' });
+    }
+  };
+
+  const handleAskQuestion = async (e) => {
+    e?.preventDefault?.();
     if (!question.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a question',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: 'Please enter a question', variant: 'destructive' });
       return;
     }
-
+    const q = question.trim();
     try {
       setAnswering(true);
-      setAnswer(null); // Clear previous answer
-      const response = await frontlineAgentService.knowledgeQA(question);
-      console.log('Knowledge Q&A Response:', response);
-      
+      const response = await frontlineAgentService.knowledgeQA(q);
       if (response.status === 'success' && response.data) {
-        // Ensure answer has required fields
-        const answerData = {
-          success: response.data.success !== false,
-          answer: response.data.answer || 'No answer available.',
-          has_verified_info: response.data.has_verified_info || false,
-          source: response.data.source || 'Knowledge Base',
-          type: response.data.type || 'general'
+        const data = response.data;
+        const answerText = data.answer || 'No answer available.';
+        const userMsg = { role: 'user', content: q };
+        const assistantMsg = {
+          role: 'assistant',
+          content: answerText,
+          responseData: {
+            answer: answerText,
+            has_verified_info: data.has_verified_info || false,
+            source: data.source || 'Knowledge Base',
+            type: data.type || 'general',
+          },
         };
-        setAnswer(answerData);
+        const title = q.slice(0, 40);
+        if (selectedChatId) {
+          const existing = chats.find((c) => c.id === selectedChatId);
+          if (existing) {
+            const updRes = await frontlineAgentService.updateQAChat(selectedChatId, {
+              messages: [userMsg, assistantMsg],
+              title: existing.title || title,
+            });
+            if (updRes.status === 'success' && updRes.data) {
+              const updatedChat = normalizeChat(updRes.data);
+              setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
+            } else throw new Error(updRes.message || 'Failed to save chat');
+          } else {
+            const createRes = await frontlineAgentService.createQAChat({ title, messages: [userMsg, assistantMsg] });
+            if (createRes.status === 'success' && createRes.data) {
+              const newChatData = normalizeChat(createRes.data);
+              setChats((prev) => [newChatData, ...prev]);
+              setSelectedChatId(newChatData.id);
+            } else throw new Error(createRes.message || 'Failed to create chat');
+          }
+        } else {
+          const createRes = await frontlineAgentService.createQAChat({ title, messages: [userMsg, assistantMsg] });
+          if (createRes.status === 'success' && createRes.data) {
+            const newChatData = normalizeChat(createRes.data);
+            setChats((prev) => [newChatData, ...prev]);
+            setSelectedChatId(newChatData.id);
+          } else throw new Error(createRes.message || 'Failed to create chat');
+        }
+        setQuestion('');
+        setTimeout(scrollToBottom, 100);
       } else {
-        setAnswer({
-          success: false,
-          answer: response.message || 'Unable to find an answer. Please try rephrasing your question.',
-          has_verified_info: false,
-          source: null
-        });
+        throw new Error(response.message || 'Failed to get response');
       }
     } catch (error) {
-      console.error('Knowledge Q&A Error:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to get answer',
-        variant: 'destructive',
-      });
-      setAnswer({
-        success: false,
-        answer: 'An error occurred while processing your question. Please try again.',
-        has_verified_info: false,
-        source: null
-      });
+      toast({ title: 'Error', description: error.message || 'Failed to get answer', variant: 'destructive' });
     } finally {
       setAnswering(false);
+    }
+  };
+
+  const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
+  const formatDate = (iso) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
     }
   };
 
@@ -420,103 +508,154 @@ const FrontlineDashboard = () => {
           </Card>
         </TabsContent>
 
-        {/* Knowledge Q&A Tab */}
+        {/* Knowledge Q&A Tab - Chat UI with sidebar (like Recruitment AI questions) */}
         <TabsContent value="qa" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Knowledge Q&A</CardTitle>
-              <CardDescription>
-                Ask questions and get answers from your knowledge base and uploaded documents
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="question">Your Question</Label>
-                <div className="flex space-x-2">
-                  <Input
-                    id="question"
-                    placeholder="Ask a question..."
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
-                  />
-                  <Button onClick={handleAskQuestion} disabled={answering}>
-                    {answering ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
+          <div className="flex gap-4 w-full max-w-full">
+            {/* Sidebar - Previous chats */}
+            <div className="w-64 shrink-0 rounded-lg border bg-card">
+              <div className="p-3 border-b flex items-center justify-between">
+                <span className="text-sm font-semibold">Previous conversations</span>
+                <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
+                  <Plus className="h-4 w-4" />
+                </Button>
               </div>
+              <div>
+                {loadingChats ? (
+                  <div className="p-4 flex justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : chats.length === 0 ? (
+                  <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
+                ) : (
+                  <div className="p-2 space-y-1">
+                    {chats.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`flex items-center gap-1 rounded-lg text-sm transition-colors ${
+                          selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setSelectedChatId(c.id)}
+                          className="flex-1 min-w-0 text-left p-3 rounded-lg"
+                        >
+                          <div className="font-medium truncate">{truncate(c.title || (c.messages?.[0]?.content) || 'Chat', 40)}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.updatedAt || c.timestamp)}</div>
+                        </button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                          onClick={(e) => deleteChat(e, c.id)}
+                          title="Delete chat"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
 
-              {answer && (
-                <div 
-                  className={answer.has_verified_info 
-                    ? 'rounded-lg border border-green-200 bg-green-50 dark:!bg-card dark:border-green-800' 
-                    : 'rounded-lg border border-yellow-200 bg-yellow-50 dark:!bg-card dark:border-yellow-800'}
-                >
-                  <div className="p-6 pt-6 rounded-lg" style={{ backgroundColor: '#0A0A0A' }}>
-                    <div className="flex items-start space-x-3">
-                      {answer.has_verified_info ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
-                      ) : (
-                        <XCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+            {/* Main chat area */}
+            <Card className="flex-1 min-w-0">
+              <CardHeader className="shrink-0">
+                <CardTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  Knowledge Q&A
+                </CardTitle>
+                <CardDescription>
+                  Ask questions and get answers from your knowledge base and uploaded documents. Previous conversations are shown in the sidebar.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="px-4 pb-4 space-y-4">
+                  {!selectedChatId && chats.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                      <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
+                      <p className="font-medium">Ask your first question</p>
+                      <p className="text-sm">Type a question to get an answer from your knowledge base.</p>
+                      {documents.length === 0 && (
+                        <p className="text-xs mt-2 text-yellow-600 dark:text-yellow-400">💡 Tip: Upload documents in the Documents tab first</p>
                       )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium mb-2 text-foreground">Answer:</p>
-                        <div className="text-sm text-foreground whitespace-pre-wrap break-words">
-                          {answer.answer || 'No answer available. Please try rephrasing your question.'}
-                        </div>
-                        {answer.source && (
-                          <p className="text-xs text-muted-foreground mt-3">
-                            Source: {answer.source}
-                          </p>
-                        )}
-                        {answer.type && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Type: {answer.type}
-                          </p>
+                    </div>
+                  )}
+                  {!selectedChatId && chats.length > 0 && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                      <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
+                      <p className="font-medium">Select a conversation or ask a new question</p>
+                      <p className="text-sm">Click a previous chat in the sidebar to view it.</p>
+                    </div>
+                  )}
+                  {currentMessages.map((msg, i) => (
+                    <div
+                      key={i}
+                      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                          msg.role === 'user'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted border'
+                        }`}
+                      >
+                        {msg.role === 'user' ? (
+                          <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        ) : (
+                          <>
+                            <div className="flex items-start gap-2">
+                              {(msg.responseData?.has_verified_info) ? (
+                                <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                              ) : (
+                                <XCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-foreground whitespace-pre-wrap break-words">
+                                  {msg.responseData?.answer ?? msg.content}
+                                </div>
+                                {msg.responseData?.source && (
+                                  <p className="text-xs text-muted-foreground mt-2">Source: {msg.responseData.source}</p>
+                                )}
+                              </div>
+                            </div>
+                          </>
                         )}
                       </div>
                     </div>
-                  </div>
+                  ))}
+                  {answering && (
+                    <div className="flex justify-start">
+                      <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="text-sm">Searching knowledge base...</span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
                 </div>
-              )}
-              
-              {!answer && !answering && (
-                <Card className="border-dashed dark:bg-gray-900 dark:border-gray-700">
-                  <CardContent className="pt-6">
-                    <div className="text-center text-muted-foreground dark:text-gray-400">
-                      <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm mb-2">Ask a question to get an answer from your knowledge base</p>
-                      {documents.length === 0 && (
-                        <p className="text-xs mt-2 text-yellow-600 dark:text-yellow-400">
-                          💡 Tip: Upload documents first to enable the agent to answer questions
-                        </p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-              
-              {answer && !answer.has_verified_info && (
-                <Card className="border-yellow-200 bg-yellow-50 dark:bg-gray-900 dark:border-yellow-800 mt-4">
-                  <CardContent className="pt-4">
-                    <div className="text-sm text-muted-foreground dark:text-gray-400">
-                      <p className="font-medium mb-2">💡 Why am I seeing this?</p>
-                      <p className="mb-2">The agent couldn't find information about your question in the knowledge base.</p>
-                      <ul className="list-disc list-inside space-y-1 text-xs">
-                        <li>Upload relevant documents in the "Documents" tab</li>
-                        <li>Try rephrasing your question with different keywords</li>
-                        <li>Make sure your uploaded documents contain the information you're asking about</li>
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
-          </Card>
+
+                <form onSubmit={handleAskQuestion} className="shrink-0 border-t p-4 space-y-3 bg-muted/30">
+                  <div className="flex gap-2">
+                    <Textarea
+                      placeholder="Ask a question from your knowledge base..."
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAskQuestion(e); } }}
+                      rows={2}
+                      disabled={answering}
+                      className="min-h-[60px] resize-none"
+                    />
+                    <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0">
+                      {answering ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Tickets Tab */}

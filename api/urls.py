@@ -185,6 +185,14 @@ urlpatterns = [
     re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),
     re_path(r'^project-manager/ai/timeline-gantt/?$', pm_agent.timeline_gantt, name='pm_timeline_gantt'),
     re_path(r'^project-manager/ai/knowledge-qa/?$', pm_agent.knowledge_qa, name='pm_knowledge_qa'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/?$', pm_agent.list_knowledge_qa_chats, name='pm_knowledge_qa_chats_list'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/create/?$', pm_agent.create_knowledge_qa_chat, name='pm_knowledge_qa_chats_create'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_knowledge_qa_chat, name='pm_knowledge_qa_chats_update'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_knowledge_qa_chat, name='pm_knowledge_qa_chats_delete'),
+    re_path(r'^project-manager/ai/project-pilot/chats/?$', pm_agent.list_project_pilot_chats, name='pm_project_pilot_chats_list'),
+    re_path(r'^project-manager/ai/project-pilot/chats/create/?$', pm_agent.create_project_pilot_chat, name='pm_project_pilot_chats_create'),
+    re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_project_pilot_chat, name='pm_project_pilot_chats_update'),
+    re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_project_pilot_chat, name='pm_project_pilot_chats_delete'),
     
     # Manual Project and Task Creation endpoints (Company User)
     re_path(r'^project-manager/projects/create/?$', pm_agent.create_project_manual, name='pm_create_project_manual'),
@@ -290,6 +298,10 @@ urlpatterns = [
     re_path(r'^frontline/documents/(?P<document_id>\d+)/delete/?$', frontline_agent.delete_document, name='frontline_delete_document'),  # POST
     re_path(r'^frontline/knowledge/qa/?$', frontline_agent.knowledge_qa, name='frontline_knowledge_qa'),  # POST
     re_path(r'^frontline/knowledge/search/?$', frontline_agent.search_knowledge, name='frontline_search_knowledge'),  # GET
+    re_path(r'^frontline/qa/chats/?$', frontline_agent.list_qa_chats, name='frontline_qa_chats_list'),  # GET
+    re_path(r'^frontline/qa/chats/create/?$', frontline_agent.create_qa_chat, name='frontline_qa_chats_create'),  # POST
+    re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/update/?$', frontline_agent.update_qa_chat, name='frontline_qa_chats_update'),  # PATCH/PUT
+    re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/delete/?$', frontline_agent.delete_qa_chat, name='frontline_qa_chats_delete'),  # DELETE
     re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
 
     # Module Purchase endpoints

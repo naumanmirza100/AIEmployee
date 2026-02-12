@@ -105,6 +105,42 @@ export const knowledgeQA = async (question) => {
 };
 
 /**
+ * List all QA chats (stored in DB)
+ */
+export const listQAChats = async () => {
+  const response = await companyApi.get('/frontline/qa/chats');
+  return response;
+};
+
+/**
+ * Create a new QA chat with optional messages
+ * @param {{ title?: string, messages?: Array<{role, content, responseData?}> }} data
+ */
+export const createQAChat = async (data) => {
+  const response = await companyApi.post('/frontline/qa/chats/create', data);
+  return response;
+};
+
+/**
+ * Update a QA chat (add messages, optional title)
+ * @param {number|string} chatId
+ * @param {{ title?: string, messages?: Array<{role, content, responseData?}> }} data
+ */
+export const updateQAChat = async (chatId, data) => {
+  const response = await companyApi.patch(`/frontline/qa/chats/${chatId}/update`, data);
+  return response;
+};
+
+/**
+ * Delete a QA chat and all its messages
+ * @param {number|string} chatId
+ */
+export const deleteQAChat = async (chatId) => {
+  const response = await companyApi.delete(`/frontline/qa/chats/${chatId}/delete`);
+  return response;
+};
+
+/**
  * Search knowledge base
  */
 export const searchKnowledge = async (query, maxResults = 5) => {
@@ -143,6 +179,10 @@ export default {
   uploadDocument,
   deleteDocument,
   knowledgeQA,
+  listQAChats,
+  createQAChat,
+  updateQAChat,
+  deleteQAChat,
   searchKnowledge,
   createTicket,
 };

@@ -36,28 +36,43 @@ class KnowledgeQAAgent(BaseAgent):
         For action requests (creating projects, tasks, etc.), users should use the Project Pilot agent.
         You should be conversational, accurate, and provide context-aware responses."""
     
-    def answer_question(self, question: str, context: Optional[Dict] = None, 
+    def answer_question(self, question: str, context: Optional[Dict] = None,
                        available_users: Optional[List[Dict]] = None,
-                       session_id: Optional[str] = None) -> Dict:
+                       session_id: Optional[str] = None,
+                       chat_history: Optional[List[Dict]] = None) -> Dict:
         """
         Answer a question about the project. This agent ONLY provides descriptive answers.
         Enhanced with conversational memory and answer quality improvements.
         For action requests (creating projects/tasks), use the Project Pilot agent.
-        
+
         Args:
             question (str): User's question
             context (Dict): Optional context (project info, tasks, etc.)
             available_users (List[Dict]): List of available users/team members
             session_id (str): Optional session ID for conversation memory
-            
+            chat_history (List[Dict]): Optional list of {role, content} for this chat
+
         Returns:
             Dict: Answer with relevant information and enhancements
         """
         self.log_action("Answering question", {"question": question[:50], "session_id": session_id})
         
-        # Enhanced: Get conversation history
+        # Enhanced: Get conversation history (prefer explicit chat_history from request, else session-based)
         conversation_context = ""
-        if session_id:
+        if chat_history and len(chat_history) > 0:
+            lines = []
+            for msg in chat_history[-10:]:
+                role = (msg.get("role") or "user").lower()
+                content = (msg.get("content") or "").strip()
+                if not content:
+                    continue
+                if role == "assistant":
+                    lines.append(f"A: {content[:300]}{'...' if len(content) > 300 else ''}")
+                else:
+                    lines.append(f"Q: {content[:300]}{'...' if len(content) > 300 else ''}")
+            if lines:
+                conversation_context = "\n\nPrevious conversation (this chat):\n" + "\n".join(lines) + "\n\nUse the above when the question is a follow-up; reference it in your answer when relevant.\n"
+        elif session_id:
             try:
                 conversation_context = KnowledgeQAEnhancements.build_conversation_context(session_id)
             except Exception as e:
@@ -353,5 +368,6 @@ Provide a clear, step-by-step explanation of how this workflow works."""
         context = kwargs.get('context', {})
         available_users = kwargs.get('available_users', [])
         session_id = kwargs.get('session_id')
-        return self.answer_question(question, context, available_users, session_id)
+        chat_history = kwargs.get('chat_history') or []
+        return self.answer_question(question, context, available_users, session_id, chat_history=chat_history)
 

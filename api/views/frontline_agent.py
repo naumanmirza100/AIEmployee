@@ -23,7 +23,7 @@ from pathlib import Path
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
-from Frontline_agent.models import Document, Ticket, KnowledgeBase
+from Frontline_agent.models import Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
 from core.Fronline_agent.embedding_service import EmbeddingService
@@ -689,6 +689,135 @@ def create_ticket(request):
         )
 
 
+# ---------- Frontline Knowledge QA Chats (persisted in DB) ----------
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_qa_chats(request):
+    """List all QA chats for the company user. Returns chats with messages."""
+    try:
+        company_user = request.user
+        chats = FrontlineQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        result = []
+        for chat in chats:
+            messages = []
+            for msg in chat.messages.order_by('created_at'):
+                m = {'role': msg.role, 'content': msg.content}
+                if msg.response_data:
+                    m['responseData'] = msg.response_data
+                messages.append(m)
+            result.append({
+                'id': str(chat.id),
+                'title': chat.title or 'Chat',
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.exception("list_qa_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_qa_chat(request):
+    """Create a new QA chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body) if request.body else {})
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = FrontlineQAChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            FrontlineQAChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("create_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_qa_chat(request, chat_id):
+    """Update a QA chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = FrontlineQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body) if request.body else {})
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                FrontlineQAChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_qa_chat(request, chat_id):
+    """Delete a QA chat and all its messages (CASCADE)."""
+    try:
+        company_user = request.user
+        chat = FrontlineQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

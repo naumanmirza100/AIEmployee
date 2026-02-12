@@ -8,6 +8,12 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
+from project_manager_agent.models import (
+    PMKnowledgeQAChat,
+    PMKnowledgeQAChatMessage,
+    PMProjectPilotChat,
+    PMProjectPilotChatMessage,
+)
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 
@@ -33,6 +39,29 @@ try:
 except ImportError:
     DOCX_AVAILABLE = False
     logger.warning("python-docx not available. DOCX extraction will not work.")
+
+
+def _assignee_display(assignee):
+    """Safely get assignee display name (full name or username) or None."""
+    if not assignee:
+        return None
+    try:
+        return assignee.get_full_name() or getattr(assignee, "username", None)
+    except Exception:
+        return getattr(assignee, "username", None)
+
+
+def _get_chat_history(request):
+    """Extract chat_history from request (JSON body or POST form for multipart). Returns a list of {role, content}."""
+    hist = request.data.get("chat_history") if hasattr(request, "data") and isinstance(getattr(request, "data", None), dict) else None
+    if hist is None and request.method == "POST":
+        hist = request.POST.get("chat_history")
+    if isinstance(hist, str):
+        try:
+            hist = json.loads(hist) if hist.strip() else []
+        except Exception:
+            hist = []
+    return list(hist)[:20] if isinstance(hist, list) else []
 
 
 def _ensure_project_manager(user):
@@ -247,8 +276,9 @@ def project_pilot(request):
             available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
 
+        chat_history = _get_chat_history(request)
         agent = AgentRegistry.get_agent("project_pilot")
-        result = agent.process(question=question, context=context, available_users=available_users)
+        result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
@@ -599,6 +629,11 @@ def project_pilot(request):
                             "task_title": task.title,
                             "project_name": task_project.name,
                             "message": f'Task "{task.title}" created successfully!',
+                            "priority": getattr(task, "priority", None) or "medium",
+                            "assignee_username": task.assignee.username if task.assignee else None,
+                            "assignee_name": _assignee_display(task.assignee),
+                            "due_date": task.due_date.isoformat() if task.due_date else None,
+                            "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
                         }
                     )
                 except Exception as e:
@@ -687,7 +722,18 @@ def project_pilot(request):
 
                     task_to_update.save()
                     action_results.append(
-                        {"action": "update_task", "success": True, "task_id": task_to_update.id}
+                        {
+                            "action": "update_task",
+                            "success": True,
+                            "task_id": task_to_update.id,
+                            "task_title": task_to_update.title,
+                            "message": f'Task "{task_to_update.title}" updated successfully!',
+                            "priority": getattr(task_to_update, "priority", None) or "medium",
+                            "assignee_username": task_to_update.assignee.username if task_to_update.assignee else None,
+                            "assignee_name": _assignee_display(task_to_update.assignee),
+                            "due_date": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
+                            "created_at": task_to_update.created_at.isoformat() if getattr(task_to_update, "created_at", None) else None,
+                        }
                     )
                 except Exception as e:
                     action_results.append(
@@ -764,7 +810,7 @@ def task_prioritization(request):
                 "estimated_hours": float(t.estimated_hours) if t.estimated_hours else None,
                 "actual_hours": float(t.actual_hours) if t.actual_hours else None,
                 "assignee_id": t.assignee.id if t.assignee else None,
-                "assignee_name": t.assignee.get_full_name() or t.assignee.username if t.assignee else None,
+                "assignee_name": _assignee_display(t.assignee),
                 "dependencies": [dep.id for dep in t.depends_on.all()],
                 "dependent_count": t.dependent_tasks.count(),
                 "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -1368,12 +1414,14 @@ def knowledge_qa(request):
             # Generate session ID from company user ID
             session_id = f"company_user_{company_user.id}"
         
+        chat_history = request.data.get("chat_history") or []
         agent = AgentRegistry.get_agent("knowledge_qa")
         result = agent.process(
-            question=question, 
-            context=context, 
+            question=question,
+            context=context,
             available_users=available_users,
-            session_id=session_id
+            session_id=session_id,
+            chat_history=chat_history,
         )
 
         return Response({
@@ -1388,6 +1436,272 @@ def knowledge_qa(request):
             {"status": "error", "message": "Knowledge Q&A failed", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ---------- PM Knowledge QA Chats ----------
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_knowledge_qa_chats(request):
+    """List all Knowledge QA chats for the company user."""
+    try:
+        company_user = request.user
+        chats = PMKnowledgeQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        result = []
+        for chat in chats:
+            messages = []
+            for msg in chat.messages.order_by('created_at'):
+                m = {'role': msg.role, 'content': msg.content}
+                if msg.response_data:
+                    m['responseData'] = msg.response_data
+                messages.append(m)
+            result.append({
+                'id': str(chat.id),
+                'title': chat.title or 'Chat',
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.exception("list_knowledge_qa_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_knowledge_qa_chat(request):
+    """Create a new Knowledge QA chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = PMKnowledgeQAChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            PMKnowledgeQAChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("create_knowledge_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_knowledge_qa_chat(request, chat_id):
+    """Update a Knowledge QA chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = PMKnowledgeQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                PMKnowledgeQAChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_knowledge_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_knowledge_qa_chat(request, chat_id):
+    """Delete a Knowledge QA chat and all its messages."""
+    try:
+        company_user = request.user
+        chat = PMKnowledgeQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_knowledge_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- PM Project Pilot Chats ----------
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_project_pilot_chats(request):
+    """List all Project Pilot chats for the company user."""
+    try:
+        company_user = request.user
+        chats = PMProjectPilotChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        result = []
+        for chat in chats:
+            messages = []
+            for msg in chat.messages.order_by('created_at'):
+                m = {'role': msg.role, 'content': msg.content}
+                if msg.response_data:
+                    m['responseData'] = msg.response_data
+                messages.append(m)
+            result.append({
+                'id': str(chat.id),
+                'title': chat.title or 'Chat',
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.exception("list_project_pilot_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_project_pilot_chat(request):
+    """Create a new Project Pilot chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = PMProjectPilotChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            PMProjectPilotChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("create_project_pilot_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_project_pilot_chat(request, chat_id):
+    """Update a Project Pilot chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = PMProjectPilotChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                PMProjectPilotChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_project_pilot_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_project_pilot_chat(request, chat_id):
+    """Delete a Project Pilot chat and all its messages."""
+    try:
+        company_user = request.user
+        chat = PMProjectPilotChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_project_pilot_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -1939,8 +2253,9 @@ def project_pilot_from_file(request):
             available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
 
+        chat_history = _get_chat_history(request)
         agent = AgentRegistry.get_agent("project_pilot")
-        result = agent.process(question=question, context=context, available_users=available_users)
+        result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
@@ -2266,6 +2581,13 @@ def project_pilot_from_file(request):
                         "task_id": task.id,
                         "task_title": task.title,
                         "project_id": project_id_for_task,
+                        "project_name": task.project.name if task.project else None,
+                        "message": f'Task "{task.title}" created successfully!',
+                        "priority": getattr(task, "priority", None) or "medium",
+                        "assignee_username": task.assignee.username if task.assignee else None,
+                        "assignee_name": _assignee_display(task.assignee),
+                        "due_date": task.due_date.isoformat() if task.due_date else None,
+                        "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
                     })
                 except Exception as e:
                     logger.exception(f"Error creating task: {action.get('task_title')}")

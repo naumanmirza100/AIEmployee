@@ -30,7 +30,7 @@ class ProjectPilotAgent(BaseAgent):
         CRITICAL INSTRUCTIONS:
         1. Always analyze the FULL context of the user's request before deciding what action to take
         2. Understand the INTENT behind the request, not just keywords
-        3. If the request is ambiguous or unclear, ASK FOR CLARIFICATION rather than making assumptions
+        3. When the user clearly asks to add task(s) to a named project (e.g. "add one task in [project name] for [topic]"), EXECUTE the action—do NOT ask for clarification. Only ask when project or intent is truly ambiguous.
         4. Distinguish clearly between:
            - Creating NEW projects vs updating existing tasks
            - Creating NEW tasks vs updating existing tasks
@@ -42,7 +42,7 @@ class ProjectPilotAgent(BaseAgent):
         You extract action details from user requests and return structured JSON, but ONLY when the intent is clear.
         If ambiguous, ask for clarification with helpful questions."""
     
-    def handle_action_request(self, question: str, context: Optional[Dict] = None, available_users: Optional[List[Dict]] = None) -> Dict:
+    def handle_action_request(self, question: str, context: Optional[Dict] = None, available_users: Optional[List[Dict]] = None, chat_history: Optional[List[Dict]] = None) -> Dict:
         """
         Handle action requests like creating projects and tasks.
         
@@ -180,8 +180,21 @@ class ProjectPilotAgent(BaseAgent):
             cannot_do = True
             cannot_do_item = 'team members directly'
         
-        # Build context string
+        # Build context string (optionally start with conversation history for this chat)
         context_str = ""
+        if chat_history:
+            recent = chat_history[-15:]  # last 15 messages
+            context_str += "\n📜 CONVERSATION HISTORY (this chat)—use this to understand follow-ups (e.g. 'yes', 'do it') and reference when relevant:\n"
+            for msg in recent:
+                role = (msg.get("role") or "user").lower()
+                content = (msg.get("content") or "").strip()
+                if not content:
+                    continue
+                if role == "assistant":
+                    context_str += f"Assistant: {content[:500]}{'...' if len(content) > 500 else ''}\n"
+                else:
+                    context_str += f"User: {content[:500]}{'...' if len(content) > 500 else ''}\n"
+            context_str += "\nCurrent user message (respond to this):\n"
         if context:
             # Always show all projects first
             if 'all_projects' in context:
@@ -569,16 +582,52 @@ Return ONLY text - NO JSON, NO actions."""
                                 wants_new_project = True
                                 break
                 
-                # Check if user mentions existing project by name
+                # Check if user mentions existing project by name (exact substring or fuzzy match)
+                def _normalize_for_match(text):
+                    """Normalize for project name matching: remove filler words, collapse spaces."""
+                    if not text:
+                        return ""
+                    t = text.lower().strip()
+                    for word in ("project", "system", "application", "app", "the", "a", "an"):
+                        t = re.sub(rf"\b{re.escape(word)}\b", " ", t)
+                    t = re.sub(r"\s+", " ", t).strip()
+                    # Normalize task/tasks, management/managing, etc.
+                    t = re.sub(r"\btasks\b", "task", t)
+                    t = re.sub(r"\bmanaging\b", "management", t)
+                    return t
+
                 existing_project_mentioned = False
                 project_id_to_use = None
                 if context.get('all_projects'):
+                    q_norm = _normalize_for_match(question)
                     for proj in context['all_projects']:
-                        proj_name = proj.get('name', '').lower()
-                        if proj_name and proj_name in question_lower:
+                        proj_name = proj.get('name', '')
+                        proj_norm = _normalize_for_match(proj_name)
+                        if not proj_norm:
+                            continue
+                        # Exact substring match
+                        if proj_name.lower() in question_lower or proj_norm in q_norm:
                             existing_project_mentioned = True
                             project_id_to_use = proj.get('id')
                             break
+                        # Fuzzy: all significant words of project name appear in question
+                        proj_words = [w for w in proj_norm.split() if len(w) > 1]
+                        if len(proj_words) >= 2 and all(pw in q_norm for pw in proj_words):
+                            existing_project_mentioned = True
+                            project_id_to_use = proj.get('id')
+                            break
+                        # Fuzzy: first 15 chars of normalized project name in question (e.g. "daily task manag")
+                        if len(proj_norm) >= 5 and proj_norm[:15] in q_norm:
+                            existing_project_mentioned = True
+                            project_id_to_use = proj.get('id')
+                            break
+                
+                # CRITICAL: If user said "add task in [name]" / "add a new task in [name]", that's the existing project—do NOT create a new project.
+                add_task_in_patterns = ['add task in', 'add a task in', 'add new task in', 'add tasks in', 'add a new task to', 'add task to', 'add tasks to', 'in the', 'in project']
+                if existing_project_mentioned or any(p in question_lower for p in add_task_in_patterns):
+                    # Prefer "add to existing project" when they named a project (or used "in X" / "to X")
+                    if existing_project_mentioned:
+                        wants_new_project = False
                 
                 if wants_new_project:
                     # Check if user wants tasks assigned to all available developers
@@ -765,10 +814,12 @@ The user wants tasks assigned to ALL available developers/users. You MUST distri
 
 User Request: {question}
 
-The user wants to add tasks to an EXISTING project. DO NOT create a new project.
+The user wants to add tasks to an EXISTING project. DO NOT create a new project. DO NOT ask for clarification—return the action(s) as JSON now.
 {assignment_instruction}
 
 Extract ONLY create_task actions. Use project_id: {target_project_id} for all tasks.
+
+CRITICAL: If the user asked to add "one task", "1 task", "a task", or "a new task" (with or without a topic), return exactly ONE create_task. Use their topic as task_title (e.g. fix "sementic" to "semantic") and write a concise task_description (2-4 sentences is fine).
 
 Return ONLY this JSON format (no other text):
 [
@@ -785,10 +836,11 @@ Return ONLY this JSON format (no other text):
 ]
 
 Rules:
-- Return ONLY the JSON array, no explanations
+- Return ONLY the JSON array, no explanations. Never respond with questions or clarification—only valid JSON.
 - DO NOT include create_project action
 - Use project_id: {target_project_id} for all tasks
-- Break down into logical tasks if multiple tasks requested (create 8-15 tasks covering all features)
+- When user asked for ONE task only (e.g. "add only 1 task", "add a task for X"), return exactly one create_task with a short title and concise description.
+- When multiple tasks requested: break down into logical tasks (8-15 tasks covering features)
 - Create comprehensive tasks that cover: database design, backend API, frontend UI, authentication, core features, testing, deployment
 - For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences) covering:
   * WHAT the task is - clear explanation
@@ -1081,17 +1133,18 @@ Return a helpful text response (NOT JSON) explaining this."""
     def process(self, question: str, **kwargs) -> Dict:
         """
         Main processing method for Project Pilot agent.
-        
+
         Args:
             question (str): User's request
-            **kwargs: Additional context parameters (context, available_users, etc.)
-            
+            **kwargs: Additional context parameters (context, available_users, chat_history, etc.)
+
         Returns:
             dict: Actions to perform
         """
         self.log_action("Processing action request", {"question": question[:50]})
-        
+
         context = kwargs.get('context', {})
         available_users = kwargs.get('available_users', [])
-        return self.handle_action_request(question, context, available_users)
+        chat_history = kwargs.get('chat_history') or []
+        return self.handle_action_request(question, context, available_users, chat_history=chat_history)
 
