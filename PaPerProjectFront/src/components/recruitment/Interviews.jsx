@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User } from 'lucide-react';
 import { getInterviews, updateInterview, rescheduleInterview } from '@/services/recruitmentAgentService';
 
 const Interviews = ({ onUpdate }) => {
@@ -183,18 +183,19 @@ const Interviews = ({ onUpdate }) => {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
+    <div className="space-y-4 w-full">
+      {/* Header and Filters */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold">Interviews</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-xl sm:text-2xl py-3 sm:py-5 font-bold">Interviews</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground">
             Manage interview scheduling and tracking
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
           <Select value={statusFilter || "all"} onValueChange={(value) => setStatusFilter(value === "all" ? "" : value)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by status" />
+            <SelectTrigger className="w-[140px] sm:w-[160px]">
+              <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
@@ -205,8 +206,8 @@ const Interviews = ({ onUpdate }) => {
             </SelectContent>
           </Select>
           <Select value={decisionFilter === '' ? "all" : decisionFilter} onValueChange={(value) => setDecisionFilter(value === "all" ? "" : value)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by decision" />
+            <SelectTrigger className="w-[140px] sm:w-[160px]">
+              <SelectValue placeholder="Decision" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Decisions</SelectItem>
@@ -222,115 +223,139 @@ const Interviews = ({ onUpdate }) => {
 
       {interviews.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center">
-            <CalendarIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-lg font-medium mb-2">No interviews yet</p>
-            <p className="text-sm text-muted-foreground">
+          <CardContent className="py-8 sm:py-12 text-center">
+            <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-muted-foreground mb-4" />
+            <p className="text-base sm:text-lg font-medium mb-2">No interviews yet</p>
+            <p className="text-xs sm:text-sm text-muted-foreground px-4">
               Interviews appear here when scheduled from Candidates.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           {interviews.map((interview) => (
-            <Card key={interview.id}>
-              <CardHeader>
-                <div className="flex justify-between items-start flex-wrap gap-2">
-                  <div>
-                    <CardTitle className="text-lg">{interview.candidate_name}</CardTitle>
-                    <CardDescription className="mt-1">
-                      {interview.job_title || interview.job_role}
-                    </CardDescription>
+            <Card key={interview.id} className="overflow-hidden">
+              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <User className="h-4 w-4 text-muted-foreground shrink-0 hidden sm:block" />
+                      <CardTitle className="text-base sm:text-lg truncate">{interview.candidate_name}</CardTitle>
+                    </div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Briefcase className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                      <CardDescription className="text-xs sm:text-sm truncate">
+                        {interview.job_title || interview.job_role}
+                      </CardDescription>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0">
                     {getStatusBadge(interview.status)}
                     {interview.outcome && getOutcomeBadge(interview.outcome)}
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span>{interview.candidate_email}</span>
+              <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0 space-y-3 sm:space-y-4">
+                {/* Contact & Schedule Info */}
+                <div className="grid grid-cols-1 gap-3 sm:gap-4">
+                  {/* Contact Info */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs sm:text-sm">
+                    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                      <Mail className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                      <span className="truncate text-muted-foreground">{interview.candidate_email}</span>
                     </div>
                     {interview.candidate_phone && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Phone className="h-4 w-4 text-muted-foreground" />
-                        <span>{interview.candidate_phone}</span>
+                      <div className="flex items-center gap-1.5 sm:gap-2">
+                        <Phone className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                        <span className="text-muted-foreground">{interview.candidate_phone}</span>
                       </div>
                     )}
-                    <div className="flex items-center gap-2 text-sm">
-                      <Badge variant="outline">{interview.interview_type}</Badge>
-                    </div>
+                    <Badge variant="outline" className="text-[10px] sm:text-xs">{interview.interview_type}</Badge>
                   </div>
-                  <div className="space-y-2">
-                    {interview.scheduled_datetime && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span>
+                  
+                  {/* Schedule Info */}
+                  {interview.scheduled_datetime && (
+                    <div className="flex items-start gap-1.5 sm:gap-2 text-xs sm:text-sm bg-muted/50 rounded-md p-2 sm:p-3">
+                      <Clock className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="hidden sm:inline">
                           {format(new Date(interview.scheduled_datetime), 'EEEE, MMMM d, yyyy \'at\' h:mm a')}
                         </span>
+                        <span className="sm:hidden">
+                          {format(new Date(interview.scheduled_datetime), 'EEE, MMM d, yyyy')}
+                          <br />
+                          <span className="text-muted-foreground">
+                            {format(new Date(interview.scheduled_datetime), 'h:mm a')}
+                          </span>
+                        </span>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 pt-4 border-t">
+                {/* Actions */}
+                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 sm:gap-4 pt-3 sm:pt-4 border-t">
+                  {/* Reschedule Button */}
                   {(interview.status === 'PENDING' || interview.status === 'SCHEDULED') && (
                     <button
                       type="button"
                       onClick={() => openRescheduleModal(interview)}
-                      className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-sm font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 hover:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50 dark:hover:border-amber-700"
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs sm:text-sm font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 hover:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50 dark:hover:border-amber-700 w-full sm:w-auto"
                     >
-                      <CalendarClock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                      <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-600 dark:text-amber-400" />
                       Reschedule
                     </button>
                   )}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Status</Label>
-                    <Select
-                      value={interview.status}
-                      onValueChange={(value) => handleStatusChange(interview.id, value)}
-                      disabled={updatingId === interview.id}
-                    >
-                      <SelectTrigger className="w-[160px] h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="PENDING">Pending</SelectItem>
-                        <SelectItem value="SCHEDULED">Scheduled</SelectItem>
-                        <SelectItem value="COMPLETED">Completed</SelectItem>
-                        <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        <SelectItem value="RESCHEDULED">Rescheduled</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {updatingId === interview.id && (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    )}
-                  </div>
-                  {(interview.status === 'COMPLETED' || interview.outcome) && (
-                    <div className="flex items-center gap-2">
-                      <Label className="text-sm font-medium text-muted-foreground">Decision</Label>
+                  
+                  {/* Status & Decision Controls */}
+                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
+                    {/* Status Select */}
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Status</Label>
                       <Select
-                        value={interview.outcome || 'none'}
-                        onValueChange={(value) => handleOutcomeChange(interview.id, value === 'none' ? '' : value)}
+                        value={interview.status}
+                        onValueChange={(value) => handleStatusChange(interview.id, value)}
                         disabled={updatingId === interview.id}
                       >
-                        <SelectTrigger className="w-[180px] h-9">
-                          <SelectValue placeholder="Set outcome" />
+                        <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">Not set</SelectItem>
-                          <SelectItem value="ONSITE_INTERVIEW">Onsite Interview</SelectItem>
-                          <SelectItem value="HIRED">Hired</SelectItem>
-                          <SelectItem value="PASSED">Passed</SelectItem>
-                          <SelectItem value="REJECTED">Rejected</SelectItem>
+                          <SelectItem value="PENDING">Pending</SelectItem>
+                          <SelectItem value="SCHEDULED">Scheduled</SelectItem>
+                          <SelectItem value="COMPLETED">Completed</SelectItem>
+                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                          <SelectItem value="RESCHEDULED">Rescheduled</SelectItem>
                         </SelectContent>
                       </Select>
+                      {updatingId === interview.id && (
+                        <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin text-muted-foreground shrink-0" />
+                      )}
                     </div>
-                  )}
+                    
+                    {/* Decision Select */}
+                    {(interview.status === 'COMPLETED' || interview.outcome) && (
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Decision</Label>
+                        <Select
+                          value={interview.outcome || 'none'}
+                          onValueChange={(value) => handleOutcomeChange(interview.id, value === 'none' ? '' : value)}
+                          disabled={updatingId === interview.id}
+                        >
+                          <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
+                            <SelectValue placeholder="Set outcome" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Not set</SelectItem>
+                            <SelectItem value="ONSITE_INTERVIEW">Onsite Interview</SelectItem>
+                            <SelectItem value="HIRED">Hired</SelectItem>
+                            <SelectItem value="PASSED">Passed</SelectItem>
+                            <SelectItem value="REJECTED">Rejected</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -348,29 +373,29 @@ const Interviews = ({ onUpdate }) => {
           setRescheduleError('');
         }
       }}>
-        <DialogContent className="max-w-lg w-[calc(100%-2rem)] sm:w-full max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-lg max-h-[85vh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle className="text-lg sm:text-xl">Reschedule Interview</DialogTitle>
+            <DialogTitle className="text-base sm:text-lg">Reschedule Interview</DialogTitle>
             {rescheduleInterviewObj && (
-              <DialogDescription className="text-sm line-clamp-2 sm:line-clamp-none">
+              <DialogDescription className="text-xs sm:text-sm line-clamp-2">
                 {rescheduleInterviewObj.candidate_name} – {rescheduleInterviewObj.job_title || rescheduleInterviewObj.job_role}
               </DialogDescription>
             )}
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground">
               Pre-filled with current scheduled time. Change date or time as needed, then confirm.
             </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2">
               <div className="space-y-2 min-w-0">
-                <Label className="text-sm font-medium">Date</Label>
+                <Label className="text-xs sm:text-sm font-medium">Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
-                      className="w-full justify-start h-[47px] text-left font-normal text-sm truncate"
+                      className="w-full justify-start h-10 sm:h-[47px] text-left font-normal text-xs sm:text-sm truncate"
                     >
-                      <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                      <CalendarIcon className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                       <span className="truncate">
                         {reschedulePickedDate ? format(reschedulePickedDate, 'PPP') : 'Pick a date'}
                       </span>
@@ -391,7 +416,7 @@ const Interviews = ({ onUpdate }) => {
                 </Popover>
               </div>
               <div className="space-y-2 min-w-0">
-                <Label htmlFor="reschedule-time" className="text-sm font-medium">Time</Label>
+                <Label htmlFor="reschedule-time" className="text-xs sm:text-sm font-medium">Time</Label>
                 <Input
                   id="reschedule-time"
                   type="time"
@@ -400,12 +425,12 @@ const Interviews = ({ onUpdate }) => {
                     setReschedulePickedTime(e.target.value);
                     setRescheduleError('');
                   }}
-                  className="w-full"
+                  className="w-full h-10 sm:h-[47px] text-xs sm:text-sm"
                 />
               </div>
             </div>
             {rescheduleError && (
-              <p className="text-sm text-destructive font-medium">
+              <p className="text-xs sm:text-sm text-destructive font-medium">
                 {rescheduleError}
               </p>
             )}
@@ -421,23 +446,26 @@ const Interviews = ({ onUpdate }) => {
                   setRescheduleError('');
                 }}
                 disabled={rescheduleSubmitting}
-                className="w-full sm:w-auto shrink-0 order-2 sm:order-1"
+                className="w-full sm:w-auto h-9 sm:h-10 text-xs sm:text-sm"
               >
                 Cancel
               </Button>
               <Button
-                size="lg"
                 onClick={handleRescheduleSubmit}
                 disabled={!reschedulePickedDate || !reschedulePickedTime || rescheduleSubmitting}
-                className="w-full sm:min-w-[240px] shrink-0 order-1 sm:order-2"
+                className="w-full sm:w-auto h-10 sm:h-11 text-xs sm:text-sm"
               >
                 {rescheduleSubmitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Rescheduling...
+                    <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-2 animate-spin" />
+                    <span className="hidden sm:inline">Rescheduling...</span>
+                    <span className="sm:hidden">Saving...</span>
                   </>
                 ) : (
-                  'Reschedule & notify candidate'
+                  <>
+                    <span className="hidden sm:inline">Reschedule & notify candidate</span>
+                    <span className="sm:hidden">Reschedule & Notify</span>
+                  </>
                 )}
               </Button>
             </div>
