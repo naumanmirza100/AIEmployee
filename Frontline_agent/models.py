@@ -268,3 +268,56 @@ class FrontlineAnalytics(models.Model):
     def __str__(self):
         return f"{self.metric_name} - {self.metric_value}"
 
+
+class FrontlineQAChat(models.Model):
+    """Knowledge Q&A chat sessions for frontline. Each chat contains multiple messages."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='frontline_qa_chats',
+        help_text='Company user who owns this chat',
+    )
+    title = models.CharField(max_length=255, default='Chat', help_text='Chat title (e.g. first question snippet)')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-updated_at']
+        verbose_name = 'Frontline QA Chat'
+        verbose_name_plural = 'Frontline QA Chats'
+
+    def __str__(self):
+        return f"QA Chat: {self.title[:40]}... ({self.id})"
+
+
+class FrontlineQAChatMessage(models.Model):
+    """Individual messages in a Frontline QA chat."""
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('assistant', 'Assistant'),
+    ]
+    chat = models.ForeignKey(
+        FrontlineQAChat,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        help_text='Chat this message belongs to',
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField(help_text='Message content')
+    response_data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='For assistant: full API response { answer, has_verified_info, source, type }',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['created_at']
+        verbose_name = 'Frontline QA Chat Message'
+        verbose_name_plural = 'Frontline QA Chat Messages'
+
+    def __str__(self):
+        return f"{self.role}: {self.content[:50]}..."
+
