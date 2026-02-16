@@ -60,6 +60,7 @@ const FrontlineDashboard = () => {
   const [ticketDescription, setTicketDescription] = useState('');
   const [creatingTicket, setCreatingTicket] = useState(false);
 
+
   useEffect(() => {
     fetchDashboard();
     

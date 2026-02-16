@@ -27,6 +27,7 @@ class Ticket(models.Model):
         ('account', 'Account'),
         ('feature_request', 'Feature Request'),
         ('bug', 'Bug'),
+        ('knowledge_gap', 'Knowledge gap (add to KB)'),
         ('other', 'Other'),
     ]
     
