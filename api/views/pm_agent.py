@@ -747,6 +747,20 @@ def project_pilot(request):
         if not project_created and any(a.get("action") == "create_project" for a in actions):
             # Project creation was attempted but failed
             logger.warning("Project creation was attempted but failed. Action results: %s", action_results)
+
+        # Ensure frontend always has a displayable answer (avoid raw JSON so UI does not hide it)
+        answer_text = (result.get("answer") or "").strip()
+        if answer_text and (answer_text.startswith("[") or answer_text.startswith("{")):
+            # Build a short summary so the message bubble shows something
+            success_count = sum(1 for r in action_results if r.get("success"))
+            if action_results:
+                parts = []
+                for r in action_results:
+                    if r.get("success") and r.get("message"):
+                        parts.append(r["message"])
+                result["answer"] = "\n".join(parts) if parts else f"Completed {success_count} action(s)."
+            else:
+                result["answer"] = "Request processed; no actions were returned."
         
         data = {"status": "success", "data": result, "action_results": action_results}
         logger.info(f"Returning project_pilot response with {len(action_results)} action results")

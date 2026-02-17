@@ -18,6 +18,7 @@ import { companyApi } from '@/services/companyAuthService';
 import { getPurchasedModules } from '@/services/modulePurchaseService';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
+import frontlineAgentService from '@/services/frontlineAgentService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { 
@@ -25,7 +26,8 @@ import {
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, Megaphone, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Headphones
+  Headphones,
+  Ticket
 } from 'lucide-react';
 
 const CompanyDashboardPage = () => {
@@ -104,6 +106,11 @@ const CompanyDashboardPage = () => {
     description: '',
     requirements: '',
   });
+
+  // Ticket Tasks (Frontline KB-gap tasks) - only relevant when frontline_agent is purchased
+  const [ticketTasks, setTicketTasks] = useState([]);
+  const [loadingTicketTasks, setLoadingTicketTasks] = useState(false);
+  const [resolvingTaskId, setResolvingTaskId] = useState(null);
 
   const fetchPurchasedModules = async () => {
     try {
@@ -458,6 +465,38 @@ const CompanyDashboardPage = () => {
     }
   };
 
+  const loadTicketTasks = async () => {
+    try {
+      setLoadingTicketTasks(true);
+      const res = await frontlineAgentService.listTicketTasks();
+      if (res.status === 'success' && res.data) {
+        setTicketTasks(res.data || []);
+      } else {
+        setTicketTasks([]);
+      }
+    } catch (err) {
+      console.error('Load ticket tasks error:', err);
+      setTicketTasks([]);
+    } finally {
+      setLoadingTicketTasks(false);
+    }
+  };
+
+  const handleCloseTicketTask = async (taskId) => {
+    try {
+      setResolvingTaskId(taskId);
+      const res = await frontlineAgentService.updateTicketTask(taskId, { status: 'closed' });
+      if (res.status === 'success') {
+        toast({ title: 'Ticket closed', description: 'The ticket task has been closed.' });
+        loadTicketTasks();
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Failed to close ticket', variant: 'destructive' });
+    } finally {
+      setResolvingTaskId(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'projects' && companyUser) {
       fetchProjects();
@@ -479,6 +518,9 @@ const CompanyDashboardPage = () => {
         fetchAvailableUsers();
       }
       fetchAllUsersTasks();
+    }
+    if (activeTab === 'ticket-tasks' && companyUser && purchasedModules.includes('frontline_agent')) {
+      loadTicketTasks();
     }
   }, [activeTab, companyUser, taskStatusFilter, taskUserFilter, taskProjectFilter, usersPagination.page, usersPagination.limit, tasksPagination.page, tasksPagination.limit]);
   
@@ -835,6 +877,12 @@ const CompanyDashboardPage = () => {
                   <ListTodo className="h-4 w-4 mr-2" />
                   All Users Tasks
                 </TabsTrigger>
+                {purchasedModules.includes('frontline_agent') && (
+                  <TabsTrigger value="ticket-tasks">
+                    <Ticket className="h-4 w-4 mr-2" />
+                    Ticket Tasks
+                  </TabsTrigger>
+                )}
               </TabsList>
               {activeTab === 'jobs' && (
                 <Button onClick={() => setShowCreateJobModal(true)}>
@@ -1547,6 +1595,68 @@ const CompanyDashboardPage = () => {
                 </div>
               )}
             </TabsContent>
+
+            {purchasedModules.includes('frontline_agent') && (
+              <TabsContent value="ticket-tasks" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Ticket className="h-5 w-5" />
+                      Ticket Tasks
+                    </CardTitle>
+                    <CardDescription>
+                      When the Frontline agent doesn&apos;t have an answer in Knowledge Q&A, a ticket is created here. Upload a document in the Frontline Agent (Documents tab) that covers the topic, then close the ticket from this tab when done.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {loadingTicketTasks ? (
+                      <div className="flex justify-center py-8">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : ticketTasks.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No ticket tasks yet. When you ask something in Frontline Knowledge Q&A that the agent can&apos;t answer, a task will appear here. Add a document in the Frontline Agent to expand the knowledge base, then close the ticket here.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {ticketTasks.map((task) => (
+                          <div
+                            key={task.id}
+                            className={`rounded-lg border p-4 ${task.status === 'resolved' || task.status === 'closed' ? 'bg-muted/50 opacity-80' : 'bg-card'}`}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-medium">{task.title}</span>
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-muted">{task.status}</span>
+                                </div>
+                                <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap break-words prose prose-sm dark:prose-invert max-w-none">
+                                  {task.description?.replace(/\*\*/g, '')}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2">
+                                  Created {task.created_at ? new Date(task.created_at).toLocaleString() : ''}
+                                </p>
+                              </div>
+                              {(task.status !== 'resolved' && task.status !== 'closed') && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleCloseTicketTask(task.id)}
+                                  disabled={resolvingTaskId === task.id}
+                                >
+                                  {resolvingTaskId === task.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
+                                  Close
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
           </Tabs>
         )}
 

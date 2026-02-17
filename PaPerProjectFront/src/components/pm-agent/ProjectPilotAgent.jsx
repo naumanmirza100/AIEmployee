@@ -349,6 +349,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                         if (looksLikeJson) return null;
                         return <p className="text-sm whitespace-pre-wrap">{a}</p>;
                       })()}
+                      {!(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
+                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      )}
                       {(msg.responseData?.action_results?.length > 0) && (
                         <div className="space-y-2 mt-2">
                           {msg.responseData.action_results.map((action, idx) => {

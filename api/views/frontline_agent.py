@@ -573,11 +573,28 @@ def delete_document(request, document_id):
         )
 
 
+def _build_knowledge_gap_task_description(question: str, agent_response: str) -> str:
+    """Build description for a KB-gap ticket task so the user can add a document later."""
+    return f"""**User query:** {question}
+
+**Agent response:** {agent_response or "The knowledge base does not currently contain verified information about this topic."}
+
+**Your task:** Add a document to the Knowledge Base so the agent can answer this and similar questions in the future.
+
+**How to resolve:**
+1. Go to the **Documents** tab and upload a document (PDF, DOCX, TXT, or similar) that covers the topic above.
+2. Ensure the document clearly explains the relevant information (definitions, steps, or FAQs).
+3. Once the document is uploaded and indexed, the agent will be able to answer similar questions automatically.
+4. Close this ticket from the Ticket Tasks tab when done.
+"""
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def knowledge_qa(request):
-    """Knowledge Q&A - Answer questions using knowledge base and uploaded documents"""
+    """Knowledge Q&A - Answer questions using knowledge base and uploaded documents.
+    When the agent has no verified info, a ticket task is created for the company user (Ticket Tasks tab)."""
     try:
         company_user = request.user
         company = company_user.company
@@ -594,6 +611,44 @@ def knowledge_qa(request):
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(question, company_id=company.id)
+        
+        # When agent doesn't have verified info, create a ticket task assigned to this company user
+        ticket_task_created = False
+        ticket_task_id = None
+        if result.get('has_verified_info') is False:
+            try:
+                user = _get_or_create_user_for_company_user(company_user)
+                title = f"KB gap: {question[:60]}{'...' if len(question) > 60 else ''}"
+                description = _build_knowledge_gap_task_description(
+                    question,
+                    result.get('answer') or "I don't have verified information about this topic in our knowledge base."
+                )
+                ticket = Ticket.objects.create(
+                    title=title,
+                    description=description,
+                    status='new',
+                    priority='medium',
+                    category='knowledge_gap',
+                    created_by=user,
+                    assigned_to=user,
+                    auto_resolved=False,
+                )
+                ticket_task_created = True
+                ticket_task_id = ticket.id
+                logger.info(f"Created KB-gap ticket task {ticket.id} for company_user {company_user.id}, question: {question[:50]}")
+            except Exception as e:
+                logger.exception("Failed to create KB-gap ticket task: %s", e)
+            
+            # Ensure response text mentions that a task was created
+            if ticket_task_created:
+                result = dict(result)
+                result['answer'] = (
+                    result.get('answer', '') +
+                    " A ticket task has been created for you. Go to your **Company Dashboard** and open the **Ticket Tasks** tab to see it. "
+                    "Add a document in the Frontline Agent (Documents tab) to expand the knowledge base, then close the ticket in Ticket Tasks when done."
+                )
+                result['ticket_task_created'] = True
+                result['ticket_task_id'] = ticket_task_id
         
         return Response({
             'status': 'success',
@@ -640,6 +695,83 @@ def search_knowledge(request):
         return Response(
             {'status': 'error', 'message': 'Failed to search knowledge base', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_ticket_tasks(request):
+    """List ticket tasks (KB-gap tasks) assigned to this company user. Shown in Ticket Tasks tab."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        tickets = Ticket.objects.filter(
+            assigned_to=user,
+            category='knowledge_gap',
+        ).order_by('-created_at')
+        data = [
+            {
+                'id': t.id,
+                'title': t.title,
+                'description': t.description,
+                'status': t.status,
+                'priority': t.priority,
+                'created_at': t.created_at.isoformat(),
+                'updated_at': t.updated_at.isoformat(),
+            }
+            for t in tickets
+        ]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_ticket_tasks failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to list ticket tasks', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_ticket_task(request, ticket_id):
+    """Update a ticket task (e.g. mark as resolved). Only own KB-gap tasks."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        ticket = Ticket.objects.filter(
+            id=ticket_id,
+            assigned_to=user,
+            category='knowledge_gap',
+        ).first()
+        if not ticket:
+            return Response(
+                {'status': 'error', 'message': 'Ticket task not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        if 'status' in data:
+            ticket.status = data['status']
+        if 'resolution' in data:
+            ticket.resolution = data['resolution']
+            if data.get('status') in ('resolved', 'closed'):
+                from django.utils import timezone
+                ticket.resolved_at = timezone.now()
+        ticket.save()
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': ticket.id,
+                'title': ticket.title,
+                'status': ticket.status,
+                'updated_at': ticket.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_ticket_task failed")
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 

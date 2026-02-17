@@ -172,6 +172,32 @@ export const createTicket = async (title, description) => {
   }
 };
 
+/**
+ * List ticket tasks (KB-gap tasks assigned to current user)
+ */
+export const listTicketTasks = async () => {
+  try {
+    const response = await companyApi.get('/frontline/ticket-tasks');
+    return response;
+  } catch (error) {
+    console.error('List ticket tasks error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update a ticket task (e.g. mark as resolved)
+ */
+export const updateTicketTask = async (ticketId, data) => {
+  try {
+    const response = await companyApi.patch(`/frontline/ticket-tasks/${ticketId}`, data);
+    return response;
+  } catch (error) {
+    console.error('Update ticket task error:', error);
+    throw error;
+  }
+};
+
 export default {
   getFrontlineDashboard,
   listDocuments,
@@ -185,5 +211,7 @@ export default {
   deleteQAChat,
   searchKnowledge,
   createTicket,
+  listTicketTasks,
+  updateTicketTask,
 };
 
