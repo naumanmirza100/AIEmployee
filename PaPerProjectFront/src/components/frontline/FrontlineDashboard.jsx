@@ -38,9 +38,13 @@ import {
   BarChart3,
   Mail,
   FileSearch,
-  ListChecks
+  ListChecks,
+  Pencil,
 } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
+
+const TEMPLATE_DEFAULT = { name: '', subject: '', body: '', notification_type: 'ticket_update', channel: 'email' };
+const WORKFLOW_STEPS_DEFAULT = '[{"type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}"}]';
 
 function FrontlineNotificationsTab() {
   const { toast } = useToast();
@@ -49,6 +53,8 @@ function FrontlineNotificationsTab() {
   const [loading, setLoading] = useState(true);
   const [sendForm, setSendForm] = useState({ template_id: '', recipient_email: '', ticket_id: '' });
   const [sending, setSending] = useState(false);
+  const [templateDialog, setTemplateDialog] = useState({ open: false, editingId: null, ...TEMPLATE_DEFAULT });
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const load = async () => {
     setLoading(true);
     try {
@@ -86,11 +92,70 @@ function FrontlineNotificationsTab() {
       setSending(false);
     }
   };
+  const openCreateTemplate = () => setTemplateDialog({ open: true, editingId: null, ...TEMPLATE_DEFAULT });
+  const openEditTemplate = (t) => setTemplateDialog({ open: true, editingId: t.id, name: t.name || '', subject: t.subject || '', body: t.body || '', notification_type: t.notification_type || 'ticket_update', channel: t.channel || 'email' });
+  const handleSaveTemplate = async (e) => {
+    e.preventDefault();
+    if (!templateDialog.name.trim()) {
+      toast({ title: 'Error', description: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      if (templateDialog.editingId) {
+        const res = await frontlineAgentService.updateNotificationTemplate(templateDialog.editingId, {
+          name: templateDialog.name.trim(),
+          subject: templateDialog.subject,
+          body: templateDialog.body,
+          notification_type: templateDialog.notification_type,
+          channel: templateDialog.channel,
+        });
+        if (res.status === 'success') {
+          toast({ title: 'Saved', description: 'Template updated.' });
+          setTemplateDialog({ open: false, editingId: null, ...TEMPLATE_DEFAULT });
+          load();
+        } else throw new Error(res.message);
+      } else {
+        const res = await frontlineAgentService.createNotificationTemplate({
+          name: templateDialog.name.trim(),
+          subject: templateDialog.subject,
+          body: templateDialog.body,
+          notification_type: templateDialog.notification_type,
+          channel: templateDialog.channel,
+        });
+        if (res.status === 'success') {
+          toast({ title: 'Created', description: 'Template created.' });
+          setTemplateDialog({ open: false, editingId: null, ...TEMPLATE_DEFAULT });
+          load();
+        } else throw new Error(res.message);
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Failed to save template', variant: 'destructive' });
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+  const handleDeleteTemplate = async (t) => {
+    if (!confirm(`Delete template "${t.name}"?`)) return;
+    try {
+      const res = await frontlineAgentService.deleteNotificationTemplate(t.id);
+      if (res.status === 'success') {
+        toast({ title: 'Deleted', description: 'Template removed.' });
+        load();
+      } else throw new Error(res.message);
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Delete failed', variant: 'destructive' });
+    }
+  };
   return (
+  <>
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Notifications</CardTitle>
-        <CardDescription>Templates and send/schedule notifications (email).</CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Notifications</CardTitle>
+          <CardDescription>Templates and send/schedule notifications (email).</CardDescription>
+        </div>
+        <Button onClick={openCreateTemplate}><Plus className="h-4 w-4 mr-2" /> Create template</Button>
       </CardHeader>
       <CardContent className="space-y-6">
         <form onSubmit={handleSendNow} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
@@ -118,10 +183,14 @@ function FrontlineNotificationsTab() {
             <div>
               <h4 className="font-medium mb-2">Templates ({templates.length})</h4>
               <div className="space-y-2 max-h-40 overflow-y-auto">
-                {templates.length === 0 ? <p className="text-sm text-muted-foreground">No templates. Create via API or add UI to create.</p> : templates.map((t) => (
+                {templates.length === 0 ? <p className="text-sm text-muted-foreground">No templates yet. Click &quot;Create template&quot; to add one.</p> : templates.map((t) => (
                   <div key={t.id} className="flex justify-between items-center p-2 border rounded text-sm">
                     <span>{t.name}</span>
-                    <Badge variant="outline">{t.channel}</Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="outline">{t.channel}</Badge>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditTemplate(t)} title="Edit"><Pencil className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteTemplate(t)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -141,6 +210,59 @@ function FrontlineNotificationsTab() {
         )}
       </CardContent>
     </Card>
+    <Dialog open={templateDialog.open} onOpenChange={(open) => !open && setTemplateDialog((d) => ({ ...d, open: false }))}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{templateDialog.editingId ? 'Edit template' : 'Create template'}</DialogTitle>
+          <DialogDescription>Name and body support placeholders: {`{{ticket_id}}`}, {`{{ticket_title}}`}, {`{{customer_name}}`}, {`{{resolution}}`}</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSaveTemplate} className="space-y-4">
+          <div className="space-y-2">
+            <Label>Name</Label>
+            <Input value={templateDialog.name} onChange={(e) => setTemplateDialog((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Ticket follow-up" required />
+          </div>
+          <div className="space-y-2">
+            <Label>Subject (email)</Label>
+            <Input value={templateDialog.subject} onChange={(e) => setTemplateDialog((d) => ({ ...d, subject: e.target.value }))} placeholder="e.g. Update on ticket {{ticket_id}}" />
+          </div>
+          <div className="space-y-2">
+            <Label>Body</Label>
+            <Textarea value={templateDialog.body} onChange={(e) => setTemplateDialog((d) => ({ ...d, body: e.target.value }))} placeholder="Hi, your ticket {{ticket_id}}: {{ticket_title}}..." rows={4} className="resize-y" />
+          </div>
+          <div className="flex gap-4">
+            <div className="space-y-2 flex-1">
+              <Label>Type</Label>
+              <Select value={templateDialog.notification_type} onValueChange={(v) => setTemplateDialog((d) => ({ ...d, notification_type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ticket_update">Ticket Update</SelectItem>
+                  <SelectItem value="follow_up">Follow-up</SelectItem>
+                  <SelectItem value="reminder">Reminder</SelectItem>
+                  <SelectItem value="alert">Alert</SelectItem>
+                  <SelectItem value="system">System</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 flex-1">
+              <Label>Channel</Label>
+              <Select value={templateDialog.channel} onValueChange={(v) => setTemplateDialog((d) => ({ ...d, channel: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="email">Email</SelectItem>
+                  <SelectItem value="sms">SMS</SelectItem>
+                  <SelectItem value="in_app">In-App</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTemplateDialog((d) => ({ ...d, open: false }))}>Cancel</Button>
+            <Button type="submit" disabled={savingTemplate}>{savingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }
 
@@ -151,6 +273,8 @@ function FrontlineWorkflowsTab() {
   const [loading, setLoading] = useState(true);
   const [executeForm, setExecuteForm] = useState({ workflow_id: '', ticket_id: '', recipient_email: '' });
   const [executing, setExecuting] = useState(false);
+  const [workflowDialog, setWorkflowDialog] = useState({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
   const load = async () => {
     setLoading(true);
     try {
@@ -186,11 +310,80 @@ function FrontlineWorkflowsTab() {
       setExecuting(false);
     }
   };
+  const openCreateWorkflow = () => setWorkflowDialog({ open: true, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+  const openEditWorkflow = (w) => setWorkflowDialog({
+    open: true, editingId: w.id, name: w.name || '', description: w.description || '',
+    stepsJson: Array.isArray(w.steps) ? JSON.stringify(w.steps, null, 2) : (typeof w.steps === 'string' ? w.steps : WORKFLOW_STEPS_DEFAULT),
+    is_active: w.is_active !== false,
+  });
+  const handleSaveWorkflow = async (e) => {
+    e.preventDefault();
+    if (!workflowDialog.name.trim()) {
+      toast({ title: 'Error', description: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    let steps = [];
+    try {
+      steps = JSON.parse(workflowDialog.stepsJson || '[]');
+      if (!Array.isArray(steps)) steps = [];
+    } catch {
+      toast({ title: 'Error', description: 'Steps must be valid JSON array', variant: 'destructive' });
+      return;
+    }
+    setSavingWorkflow(true);
+    try {
+      if (workflowDialog.editingId) {
+        const res = await frontlineAgentService.updateWorkflow(workflowDialog.editingId, {
+          name: workflowDialog.name.trim(),
+          description: workflowDialog.description,
+          steps,
+          is_active: workflowDialog.is_active,
+        });
+        if (res.status === 'success') {
+          toast({ title: 'Saved', description: 'Workflow updated.' });
+          setWorkflowDialog({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+          load();
+        } else throw new Error(res.message);
+      } else {
+        const res = await frontlineAgentService.createWorkflow({
+          name: workflowDialog.name.trim(),
+          description: workflowDialog.description,
+          steps,
+          is_active: workflowDialog.is_active,
+        });
+        if (res.status === 'success') {
+          toast({ title: 'Created', description: 'Workflow created.' });
+          setWorkflowDialog({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+          load();
+        } else throw new Error(res.message);
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Failed to save workflow', variant: 'destructive' });
+    } finally {
+      setSavingWorkflow(false);
+    }
+  };
+  const handleDeleteWorkflow = async (w) => {
+    if (!confirm(`Delete workflow "${w.name}"?`)) return;
+    try {
+      const res = await frontlineAgentService.deleteWorkflow(w.id);
+      if (res.status === 'success') {
+        toast({ title: 'Deleted', description: 'Workflow removed.' });
+        load();
+      } else throw new Error(res.message);
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Delete failed', variant: 'destructive' });
+    }
+  };
   return (
+  <>
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><GitBranch className="h-5 w-5" /> Workflows</CardTitle>
-        <CardDescription>Run SOP/workflows with context (e.g. ticket_id, recipient_email).</CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2"><GitBranch className="h-5 w-5" /> Workflows</CardTitle>
+          <CardDescription>Run SOP/workflows with context (e.g. ticket_id, recipient_email).</CardDescription>
+        </div>
+        <Button onClick={openCreateWorkflow}><Plus className="h-4 w-4 mr-2" /> Create workflow</Button>
       </CardHeader>
       <CardContent className="space-y-6">
         <form onSubmit={handleExecute} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
@@ -218,10 +411,14 @@ function FrontlineWorkflowsTab() {
             <div>
               <h4 className="font-medium mb-2">Workflows ({workflows.length})</h4>
               <div className="space-y-2 max-h-32 overflow-y-auto">
-                {workflows.length === 0 ? <p className="text-sm text-muted-foreground">No workflows yet.</p> : workflows.map((w) => (
+                {workflows.length === 0 ? <p className="text-sm text-muted-foreground">No workflows yet. Click &quot;Create workflow&quot; to add one.</p> : workflows.map((w) => (
                   <div key={w.id} className="flex justify-between items-center p-2 border rounded text-sm">
                     <span>{w.name}</span>
-                    <Badge variant={w.is_active ? 'default' : 'secondary'}>{w.is_active ? 'Active' : 'Inactive'}</Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge variant={w.is_active ? 'default' : 'secondary'}>{w.is_active ? 'Active' : 'Inactive'}</Badge>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditWorkflow(w)} title="Edit"><Pencil className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteWorkflow(w)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -241,6 +438,38 @@ function FrontlineWorkflowsTab() {
         )}
       </CardContent>
     </Card>
+    <Dialog open={workflowDialog.open} onOpenChange={(open) => !open && setWorkflowDialog((d) => ({ ...d, open: false }))}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{workflowDialog.editingId ? 'Edit workflow' : 'Create workflow'}</DialogTitle>
+          <DialogDescription>Steps run in order. Types: send_email (template_id, recipient_email), update_ticket (ticket_id, status). Use {`{{ticket_id}}`}, {`{{recipient_email}}`} in context.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSaveWorkflow} className="space-y-4">
+          <div className="space-y-2">
+            <Label>Name</Label>
+            <Input value={workflowDialog.name} onChange={(e) => setWorkflowDialog((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Ticket follow-up flow" required />
+          </div>
+          <div className="space-y-2">
+            <Label>Description (optional)</Label>
+            <Input value={workflowDialog.description} onChange={(e) => setWorkflowDialog((d) => ({ ...d, description: e.target.value }))} placeholder="Short description" />
+          </div>
+          <div className="space-y-2">
+            <Label>Steps (JSON array)</Label>
+            <Textarea value={workflowDialog.stepsJson} onChange={(e) => setWorkflowDialog((d) => ({ ...d, stepsJson: e.target.value }))} rows={8} className="font-mono text-sm resize-y" placeholder={WORKFLOW_STEPS_DEFAULT} />
+            <p className="text-xs text-muted-foreground">Example: send_email with template_id and recipient_email; update_ticket with status.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="wf-active" checked={workflowDialog.is_active} onChange={(e) => setWorkflowDialog((d) => ({ ...d, is_active: e.target.checked }))} className="rounded border" />
+            <Label htmlFor="wf-active">Active (can be executed)</Label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setWorkflowDialog((d) => ({ ...d, open: false }))}>Cancel</Button>
+            <Button type="submit" disabled={savingWorkflow}>{savingWorkflow ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }
 
