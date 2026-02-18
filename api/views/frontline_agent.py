@@ -13,9 +13,11 @@ from django.db.models import Q, Count
 from django.contrib.auth.models import User
 from django.http import HttpResponse
 from django.conf import settings
-from datetime import timedelta
+from datetime import timedelta, datetime
 import json
 import logging
+import csv
+import re
 import os
 import hashlib
 from pathlib import Path
@@ -23,12 +25,52 @@ from pathlib import Path
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
-from Frontline_agent.models import Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage
+from Frontline_agent.models import (
+    Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
+    NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
+)
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
 from core.Fronline_agent.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+
+def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
+    """
+    Evaluate notification template trigger_config and create ScheduledNotification when
+    template has trigger_config.on == event_type (e.g. ticket_created, ticket_updated).
+    """
+    try:
+        templates = NotificationTemplate.objects.filter(
+            company_id=company_id,
+            trigger_config__on=event_type,
+        )
+        for t in templates:
+            cfg = t.trigger_config or {}
+            if cfg.get('on') != event_type:
+                continue
+            delay_minutes = int(cfg.get('delay_minutes', 0))
+            scheduled_at = timezone.now() + timedelta(minutes=delay_minutes)
+            context = {
+                'ticket_id': ticket.id,
+                'ticket_title': ticket.title,
+                'resolution': ticket.resolution or '',
+                'customer_name': getattr(ticket.created_by, 'email', '') or '',
+            }
+            recipient_email = getattr(ticket.created_by, 'email', '') or ''
+            ScheduledNotification.objects.create(
+                company_id=company_id,
+                template=t,
+                scheduled_at=scheduled_at,
+                status='pending',
+                recipient_email=recipient_email,
+                related_ticket=ticket,
+                context=context,
+            )
+            logger.info(f"Notification trigger: created scheduled notification for template {t.id} (event={event_type}, ticket={ticket.id})")
+    except Exception as e:
+        logger.exception("_run_notification_triggers failed: %s", e)
 
 
 def _get_or_create_user_for_company_user(company_user):
@@ -544,6 +586,87 @@ def get_document(request, document_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def summarize_document(request, document_id):
+    """Summarize a document by ID. Body: optional { \"max_sentences\": 5, \"by_section\": false }."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        document = get_object_or_404(Document, id=document_id, company=company)
+        content = document.document_content or ""
+        if not content.strip():
+            return Response({
+                'status': 'error',
+                'message': 'Document has no text content to summarize',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        data = json.loads(request.body) if request.body else {}
+        max_sentences = data.get('max_sentences')
+        by_section = data.get('by_section', False)
+        agent = FrontlineAgent(company_id=company.id)
+        result = agent.summarize_document(content, max_sentences=max_sentences, by_section=by_section)
+        if not result.get('success'):
+            return Response({
+                'status': 'error',
+                'message': result.get('error', 'Summarization failed'),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            'status': 'success',
+            'data': {
+                'document_id': document.id,
+                'title': document.title,
+                'summary': result.get('summary'),
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("summarize_document failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to summarize document', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def extract_document(request, document_id):
+    """Extract structured data from a document. Body: optional { \"schema\": [\"parties\", \"dates\", \"amounts\"] }."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        document = get_object_or_404(Document, id=document_id, company=company)
+        content = document.document_content or ""
+        if not content.strip():
+            return Response({
+                'status': 'error',
+                'message': 'Document has no text content to extract from',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        data = json.loads(request.body) if request.body else {}
+        schema = data.get('schema')
+        agent = FrontlineAgent(company_id=company.id)
+        result = agent.extract_from_document(content, schema=schema)
+        if not result.get('success'):
+            return Response({
+                'status': 'error',
+                'message': result.get('error', 'Extraction failed'),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            'status': 'success',
+            'data': {
+                'document_id': document.id,
+                'title': document.title,
+                'extracted': result.get('data'),
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("extract_document failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to extract from document', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def delete_document(request, document_id):
     """Delete a document"""
     try:
@@ -636,6 +759,7 @@ def knowledge_qa(request):
                 ticket_task_created = True
                 ticket_task_id = ticket.id
                 logger.info(f"Created KB-gap ticket task {ticket.id} for company_user {company_user.id}, question: {question[:50]}")
+                _run_notification_triggers(company.id, 'ticket_created', ticket)
             except Exception as e:
                 logger.exception("Failed to create KB-gap ticket task: %s", e)
             
@@ -731,6 +855,83 @@ def list_ticket_tasks(request):
         )
 
 
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_tickets(request):
+    """List support tickets with filters and pagination. Scoped to tickets created by this company user."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        qs = Ticket.objects.filter(created_by=user).order_by('-created_at')
+
+        status_filter = request.GET.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        priority_filter = request.GET.get('priority')
+        if priority_filter:
+            qs = qs.filter(priority=priority_filter)
+        category_filter = request.GET.get('category')
+        if category_filter:
+            qs = qs.filter(category=category_filter)
+        date_from = request.GET.get('date_from')
+        if date_from:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(date_from, '%Y-%m-%d')
+                qs = qs.filter(created_at__date__gte=dt.date())
+            except ValueError:
+                pass
+        date_to = request.GET.get('date_to')
+        if date_to:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(date_to, '%Y-%m-%d')
+                qs = qs.filter(created_at__date__lte=dt.date())
+            except ValueError:
+                pass
+
+        page = max(1, int(request.GET.get('page', 1)))
+        limit = min(100, max(1, int(request.GET.get('limit', 20))))
+        total = qs.count()
+        total_pages = (total + limit - 1) // limit if limit else 1
+        offset = (page - 1) * limit
+        tickets = list(qs[offset:offset + limit])
+
+        data = [
+            {
+                'id': t.id,
+                'title': t.title,
+                'description': t.description,
+                'status': t.status,
+                'priority': t.priority,
+                'category': t.category,
+                'auto_resolved': t.auto_resolved,
+                'resolution': t.resolution,
+                'created_at': t.created_at.isoformat(),
+                'updated_at': t.updated_at.isoformat(),
+                'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
+            }
+            for t in tickets
+        ]
+        return Response({
+            'status': 'success',
+            'data': data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'total_pages': total_pages,
+            },
+        })
+    except Exception as e:
+        logger.exception("list_tickets failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to list tickets', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
 @api_view(["PATCH", "PUT"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -752,12 +953,15 @@ def update_ticket_task(request, ticket_id):
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
         if 'status' in data:
             ticket.status = data['status']
+        old_status = ticket.status
         if 'resolution' in data:
             ticket.resolution = data['resolution']
             if data.get('status') in ('resolved', 'closed'):
                 from django.utils import timezone
                 ticket.resolved_at = timezone.now()
         ticket.save()
+        if old_status != ticket.status:
+            _run_notification_triggers(company_user.company_id, 'ticket_updated', ticket, old_status=old_status)
         return Response({
             'status': 'success',
             'data': {
@@ -807,7 +1011,11 @@ def create_ticket(request):
                 {'status': 'error', 'message': result.get('error', 'Failed to process ticket')},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
+        ticket_id = result.get('ticket_id')
+        if ticket_id:
+            ticket = Ticket.objects.filter(id=ticket_id).first()
+            if ticket:
+                _run_notification_triggers(company.id, 'ticket_created', ticket)
         return Response({
             'status': 'success',
             'data': result
@@ -951,5 +1159,526 @@ def delete_qa_chat(request, chat_id):
         return Response({'status': 'success', 'message': 'Chat deleted.'})
     except Exception as e:
         logger.exception("delete_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- Proactive Notifications (templates + schedule/send) ----------
+
+def _render_template_body(body, context):
+    """Replace {{key}} placeholders in body with context values."""
+    if not body or not context:
+        return body
+    text = body
+    for key, value in (context or {}).items():
+        text = re.sub(r'\{\{\s*' + re.escape(str(key)) + r'\s*\}\}', str(value or ''), text, flags=re.IGNORECASE)
+    return text
+
+
+def _send_notification_email(recipient_email, subject, body):
+    """Send email via Django's email backend."""
+    try:
+        from django.core.mail import send_mail
+        send_mail(
+            subject=subject or 'Notification',
+            message=body,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            recipient_list=[recipient_email],
+            fail_silently=False,
+        )
+        return True
+    except Exception as e:
+        logger.exception("Send notification email failed: %s", e)
+        return False
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_notification_templates(request):
+    """List notification templates for the company."""
+    try:
+        company = request.user.company
+        qs = NotificationTemplate.objects.filter(company=company).order_by('-updated_at')
+        data = [{'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'created_at': t.created_at.isoformat(), 'updated_at': t.updated_at.isoformat()} for t in qs]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_notification_templates failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_notification_template(request):
+    """Create a notification template."""
+    try:
+        company = request.user.company
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        name = (data.get('name') or '').strip()
+        if not name:
+            return Response({'status': 'error', 'message': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
+        t = NotificationTemplate.objects.create(
+            company=company,
+            name=name,
+            subject=(data.get('subject') or '')[:300],
+            body=data.get('body') or '',
+            notification_type=data.get('notification_type') or 'ticket_update',
+            channel=data.get('channel') or 'email',
+        )
+        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel}})
+    except Exception as e:
+        logger.exception("create_notification_template failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_notification_template(request, template_id):
+    """Get a single notification template."""
+    try:
+        company = request.user.company
+        t = NotificationTemplate.objects.filter(company=company, id=template_id).first()
+        if not t:
+            return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel}})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_notification_template(request, template_id):
+    """Update a notification template."""
+    try:
+        company = request.user.company
+        t = NotificationTemplate.objects.filter(company=company, id=template_id).first()
+        if not t:
+            return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        if 'name' in data:
+            t.name = (data['name'] or '')[:200]
+        if 'subject' in data:
+            t.subject = (data['subject'] or '')[:300]
+        if 'body' in data:
+            t.body = data['body']
+        if 'notification_type' in data:
+            t.notification_type = data['notification_type']
+        if 'channel' in data:
+            t.channel = data['channel']
+        t.save()
+        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body}})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_notification_template(request, template_id):
+    """Delete a notification template."""
+    try:
+        company = request.user.company
+        t = NotificationTemplate.objects.filter(company=company, id=template_id).first()
+        if not t:
+            return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        t.delete()
+        return Response({'status': 'success', 'message': 'Template deleted'})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_scheduled_notifications(request):
+    """List scheduled/sent notifications for the company with optional filters."""
+    try:
+        company = request.user.company
+        qs = ScheduledNotification.objects.filter(company=company).order_by('-scheduled_at')
+        status_filter = request.GET.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        limit = min(100, max(1, int(request.GET.get('limit', 50))))
+        qs = qs[:limit]
+        data = []
+        for n in qs:
+            data.append({
+                'id': n.id, 'template_id': n.template_id, 'scheduled_at': n.scheduled_at.isoformat(),
+                'status': n.status, 'recipient_email': n.recipient_email, 'related_ticket_id': n.related_ticket_id,
+                'sent_at': n.sent_at.isoformat() if n.sent_at else None, 'error_message': n.error_message,
+                'created_at': n.created_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_scheduled_notifications failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def schedule_notification(request):
+    """Schedule a notification (template + recipient + optional ticket + context)."""
+    try:
+        company = request.user.company
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        template_id = data.get('template_id')
+        recipient_email = (data.get('recipient_email') or '').strip()
+        scheduled_at_str = data.get('scheduled_at')
+        ticket_id = data.get('ticket_id')
+        context = data.get('context') or {}
+        if not scheduled_at_str:
+            return Response({'status': 'error', 'message': 'scheduled_at is required (ISO format)'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            scheduled_at = datetime.fromisoformat(scheduled_at_str.replace('Z', '+00:00'))
+        except Exception:
+            return Response({'status': 'error', 'message': 'Invalid scheduled_at format'}, status=status.HTTP_400_BAD_REQUEST)
+        template = None
+        if template_id:
+            template = NotificationTemplate.objects.filter(company=company, id=template_id).first()
+            if not template:
+                return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        related_ticket = None
+        if ticket_id:
+            user = _get_or_create_user_for_company_user(request.user)
+            related_ticket = Ticket.objects.filter(id=ticket_id, created_by=user).first()
+            if related_ticket:
+                context.setdefault('ticket_id', related_ticket.id)
+                context.setdefault('ticket_title', related_ticket.title)
+                context.setdefault('resolution', related_ticket.resolution or '')
+        n = ScheduledNotification.objects.create(
+            company=company, template=template, scheduled_at=scheduled_at, status='pending',
+            recipient_email=recipient_email or '', related_ticket=related_ticket, context=context,
+        )
+        return Response({'status': 'success', 'data': {'id': n.id, 'scheduled_at': n.scheduled_at.isoformat(), 'status': n.status}})
+    except Exception as e:
+        logger.exception("schedule_notification failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def send_notification_now(request):
+    """Send a notification immediately (template + recipient + optional ticket + context)."""
+    try:
+        company = request.user.company
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        template_id = data.get('template_id')
+        recipient_email = (data.get('recipient_email') or '').strip()
+        ticket_id = data.get('ticket_id')
+        context = data.get('context') or {}
+        if not template_id:
+            return Response({'status': 'error', 'message': 'template_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        template = NotificationTemplate.objects.filter(company=company, id=template_id).first()
+        if not template:
+            return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not recipient_email:
+            return Response({'status': 'error', 'message': 'recipient_email is required'}, status=status.HTTP_400_BAD_REQUEST)
+        related_ticket = None
+        if ticket_id:
+            user = _get_or_create_user_for_company_user(request.user)
+            related_ticket = Ticket.objects.filter(id=ticket_id, created_by=user).first()
+            if related_ticket:
+                context.setdefault('ticket_id', related_ticket.id)
+                context.setdefault('ticket_title', related_ticket.title)
+                context.setdefault('resolution', related_ticket.resolution or '')
+        body = _render_template_body(template.body, context)
+        subject = _render_template_body(template.subject, context)
+        if template.channel == 'email':
+            ok = _send_notification_email(recipient_email, subject, body)
+        else:
+            ok = False
+            logger.warning("SMS/in_app send not implemented, logging only")
+        if ok:
+            n = ScheduledNotification.objects.create(
+                company=company, template=template, scheduled_at=timezone.now(), status='sent',
+                recipient_email=recipient_email, related_ticket=related_ticket, context=context, sent_at=timezone.now(),
+            )
+            return Response({'status': 'success', 'data': {'id': n.id, 'status': 'sent'}})
+        n = ScheduledNotification.objects.create(
+            company=company, template=template, scheduled_at=timezone.now(), status='failed',
+            recipient_email=recipient_email, related_ticket=related_ticket, context=context, error_message='Send failed',
+        )
+        return Response({'status': 'error', 'message': 'Failed to send email'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.exception("send_notification_now failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- Workflow / SOP Runner ----------
+
+def _execute_workflow_steps(workflow, context_data, user):
+    """Execute workflow steps in order. Returns (success, result_data, error_message)."""
+    steps = workflow.steps or []
+    result_data = {'steps_completed': 0, 'results': []}
+    for i, step in enumerate(steps):
+        step_type = (step.get('type') or '').lower()
+        if step_type == 'send_email':
+            template_id = step.get('template_id')
+            recipient = (step.get('recipient_email') or context_data.get('recipient_email') or '').strip()
+            if template_id and recipient:
+                template = NotificationTemplate.objects.filter(id=template_id).first()
+                if template:
+                    body = _render_template_body(template.body, {**context_data, **step.get('context', {})})
+                    subject = _render_template_body(template.subject, {**context_data, **step.get('context', {})})
+                    _send_notification_email(recipient, subject, body)
+            result_data['results'].append({'step': i, 'type': step_type, 'done': True})
+        elif step_type == 'update_ticket':
+            ticket_id = context_data.get('ticket_id') or step.get('ticket_id')
+            if ticket_id:
+                ticket = Ticket.objects.filter(id=ticket_id).first()
+                if ticket:
+                    if 'status' in step:
+                        ticket.status = step['status']
+                    if 'resolution' in step:
+                        ticket.resolution = step['resolution']
+                    ticket.save()
+            result_data['results'].append({'step': i, 'type': step_type, 'done': True})
+        else:
+            result_data['results'].append({'step': i, 'type': step_type, 'done': True})
+        result_data['steps_completed'] = i + 1
+    return True, result_data, None
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_workflows(request):
+    """List workflows for the company."""
+    try:
+        company = request.user.company
+        qs = FrontlineWorkflow.objects.filter(company=company).order_by('-updated_at')
+        data = [{'id': w.id, 'name': w.name, 'description': w.description, 'trigger_conditions': w.trigger_conditions, 'steps': w.steps, 'is_active': w.is_active, 'created_at': w.created_at.isoformat(), 'updated_at': w.updated_at.isoformat()} for w in qs]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_workflows failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_workflow(request):
+    """Create a workflow."""
+    try:
+        company = request.user.company
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        name = (data.get('name') or '').strip()
+        if not name:
+            return Response({'status': 'error', 'message': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
+        w = FrontlineWorkflow.objects.create(
+            company=company, name=name, description=data.get('description') or '',
+            trigger_conditions=data.get('trigger_conditions') or {}, steps=data.get('steps') or [], is_active=data.get('is_active', True),
+        )
+        return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name, 'steps': w.steps}})
+    except Exception as e:
+        logger.exception("create_workflow failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_workflow(request, workflow_id):
+    """Get a single workflow."""
+    try:
+        company = request.user.company
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name, 'description': w.description, 'trigger_conditions': w.trigger_conditions, 'steps': w.steps, 'is_active': w.is_active}})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_workflow(request, workflow_id):
+    """Update a workflow."""
+    try:
+        company = request.user.company
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        if 'name' in data:
+            w.name = (data['name'] or '')[:200]
+        if 'description' in data:
+            w.description = data['description']
+        if 'trigger_conditions' in data:
+            w.trigger_conditions = data['trigger_conditions']
+        if 'steps' in data:
+            w.steps = data['steps']
+        if 'is_active' in data:
+            w.is_active = bool(data['is_active'])
+        w.save()
+        return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name}})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_workflow(request, workflow_id):
+    """Delete a workflow."""
+    try:
+        company = request.user.company
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
+        w.delete()
+        return Response({'status': 'success', 'message': 'Workflow deleted'})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def execute_workflow(request, workflow_id):
+    """Execute a workflow with context (e.g. ticket_id, recipient_email)."""
+    try:
+        company = request.user.company
+        user = _get_or_create_user_for_company_user(request.user)
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id, is_active=True).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        context_data = data.get('context') or {}
+        exec_obj = FrontlineWorkflowExecution.objects.create(
+            workflow=w, workflow_name=w.name, workflow_description=w.description, executed_by=user, status='in_progress', context_data=context_data,
+        )
+        success, result_data, err = _execute_workflow_steps(w, context_data, user)
+        exec_obj.status = 'completed' if success else 'failed'
+        exec_obj.result_data = result_data
+        exec_obj.error_message = err
+        exec_obj.completed_at = timezone.now()
+        exec_obj.save()
+        return Response({'status': 'success', 'data': {'execution_id': exec_obj.id, 'status': exec_obj.status, 'result_data': result_data}})
+    except Exception as e:
+        logger.exception("execute_workflow failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_workflow_executions(request):
+    """List workflow executions for the company."""
+    try:
+        company = request.user.company
+        workflow_id = request.GET.get('workflow_id')
+        qs = FrontlineWorkflowExecution.objects.filter(workflow__company=company).order_by('-started_at')
+        if workflow_id:
+            qs = qs.filter(workflow_id=workflow_id)
+        qs = qs[:50]
+        data = [{'id': e.id, 'workflow_id': e.workflow_id, 'workflow_name': e.workflow_name, 'status': e.status, 'started_at': e.started_at.isoformat(), 'completed_at': e.completed_at.isoformat() if e.completed_at else None, 'error_message': e.error_message} for e in qs]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_workflow_executions failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- Advanced Analytics & Export ----------
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_analytics(request):
+    """Analytics: trends (tickets by day, by status, by category), resolution stats. Query params: date_from, date_to (YYYY-MM-DD)."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        user = _get_or_create_user_for_company_user(company_user)
+        date_from_str = request.GET.get('date_from')
+        date_to_str = request.GET.get('date_to')
+        from django.db.models.functions import TruncDate
+        from django.db.models import Count
+        qs = Ticket.objects.filter(created_by=user)
+        if date_from_str:
+            try:
+                qs = qs.filter(created_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+        if date_to_str:
+            try:
+                qs = qs.filter(created_at__date__lte=datetime.strptime(date_to_str, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+        tickets = list(qs)
+        by_date = {}
+        by_status = {}
+        by_category = {}
+        resolution_times = []
+        for t in tickets:
+            d = t.created_at.date().isoformat()
+            by_date[d] = by_date.get(d, 0) + 1
+            by_status[t.status] = by_status.get(t.status, 0) + 1
+            by_category[t.category] = by_category.get(t.category, 0) + 1
+            if t.resolved_at and t.created_at:
+                delta = (t.resolved_at - t.created_at).total_seconds() / 3600
+                resolution_times.append(delta)
+        avg_resolution_hours = sum(resolution_times) / len(resolution_times) if resolution_times else None
+        data = {
+            'tickets_by_date': [{'date': k, 'count': v} for k, v in sorted(by_date.items())],
+            'tickets_by_status': [{'status': k, 'count': v} for k, v in by_status.items()],
+            'tickets_by_category': [{'category': k, 'count': v} for k, v in by_category.items()],
+            'total_tickets': len(tickets),
+            'avg_resolution_hours': round(avg_resolution_hours, 2) if avg_resolution_hours is not None else None,
+            'auto_resolved_count': sum(1 for t in tickets if t.auto_resolved),
+        }
+        if request.GET.get('narrative') == '1':
+            try:
+                agent = FrontlineAgent(company_id=company.id)
+                nar_result = agent.generate_analytics_narrative(data)
+                if nar_result.get('success') and nar_result.get('narrative'):
+                    data['narrative'] = nar_result['narrative']
+            except Exception as nar_err:
+                logger.warning("Analytics narrative generation failed: %s", nar_err)
+        return Response({
+            'status': 'success',
+            'data': data,
+        })
+    except Exception as e:
+        logger.exception("frontline_analytics failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_analytics_export(request):
+    """Export analytics (tickets) as CSV. Query params: date_from, date_to."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        date_from_str = request.GET.get('date_from')
+        date_to_str = request.GET.get('date_to')
+        qs = Ticket.objects.filter(created_by=user).order_by('-created_at')
+        if date_from_str:
+            try:
+                qs = qs.filter(created_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+        if date_to_str:
+            try:
+                qs = qs.filter(created_at__date__lte=datetime.strptime(date_to_str, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+        qs = qs[:5000]
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="frontline_tickets_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['id', 'title', 'description', 'status', 'priority', 'category', 'auto_resolved', 'created_at', 'updated_at', 'resolved_at'])
+        for t in qs:
+            writer.writerow([t.id, t.title, (t.description or '')[:500], t.status, t.priority, t.category, t.auto_resolved, t.created_at.isoformat(), t.updated_at.isoformat(), t.resolved_at.isoformat() if t.resolved_at else ''])
+        return response
+    except Exception as e:
+        logger.exception("frontline_analytics_export failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

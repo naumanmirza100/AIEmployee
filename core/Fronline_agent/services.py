@@ -86,11 +86,13 @@ class KnowledgeService:
                 for doc in documents:
                     all_results.append({
                         'type': 'document',
+                        'id': doc.get('id'),
                         'title': doc.get('title', ''),
                         'content': doc.get('content', ''),
                         'document_id': doc.get('id'),
                         'file_format': doc.get('file_format', ''),
-                        'source': 'Uploaded Document'
+                        'source': 'Uploaded Document',
+                        'similarity_score': doc.get('similarity_score'),
                     })
             
             logger.info(f"Found {len(all_results)} knowledge base results (including {documents_count} documents)")
@@ -470,14 +472,33 @@ class KnowledgeService:
                 logger.warning(f"Document found but content is empty. Document ID: {best_match.get('id')}")
                 answer = "I found a document in the knowledge base, but it appears to be empty or could not be processed."
             
+            # Build citation for "Source: doc name / section"
+            doc_id = best_match.get('id') or best_match.get('document_id')
+            doc_title = best_match.get('title', '')
+            source_label = best_match.get('source', 'PayPerProject Database')
+            if best_match.get('type') == 'faq':
+                citation_title = best_match.get('question', '') or 'FAQ'
+            elif best_match.get('type') in ('policy', 'manual'):
+                citation_title = best_match.get('title', '') or (best_match.get('policy_type') or best_match.get('manual_type') or 'Document')
+            else:
+                citation_title = doc_title or 'Uploaded Document'
+            citation_display = f"{source_label}" + (f" – {citation_title}" if citation_title else "")
+            citations = [{
+                'source': source_label,
+                'document_title': citation_title or None,
+                'document_id': doc_id if best_match.get('type') == 'document' else None,
+                'type': best_match.get('type', 'unknown'),
+            }]
             logger.info(f"Found answer in knowledge base (type: {best_match.get('type')}, answer length: {len(answer)}, similarity: {best_match.get('similarity_score', 'N/A')})")
             return {
                 'success': True,
                 'answer': answer,
-                'source': best_match.get('source', 'PayPerProject Database'),
+                'source': citation_display,
                 'type': best_match.get('type', 'unknown'),
                 'has_verified_info': True,
-                'document_id': best_match.get('id') or best_match.get('document_id') if best_match.get('type') == 'document' else None
+                'document_id': doc_id if best_match.get('type') == 'document' else None,
+                'document_title': doc_title or citation_title or None,
+                'citations': citations,
             }
         else:
             logger.info("No verified information found in knowledge base")
@@ -593,22 +614,39 @@ class TicketAutomationService:
         
         return True, resolution_text, solution
     
-    def process_ticket(self, title: str, description: str, user_id: int) -> Dict:
+    def process_ticket(self, title: str, description: str, user_id: int, llm_extraction: Optional[Dict] = None) -> Dict:
         """
         Process a ticket: classify, search for solution, and determine action.
+        Optionally augments classification with LLM intent/entity extraction.
         
         Args:
             title: Ticket title
             description: Ticket description
             user_id: User ID who created the ticket
+            llm_extraction: Optional dict from LLM with intent, entities, suggested_category, suggested_priority
             
         Returns:
             Processing result dictionary
         """
         logger.info(f"Processing ticket from user {user_id}: {title[:50]}")
         
-        # Classify ticket
+        # Classify ticket (rule-based)
         classification = self.classify_ticket(title, description)
+        
+        # Augment with LLM extraction when available
+        valid_categories = {'technical', 'billing', 'account', 'feature_request', 'bug', 'other'}
+        valid_priorities = {'low', 'medium', 'high', 'urgent'}
+        if llm_extraction:
+            if llm_extraction.get('suggested_category') and llm_extraction['suggested_category'].lower() in valid_categories:
+                classification['category'] = llm_extraction['suggested_category'].lower()
+                classification['llm_category'] = True
+            if llm_extraction.get('suggested_priority') and llm_extraction['suggested_priority'].lower() in valid_priorities:
+                classification['priority'] = llm_extraction['suggested_priority'].lower()
+                classification['llm_priority'] = True
+            if llm_extraction.get('entities'):
+                classification['entities'] = llm_extraction['entities']
+            if llm_extraction.get('intent'):
+                classification['intent'] = llm_extraction['intent']
         
         # Search for solution
         solution = self.find_solution(description, classification.get('category', 'other'))
@@ -641,7 +679,7 @@ class TicketAutomationService:
                 
                 logger.info(f"Ticket created: ID {ticket.id}, Status: {ticket.status}")
                 
-                return {
+                out = {
                     'success': True,
                     'ticket_id': ticket.id,
                     'ticket_status': ticket.status,
@@ -651,6 +689,11 @@ class TicketAutomationService:
                     'should_escalate': classification.get('should_escalate', False),
                     'message': 'Ticket processed successfully'
                 }
+                if classification.get('intent'):
+                    out['intent'] = classification['intent']
+                if classification.get('entities'):
+                    out['entities'] = classification['entities']
+                return out
         except Exception as e:
             logger.error(f"Failed to create ticket: {e}", exc_info=True)
             return {

@@ -14,6 +14,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { 
   Loader2, 
   FileText, 
@@ -27,9 +30,323 @@ import {
   XCircle,
   Send,
   Plus,
-  MessageCircle
+  MessageCircle,
+  ChevronLeft,
+  ChevronRight,
+  Bell,
+  GitBranch,
+  BarChart3,
+  Mail,
+  FileSearch,
+  ListChecks
 } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
+
+function FrontlineNotificationsTab() {
+  const { toast } = useToast();
+  const [templates, setTemplates] = useState([]);
+  const [scheduled, setScheduled] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sendForm, setSendForm] = useState({ template_id: '', recipient_email: '', ticket_id: '' });
+  const [sending, setSending] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [tRes, sRes] = await Promise.all([frontlineAgentService.listNotificationTemplates(), frontlineAgentService.listScheduledNotifications()]);
+      setTemplates((tRes.status === 'success' && tRes.data) ? tRes.data : []);
+      setScheduled((sRes.status === 'success' && sRes.data) ? sRes.data : []);
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Failed to load', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []);
+  const handleSendNow = async (e) => {
+    e.preventDefault();
+    if (!sendForm.template_id || !sendForm.recipient_email) {
+      toast({ title: 'Error', description: 'Template and recipient email required', variant: 'destructive' });
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await frontlineAgentService.sendNotificationNow({
+        template_id: parseInt(sendForm.template_id, 10),
+        recipient_email: sendForm.recipient_email,
+        ticket_id: sendForm.ticket_id ? parseInt(sendForm.ticket_id, 10) : undefined,
+      });
+      if (res.status === 'success') {
+        toast({ title: 'Sent', description: 'Notification sent.' });
+        setSendForm({ template_id: '', recipient_email: '', ticket_id: '' });
+        load();
+      } else throw new Error(res.message);
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Send failed', variant: 'destructive' });
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Notifications</CardTitle>
+        <CardDescription>Templates and send/schedule notifications (email).</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <form onSubmit={handleSendNow} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
+          <div className="space-y-1">
+            <Label>Template</Label>
+            <Select value={sendForm.template_id} onValueChange={(v) => setSendForm((f) => ({ ...f, template_id: v }))}>
+              <SelectTrigger className="w-[200px]"><SelectValue placeholder="Select template" /></SelectTrigger>
+              <SelectContent>
+                {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>To email</Label>
+            <Input placeholder="email@example.com" value={sendForm.recipient_email} onChange={(e) => setSendForm((f) => ({ ...f, recipient_email: e.target.value }))} className="w-[200px]" />
+          </div>
+          <div className="space-y-1">
+            <Label>Ticket ID (optional)</Label>
+            <Input placeholder="123" value={sendForm.ticket_id} onChange={(e) => setSendForm((f) => ({ ...f, ticket_id: e.target.value }))} className="w-[80px]" />
+          </div>
+          <Button type="submit" disabled={sending}>Send now</Button>
+        </form>
+        {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
+          <>
+            <div>
+              <h4 className="font-medium mb-2">Templates ({templates.length})</h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {templates.length === 0 ? <p className="text-sm text-muted-foreground">No templates. Create via API or add UI to create.</p> : templates.map((t) => (
+                  <div key={t.id} className="flex justify-between items-center p-2 border rounded text-sm">
+                    <span>{t.name}</span>
+                    <Badge variant="outline">{t.channel}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">Scheduled / history</h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {scheduled.length === 0 ? <p className="text-sm text-muted-foreground">No scheduled notifications.</p> : scheduled.slice(0, 20).map((n) => (
+                  <div key={n.id} className="flex justify-between items-center p-2 border rounded text-sm">
+                    <span>{n.recipient_email} · {new Date(n.scheduled_at).toLocaleString()}</span>
+                    <Badge variant={n.status === 'sent' ? 'default' : n.status === 'failed' ? 'destructive' : 'secondary'}>{n.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FrontlineWorkflowsTab() {
+  const { toast } = useToast();
+  const [workflows, setWorkflows] = useState([]);
+  const [executions, setExecutions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [executeForm, setExecuteForm] = useState({ workflow_id: '', ticket_id: '', recipient_email: '' });
+  const [executing, setExecuting] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [wRes, eRes] = await Promise.all([frontlineAgentService.listWorkflows(), frontlineAgentService.listWorkflowExecutions()]);
+      setWorkflows((wRes.status === 'success' && wRes.data) ? wRes.data : []);
+      setExecutions((eRes.status === 'success' && eRes.data) ? eRes.data : []);
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Failed to load', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []);
+  const handleExecute = async (e) => {
+    e.preventDefault();
+    if (!executeForm.workflow_id) {
+      toast({ title: 'Error', description: 'Select a workflow', variant: 'destructive' });
+      return;
+    }
+    setExecuting(true);
+    try {
+      const res = await frontlineAgentService.executeWorkflow(parseInt(executeForm.workflow_id, 10), {
+        ticket_id: executeForm.ticket_id ? parseInt(executeForm.ticket_id, 10) : undefined,
+        recipient_email: executeForm.recipient_email || undefined,
+      });
+      if (res.status === 'success') {
+        toast({ title: 'Done', description: `Execution ${res.data?.status || 'completed'}.` });
+        load();
+      } else throw new Error(res.message);
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Execute failed', variant: 'destructive' });
+    } finally {
+      setExecuting(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><GitBranch className="h-5 w-5" /> Workflows</CardTitle>
+        <CardDescription>Run SOP/workflows with context (e.g. ticket_id, recipient_email).</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <form onSubmit={handleExecute} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
+          <div className="space-y-1">
+            <Label>Workflow</Label>
+            <Select value={executeForm.workflow_id} onValueChange={(v) => setExecuteForm((f) => ({ ...f, workflow_id: v }))}>
+              <SelectTrigger className="w-[220px]"><SelectValue placeholder="Select workflow" /></SelectTrigger>
+              <SelectContent>
+                {workflows.filter((w) => w.is_active).map((w) => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Ticket ID (optional)</Label>
+            <Input placeholder="123" value={executeForm.ticket_id} onChange={(e) => setExecuteForm((f) => ({ ...f, ticket_id: e.target.value }))} className="w-[90px]" />
+          </div>
+          <div className="space-y-1">
+            <Label>Recipient email (optional)</Label>
+            <Input placeholder="email@example.com" value={executeForm.recipient_email} onChange={(e) => setExecuteForm((f) => ({ ...f, recipient_email: e.target.value }))} className="w-[180px]" />
+          </div>
+          <Button type="submit" disabled={executing}>Execute</Button>
+        </form>
+        {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
+          <>
+            <div>
+              <h4 className="font-medium mb-2">Workflows ({workflows.length})</h4>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {workflows.length === 0 ? <p className="text-sm text-muted-foreground">No workflows yet.</p> : workflows.map((w) => (
+                  <div key={w.id} className="flex justify-between items-center p-2 border rounded text-sm">
+                    <span>{w.name}</span>
+                    <Badge variant={w.is_active ? 'default' : 'secondary'}>{w.is_active ? 'Active' : 'Inactive'}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">Recent executions</h4>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {executions.length === 0 ? <p className="text-sm text-muted-foreground">No executions yet.</p> : executions.slice(0, 15).map((ex) => (
+                  <div key={ex.id} className="flex justify-between items-center p-2 border rounded text-sm">
+                    <span>{ex.workflow_name} · {new Date(ex.started_at).toLocaleString()}</span>
+                    <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'}>{ex.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FrontlineAnalyticsTab() {
+  const { toast } = useToast();
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await frontlineAgentService.getFrontlineAnalytics(dateFrom || undefined, dateTo || undefined);
+      setData((res.status === 'success' && res.data) ? res.data : null);
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Failed to load analytics', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, [dateFrom, dateTo]);
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await frontlineAgentService.downloadFrontlineAnalyticsExport(dateFrom || undefined, dateTo || undefined);
+      toast({ title: 'Export started', description: 'CSV download should start.' });
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Export failed', variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Analytics</CardTitle>
+        <CardDescription>Tickets trends and export. Set date range and load.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label>From</Label>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[160px]" />
+          </div>
+          <div className="space-y-1">
+            <Label>To</Label>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[160px]" />
+          </div>
+          <Button variant="outline" onClick={load} disabled={loading}>Load</Button>
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>Export CSV</Button>
+        </div>
+        {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : data && (
+          <div className="space-y-4">
+            {data.narrative && (
+              <div className="p-3 rounded-lg bg-muted/50 border text-sm text-foreground">
+                <p className="font-medium text-muted-foreground mb-1">Summary</p>
+                <p className="whitespace-pre-wrap">{data.narrative}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-3 border rounded">
+                <p className="text-sm text-muted-foreground">Total tickets</p>
+                <p className="text-2xl font-semibold">{data.total_tickets}</p>
+              </div>
+              <div className="p-3 border rounded">
+                <p className="text-sm text-muted-foreground">Auto-resolved</p>
+                <p className="text-2xl font-semibold">{data.auto_resolved_count ?? 0}</p>
+              </div>
+              <div className="p-3 border rounded">
+                <p className="text-sm text-muted-foreground">Avg resolution (hours)</p>
+                <p className="text-2xl font-semibold">{data.avg_resolution_hours ?? '—'}</p>
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">By status</h4>
+              <div className="flex flex-wrap gap-2">
+                {(data.tickets_by_status || []).map((s) => (
+                  <Badge key={s.status} variant="outline">{s.status}: {s.count}</Badge>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">By category</h4>
+              <div className="flex flex-wrap gap-2">
+                {(data.tickets_by_category || []).map((c) => (
+                  <Badge key={c.category} variant="secondary">{c.category}: {c.count}</Badge>
+                ))}
+              </div>
+            </div>
+            {(data.tickets_by_date || []).length > 0 && (
+              <div>
+                <h4 className="font-medium mb-2">By date</h4>
+                <div className="max-h-48 overflow-y-auto space-y-1 text-sm">
+                  {data.tickets_by_date.map((d) => (
+                    <div key={d.date} className="flex justify-between"><span>{d.date}</span><span>{d.count}</span></div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const FrontlineDashboard = () => {
   const { toast } = useToast();
@@ -60,6 +377,14 @@ const FrontlineDashboard = () => {
   const [ticketDescription, setTicketDescription] = useState('');
   const [creatingTicket, setCreatingTicket] = useState(false);
 
+  // Document processing result (summarize / extract)
+  const [docResultDialog, setDocResultDialog] = useState({ open: false, type: null, title: '', content: null, loading: false });
+
+  // Tickets list (filter + pagination)
+  const [ticketsList, setTicketsList] = useState([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketFilters, setTicketFilters] = useState({ status: '', priority: '', category: '', date_from: '', date_to: '' });
+  const [ticketsPagination, setTicketsPagination] = useState({ page: 1, limit: 20, total: 0, total_pages: 1 });
 
   useEffect(() => {
     fetchDashboard();
@@ -173,6 +498,29 @@ const FrontlineDashboard = () => {
     }
   };
 
+  const handleSummarizeDocument = async (doc) => {
+    setDocResultDialog({ open: true, type: 'summary', title: `Summary: ${doc.title}`, content: null, loading: true });
+    try {
+      const response = await frontlineAgentService.summarizeDocument(doc.id, {});
+      const summary = response?.data?.summary ?? response?.summary;
+      setDocResultDialog((prev) => ({ ...prev, content: summary || 'No summary generated.', loading: false }));
+    } catch (error) {
+      setDocResultDialog((prev) => ({ ...prev, content: `Error: ${error.message || 'Summarization failed'}`, loading: false }));
+    }
+  };
+
+  const handleExtractDocument = async (doc) => {
+    setDocResultDialog({ open: true, type: 'extract', title: `Extracted data: ${doc.title}`, content: null, loading: true });
+    try {
+      const response = await frontlineAgentService.extractDocument(doc.id, {});
+      const extracted = response?.data?.extracted ?? response?.extracted;
+      const content = typeof extracted === 'object' ? JSON.stringify(extracted, null, 2) : (extracted || 'No data extracted.');
+      setDocResultDialog((prev) => ({ ...prev, content, loading: false }));
+    } catch (error) {
+      setDocResultDialog((prev) => ({ ...prev, content: `Error: ${error.message || 'Extraction failed'}`, loading: false }));
+    }
+  };
+
   /** Normalize chat from API shape to component shape */
   const normalizeChat = (chat) => {
     if (!chat) return chat;
@@ -203,11 +551,42 @@ const FrontlineDashboard = () => {
     }
   };
 
+  const loadTickets = async () => {
+    try {
+      setTicketsLoading(true);
+      const params = { page: ticketsPagination.page, limit: ticketsPagination.limit };
+      if (ticketFilters.status) params.status = ticketFilters.status;
+      if (ticketFilters.priority) params.priority = ticketFilters.priority;
+      if (ticketFilters.category) params.category = ticketFilters.category;
+      if (ticketFilters.date_from) params.date_from = ticketFilters.date_from;
+      if (ticketFilters.date_to) params.date_to = ticketFilters.date_to;
+      const res = await frontlineAgentService.listTickets(params);
+      if (res.status === 'success') {
+        setTicketsList(res.data || []);
+        if (res.pagination) setTicketsPagination(res.pagination);
+      } else {
+        setTicketsList([]);
+      }
+    } catch (err) {
+      console.error('Load tickets error:', err);
+      setTicketsList([]);
+      toast({ title: 'Error', description: err.message || 'Failed to load tickets', variant: 'destructive' });
+    } finally {
+      setTicketsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'qa') {
       loadChatsFromApi();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'tickets') {
+      loadTickets();
+    }
+  }, [activeTab, ticketFilters.status, ticketFilters.priority, ticketFilters.category, ticketFilters.date_from, ticketFilters.date_to, ticketsPagination.page]);
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
   const currentMessages = selectedChat?.messages ?? [];
@@ -334,6 +713,7 @@ const FrontlineDashboard = () => {
         setTicketTitle('');
         setTicketDescription('');
         fetchDashboard();
+        if (activeTab === 'tickets') loadTickets();
       }
     } catch (error) {
       toast({
@@ -405,6 +785,9 @@ const FrontlineDashboard = () => {
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="qa">Knowledge Q&A</TabsTrigger>
           <TabsTrigger value="tickets">Tickets</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          <TabsTrigger value="workflows">Workflows</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -494,13 +877,17 @@ const FrontlineDashboard = () => {
                           </div>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteDocument(doc.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => handleSummarizeDocument(doc)} title="Summarize">
+                          <FileSearch className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleExtractDocument(doc)} title="Extract data">
+                          <ListChecks className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteDocument(doc.id)} title="Delete">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -617,9 +1004,16 @@ const FrontlineDashboard = () => {
                                 <div className="text-sm text-foreground whitespace-pre-wrap break-words">
                                   {msg.responseData?.answer ?? msg.content}
                                 </div>
-                                {msg.responseData?.source && (
-                                  <p className="text-xs text-muted-foreground mt-2">Source: {msg.responseData.source}</p>
-                                )}
+                                {(msg.responseData?.source || msg.responseData?.citations?.length) ? (
+                                  <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                                    {msg.responseData?.source && (
+                                      <p>Source: {msg.responseData.source}</p>
+                                    )}
+                                    {msg.responseData?.citations?.length > 1 && (
+                                      <p>References: {msg.responseData.citations.map((c, i) => c.document_title || c.source).filter(Boolean).join('; ')}</p>
+                                    )}
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           </>
@@ -665,21 +1059,172 @@ const FrontlineDashboard = () => {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Support Tickets</CardTitle>
-                <CardDescription>Create and manage support tickets</CardDescription>
+                <CardDescription>Create and filter your support tickets</CardDescription>
               </div>
               <Button onClick={() => setShowTicketDialog(true)}>
                 <Ticket className="mr-2 h-4 w-4" />
                 Create Ticket
               </Button>
             </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                Ticket management interface coming soon
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={ticketFilters.status || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, status: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="new">New</SelectItem>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="resolved">Resolved</SelectItem>
+                    <SelectItem value="closed">Closed</SelectItem>
+                    <SelectItem value="auto_resolved">Auto Resolved</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={ticketFilters.priority || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, priority: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
+                  <SelectTrigger className="w-[120px]">
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All priorities</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={ticketFilters.category || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, category: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All categories</SelectItem>
+                    <SelectItem value="technical">Technical</SelectItem>
+                    <SelectItem value="billing">Billing</SelectItem>
+                    <SelectItem value="account">Account</SelectItem>
+                    <SelectItem value="feature_request">Feature Request</SelectItem>
+                    <SelectItem value="bug">Bug</SelectItem>
+                    <SelectItem value="knowledge_gap">Knowledge gap</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="date"
+                  placeholder="From"
+                  className="w-[140px]"
+                  value={ticketFilters.date_from}
+                  onChange={(e) => { setTicketFilters((f) => ({ ...f, date_from: e.target.value })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}
+                />
+                <Input
+                  type="date"
+                  placeholder="To"
+                  className="w-[140px]"
+                  value={ticketFilters.date_to}
+                  onChange={(e) => { setTicketFilters((f) => ({ ...f, date_to: e.target.value })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}
+                />
+                <Button variant="outline" size="sm" onClick={() => setTicketFilters({ status: '', priority: '', category: '', date_from: '', date_to: '' })}>Clear filters</Button>
               </div>
+              {ticketsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : ticketsList.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No tickets found. Create a ticket to get started.
+                </div>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Auto-resolved</TableHead>
+                        <TableHead>Created</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ticketsList.map((t) => (
+                        <TableRow key={t.id}>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">{t.title}</div>
+                              {t.description && <div className="text-xs text-muted-foreground line-clamp-1">{t.description}</div>}
+                            </div>
+                          </TableCell>
+                          <TableCell><Badge variant="outline">{t.status}</Badge></TableCell>
+                          <TableCell><Badge variant="secondary">{t.priority}</Badge></TableCell>
+                          <TableCell className="capitalize">{t.category?.replace('_', ' ')}</TableCell>
+                          <TableCell>{t.auto_resolved ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : '—'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {ticketsPagination.total_pages > 1 && (
+                    <div className="flex items-center justify-between pt-2">
+                      <p className="text-sm text-muted-foreground">
+                        Page {ticketsPagination.page} of {ticketsPagination.total_pages} ({ticketsPagination.total} tickets)
+                      </p>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" disabled={ticketsPagination.page <= 1} onClick={() => setTicketsPagination((p) => ({ ...p, page: p.page - 1 }))}>
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={ticketsPagination.page >= ticketsPagination.total_pages} onClick={() => setTicketsPagination((p) => ({ ...p, page: p.page + 1 }))}>
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Notifications Tab */}
+        <TabsContent value="notifications" className="space-y-4">
+          <FrontlineNotificationsTab />
+        </TabsContent>
+
+        {/* Workflows Tab */}
+        <TabsContent value="workflows" className="space-y-4">
+          <FrontlineWorkflowsTab />
+        </TabsContent>
+
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="space-y-4">
+          <FrontlineAnalyticsTab />
+        </TabsContent>
       </Tabs>
+
+      {/* Document result (summary / extract) dialog */}
+      <Dialog open={docResultDialog.open} onOpenChange={(open) => setDocResultDialog((prev) => ({ ...prev, open }))}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{docResultDialog.title}</DialogTitle>
+            <DialogDescription>
+              {docResultDialog.type === 'summary' ? 'AI-generated summary of the document.' : 'Structured data extracted from the document.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto rounded border bg-muted/30 p-3">
+            {docResultDialog.loading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Processing...</span>
+              </div>
+            ) : (
+              <pre className="text-sm whitespace-pre-wrap break-words font-sans">{docResultDialog.content}</pre>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDocResultDialog((prev) => ({ ...prev, open: false }))}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Upload Document Dialog */}
       <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
