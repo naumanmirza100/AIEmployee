@@ -10,6 +10,13 @@ from typing import Dict, Optional, List
 import json
 import re
 
+# Words to ignore when matching user names from the question (e.g. "hamza and abdullah" must not match "and")
+_ASSIGNMENT_NAME_STOPWORDS = frozenset({
+    "and", "or", "the", "a", "an", "to", "for", "only", "all", "users", "user", "tasks", "task",
+    "assign", "assigned", "by", "with", "be", "is", "are", "its", "it", "as", "in", "on", "at",
+    "of", "no", "so", "do", "go", "we", "me", "my", "us", "am", "id", "to", "from", "into", "our",
+})
+
 
 class ProjectPilotAgent(BaseAgent):
     """
@@ -630,32 +637,47 @@ Return ONLY text - NO JSON, NO actions."""
                         wants_new_project = False
                 
                 if wants_new_project:
-                    # Check if user wants tasks assigned to all available developers
-                    assign_to_all_keywords = ['assign to all', 'assign to all available', 'assign to all developers', 
-                                             'assign to all users', 'distribute to all', 'assign tasks to all',
-                                             'all available developers', 'all developers', 'all users',
-                                             'assign the tasks to all', 'assign the tasks to all available users']
-                    wants_assign_to_all = any(keyword in question_lower for keyword in assign_to_all_keywords)
-                    
-                    # Check if user mentioned specific usernames to assign to
-                    # Look for patterns like "assign to following users:", "username: abdullah", etc.
+                    # Determine assignment intent from the user's words (no hardcoded keyword lists for "all").
+                    # First, try to find specific users mentioned by name/username (partial match: "hamza" matches "Ameer Hamza").
+                    _seen_ids = set()
                     specific_usernames = []
-                    assignment_keywords_in_question = ['assign to', 'assign tasks to', 'assign to following', 
-                                                      'assign to users', 'only assign', 'assign only',
-                                                      'following users', 'assign:', 'username:']
-                    has_specific_assignment = any(keyword in question_lower for keyword in assignment_keywords_in_question)
-                    
-                    # Extract usernames from the question if available_users is provided
-                    if has_specific_assignment and available_users:
-                        # Look for username patterns in the question
+                    if available_users:
                         for user_info in available_users:
-                            username = user_info.get('username', '').lower()
-                            name = user_info.get('name', '').lower()
-                            # Check if username or name appears in the question
+                            uid = user_info.get('id')
+                            if uid in _seen_ids:
+                                continue
+                            username = (user_info.get('username') or '').strip().lower()
+                            name = (user_info.get('name') or '').strip().lower()
+                            if not username and not name:
+                                continue
+                            # Full match
                             if username and username in question_lower:
                                 specific_usernames.append(user_info)
-                            elif name and name in question_lower:
+                                _seen_ids.add(uid)
+                                continue
+                            if name and name in question_lower:
                                 specific_usernames.append(user_info)
+                                _seen_ids.add(uid)
+                                continue
+                            # Partial match: any word from name or username (e.g. "hamza" in "Ameer Hamza"); skip stopwords like "and"
+                            name_words = [w for w in name.split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            username_words = [w for w in re.sub(r'[_.-]', ' ', username).split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            for word in name_words + username_words:
+                                if len(word) >= 2 and word not in _ASSIGNMENT_NAME_STOPWORDS and word in question_lower:
+                                    specific_usernames.append(user_info)
+                                    _seen_ids.add(uid)
+                                    break
+                    # "Assign to all" only when user clearly asks for everyone and did NOT limit to specific people or "only N users"
+                    only_n_users = re.search(r'only\s+\d+\s+users?', question_lower)
+                    wants_assign_to_all = (
+                        not only_n_users
+                        and not specific_usernames
+                        and any(phrase in question_lower for phrase in [
+                            'assign to all', 'assign to all available', 'assign to all users',
+                            'distribute to all', 'assign tasks to all', 'all available users',
+                            'all developers', 'all users', 'assign the tasks to all'
+                        ])
+                    )
                     
                     # User explicitly wants a NEW project
                     assignment_instruction = ""
@@ -669,17 +691,15 @@ The user wants tasks assigned to ALL available developers/users. You MUST distri
 - Use ALL user IDs from the available users list above
 - Example: If there are 3 users (IDs: 1, 2, 3) and you create 6 tasks, assign: task1→user1, task2→user2, task3→user3, task4→user1, task5→user2, task6→user3"""
                     elif specific_usernames:
-                        # User specified specific users to assign to
-                        usernames_list = ', '.join([u.get('username', 'Unknown') for u in specific_usernames])
+                        # User specified specific users (e.g. "only 2 users, hamza and abdullah") – give exact IDs so the LLM cannot assign to others
+                        usernames_list = ', '.join([u.get('username', u.get('name', 'Unknown')) for u in specific_usernames])
+                        ids_list = ', '.join([str(u.get('id')) for u in specific_usernames])
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
-The user wants tasks assigned ONLY to these specific users mentioned in their request: {usernames_list}
-- You MUST assign tasks ONLY to these users from the available users list above
-- Match the usernames mentioned in the request to the usernames in the available users list
-- Distribute tasks evenly across ONLY these specific users
-- Create at least one task per specified user, and distribute additional tasks among them
-- DO NOT assign to users not mentioned in the request
-- Example: If user mentioned "abdullah" and "hamza1", only use assignee_id for users with those usernames"""
+The user asked to assign tasks to ONLY these people: {usernames_list}. You MUST use ONLY these user IDs: {ids_list}.
+- Every assignee_id in every create_task MUST be one of: {ids_list}. No other user IDs are allowed.
+- Distribute tasks evenly between these users only (e.g. round-robin: first task → first ID, second → second ID, then repeat).
+- DO NOT assign to any user whose ID is not in {{ {ids_list} }}."""
                     elif wants_assign_to_all and not available_users:
                         assignment_instruction = "\nNOTE: User wants tasks assigned to all developers, but no users are available. Leave assignee_id as null."
                     else:
@@ -778,15 +798,54 @@ Ask for each task: "Is this required for the project to work? Is it blocking oth
                     # User wants tasks in EXISTING project
                     target_project_id = project_id_to_use or (context.get('project', {}).get('id') if context.get('project') else None)
                     
-                    # Check if user wants tasks assigned to all available developers
-                    assign_to_all_keywords = ['assign to all', 'assign to all available', 'assign to all developers', 
-                                             'assign to all users', 'distribute to all', 'assign tasks to all',
-                                             'all available developers', 'all developers', 'all users',
-                                             'assign the tasks to all', 'assign the tasks to all available users']
-                    wants_assign_to_all = any(keyword in question_lower for keyword in assign_to_all_keywords)
+                    # Same assignment intent logic as new-project: specific users (partial name match) vs assign to all
+                    _seen_ids_ex = set()
+                    specific_usernames = []
+                    if available_users:
+                        for user_info in available_users:
+                            uid = user_info.get('id')
+                            if uid in _seen_ids_ex:
+                                continue
+                            username = (user_info.get('username') or '').strip().lower()
+                            name = (user_info.get('name') or '').strip().lower()
+                            if not username and not name:
+                                continue
+                            if username and username in question_lower:
+                                specific_usernames.append(user_info)
+                                _seen_ids_ex.add(uid)
+                                continue
+                            if name and name in question_lower:
+                                specific_usernames.append(user_info)
+                                _seen_ids_ex.add(uid)
+                                continue
+                            name_words = [w for w in name.split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            username_words = [w for w in re.sub(r'[_.-]', ' ', username).split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            for word in name_words + username_words:
+                                if len(word) >= 2 and word not in _ASSIGNMENT_NAME_STOPWORDS and word in question_lower:
+                                    specific_usernames.append(user_info)
+                                    _seen_ids_ex.add(uid)
+                                    break
+                    only_n_users = re.search(r'only\s+\d+\s+users?', question_lower)
+                    wants_assign_to_all = (
+                        not only_n_users
+                        and not specific_usernames
+                        and any(phrase in question_lower for phrase in [
+                            'assign to all', 'assign to all available', 'assign to all users',
+                            'distribute to all', 'assign tasks to all', 'all available users',
+                            'all developers', 'all users', 'assign the tasks to all'
+                        ])
+                    )
                     
                     assignment_instruction = ""
-                    if wants_assign_to_all and available_users:
+                    if specific_usernames:
+                        usernames_list = ', '.join([u.get('username', u.get('name', 'Unknown')) for u in specific_usernames])
+                        ids_list = ', '.join([str(u.get('id')) for u in specific_usernames])
+                        assignment_instruction = f"""
+CRITICAL ASSIGNMENT INSTRUCTION:
+The user asked to assign tasks to ONLY these people: {usernames_list}. You MUST use ONLY these user IDs: {ids_list}.
+- Every assignee_id MUST be one of: {ids_list}. Do NOT use any other user ID.
+- Distribute tasks evenly between these users only (round-robin)."""
+                    elif wants_assign_to_all and available_users:
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
 The user wants tasks assigned to ALL available developers/users. You MUST distribute tasks across ALL available users listed above.

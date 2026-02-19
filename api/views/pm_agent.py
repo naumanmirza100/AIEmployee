@@ -123,6 +123,56 @@ def _build_available_users(project_id=None, project=None):
     return available_users
 
 
+# Common words to ignore when matching user names in "only N users, X and Y" (avoids matching "and" as a name)
+_ALLOWED_IDS_STOPWORDS = frozenset({
+    "and", "or", "the", "a", "an", "to", "for", "only", "all", "users", "user", "tasks", "task",
+    "assign", "assigned", "by", "with", "be", "is", "are", "its", "it", "as", "in", "on", "at",
+    "of", "no", "so", "do", "go", "we", "me", "my", "us", "am", "id", "st", "nd", "rd", "th",
+    "to", "from", "into", "our", "can", "has", "have", "had", "was", "were", "been", "being",
+})
+
+
+def _get_allowed_user_ids_for_only_n_users(question, available_users):
+    """
+    If the user said "only N users" and named people (e.g. "only 2 users, hamza and abdullah"),
+    return the list of allowed user IDs (same partial name matching as the agent). Otherwise return None.
+    Used to enforce assignment in the backend when the LLM assigns to others anyway.
+    Excludes common stopwords so "and" in "hamza and abdullah" does not match a user with "and" in their name.
+    """
+    if not question or not available_users:
+        return None
+    import re
+    q_lower = question.lower().strip()
+    if not re.search(r"only\s+\d+\s+users?", q_lower):
+        return None
+    seen_ids = set()
+    allowed = []
+    for u in available_users:
+        uid = u.get("id")
+        if uid in seen_ids:
+            continue
+        username = (u.get("username") or "").strip().lower()
+        name = (u.get("name") or "").strip().lower()
+        if not username and not name:
+            continue
+        if username and username in q_lower:
+            allowed.append(uid)
+            seen_ids.add(uid)
+            continue
+        if name and name in q_lower:
+            allowed.append(uid)
+            seen_ids.add(uid)
+            continue
+        name_words = [w for w in name.split() if len(w) > 1 and w not in _ALLOWED_IDS_STOPWORDS]
+        username_words = [w for w in re.sub(r"[_.-]", " ", username).split() if len(w) > 1 and w not in _ALLOWED_IDS_STOPWORDS]
+        for word in name_words + username_words:
+            if len(word) >= 2 and word not in _ALLOWED_IDS_STOPWORDS and word in q_lower:
+                allowed.append(uid)
+                seen_ids.add(uid)
+                break
+    return allowed if allowed else None
+
+
 def _build_user_assignments(available_users, *, project_id=None, all_tasks=None, owner=None):
     """
     Build assignment context for the Project Pilot agent.
@@ -439,16 +489,17 @@ def project_pilot(request):
         if not isinstance(actions, list):
             actions = []
         
-        # If user asked to assign tasks to all available users but LLM omitted assignee_id, assign round-robin
-        _assign_to_all_keywords = [
-            "assign to all", "assign to all available", "assign to all developers",
-            "assign to all users", "distribute to all", "assign tasks to all",
-            "all available developers", "all developers", "all users",
-            "assign the tasks to all", "assign the tasks to all available users",
-        ]
+        # Only run round-robin when user clearly asked for "assign to ALL" and did NOT say "only N users" or name specific people
+        import re as _re
         _q_lower = question.lower()
-        _wants_assign_to_all = any(kw in _q_lower for kw in _assign_to_all_keywords)
-        if _wants_assign_to_all and available_users:
+        _only_n_users = _re.search(r"only\s+\d+\s+users?", _q_lower)
+        _assign_to_all_phrases = [
+            "assign to all", "assign to all available", "assign to all users",
+            "distribute to all", "assign tasks to all", "all available users",
+            "all developers", "all users", "assign the tasks to all",
+        ]
+        _wants_assign_to_all = any(p in _q_lower for p in _assign_to_all_phrases)
+        if _wants_assign_to_all and not _only_n_users and available_users:
             _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
             _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
             if _unassigned:
@@ -456,6 +507,14 @@ def project_pilot(request):
                 for i, action_data in enumerate(_unassigned):
                     action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
                 logger.info(f"Backend fallback: assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
+        
+        # Enforce "only N users" when user named specific people: restrict every create_task to allowed IDs only
+        _allowed_ids = _get_allowed_user_ids_for_only_n_users(question, available_users)
+        if _allowed_ids is not None:
+            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            for i, action_data in enumerate(_create_tasks):
+                action_data["assignee_id"] = _allowed_ids[i % len(_allowed_ids)]
+            logger.info(f"Backend enforcement: restricted task assignment to only {len(_allowed_ids)} users (IDs: {_allowed_ids})")
         
         logger.info(f"Extracted {len(actions)} actions from agent response. Actions: {[a.get('action') if isinstance(a, dict) else 'invalid' for a in actions[:5]]}")
         
@@ -2439,18 +2498,19 @@ def project_pilot_from_file(request):
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Failed to parse answer as JSON: {e}")
 
-        # If user asked to assign tasks to all available users but LLM omitted assignee_id, assign round-robin
+        # Only run round-robin when user asked for "assign to ALL" and did NOT say "only N users"
         if not isinstance(actions, list):
             actions = []
-        _assign_to_all_keywords = [
-            "assign to all", "assign to all available", "assign to all developers",
-            "assign to all users", "distribute to all", "assign tasks to all",
-            "all available developers", "all developers", "all users",
-            "assign the tasks to all", "assign the tasks to all available users",
+        import re as _re_file
+        _q_lower_file = question.lower()
+        _only_n_users_file = _re_file.search(r"only\s+\d+\s+users?", _q_lower_file)
+        _assign_to_all_phrases_file = [
+            "assign to all", "assign to all available", "assign to all users",
+            "distribute to all", "assign tasks to all", "all available users",
+            "all developers", "all users", "assign the tasks to all",
         ]
-        _q_lower = question.lower()
-        _wants_assign_to_all = any(kw in _q_lower for kw in _assign_to_all_keywords)
-        if _wants_assign_to_all and available_users:
+        _wants_assign_to_all_file = any(p in _q_lower_file for p in _assign_to_all_phrases_file)
+        if _wants_assign_to_all_file and not _only_n_users_file and available_users:
             _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
             _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
             if _unassigned:
@@ -2458,6 +2518,13 @@ def project_pilot_from_file(request):
                 for i, action_data in enumerate(_unassigned):
                     action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
                 logger.info(f"Backend fallback (from_file): assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
+        
+        _allowed_ids_file = _get_allowed_user_ids_for_only_n_users(question, available_users)
+        if _allowed_ids_file is not None:
+            _create_tasks_f = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            for i, action_data in enumerate(_create_tasks_f):
+                action_data["assignee_id"] = _allowed_ids_file[i % len(_allowed_ids_file)]
+            logger.info(f"Backend enforcement (from_file): restricted to only {len(_allowed_ids_file)} users")
 
         # Process actions (reuse same logic from project_pilot)
         action_results = []
