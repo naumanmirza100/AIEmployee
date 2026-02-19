@@ -81,12 +81,15 @@ def _build_available_users(project_id=None, project=None):
     """
     - If project_id provided: return team members + owner for that project
     - Else: return up to 50 users (for general assignment mapping)
+    - Never include superusers (they should not be assigned tasks when creating projects/tasks).
     """
     available_users = []
 
     if project_id and project is not None:
         team_members = TeamMember.objects.filter(project_id=project_id).select_related("user")
         for member in team_members:
+            if getattr(member.user, "is_superuser", False):
+                continue
             available_users.append(
                 {
                     "id": member.user.id,
@@ -96,20 +99,22 @@ def _build_available_users(project_id=None, project=None):
                 }
             )
 
-        # Include owner if not in team list
+        # Include owner if not in team list (and not a superuser)
         team_user_ids = {m.user.id for m in team_members}
         if project.owner_id and project.owner_id not in team_user_ids:
-            available_users.append(
-                {
-                    "id": project.owner.id,
-                    "username": project.owner.username,
-                    "name": project.owner.get_full_name() or project.owner.username,
-                    "role": "owner",
-                }
-            )
+            owner = project.owner
+            if not getattr(owner, "is_superuser", False):
+                available_users.append(
+                    {
+                        "id": owner.id,
+                        "username": owner.username,
+                        "name": owner.get_full_name() or owner.username,
+                        "role": "owner",
+                    }
+                )
     else:
         User = get_user_model()
-        users = User.objects.all()[:50]
+        users = User.objects.filter(is_superuser=False)[:50]
         for u in users:
             available_users.append(
                 {"id": u.id, "username": u.username, "name": u.get_full_name() or u.username}
@@ -434,6 +439,24 @@ def project_pilot(request):
         if not isinstance(actions, list):
             actions = []
         
+        # If user asked to assign tasks to all available users but LLM omitted assignee_id, assign round-robin
+        _assign_to_all_keywords = [
+            "assign to all", "assign to all available", "assign to all developers",
+            "assign to all users", "distribute to all", "assign tasks to all",
+            "all available developers", "all developers", "all users",
+            "assign the tasks to all", "assign the tasks to all available users",
+        ]
+        _q_lower = question.lower()
+        _wants_assign_to_all = any(kw in _q_lower for kw in _assign_to_all_keywords)
+        if _wants_assign_to_all and available_users:
+            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
+            if _unassigned:
+                _user_ids = [u["id"] for u in available_users]
+                for i, action_data in enumerate(_unassigned):
+                    action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
+                logger.info(f"Backend fallback: assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
+        
         logger.info(f"Extracted {len(actions)} actions from agent response. Actions: {[a.get('action') if isinstance(a, dict) else 'invalid' for a in actions[:5]]}")
         
         # Log if no actions found
@@ -601,6 +624,25 @@ def project_pilot(request):
                                             due_date = timezone.make_aware(due_date)
                         except Exception:
                             due_date = None
+
+                    # Default due_date when missing (e.g. project deadline, end_date, or 14 days from now)
+                    if due_date is None and task_project:
+                        from django.utils import timezone
+                        from datetime import datetime as dt_time
+                        if getattr(task_project, "deadline", None):
+                            d = task_project.deadline
+                            if hasattr(d, "year"):
+                                due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                if timezone.is_naive(due_date):
+                                    due_date = timezone.make_aware(due_date)
+                        if due_date is None and getattr(task_project, "end_date", None):
+                            d = task_project.end_date
+                            if hasattr(d, "year"):
+                                due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                if timezone.is_naive(due_date):
+                                    due_date = timezone.make_aware(due_date)
+                        if due_date is None:
+                            due_date = timezone.now() + timedelta(days=14)
 
                     estimated_hours = action_data.get("estimated_hours")
                     if estimated_hours:
@@ -2397,6 +2439,26 @@ def project_pilot_from_file(request):
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Failed to parse answer as JSON: {e}")
 
+        # If user asked to assign tasks to all available users but LLM omitted assignee_id, assign round-robin
+        if not isinstance(actions, list):
+            actions = []
+        _assign_to_all_keywords = [
+            "assign to all", "assign to all available", "assign to all developers",
+            "assign to all users", "distribute to all", "assign tasks to all",
+            "all available developers", "all developers", "all users",
+            "assign the tasks to all", "assign the tasks to all available users",
+        ]
+        _q_lower = question.lower()
+        _wants_assign_to_all = any(kw in _q_lower for kw in _assign_to_all_keywords)
+        if _wants_assign_to_all and available_users:
+            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
+            if _unassigned:
+                _user_ids = [u["id"] for u in available_users]
+                for i, action_data in enumerate(_unassigned):
+                    action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
+                logger.info(f"Backend fallback (from_file): assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
+
         # Process actions (reuse same logic from project_pilot)
         action_results = []
         created_projects = {}  # Map to track created projects for task assignment
@@ -2568,6 +2630,29 @@ def project_pilot_from_file(request):
                                             due_date = timezone.make_aware(due_date)
                         except Exception:
                             due_date = None
+                    
+                    # Default due_date when missing
+                    if due_date is None and project_id_for_task:
+                        try:
+                            from django.utils import timezone
+                            from datetime import datetime as dt_time
+                            task_project = Project.objects.filter(id=project_id_for_task).first()
+                            if task_project and getattr(task_project, "deadline", None):
+                                d = task_project.deadline
+                                if hasattr(d, "year"):
+                                    due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                    if timezone.is_naive(due_date):
+                                        due_date = timezone.make_aware(due_date)
+                            if due_date is None and task_project and getattr(task_project, "end_date", None):
+                                d = task_project.end_date
+                                if hasattr(d, "year"):
+                                    due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                    if timezone.is_naive(due_date):
+                                        due_date = timezone.make_aware(due_date)
+                            if due_date is None:
+                                due_date = timezone.now() + timedelta(days=14)
+                        except Exception:
+                            pass
                     
                     # Parse estimated_hours
                     estimated_hours = action.get("estimated_hours")

@@ -396,7 +396,9 @@ class KnowledgeService:
         if search_results['success'] and search_results['count'] > 0:
             # Get the most relevant result
             best_match = search_results['results'][0]
-            similarity_score = best_match.get('similarity_score', 0)
+            # similarity_score can be None for FAQ/policy/manual (non-document) results
+            _raw = best_match.get('similarity_score')
+            similarity_score = _raw if _raw is not None else 0.0
             
             # Check if similarity is too low - might be irrelevant document
             if similarity_score < 0.2:
