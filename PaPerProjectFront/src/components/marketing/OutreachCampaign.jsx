@@ -29,6 +29,76 @@ const COMPANY_SIZES = [
   { value: '5000+', label: '5000+ employees' },
 ];
 
+/** Markdown to HTML for campaign design / QA-style result - headings, lists, bold */
+function markdownToHtml(markdown) {
+  if (!markdown || typeof markdown !== 'string') return '';
+  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
+  const italic = (s) => s.replace(/\*(.+?)\*/g, '<em class="text-muted-foreground">$1</em>');
+  const lines = markdown.split('\n');
+  const out = [];
+  let inList = false;
+  let inSubList = false;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+    const trimmedOnly = line.replace(/^\s+/, '');
+    // ### Heading
+    if (/^###\s+/.test(t)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h3 class="text-lg font-bold mt-5 mb-2 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t.slice(4)))}</h3>`);
+      i++; continue;
+    }
+    // ## Heading
+    if (/^##\s+/.test(t)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t.slice(3)))}</h2>`);
+      i++; continue;
+    }
+    // **ALL CAPS or Section** at start of line -> section heading (no ##)
+    if (/^\*\*[A-Z\s]+\*\*$/.test(t) || (/^\*\*[^*]+\*\*$/.test(t) && t.length < 80)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      const content = t.replace(/^\*\*|\*\*$/g, '');
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${escape(content)}</h2>`);
+      i++; continue;
+    }
+    // Sub-bullet: line starts with whitespace then + or * (e.g. tab+ or spaces+)
+    if (/^\s+(?:\+|\*)\s+/.test(line)) {
+      if (!inSubList) { out.push('<ul class="list-[circle] pl-8 my-1 space-y-1 text-sm">'); inSubList = true; }
+      if (!inList) { inList = true; }
+      const content = line.replace(/^\s*(?:\+|\*)\s+/, '').trim();
+      out.push(`<li class="leading-relaxed">${bold(italic(escape(content)))}</li>`);
+      i++; continue;
+    }
+    // Top-level bullet: * **x** or + **x** or * x or 1. x
+    if (/^[\s]*(?:\*|\+|\-)\s+/.test(t) || /^\d+\.\s+/.test(t)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (!inList) { out.push('<ul class="list-disc pl-6 my-3 space-y-2">'); inList = true; }
+      const content = t.replace(/^[\s]*(?:\*|\+|\-|\d+\.)\s+/, '');
+      out.push(`<li class="text-sm leading-relaxed">${bold(italic(escape(content)))}</li>`);
+      i++; continue;
+    }
+    if (t === '' && (inList || inSubList)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      i++; continue;
+    }
+    if (t && !t.startsWith('<')) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<p class="my-2 text-sm leading-relaxed text-foreground">${bold(italic(escape(t)).replace(/\n/g, '<br/>'))}</p>`);
+    }
+    i++;
+  }
+  if (inSubList) out.push('</ul>');
+  if (inList) out.push('</ul>');
+  return out.join('\n');
+}
+
 /**
  * Format agent result for display (markdown-like text to simple HTML/JSX)
  */
@@ -39,10 +109,16 @@ function formatResult(result, action) {
   }
   const parts = [];
   if (result.campaign_design?.raw_design) {
-    parts.push(<div key="design" className="whitespace-pre-wrap text-sm">{result.campaign_design.raw_design}</div>);
+    parts.push(
+      <div
+        key="design"
+        className="prose prose-sm dark:prose-invert max-w-none text-foreground campaign-design-content"
+        dangerouslySetInnerHTML={{ __html: markdownToHtml(result.campaign_design.raw_design) }}
+      />
+    );
   }
   if (result.campaign_name) parts.push(<p key="name"><strong>Campaign:</strong> {result.campaign_name}</p>);
-  if (result.campaign_id) parts.push(<p key="id"><strong>Campaign ID:</strong> {result.campaign_id}</p>);
+  // if (result.campaign_id) parts.push(<p key="id"><strong>Campaign ID:</strong> {result.campaign_id}</p>);
   if (result.status) parts.push(<p key="status"><strong>Status:</strong> {result.status}</p>);
   if (result.message) parts.push(<p key="msg" className="text-muted-foreground">{result.message}</p>);
   if (result.leads_uploaded != null && result.leads_uploaded > 0) {
@@ -84,9 +160,11 @@ function formatResult(result, action) {
   }
   if (result.recommendations?.length) {
     parts.push(
-      <div key="rec" className="mt-2 border-t pt-2">
-        <strong>Recommendations</strong>
-        <ul className="list-disc pl-4 mt-1">
+      <div key="rec" className="mt-4 pt-4 border-t border-border">
+        <h3 className="text-lg font-bold mb-2 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2 w-fit">
+          Recommendations
+        </h3>
+        <ul className="list-disc pl-6 mt-2 space-y-2 text-sm leading-relaxed">
           {result.recommendations.map((r, i) => <li key={i}>{r}</li>)}
         </ul>
       </div>
@@ -437,7 +515,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
           )}
 
           {created ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-200 bg-violet-50/80 dark:border-violet-800 dark:bg-violet-950/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-200 p-4">
               <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
                 <CheckCircle className="h-5 w-5 shrink-0" />
                 <span className="font-medium">Created.</span>
@@ -451,7 +529,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
               </Button>
             </div>
           ) : designReady ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-200 bg-violet-50/80 dark:border-violet-800 dark:bg-violet-950/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-200 p-4">
               <div className="flex flex-col items-start gap-2 text-green-700 dark:text-green-400">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="h-5 w-5 shrink-0" />
@@ -490,9 +568,13 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         {/* {error && <p className="text-sm text-destructive">{error}</p>} */}
 
         {result && (
-          <div className="rounded-lg border bg-muted/30 p-4">
-            <h4 className="font-semibold mb-2">Result</h4>
-            {formatResult(result, action)}
+          <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <h3 className="text-lg font-bold mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">
+              {action === 'design' ? 'Campaign design' : action === 'create_multi_channel' ? 'Campaign created' : action === 'launch' ? 'Launch result' : action === 'schedule' ? 'Schedule result' : 'Result'}
+            </h3>
+            <div className="max-h-[70vh] overflow-y-auto pr-1">
+              {formatResult(result, action)}
+            </div>
           </div>
         )}
       </CardContent>

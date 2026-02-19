@@ -696,33 +696,58 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
                             pass
                     elif end_date:
                         campaign.end_date = end_date
-            
-            # Check if email templates exist
-            from marketing_agent.models import EmailTemplate, EmailSequence
-            email_templates = EmailTemplate.objects.filter(campaign=campaign, is_active=True)
-            if not email_templates.exists():
+
+            # Validate dates: no past dates when launching (use today as minimum)
+            today = datetime.now().date()
+            if campaign.start_date and campaign.start_date < today:
                 return {
                     'success': False,
-                    'error': 'No active email templates found. Please create at least one email template before launching the campaign.'
+                    'error': 'Start date cannot be in the past. Please set start date to today or a future date.'
                 }
-            # Check if at least one active sequence with steps exists (emails are sent via sequences)
-            active_sequences = EmailSequence.objects.filter(campaign=campaign, is_active=True)
+            if campaign.end_date and campaign.end_date < today:
+                return {
+                    'success': False,
+                    'error': 'End date cannot be in the past. Please set end date to today or a future date.'
+                }
+            # End date must be >= start date if both set
+            if campaign.start_date and campaign.end_date and campaign.end_date < campaign.start_date:
+                return {
+                    'success': False,
+                    'error': 'End date must be on or after start date. Please correct the dates and try again.'
+                }
+
+            # Check if campaign has at least one email sequence with steps (active or inactive; launching will reactivate them)
+            from marketing_agent.models import EmailTemplate, EmailSequence
+            all_sequences = EmailSequence.objects.filter(campaign=campaign)
             has_sequence_with_steps = False
-            for seq in active_sequences:
+            for seq in all_sequences:
                 if seq.steps.exists():
                     has_sequence_with_steps = True
                     break
             if not has_sequence_with_steps:
                 return {
                     'success': False,
-                    'error': 'No active email sequences found. Please create at least one email sequence with steps before launching. Go to Sequence Management to add sequences.'
+                    'error': 'No email sequences found. Please create at least one email sequence with steps before launching. Go to Sequence Management to add sequences.'
                 }
-            
-            # Update campaign status directly (no AI call)
+
+            # Check for at least one email template (active or inactive)
+            email_templates = EmailTemplate.objects.filter(campaign=campaign)
+            if not email_templates.exists():
+                return {
+                    'success': False,
+                    'error': 'No email templates found. Please create at least one email template before launching the campaign.'
+                }
+
+            # Update campaign status and reactivate sequences (and templates) so launch works after a pause
             campaign.status = 'active'
             if not campaign.start_date:
                 campaign.start_date = datetime.now().date()
             campaign.save()
+
+            # Reactivate all email sequences for this campaign (they may have been inactive due to pause)
+            EmailSequence.objects.filter(campaign=campaign).update(is_active=True)
+            # Reactivate all email templates for this campaign
+            EmailTemplate.objects.filter(campaign=campaign).update(is_active=True)
             
             # Create initial performance tracking entries
             self._initialize_performance_tracking(campaign)

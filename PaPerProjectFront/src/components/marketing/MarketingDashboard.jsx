@@ -489,6 +489,27 @@ const MarketingDashboard = () => {
                     Use the Campaigns tab to create and manage email campaigns. Use the Email tab to manage accounts and see sending stats.
                   </p>
 
+                  {/* Main action buttons */}
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      size="lg"
+                      className="gap-2"
+                      onClick={() => setActiveTab('campaigns')}
+                    >
+                      <Plus className="h-5 w-5" />
+                      Create campaign
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      className="gap-2"
+                      onClick={() => setActiveTab('email')}
+                    >
+                      <Mail className="h-5 w-5" />
+                      Email accounts
+                    </Button>
+                  </div>
+
                   {/* Campaigns list (like backend campaigns_list.html) */}
                   <div>
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Your Campaigns</h3>
@@ -497,7 +518,14 @@ const MarketingDashboard = () => {
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
                       </div>
                     ) : campaigns.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-4">No campaigns yet. Create one from the Campaigns tab.</p>
+                      <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-8 text-center">
+                        <Megaphone className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                        <p className="text-sm text-muted-foreground mb-4">No campaigns yet.</p>
+                        <Button size="lg" className="gap-2" onClick={() => setActiveTab('campaigns')}>
+                          <Plus className="h-5 w-5" />
+                          Create campaign
+                        </Button>
+                      </div>
                     ) : (
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">

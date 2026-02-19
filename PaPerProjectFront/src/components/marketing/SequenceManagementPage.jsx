@@ -57,6 +57,29 @@ const INTEREST_LEVEL_OPTIONS = [
   { value: 'unsubscribe', label: 'Unsubscribe Request' },
 ];
 
+
+/** Badge className for interest-level (sub-sequence) – color the badge only, not the card. */
+function interestBadgeClass(interestLevel) {
+  const base = 'text-xs font-medium ml-2 shrink-0';
+  switch (interestLevel) {
+    case 'positive':
+      return `${base} bg-emerald-500/90 text-white border-0 hover:bg-emerald-500/90`;
+    case 'negative':
+      return `${base} bg-red-500/90 text-white border-0 hover:bg-red-500/90`;
+    case 'neutral':
+      return `${base} bg-slate-500/90 text-white border-0 hover:bg-slate-500/90`;
+    case 'requested_info':
+      return `${base} bg-blue-500/90 text-white border-0 hover:bg-blue-500/90`;
+    case 'objection':
+      return `${base} bg-amber-500/90 text-white border-0 hover:bg-amber-500/90`;
+    case 'unsubscribe':
+      return `${base} bg-rose-600/90 text-white border-0 hover:bg-rose-600/90`;
+    case 'any':
+    default:
+      return `${base} bg-violet-500/90 text-white border-0 hover:bg-violet-500/90`;
+  }
+}
+
 function stepTotalMinutes(step) {
   const d = Number(step?.delay_days) || 0;
   const h = Number(step?.delay_hours) || 0;
@@ -779,12 +802,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div>
                                     <span className="font-medium text-sm text-foreground">{sub.name}</span>
-                                    {/* <Badge variant={sub.effective_is_active ? 'default' : 'secondary'} className="ml-2 text-xs">
-                                      {sub.effective_is_active ? 'Active' : 'Inactive'}
-                                    </Badge> */}
-                                    <span className="text-xs text-muted-foreground ml-2">
-                                      Interest: {INTEREST_LEVEL_OPTIONS.find((o) => o.value === sub.interest_level)?.label ?? sub.interest_level}
-                                    </span>
+                                    <Badge style={{padding: '0.05rem 0.5rem', marginLeft: '1.5rem'}} className={interestBadgeClass(sub.interest_level)} variant="secondary">
+                                      {INTEREST_LEVEL_OPTIONS.find((o) => o.value === sub.interest_level)?.label ?? sub.interest_level}
+                                    </Badge>
                                     <span className="text-xs text-muted-foreground ml-2">Steps: {sub.steps?.length ?? 0}</span>
                                   </div>
                                   <div className="flex gap-1">
