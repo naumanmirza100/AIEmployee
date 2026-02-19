@@ -79,6 +79,32 @@ export const uploadDocument = async (file, title, description, documentType = 'k
 };
 
 /**
+ * Summarize document (LLM). Options: { max_sentences?, by_section? }
+ */
+export const summarizeDocument = async (documentId, options = {}) => {
+  try {
+    const response = await companyApi.post(`/frontline/documents/${documentId}/summarize/`, options);
+    return response;
+  } catch (error) {
+    console.error('Summarize document error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Extract structured data from document (LLM). Options: { schema?: string[] }
+ */
+export const extractDocument = async (documentId, options = {}) => {
+  try {
+    const response = await companyApi.post(`/frontline/documents/${documentId}/extract/`, options);
+    return response;
+  } catch (error) {
+    console.error('Extract document error:', error);
+    throw error;
+  }
+};
+
+/**
  * Delete document
  */
 export const deleteDocument = async (documentId) => {
@@ -157,6 +183,28 @@ export const searchKnowledge = async (query, maxResults = 5) => {
 };
 
 /**
+ * List support tickets with filters and pagination
+ * @param {{ status?, priority?, category?, date_from?, date_to?, page?, limit? }} params
+ */
+export const listTickets = async (params = {}) => {
+  try {
+    const query = new URLSearchParams();
+    if (params.status) query.set('status', params.status);
+    if (params.priority) query.set('priority', params.priority);
+    if (params.category) query.set('category', params.category);
+    if (params.date_from) query.set('date_from', params.date_from);
+    if (params.date_to) query.set('date_to', params.date_to);
+    if (params.page) query.set('page', params.page);
+    if (params.limit) query.set('limit', params.limit);
+    const response = await companyApi.get(`/frontline/tickets?${query.toString()}`);
+    return response;
+  } catch (error) {
+    console.error('List tickets error:', error);
+    throw error;
+  }
+};
+
+/**
  * Create support ticket
  */
 export const createTicket = async (title, description) => {
@@ -198,6 +246,99 @@ export const updateTicketTask = async (ticketId, data) => {
   }
 };
 
+// ---------- Notification templates & scheduled ----------
+export const listNotificationTemplates = async () => {
+  const response = await companyApi.get('/frontline/notifications/templates');
+  return response;
+};
+export const createNotificationTemplate = async (data) => {
+  const response = await companyApi.post('/frontline/notifications/templates/create', data);
+  return response;
+};
+export const getNotificationTemplate = async (templateId) => {
+  const response = await companyApi.get(`/frontline/notifications/templates/${templateId}`);
+  return response;
+};
+export const updateNotificationTemplate = async (templateId, data) => {
+  const response = await companyApi.patch(`/frontline/notifications/templates/${templateId}/update`, data);
+  return response;
+};
+export const deleteNotificationTemplate = async (templateId) => {
+  const response = await companyApi.delete(`/frontline/notifications/templates/${templateId}/delete`);
+  return response;
+};
+export const listScheduledNotifications = async (params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  const response = await companyApi.get(`/frontline/notifications/scheduled${q ? `?${q}` : ''}`);
+  return response;
+};
+export const scheduleNotification = async (data) => {
+  const response = await companyApi.post('/frontline/notifications/schedule', data);
+  return response;
+};
+export const sendNotificationNow = async (data) => {
+  const response = await companyApi.post('/frontline/notifications/send', data);
+  return response;
+};
+
+// ---------- Workflows ----------
+export const listWorkflows = async () => {
+  const response = await companyApi.get('/frontline/workflows');
+  return response;
+};
+export const createWorkflow = async (data) => {
+  const response = await companyApi.post('/frontline/workflows/create', data);
+  return response;
+};
+export const getWorkflow = async (workflowId) => {
+  const response = await companyApi.get(`/frontline/workflows/${workflowId}`);
+  return response;
+};
+export const updateWorkflow = async (workflowId, data) => {
+  const response = await companyApi.patch(`/frontline/workflows/${workflowId}/update`, data);
+  return response;
+};
+export const deleteWorkflow = async (workflowId) => {
+  const response = await companyApi.delete(`/frontline/workflows/${workflowId}/delete`);
+  return response;
+};
+export const executeWorkflow = async (workflowId, context) => {
+  const response = await companyApi.post(`/frontline/workflows/${workflowId}/execute`, { context });
+  return response;
+};
+export const listWorkflowExecutions = async (workflowId = null) => {
+  const url = workflowId ? `/frontline/workflows/executions?workflow_id=${workflowId}` : '/frontline/workflows/executions';
+  const response = await companyApi.get(url);
+  return response;
+};
+
+// ---------- Analytics ----------
+export const getFrontlineAnalytics = async (dateFrom, dateTo, options = {}) => {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  if (options.narrative !== false) params.set('narrative', '1');
+  const response = await companyApi.get(`/frontline/analytics?${params.toString()}`);
+  return response;
+};
+/** Download analytics export as CSV (uses auth token from localStorage). */
+export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  const token = localStorage.getItem('company_auth_token');
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const url = `${API_BASE_URL}/frontline/analytics/export?${params.toString()}`;
+  const res = await fetch(url, { headers: token ? { Authorization: `Token ${token}` } : {} });
+  if (!res.ok) throw new Error(res.statusText || 'Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `frontline_tickets_export_${dateFrom || 'all'}_${dateTo || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 export default {
   getFrontlineDashboard,
   listDocuments,
@@ -210,8 +351,26 @@ export default {
   updateQAChat,
   deleteQAChat,
   searchKnowledge,
+  listTickets,
   createTicket,
   listTicketTasks,
   updateTicketTask,
+  listNotificationTemplates,
+  createNotificationTemplate,
+  getNotificationTemplate,
+  updateNotificationTemplate,
+  deleteNotificationTemplate,
+  listScheduledNotifications,
+  scheduleNotification,
+  sendNotificationNow,
+  listWorkflows,
+  createWorkflow,
+  getWorkflow,
+  updateWorkflow,
+  deleteWorkflow,
+  executeWorkflow,
+  listWorkflowExecutions,
+  getFrontlineAnalytics,
+  downloadFrontlineAnalyticsExport,
 };
 
