@@ -5,7 +5,7 @@ Creates structured marketing documents such as strategies, proposals, reports, p
 
 from .marketing_base_agent import MarketingBaseAgent
 from typing import Dict, Optional
-from marketing_agent.models import Campaign, MarketingDocument, CampaignPerformance, Lead, EmailSendHistory
+from marketing_agent.models import Campaign, MarketingDocument, CampaignPerformance, Lead, EmailSendHistory, Reply
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.db.models import Count, Sum, Avg, Q
@@ -175,8 +175,118 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         elif document_type == 'brief':
             content = self._fix_timeline_phase2(content, document_type='brief', campaign=campaign)
         
+        # Post-process: remove duplicate sections that the model often adds after Conclusion (brief) or Future Outlook (report)
+        if document_type in ('brief', 'report'):
+            content = self._strip_duplicate_sections_after_end(content, document_type)
+        # Post-process: ensure [CHART] values are numbers only (no % sign) so chart renderer works
+        if document_type in ('report', 'brief'):
+            content = self._fix_chart_values_numeric(content)
+        
         return content
     
+    def _fix_chart_values_numeric(self, content: str) -> str:
+        """Strip % from values: lines inside [CHART]...[/CHART] so values are numbers only."""
+        if not content or '[CHART]' not in content:
+            return content
+
+        def fix_block(block):
+            return re.sub(
+                r'(values:\s*[^\n]+)',
+                lambda m: re.sub(r'%', '', m.group(1)),
+                block,
+                flags=re.IGNORECASE
+            )
+
+        return re.sub(
+            r'(\[\s*CHART\s*\].*?\[\s*/\s*CHART\s*\])',
+            lambda m: fix_block(m.group(0)),
+            content,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+
+    def _strip_duplicate_sections_after_end(self, content: str, document_type: str) -> str:
+        """Remove duplicate tables/sections that appear after Conclusion (brief) or Future Outlook (report)."""
+        if not content or document_type not in ('brief', 'report'):
+            return content
+        # Reports/briefs often use **Section** instead of ## Section; find end of "real" content
+        if document_type == 'brief':
+            end_marker_re = re.compile(r'\n(##\s+Conclusion|\*\*Conclusion\*\*)\b', re.IGNORECASE)
+            dup_patterns = [
+                r'\n\s*\*\*Lead Details Table\*\*',
+                r'\n\s*\*\*Lead Details\*\*\s*(\n|$)',
+                r'\n\s*\*\*Email Campaign Performance Metrics Table\*\*',
+                r'\n\s*\*\*Email Campaign Performance Metrics\*\*\s*(\n|$)',
+                r'\n\s*\*\*Target Audience Table\*\*',
+                r'\n\s*\*\*Target Audience\*\*\s*(\n|$)',
+                r'\n\s*\*\*Target Leads and Conversions Table\*\*',
+                r'\n\s*\*\*Target Leads and Conversions\*\*\s*(\n|$)',
+                r'\n\s*###\s*Lead Details Table',
+                r'\n\s*###\s*Email Campaign Performance Metrics Table',
+                r'\n\s*###\s*Target Audience Table',
+                r'\n\s*###\s*Target Leads and Conversions Table',
+                # Duplicate full-section blocks (same as report: catch when brief is output twice)
+                r'\n\s*\*\*Campaign Overview\*\*',
+                r'\n\s*\*\*Objectives and Goals\*\*',
+                r'\n\s*\*\*Target Audience\*\*',
+                r'\n\s*\*\*Key Messaging\*\*',
+                r'\n\s*\*\*Campaign Timeline\*\*',
+                r'\n\s*\*\*Success Criteria\*\*',
+                r'\n\s*\*\*Email Campaign Performance\*\*',
+                r'\n\s*\*\*Lead Engagement Data\*\*',
+                r'\n\s*\*\*Issues\s*/\s*Challenges\*\*',
+                r'\n\s*\*\*Improvements\s*/\s*Recommendations\*\*',
+            ]
+        else:
+            # Report: end after **Future Outlook** or ## Future Outlook (then allow [CHART])
+            end_marker_re = re.compile(r'(\n\*\*Future Outlook\*\*|\n##\s+Future Outlook\b)', re.IGNORECASE)
+            dup_patterns = [
+                r'\n\s*\*\*Lead Details Table\*\*',
+                r'\n\s*\*\*Performance Metrics Table\*\*',
+                r'\n\s*###\s*Lead Details Table',
+                r'\n\s*###\s*Performance Metrics Table',
+                r'\n\s*\*\*Performance Metrics and KPIs\*\*',
+                r'\n\s*\*\*Lead Details\*\*',
+                r'\n\s*\*\*Key Achievements\*\*',
+                r'\n\s*\*\*Challenges and Issues\*\*',
+                r'\n\s*\*\*Analysis and Insights\*\*',
+                r'\n\s*\*\*Recommendations\*\*',
+                r'\n\s*\*\*Conclusion\*\*',
+                r'\n\s*\*\*Call to Action\*\*',
+            ]
+        m_end = end_marker_re.search(content)
+        if not m_end:
+            if document_type == 'brief':
+                return content
+            # Try alternate: find **Conclusion** for report (wrong but sometimes present)
+            m_end = re.search(r'\n\*\*Conclusion\*\*', content, re.IGNORECASE)
+            if not m_end:
+                return content
+        search_start = m_end.start()
+        after = content[search_start:]
+        first_dup = -1
+        for pattern in dup_patterns:
+            match = re.search(pattern, after, re.IGNORECASE)
+            if match and (first_dup == -1 or match.start() < first_dup):
+                first_dup = match.start()
+        # Fallback for brief: strip any repeat section header after Conclusion (match at line start)
+        if document_type == 'brief' and first_dup == -1:
+            for needle in (
+                '\n**Lead Details Table**',
+                '\n**Lead Details**',
+                '\n**Email Campaign Performance Metrics Table**',
+                '\n**Email Campaign Performance Metrics**',
+                '\n**Target Audience Table**',
+                '\n**Target Audience**',
+                '\n**Target Leads and Conversions Table**',
+                '\n**Target Leads and Conversions**',
+            ):
+                i = after.find(needle)
+                if i != -1 and (first_dup == -1 or i < first_dup):
+                    first_dup = i
+        if first_dup != -1:
+            content = content[: search_start + first_dup].rstrip()
+        return content
+
     def _fix_timeline_phase2(self, content: str, document_type: str = 'strategy', campaign: Optional[Campaign] = None) -> str:
         """If content has Phase 1 and Phase 3 but no Phase 2, insert Phase 2 before Phase 3."""
         if not content or 'Phase 2' in content:
@@ -277,11 +387,11 @@ LENGTH AND FORMAT REQUIREMENTS (USER-SPECIFIED - MANDATORY, NO EXCEPTIONS):
   Exact format for each chart block:
   [CHART]
   type: {chart_type if chart_type in ('bar', 'pie') else 'bar'}
-  title: [Chart title, e.g. "Email Open Rates by Month"]
-  labels: [comma-separated labels, e.g. Jan, Feb, Mar, Apr]
-  values: [comma-separated numbers matching labels, e.g. 25, 30, 28, 32]
+  title: [Chart title, e.g. "Campaign Email Metrics"]
+  labels: [comma-separated labels FROM CAMPAIGN DATA ONLY, e.g. Open Rate, Click Rate, Reply Rate, Bounce Rate]
+  values: [comma-separated NUMBERS ONLY from campaign data—e.g. 50, 16.67, 50, 0. NO % sign or text; use raw numbers so 50% becomes 50]
   [/CHART]
-  Use REAL data from the campaign (open rates, click rates, leads, etc.). Place charts in relevant sections. For "line" type use "bar" (supported).''' if target_charts > 0 and document_type == 'report' else ''}
+  CRITICAL—CHARTS: (1) Use REAL data only from CAMPAIGN DATA above. (2) values: must be numbers only (e.g. 50, 16.67, 50, 0)—never "50.0%" or "50%"; use 50 not 50%. (3) No placeholder data (no Jan/Feb/Mar/Apr, no 25,30,28,32). Place chart inside Performance Metrics and KPIs. For "line" use "bar".''' if target_charts > 0 and document_type == 'report' else ''}
 
 """
         if user_notes:
@@ -321,9 +431,10 @@ CAMPAIGN DATA (REAL DATA FROM DATABASE - USE ALL OF THIS):
 ═══════════════════════════════════════════════════════════════
 {self._format_campaign_data(campaign_data)}
 ═══════════════════════════════════════════════════════════════
+{"ANTI-DUPLICATION RULE (BRIEF/REPORT): Lead list, email metrics table, and objectives/targets table each appear ONCE in their section. Do NOT add any repeat section or table after ## Conclusion (brief) or after ## Future Outlook (report). The document ends there." if document_type in ('brief', 'report') else ''}
 {sparse_hint}
 CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
-0. NO REPETITION: Do NOT repeat the same sentences, bullets, or ideas anywhere in the document. For Campaign Brief and Performance Report especially: if you need more content to meet the page minimum, add NEW unique content—e.g. different implications, alternative recommendations, deeper analysis of the same metrics, or additional angles on the campaign—never copy, paste, or rephrase existing content to fill space.
+0. NO DUPLICATION OF SECTIONS OR DATA: For Campaign Brief and Performance Report ONLY: (a) Each piece of data must appear in exactly ONE place. Do NOT show Lead Details (email, name, company, status) in more than one section or table—include it ONCE only (e.g. in "Lead Details" or "Lead Engagement"). (b) Do NOT show Email Performance metrics (sent, open rate, click rate, reply rate, bounce rate) twice—include them ONCE (e.g. in "Email Campaign Performance" or "Performance Metrics"). (c) Do NOT add any extra section at the end such as "Lead Details Table", "Performance Metrics Table", "Summary Table", or similar—that would duplicate data already shown. The report must END after Future Outlook (and any chart that belongs in Performance Metrics). (d) Do NOT repeat Success Criteria, Objectives, or Timeline in another section or table. (e) Conclusion, Call to Action, and Future Outlook must each contain NEW content (different from each other and from Recommendations)—do NOT copy the same bullets or phrases into multiple sections. (f) To meet page minimum, add NEW unique content only—never duplicate or rephrase the same section, table, or list.
 1. For briefs/reports: address what the user asked for (e.g. issues, improvement, engagement). For strategy/proposal: produce a full, professional document with all sections; if the user gave a title or notes (or specific details like budget, timeline, audience), incorporate those in the relevant sections—budget in Resource Breakdown, timeline in Timeline, audience/industry in Target Audience, etc. Do not ignore or genericize user-provided details.
 2. ALL data above is REAL data fetched from the database for this specific campaign
 3. You MUST include ALL performance metrics, statistics, and data points provided above
@@ -331,7 +442,7 @@ CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
 5. Use the actual values provided above - do NOT use placeholder, generic, or invented data
 6. NEVER write [insert date], [insert duration], or any [insert ...] placeholder. If Start Date or End Date are "Not set" in the data, write "Not specified" or "To be determined"
 7. If a field is missing from the data above, write "Not specified" or "Not available" - do NOT make up values or placeholders
-8. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided
+8. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided. For briefs/reports: "Target conversions" in the data means the number of conversions (e.g. 10), not a percentage—do not write "10% conversion rate" unless the data explicitly says so. If the data shows a lead count (e.g. 3 leads), say "the campaign has 3 leads" or "Total leads: 3"—do not say "has not yet generated any leads" when leads are present in the data.
 9. For email campaigns: Create a detailed "Email Performance Metrics" section with:
    - Total emails sent (actual number)
    - Open rate (actual percentage)
@@ -360,7 +471,7 @@ NO CAMPAIGN LINKED: This document is not tied to a specific campaign.
 
 {doc_instructions}
 
-FORMATTING: Use **text** for bold (e.g. **Brand Awareness**: description). For Performance Reports: {'You MUST include ' + str(target_charts) + ' chart(s) using [CHART] blocks—see LENGTH AND FORMAT REQUIREMENTS for exact format. Each chart MUST have type, title, labels, values.' if target_charts > 0 else 'Do NOT add [CHART] blocks—charts are not used in this report.'} For strategy/proposal/brief you may optionally include charts using [CHART] blocks.
+FORMATTING: Use **text** for bold (e.g. **Brand Awareness**: description). For Performance Reports: {'You MUST include ' + str(target_charts) + ' chart(s) using [CHART] blocks. Each chart MUST use REAL data from CAMPAIGN DATA only (actual open rate, click rate, reply rate, bounce rate, or counts)—NO placeholder data (no Jan/Feb/Mar/Apr, no 25/30/28/32). Place charts inside Performance Metrics and KPIs.' if target_charts > 0 else 'Do NOT add [CHART] blocks—charts are not used in this report.'} For strategy/proposal/brief you may optionally include charts using [CHART] blocks.
 
 DOCUMENT STRUCTURE REQUIREMENTS:
 - Use ## for main sections only. Do NOT use ### or #### in any document (strategy, proposal, report, brief). Use **bold** subheads or bullet points followed by full paragraphs instead of ###/#### subsections.
@@ -456,22 +567,20 @@ The conclusion MUST be a proper, professional ending that:
             max_leads = 50 if document_type == 'report' else 10
             data['leads'] = list(campaign.leads.values('email', 'first_name', 'last_name', 'company', 'status')[:max_leads])
         
-        # Get email sending data from database
+        # Get email sending data from database (same logic as dashboard/email status)
         email_sends = EmailSendHistory.objects.filter(campaign=campaign)
-        if email_sends.exists():
-            total_sent = email_sends.count()
-            total_opened = email_sends.filter(status='opened').count()
-            total_clicked = email_sends.filter(status='clicked').count()
-            total_replied = email_sends.filter(status='replied').count()
-            total_bounced = email_sends.filter(status='bounced').count()
-            
+        total_sent = email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
+        total_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
+        total_clicked = email_sends.filter(status='clicked').count()
+        total_bounced = email_sends.filter(status='bounced').count()
+        total_replied = Reply.objects.filter(campaign=campaign).count()
+
+        if total_sent > 0 or total_replied > 0 or total_bounced > 0:
             data['emails_sent'] = total_sent
             data['emails_opened'] = total_opened
             data['emails_clicked'] = total_clicked
             data['emails_replied'] = total_replied
             data['emails_bounced'] = total_bounced
-            
-            # Calculate rates
             if total_sent > 0:
                 data['open_rate'] = round((total_opened / total_sent) * 100, 2)
                 data['click_rate'] = round((total_clicked / total_sent) * 100, 2)
@@ -500,10 +609,21 @@ The conclusion MUST be a proper, professional ending that:
     
     def _format_campaign_data(self, campaign_data: Dict) -> str:
         """Format campaign data for prompt in a clear, detailed way"""
+        def _human_date(d):
+            """Convert YYYY-MM-DD to 'February 20, 2026' for document output."""
+            if not d:
+                return None
+            s = str(d)[:10]
+            try:
+                dt = datetime.strptime(s, '%Y-%m-%d')
+                return dt.strftime('%B %d, %Y')
+            except (ValueError, TypeError):
+                return s
+
         lines = []
         lines.append("=== CAMPAIGN INFORMATION ===")
         
-        # Basic campaign info
+        # Basic campaign info (use human-readable dates so document says "February 20, 2026" not "2026-02-20")
         if 'name' in campaign_data:
             lines.append(f"Campaign Name: {campaign_data['name']}")
         if 'description' in campaign_data:
@@ -511,11 +631,11 @@ The conclusion MUST be a proper, professional ending that:
         if 'status' in campaign_data:
             lines.append(f"Status: {campaign_data['status']}")
         if 'start_date' in campaign_data:
-            lines.append(f"Start Date: {campaign_data['start_date']}")
+            lines.append(f"Start Date: {_human_date(campaign_data['start_date']) or campaign_data['start_date']} (use this exact format in document)")
         else:
             lines.append("Start Date: Not set (use 'Not specified' in document - NEVER use [insert date])")
         if 'end_date' in campaign_data:
-            lines.append(f"End Date: {campaign_data['end_date']}")
+            lines.append(f"End Date: {_human_date(campaign_data['end_date']) or campaign_data['end_date']} (use this exact format in document)")
         else:
             lines.append("End Date: Not set (use 'Not specified' in document - NEVER use [insert date])")
         
@@ -556,10 +676,10 @@ The conclusion MUST be a proper, professional ending that:
                 else:
                     lines.append(f"{key.replace('_', ' ').title()}: {value}")
         
-        # Email metrics
+        # Email metrics (explicit: use these exact numbers only)
         if 'emails_sent' in campaign_data:
             lines.append("")
-            lines.append("=== EMAIL CAMPAIGN METRICS (MUST INCLUDE IN DOCUMENT) ===")
+            lines.append("=== EMAIL CAMPAIGN METRICS (USE THESE EXACT NUMBERS ONLY - DO NOT CHANGE OR ROUND) ===")
             lines.append(f"Total Emails Sent: {campaign_data['emails_sent']}")
             if 'emails_opened' in campaign_data:
                 lines.append(f"Emails Opened: {campaign_data['emails_opened']}")
@@ -577,6 +697,7 @@ The conclusion MUST be a proper, professional ending that:
                 lines.append(f"Reply Rate: {campaign_data['reply_rate']}%")
             if 'bounce_rate' in campaign_data:
                 lines.append(f"Bounce Rate: {campaign_data['bounce_rate']}%")
+            lines.append("(In the document, copy these numbers exactly. Do not substitute different values.)")
         
         # Lead data
         if 'leads_count' in campaign_data:
@@ -719,7 +840,7 @@ End the proposal here. Do NOT add Performance Metrics and Analysis, Email Campai
             'report': """
 Create a LONG, detailed Performance Report (full paragraphs throughout—not short bullets). Use ## for main sections only; do NOT use ### (H3) subsections—use **bold** labels or bullet points followed by full paragraphs.
 
-NO REPETITION: Do not repeat the same content. If you need more length, add NEW unique analysis, implications, or recommendations related to the campaign—never duplicate or rephrase existing paragraphs or bullets.
+NO DUPLICATION: (1) Lead Details (email, name, company, status) must appear in exactly ONE place—either one table OR one list; do NOT repeat the same lead list/table anywhere else. (2) Email/performance metrics (sent, open rate, click rate, reply rate, bounce rate) must appear in exactly ONE place—one table or one bullet list; do NOT repeat the same metrics in another section. (3) Do NOT add a "Lead Details Table", "Performance Metrics Table", or any summary/repeat section at the end—the report ends with ## Future Outlook (and charts go inside Performance Metrics and KPIs). (4) Do not repeat Success Criteria, Objectives, or Timeline in a second section or table. (5) Conclusion, Call to Action, and Future Outlook must each be distinct: do NOT copy Recommendations or the same bullets into these sections; write different, specific content for each. (6) If you need more length, add NEW unique analysis—never duplicate or rephrase existing content.
 
 Sections:
 - Executive Summary (2–3 full paragraphs)
@@ -738,7 +859,7 @@ MANDATORY:
 1. Campaign metrics: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate, Total Leads. Present as a markdown table (| Metric | Value |) ONLY if user requested tables; otherwise use bullet list.
 2. Lead Details: every lead from the data (Email, Name, Company, Status). Use table format ONLY if user requested tables; otherwise use numbered bullet list.
 3. Do NOT use ### (H3) headings—use ## for main sections and **bold** or bullets + paragraphs for sub-content.
-4. Charts: you MUST add [CHART] blocks when user requested them. Use the exact format shown in LENGTH AND FORMAT REQUIREMENTS (type, title, labels, values). Never omit requested charts.
+4. Charts: you MUST add [CHART] blocks when user requested them. Use the exact format (type, title, labels, values). Values must be NUMBERS ONLY (e.g. 50, 16.67, 50, 0)—never include % in the values line (write 50 not 50%). Labels and values from CAMPAIGN DATA only. Place each chart inside "Performance Metrics and KPIs"—do NOT put charts after Future Outlook. Never omit requested charts.
 5. Always include ## Call to Action and ## Future Outlook as separate section headings with full paragraphs.
 6. Always write a LONG report: full paragraphs in every section, especially Achievements and Challenges (each point must have a paragraph). Aim for thorough, readable length.
 7. ALWAYS include Challenges and Issues and Recommendations; keep both sections a bit long (full paragraphs per item). If there are positive opportunities (e.g. strong performance, upside potential), include them in Key Achievements or Analysis and make that part a bit long too.
@@ -746,7 +867,7 @@ MANDATORY:
             'brief': """
 Create a DETAILED Campaign Brief that reads like a proper campaign briefing. Use ONLY the campaign data provided above. Use ## for main sections only; do NOT use ### or ####. Every section MUST have substantive content (paragraphs or bullets with explanation)—do NOT leave sections empty or one-line.
 
-NO REPETITION: Do not repeat the same content anywhere. If you need more length, add NEW unique content related to the campaign (e.g. extra implications, recommendations, or analysis)—never duplicate or rephrase existing text to fill space.
+NO DUPLICATION: (1) Lead list and Email metrics each appear in exactly ONE place: leads in "Lead Engagement Data", email metrics in "Email Campaign Performance". (2) The document MUST END with the Conclusion section. Do NOT add ANY section or table after Conclusion—no "Lead Details", no "Email Campaign Performance Metrics", no "Target Audience", no "Target Leads and Conversions" (with or without "Table"). Nothing after **Conclusion**. (3) Do NOT repeat Objectives/Success Criteria/Timeline elsewhere. (4) To add length, use NEW unique content only—never duplicate sections or tables.
 
 Sections (use ONLY these—do NOT add "Performance Metrics and Analysis", "Lead Engagement Metrics", "Engagement Analysis", "Improvement Opportunities", or "Action Items" as extra ## sections):
 
@@ -757,22 +878,22 @@ Sections (use ONLY these—do NOT add "Performance Metrics and Analysis", "Lead 
 List each target from the data (Target Leads, Target Conversions) and goals. For each: **Target name**: value. Then a short paragraph explaining what it means and how the campaign will achieve it. Do not write only one bullet with no context.
 
 ## Target Audience
-Use the TARGET AUDIENCE section from the data. Write 1–2 full paragraphs describing who the audience is (age, location, industry, interests, company size—use every field provided). If the data lists demographics, include them. Do not leave this section empty.
+Use ONLY the TARGET AUDIENCE section from the CAMPAIGN DATA above. If the data provides demographics, age, location, industry, interests, or company size, use them. If the campaign data has NO target audience or no demographics/interests/company size, write "Not specified" or "Target audience not defined in campaign data" in one short paragraph—do NOT invent demographics (e.g. no "18-35", "young adults", "summer sales interests") or company sizes unless they appear in the data.
 
 ## Key Messaging
 1–2 paragraphs derived from the campaign description and goals. What will the campaign communicate? What value proposition? Use the data.
 
 ## Campaign Timeline
-Use ONLY the campaign's Start Date and End Date from the data. Write a full paragraph (e.g. "The campaign runs from [start] to [end]. Key phases…"). Phases MUST be derived from this campaign period only—split the period into 2–4 phases (e.g. by weeks or equal segments). Use actual dates or date ranges that fall BETWEEN start and end (e.g. if campaign is Jan 30–Feb 22: Phase 1: Jan 30–Feb 7, Phase 2: Feb 8–Feb 15, Phase 3: Feb 16–Feb 22). NEVER use generic "Month 1-2", "Month 5-6", or any timeframe outside the campaign dates. If you list Phase 1, Phase 2, Phase 3, do NOT skip numbers—always include Phase 2 between Phase 1 and Phase 3. If dates are "Not set", write "Not specified" and add a sentence on planned timeline.
+Use ONLY the campaign's Start Date and End Date from the data. Phases MUST fall strictly within this period—every phase start and end date must be on or between Start Date and End Date. If the campaign is Feb 20–Feb 21, do NOT add Phase 2 or Phase 3 ending on Feb 22 or later; use one or two phases within Feb 20–21 only (e.g. Phase 1: Feb 20, Phase 2: Feb 21). For longer campaigns, split into 2–4 phases with dates between start and end. NEVER use timeframes that extend beyond End Date. If dates are "Not set", write "Not specified".
 
 ## Success Criteria
-Use the targets from the data. Full paragraph or bullets with short explanation of how success will be measured.
+Use the targets from the data exactly. "Target conversions" means the number of conversions (e.g. 10), not a percentage—do not write "10% conversion rate" unless the data explicitly says that. Full paragraph or bullets on how success will be measured.
 
 ## Email Campaign Performance
-Use the exact EMAIL CAMPAIGN METRICS from the data. List: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate (use the exact numbers from the prompt). For each metric, 1 sentence of what it means. If the data provides numbers (e.g. Emails Sent: 3, Open Rate: 0%), use them and comment on them—do not say "No email campaign performance data available" when the data is provided. If the prompt has no email metrics at all, then one short paragraph: "Email campaign not yet launched" and what will be measured.
+Use the exact EMAIL CAMPAIGN METRICS from the CAMPAIGN DATA above only. List: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate—use the exact numbers from the prompt (e.g. if data says 10 sent, 30% open, write those numbers). Use correct tense: if the data shows emails already sent (e.g. Emails Sent: 10), write "The campaign has sent X emails" / "Total emails sent: X", not "will send". Do not invent metrics. If the prompt has no email metrics at all, write one short paragraph: "Email campaign not yet launched."
 
 ## Lead Engagement Data
-Use the exact LEAD DATA from the data. State Total Leads. List EVERY lead from the prompt (email, name, company, status for each). Then 1–2 paragraphs on engagement (e.g. lead status breakdown, what it means, next steps). Do not leave empty or say "no lead data" when leads are listed in the prompt.
+Use the exact LEAD DATA from the data. State the total lead count from the data (e.g. "Total leads: 3" if the data says 3). List EVERY lead from the prompt (email, name, company, status for each). Then 1–2 paragraphs on engagement. Do NOT say "has not yet generated any leads" or "no leads" when the data shows a lead count greater than zero—use the actual number (e.g. "The campaign has 3 leads, all currently new.").
 
 ## Issues / Challenges
 ALWAYS include this section. Keep it a bit long—each issue must have real detail. For each issue: **Bold issue name** (e.g. **Low Email Open Rates**, **Limited Lead Engagement**, **Missing Audience Data**) followed by a FULL PARAGRAPH (3–5 sentences) explaining: what the issue is, why it matters, cause/context from the campaign data, and impact on the campaign. Do NOT write only one-line bullets. Minimum 2–4 issues, each with a bold heading and a full paragraph. Base on actual data (open rate, click rate, lead count, audience fields, conversions).
@@ -785,7 +906,7 @@ If the campaign has positive opportunities (e.g. strong open rate, engaged leads
 ## Conclusion
 2–3 full paragraphs: campaign readiness, launch recommendations, expected outcomes. Summarize the brief and state whether the campaign is ready and what is needed.
 
-CRITICAL: (1) Use ALL campaign data from the prompt—every number, every lead, every date. (2) Do NOT add duplicate or report-style section headers (no "Performance Metrics and Analysis", "Lead Engagement Metrics", "Action Items" as ##). (3) Do NOT leave any section with only a heading—every section must have at least 2–3 sentences or a bullet list with explanation. (4) If you list numbered phases (Phase 1, Phase 2, Phase 3), do NOT skip numbers—always include Phase 2 between Phase 1 and Phase 3, and so on. (5) If the user provided notes (e.g. "issues and improvement"), address those in Issues/Challenges and Improvements/Recommendations. (6) Issues / Challenges and Improvements / Recommendations: ALWAYS include both sections; each item MUST have a **bold** heading (e.g. **Low Email Open Rates**, **Gather Audience Data**) followed by a full paragraph (3–5 sentences)—keep these sections a bit long. If there are positive opportunities, mention them and make that part a bit long too. (7) Do not disturb or change strategy, proposal, or report documents—this applies to Campaign Brief only.
+CRITICAL: (1) Use ONLY the numbers and dates from the CAMPAIGN DATA above—Email Campaign Performance and Lead Engagement must use the exact values from "EMAIL CAMPAIGN METRICS" and "LEAD DATA" (do not change or round). (2) Use the Start Date and End Date format given (e.g. "February 20, 2026")—do not output raw dates like 2026-02-20. (3) The document MUST END with the Conclusion section. Do NOT add ANY content after Conclusion—no "Lead Details", "Email Campaign Performance Metrics", "Target Audience", or "Target Leads and Conversions" section or table after Conclusion. (4) Each piece of data (leads, email metrics, targets) appears in only one section. (5) Campaign Timeline: phase dates must be within Start and End date only. (6) "Target conversions" = the number (e.g. 10), not "10%". (7) Issues/Challenges and Improvements/Recommendations: both required; each item **bold** + full paragraph. (8) Campaign Brief only—do not change strategy, proposal, or report.
 """,
             'presentation': """
 Create a presentation document with slides covering:

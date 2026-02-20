@@ -69,18 +69,24 @@ Return your analysis in a structured format."""
                 'analysis': 'Reply expresses eagerness to meet (e.g. "eager to meet you"). Classified as Interested.',
                 'confidence': 95
             }
-        # Early rule: "send more/new information" / "more info" / "so i can analyze" = requested_info (wants details)
+        # Early rule: "send more/new information" / "more info" / "so i can analyze" / "further requirements" = requested_info (wants details)
         if any(phrase in combined_lower for phrase in [
             'send more information', 'send more info', 'send new information', 'send new info',
             'more information', 'more info', 'need more information', 'need more info',
             'awesome send more information', 'send more information now',
             'good send new information', 'send new information so that',
             'so that i can analyze', 'so that i can analyse', 'so i can analyze', 'so i can analyse',
-            'information so that i can analyze', 'information so i can analyze'
+            'information so that i can analyze', 'information so i can analyze',
+            'send me further requirements', 'send further requirements', 'further requirements',
+            'send me the requirements', 'send the requirements', 'send me requirements',
+            'share the requirements', 'share further requirements', 'share me the requirements',
+            'send me further details', 'send further details', 'further details',
+            'send me the details', 'send the details', 'send me details',
+            'share the details', 'share further details', 'share me the details'
         ]) and not any(phrase in combined_lower for phrase in ["dont send", "don't send", "unsubscribe"]):
             return {
                 'interest_level': 'requested_info',
-                'analysis': 'Reply asks for more/new information (e.g. "send new information so I can analyze"). Classified as Requested More Information.',
+                'analysis': 'Reply asks for more/new information or requirements (e.g. "send new information", "send me further requirements"). Classified as Requested More Information.',
                 'confidence': 95
             }
         # Early rule: short positive agreement = positive (e.g. "yes thanks", "yes", "thanks")
@@ -236,10 +242,11 @@ CLASSIFICATION OPTIONS (use these exact labels):
 4. "requested_info" - REQUESTED MORE INFORMATION:
    - Asks specific questions about features, pricing, capabilities
    - Wants detailed information, case studies, examples, or clarification
-   - Requests documentation, demos, or samples
+   - Requests documentation, demos, samples, or REQUIREMENTS (e.g. "send me further requirements", "send me the requirements")
    - Asks to make something clearer or to clarify: "make it more clear", "make it clearer", "please clarify", "could you clarify", "can you explain"
-   - Language: "tell me more about", "what are the features", "how much does it cost", "can you send"
+   - Language: "tell me more about", "what are the features", "how much does it cost", "can you send", "send me requirements", "further requirements"
    - CRITICAL: "make it more clear please" / "please clarify" = requested_info (they want clearer info), NOT neutral.
+   - CRITICAL: If the reply is PRIMARILY asking for more information, details, or requirements (e.g. "Send me further requirements", "Send further details"), use "requested_info", NOT "positive".
 
 5. "objection" - HAS OBJECTION/CONCERN:
    - Raises concerns, objections, or doubts about the approach or feasibility
@@ -349,12 +356,16 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
         # Clear unsubscribe: stop sending / don't send again (override AI if it returned "negative")
         if any(p in combined_text_lower for p in ["don't send again", "dont send again", "do not send again", "stop sending", "stop sending me"]):
             return 'unsubscribe'
-        # Clear requested_info: asking for pricing, details, clarification (override AI if it returned neutral)
+        # Clear requested_info: asking for pricing, details, clarification, requirements (override AI if it returned neutral/positive)
         if any(p in combined_text_lower for p in [
             'how much', 'what is the price', 'what is the cost', 'can you send me', 'send me more', 'send me details',
             'more details', 'pricing information', 'more information about', 'tell me more about', 'what are the features',
             'make it more clear', 'make it clearer', 'make it mroe clear', 'make it clear',
-            'please clarify', 'could you clarify', 'can you clarify', 'can you explain'
+            'please clarify', 'could you clarify', 'can you clarify', 'can you explain',
+            'send me further requirements', 'send further requirements', 'further requirements',
+            'send me the requirements', 'send me requirements', 'share the requirements',
+            'send me further details', 'send further details', 'further details',
+            'send me the details', 'send me details', 'share the details'
         ]):
             return 'requested_info'
         if 'make it' in combined_text_lower and ('clear' in combined_text_lower or 'clarif' in combined_text_lower):
@@ -396,11 +407,13 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
                 'confidence': 70
             }
         
-        # Check for info requests (including clarification; include typo "mroe")
+        # Check for info requests (including clarification; include typo "mroe"; requirements)
         info_keywords = [
             'tell me more', 'more information', 'details about', 'what are', 'how much', 'pricing', 'features', 'can you send',
             'make it more clear', 'make it clearer', 'make it mroe clear', 'make it clear',
-            'please clarify', 'could you clarify', 'can you clarify', 'can you explain'
+            'please clarify', 'could you clarify', 'can you clarify', 'can you explain',
+            'send me further requirements', 'further requirements', 'send me requirements', 'send the requirements',
+            'send me further details', 'send further details', 'further details', 'send me details', 'send the details'
         ]
         if 'make it' in combined_text and ('clear' in combined_text or 'clarif' in combined_text):
             return {'interest_level': 'requested_info', 'analysis': 'Asks for clarification.', 'confidence': 85}

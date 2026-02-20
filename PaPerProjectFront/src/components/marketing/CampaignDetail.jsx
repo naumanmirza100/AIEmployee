@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -276,9 +276,24 @@ const CampaignDetail = () => {
     return () => clearInterval(interval);
   }, [id, loading, fetchDetail]);
 
+  const todayStr = formatDateLocal(new Date());
+  const todayDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
   const handleLaunch = async () => {
     if (!launchStart) {
       toast({ title: 'Validation', description: 'Start date is required', variant: 'destructive' });
+      return;
+    }
+    if (launchStart < todayStr) {
+      toast({ title: 'Invalid date', description: 'Start date cannot be in the past. Use today or a future date.', variant: 'destructive' });
+      return;
+    }
+    if (launchEnd && launchEnd < todayStr) {
+      toast({ title: 'Invalid date', description: 'End date cannot be in the past. Use today or a future date.', variant: 'destructive' });
       return;
     }
     setActionLoading('launch');
@@ -525,8 +540,11 @@ const CampaignDetail = () => {
             <Button
               size="sm"
               onClick={() => {
-                setLaunchStart(campaign.start_date ? campaign.start_date.slice(0, 10) : formatDateLocal(new Date()));
-                setLaunchEnd(campaign.end_date ? campaign.end_date.slice(0, 10) : '');
+                const today = formatDateLocal(new Date());
+                const start = campaign.start_date ? campaign.start_date.slice(0, 10) : today;
+                const end = campaign.end_date ? campaign.end_date.slice(0, 10) : '';
+                setLaunchStart(start >= today ? start : today);
+                setLaunchEnd(end && end >= today ? end : '');
                 setLaunchOpen(true);
               }}
               disabled={!!actionLoading}
@@ -936,7 +954,9 @@ const CampaignDetail = () => {
                 date={launchStart ? parseDateLocal(launchStart) : undefined}
                 setDate={(d) => setLaunchStart(d ? formatDateLocal(d) : '')}
                 placeholder="Select start date"
+                fromDate={todayDate}
               />
+              <p className="text-xs text-muted-foreground mt-1">Cannot select past dates. Use today or a future date.</p>
             </div>
             <div>
               <Label>End date (optional)</Label>
@@ -944,6 +964,7 @@ const CampaignDetail = () => {
                 date={launchEnd ? parseDateLocal(launchEnd) : undefined}
                 setDate={(d) => setLaunchEnd(d ? formatDateLocal(d) : '')}
                 placeholder="Select end date"
+                fromDate={todayDate}
               />
             </div>
           </div>
