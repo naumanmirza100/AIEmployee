@@ -490,35 +490,18 @@ SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 # --------------------
 # CORS Configuration
 # --------------------
-# Read CORS allowed origins from .env (comma-separated list). Set CORS_ALLOWED_ORIGINS in .env for your frontend URL(s).
-cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173')
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    cors_origins_env = os.getenv(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173',
+    )
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
 
-# If no origins in env, add default localhost for development
-if not CORS_ALLOWED_ORIGINS:
-    # Default to localhost for development (remove in production)
-    CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
-
-
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",
-#     "http://127.0.0.1:3000",
-#     "http://127.0.0.1:8000",
-#     "https://aiemployeemine.onrender.com",  # optional self-reference
-#     # Add your production frontend domain here later
-# ]
-
-# If env var exists, extend the list (safe fallback)
-cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
-if cors_origins_env:
-    extra_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
-    CORS_ALLOWED_ORIGINS.extend(extra_origins)
-
-# Allow credentials (cookies, authorization headers, etc.)
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False  # Do NOT set to True in production
 
-# Allow all headers
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -529,11 +512,10 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
-    'x-company-user-id',  # Company user ID header
+    'x-company-user-id',
     'x-company-id',
 ]
 
-# Allow all methods
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',

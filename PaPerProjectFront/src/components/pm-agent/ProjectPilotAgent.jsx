@@ -249,13 +249,13 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
     <div className="flex gap-4 w-full max-w-full">
       {/* Sidebar */}
       <div className="w-64 shrink-0 rounded-lg border bg-card">
-        <div className="p-3 border-b flex items-center justify-between">
+        <div className="p-3 border-b flex items-center justify-between shrink-0">
           <span className="text-sm font-semibold">Previous conversations</span>
           <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
             <Plus className="h-4 w-4" />
           </Button>
         </div>
-        <div>
+        <div className="overflow-y-auto overflow-x-hidden max-h-[min(60vh,420px)]">
           {loadingChats ? (
             <div className="p-4 flex justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -307,8 +307,8 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
             Create projects and tasks with natural language or upload a document (txt, pdf, docx). Select a project (optional) to scope actions. Previous conversations are in the sidebar.
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="px-4 pb-4 space-y-4">
+        <CardContent className="p-0 flex flex-col min-h-0">
+          <div className="px-4 pb-4 space-y-4 overflow-y-auto overflow-x-hidden max-h-[min(55vh,480px)] min-h-0">
             {!selectedChatId && chats.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
