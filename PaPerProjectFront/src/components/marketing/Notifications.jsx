@@ -42,6 +42,20 @@ const ISSUE_TYPES = ['performance_alert', 'anomaly', 'email_delivery', 'engageme
 /** Only count high/critical priority as "issues" for the stats. */
 const HIGH_PRIORITY = ['high', 'critical'];
 
+/** Treat as connection/backend unreachable – don't show error toast or banner; show blank/empty state instead. */
+const isConnectionError = (err) => {
+  const msg = (err?.message || err?.data?.message || String(err || '')).toLowerCase();
+  return (
+    msg.includes('connect') ||
+    msg.includes('network') ||
+    msg.includes('backend') ||
+    msg.includes('running') ||
+    msg.includes('cors') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('load failed')
+  );
+};
+
 const getNotificationStats = (notifications) => {
   const totalIssues = notifications.filter(
     (n) => ISSUE_TYPES.includes(n.notification_type) && HIGH_PRIORITY.includes(n.priority)
@@ -105,11 +119,15 @@ const Notifications = ({ onUnreadCountChange }) => {
         onUnreadCountChange?.();
       }
     } catch (err) {
-      setError(err.message || 'Failed to load notifications');
       setNotifications([]);
       setUnreadCount(0);
       onUnreadCountChange?.();
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      if (!isConnectionError(err)) {
+        setError(err.message || 'Failed to load notifications');
+        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      } else {
+        setError(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -161,7 +179,9 @@ const Notifications = ({ onUnreadCountChange }) => {
         toast({ title: 'Error', description: response.message || 'Monitor failed', variant: 'destructive' });
       }
     } catch (err) {
-      toast({ title: 'Error', description: err.message || 'Monitor failed', variant: 'destructive' });
+      if (!isConnectionError(err)) {
+        toast({ title: 'Error', description: err.message || 'Monitor failed', variant: 'destructive' });
+      }
     } finally {
       setMonitoring(false);
     }
@@ -180,7 +200,9 @@ const Notifications = ({ onUnreadCountChange }) => {
         toast({ title: 'Error', description: response.message, variant: 'destructive' });
       }
     } catch (err) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      if (!isConnectionError(err)) {
+        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      }
     } finally {
       setActioningId(null);
     }
@@ -200,7 +222,9 @@ const Notifications = ({ onUnreadCountChange }) => {
         toast({ title: 'Error', description: response.message, variant: 'destructive' });
       }
     } catch (err) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      if (!isConnectionError(err)) {
+        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      }
     } finally {
       setActioningId(null);
     }

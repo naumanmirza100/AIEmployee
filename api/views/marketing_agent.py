@@ -922,6 +922,7 @@ def marketing_qa(request):
         
         agent = AgentRegistry.get_agent("marketing_qa")
         question = request.data.get('question', '')
+        conversation_history = request.data.get('conversation_history') or []
         
         if not question:
             return Response(
@@ -931,6 +932,7 @@ def marketing_qa(request):
         
         result = agent.process(
             question=question,
+            context={'conversation_history': conversation_history},
             user_id=user.id
         )
         
