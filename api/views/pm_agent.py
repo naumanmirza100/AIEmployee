@@ -8,6 +8,12 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
+from project_manager_agent.models import (
+    PMKnowledgeQAChat,
+    PMKnowledgeQAChatMessage,
+    PMProjectPilotChat,
+    PMProjectPilotChatMessage,
+)
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 
@@ -35,6 +41,29 @@ except ImportError:
     logger.warning("python-docx not available. DOCX extraction will not work.")
 
 
+def _assignee_display(assignee):
+    """Safely get assignee display name (full name or username) or None."""
+    if not assignee:
+        return None
+    try:
+        return assignee.get_full_name() or getattr(assignee, "username", None)
+    except Exception:
+        return getattr(assignee, "username", None)
+
+
+def _get_chat_history(request):
+    """Extract chat_history from request (JSON body or POST form for multipart). Returns a list of {role, content}."""
+    hist = request.data.get("chat_history") if hasattr(request, "data") and isinstance(getattr(request, "data", None), dict) else None
+    if hist is None and request.method == "POST":
+        hist = request.POST.get("chat_history")
+    if isinstance(hist, str):
+        try:
+            hist = json.loads(hist) if hist.strip() else []
+        except Exception:
+            hist = []
+    return list(hist)[:20] if isinstance(hist, list) else []
+
+
 def _ensure_project_manager(user):
     """
     Enforce that only project managers (or staff/superusers) can use PM agent endpoints.
@@ -52,12 +81,15 @@ def _build_available_users(project_id=None, project=None):
     """
     - If project_id provided: return team members + owner for that project
     - Else: return up to 50 users (for general assignment mapping)
+    - Never include superusers (they should not be assigned tasks when creating projects/tasks).
     """
     available_users = []
 
     if project_id and project is not None:
         team_members = TeamMember.objects.filter(project_id=project_id).select_related("user")
         for member in team_members:
+            if getattr(member.user, "is_superuser", False):
+                continue
             available_users.append(
                 {
                     "id": member.user.id,
@@ -67,26 +99,78 @@ def _build_available_users(project_id=None, project=None):
                 }
             )
 
-        # Include owner if not in team list
+        # Include owner if not in team list (and not a superuser)
         team_user_ids = {m.user.id for m in team_members}
         if project.owner_id and project.owner_id not in team_user_ids:
-            available_users.append(
-                {
-                    "id": project.owner.id,
-                    "username": project.owner.username,
-                    "name": project.owner.get_full_name() or project.owner.username,
-                    "role": "owner",
-                }
-            )
+            owner = project.owner
+            if not getattr(owner, "is_superuser", False):
+                available_users.append(
+                    {
+                        "id": owner.id,
+                        "username": owner.username,
+                        "name": owner.get_full_name() or owner.username,
+                        "role": "owner",
+                    }
+                )
     else:
         User = get_user_model()
-        users = User.objects.all()[:50]
+        users = User.objects.filter(is_superuser=False)[:50]
         for u in users:
             available_users.append(
                 {"id": u.id, "username": u.username, "name": u.get_full_name() or u.username}
             )
 
     return available_users
+
+
+# Common words to ignore when matching user names in "only N users, X and Y" (avoids matching "and" as a name)
+_ALLOWED_IDS_STOPWORDS = frozenset({
+    "and", "or", "the", "a", "an", "to", "for", "only", "all", "users", "user", "tasks", "task",
+    "assign", "assigned", "by", "with", "be", "is", "are", "its", "it", "as", "in", "on", "at",
+    "of", "no", "so", "do", "go", "we", "me", "my", "us", "am", "id", "st", "nd", "rd", "th",
+    "to", "from", "into", "our", "can", "has", "have", "had", "was", "were", "been", "being",
+})
+
+
+def _get_allowed_user_ids_for_only_n_users(question, available_users):
+    """
+    If the user said "only N users" and named people (e.g. "only 2 users, hamza and abdullah"),
+    return the list of allowed user IDs (same partial name matching as the agent). Otherwise return None.
+    Used to enforce assignment in the backend when the LLM assigns to others anyway.
+    Excludes common stopwords so "and" in "hamza and abdullah" does not match a user with "and" in their name.
+    """
+    if not question or not available_users:
+        return None
+    import re
+    q_lower = question.lower().strip()
+    if not re.search(r"only\s+\d+\s+users?", q_lower):
+        return None
+    seen_ids = set()
+    allowed = []
+    for u in available_users:
+        uid = u.get("id")
+        if uid in seen_ids:
+            continue
+        username = (u.get("username") or "").strip().lower()
+        name = (u.get("name") or "").strip().lower()
+        if not username and not name:
+            continue
+        if username and username in q_lower:
+            allowed.append(uid)
+            seen_ids.add(uid)
+            continue
+        if name and name in q_lower:
+            allowed.append(uid)
+            seen_ids.add(uid)
+            continue
+        name_words = [w for w in name.split() if len(w) > 1 and w not in _ALLOWED_IDS_STOPWORDS]
+        username_words = [w for w in re.sub(r"[_.-]", " ", username).split() if len(w) > 1 and w not in _ALLOWED_IDS_STOPWORDS]
+        for word in name_words + username_words:
+            if len(word) >= 2 and word not in _ALLOWED_IDS_STOPWORDS and word in q_lower:
+                allowed.append(uid)
+                seen_ids.add(uid)
+                break
+    return allowed if allowed else None
 
 
 def _build_user_assignments(available_users, *, project_id=None, all_tasks=None, owner=None):
@@ -247,8 +331,9 @@ def project_pilot(request):
             available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
 
+        chat_history = _get_chat_history(request)
         agent = AgentRegistry.get_agent("project_pilot")
-        result = agent.process(question=question, context=context, available_users=available_users)
+        result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
@@ -403,6 +488,33 @@ def project_pilot(request):
         # Ensure actions is always a list
         if not isinstance(actions, list):
             actions = []
+        
+        # Only run round-robin when user clearly asked for "assign to ALL" and did NOT say "only N users" or name specific people
+        import re as _re
+        _q_lower = question.lower()
+        _only_n_users = _re.search(r"only\s+\d+\s+users?", _q_lower)
+        _assign_to_all_phrases = [
+            "assign to all", "assign to all available", "assign to all users",
+            "distribute to all", "assign tasks to all", "all available users",
+            "all developers", "all users", "assign the tasks to all",
+        ]
+        _wants_assign_to_all = any(p in _q_lower for p in _assign_to_all_phrases)
+        if _wants_assign_to_all and not _only_n_users and available_users:
+            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
+            if _unassigned:
+                _user_ids = [u["id"] for u in available_users]
+                for i, action_data in enumerate(_unassigned):
+                    action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
+                logger.info(f"Backend fallback: assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
+        
+        # Enforce "only N users" when user named specific people: restrict every create_task to allowed IDs only
+        _allowed_ids = _get_allowed_user_ids_for_only_n_users(question, available_users)
+        if _allowed_ids is not None:
+            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            for i, action_data in enumerate(_create_tasks):
+                action_data["assignee_id"] = _allowed_ids[i % len(_allowed_ids)]
+            logger.info(f"Backend enforcement: restricted task assignment to only {len(_allowed_ids)} users (IDs: {_allowed_ids})")
         
         logger.info(f"Extracted {len(actions)} actions from agent response. Actions: {[a.get('action') if isinstance(a, dict) else 'invalid' for a in actions[:5]]}")
         
@@ -572,6 +684,25 @@ def project_pilot(request):
                         except Exception:
                             due_date = None
 
+                    # Default due_date when missing (e.g. project deadline, end_date, or 14 days from now)
+                    if due_date is None and task_project:
+                        from django.utils import timezone
+                        from datetime import datetime as dt_time
+                        if getattr(task_project, "deadline", None):
+                            d = task_project.deadline
+                            if hasattr(d, "year"):
+                                due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                if timezone.is_naive(due_date):
+                                    due_date = timezone.make_aware(due_date)
+                        if due_date is None and getattr(task_project, "end_date", None):
+                            d = task_project.end_date
+                            if hasattr(d, "year"):
+                                due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                if timezone.is_naive(due_date):
+                                    due_date = timezone.make_aware(due_date)
+                        if due_date is None:
+                            due_date = timezone.now() + timedelta(days=14)
+
                     estimated_hours = action_data.get("estimated_hours")
                     if estimated_hours:
                         try:
@@ -599,6 +730,11 @@ def project_pilot(request):
                             "task_title": task.title,
                             "project_name": task_project.name,
                             "message": f'Task "{task.title}" created successfully!',
+                            "priority": getattr(task, "priority", None) or "medium",
+                            "assignee_username": task.assignee.username if task.assignee else None,
+                            "assignee_name": _assignee_display(task.assignee),
+                            "due_date": task.due_date.isoformat() if task.due_date else None,
+                            "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
                         }
                     )
                 except Exception as e:
@@ -687,7 +823,18 @@ def project_pilot(request):
 
                     task_to_update.save()
                     action_results.append(
-                        {"action": "update_task", "success": True, "task_id": task_to_update.id}
+                        {
+                            "action": "update_task",
+                            "success": True,
+                            "task_id": task_to_update.id,
+                            "task_title": task_to_update.title,
+                            "message": f'Task "{task_to_update.title}" updated successfully!',
+                            "priority": getattr(task_to_update, "priority", None) or "medium",
+                            "assignee_username": task_to_update.assignee.username if task_to_update.assignee else None,
+                            "assignee_name": _assignee_display(task_to_update.assignee),
+                            "due_date": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
+                            "created_at": task_to_update.created_at.isoformat() if getattr(task_to_update, "created_at", None) else None,
+                        }
                     )
                 except Exception as e:
                     action_results.append(
@@ -701,6 +848,20 @@ def project_pilot(request):
         if not project_created and any(a.get("action") == "create_project" for a in actions):
             # Project creation was attempted but failed
             logger.warning("Project creation was attempted but failed. Action results: %s", action_results)
+
+        # Ensure frontend always has a displayable answer (avoid raw JSON so UI does not hide it)
+        answer_text = (result.get("answer") or "").strip()
+        if answer_text and (answer_text.startswith("[") or answer_text.startswith("{")):
+            # Build a short summary so the message bubble shows something
+            success_count = sum(1 for r in action_results if r.get("success"))
+            if action_results:
+                parts = []
+                for r in action_results:
+                    if r.get("success") and r.get("message"):
+                        parts.append(r["message"])
+                result["answer"] = "\n".join(parts) if parts else f"Completed {success_count} action(s)."
+            else:
+                result["answer"] = "Request processed; no actions were returned."
         
         data = {"status": "success", "data": result, "action_results": action_results}
         logger.info(f"Returning project_pilot response with {len(action_results)} action results")
@@ -764,7 +925,7 @@ def task_prioritization(request):
                 "estimated_hours": float(t.estimated_hours) if t.estimated_hours else None,
                 "actual_hours": float(t.actual_hours) if t.actual_hours else None,
                 "assignee_id": t.assignee.id if t.assignee else None,
-                "assignee_name": t.assignee.get_full_name() or t.assignee.username if t.assignee else None,
+                "assignee_name": _assignee_display(t.assignee),
                 "dependencies": [dep.id for dep in t.depends_on.all()],
                 "dependent_count": t.dependent_tasks.count(),
                 "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -787,7 +948,7 @@ def task_prioritization(request):
             }
             for m in members
         ]
-        
+
         # Calculate workload analysis for each team member
         workload_analysis = {}
         for member in team:
@@ -815,7 +976,7 @@ def task_prioritization(request):
             "workload_by_user": workload_analysis,
             "team_size": len(team),
             "total_active_tasks": len([t for t in tasks if t.get('status') in ['todo', 'in_progress', 'review']])
-        }
+            }
 
         # Get action from request (default to 'prioritize')
         action = request.data.get("action", "prioritize")
@@ -867,7 +1028,7 @@ def task_prioritization(request):
                     result["bottlenecks"] = result.get("analysis", {}).get("bottlenecks", [])
                     if "summary" in result.get("analysis", {}):
                         result["summary"] = result["analysis"]["summary"]
-                else:
+            else:
                     # Fallback - create empty structure
                     result["bottlenecks"] = []
                     result["summary"] = {"message": "No bottlenecks found"}
@@ -1127,7 +1288,7 @@ def timeline_gantt(request):
                     "actual_hours": float(t.actual_hours) if t.actual_hours else None,
                     "dependencies": [dep.id for dep in t.depends_on.all()],
                     "assignee_id": t.assignee.id if t.assignee else None,
-                }
+            }
             for t in tasks_queryset
         ]
 
@@ -1368,12 +1529,14 @@ def knowledge_qa(request):
             # Generate session ID from company user ID
             session_id = f"company_user_{company_user.id}"
         
+        chat_history = request.data.get("chat_history") or []
         agent = AgentRegistry.get_agent("knowledge_qa")
         result = agent.process(
-            question=question, 
-            context=context, 
+            question=question,
+            context=context,
             available_users=available_users,
-            session_id=session_id
+            session_id=session_id,
+            chat_history=chat_history,
         )
 
         return Response({
@@ -1388,6 +1551,272 @@ def knowledge_qa(request):
             {"status": "error", "message": "Knowledge Q&A failed", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ---------- PM Knowledge QA Chats ----------
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_knowledge_qa_chats(request):
+    """List all Knowledge QA chats for the company user."""
+    try:
+        company_user = request.user
+        chats = PMKnowledgeQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        result = []
+        for chat in chats:
+            messages = []
+            for msg in chat.messages.order_by('created_at'):
+                m = {'role': msg.role, 'content': msg.content}
+                if msg.response_data:
+                    m['responseData'] = msg.response_data
+                messages.append(m)
+            result.append({
+                'id': str(chat.id),
+                'title': chat.title or 'Chat',
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.exception("list_knowledge_qa_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_knowledge_qa_chat(request):
+    """Create a new Knowledge QA chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = PMKnowledgeQAChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            PMKnowledgeQAChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("create_knowledge_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_knowledge_qa_chat(request, chat_id):
+    """Update a Knowledge QA chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = PMKnowledgeQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                PMKnowledgeQAChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_knowledge_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_knowledge_qa_chat(request, chat_id):
+    """Delete a Knowledge QA chat and all its messages."""
+    try:
+        company_user = request.user
+        chat = PMKnowledgeQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_knowledge_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- PM Project Pilot Chats ----------
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_project_pilot_chats(request):
+    """List all Project Pilot chats for the company user."""
+    try:
+        company_user = request.user
+        chats = PMProjectPilotChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        result = []
+        for chat in chats:
+            messages = []
+            for msg in chat.messages.order_by('created_at'):
+                m = {'role': msg.role, 'content': msg.content}
+                if msg.response_data:
+                    m['responseData'] = msg.response_data
+                messages.append(m)
+            result.append({
+                'id': str(chat.id),
+                'title': chat.title or 'Chat',
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.exception("list_project_pilot_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_project_pilot_chat(request):
+    """Create a new Project Pilot chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = PMProjectPilotChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            PMProjectPilotChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("create_project_pilot_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_project_pilot_chat(request, chat_id):
+    """Update a Project Pilot chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = PMProjectPilotChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                PMProjectPilotChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        messages = []
+        for msg in chat.messages.order_by('created_at'):
+            msg_dict = {'role': msg.role, 'content': msg.content}
+            if msg.response_data:
+                msg_dict['responseData'] = msg.response_data
+            messages.append(msg_dict)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': str(chat.id),
+                'title': chat.title,
+                'messages': messages,
+                'updatedAt': chat.updated_at.isoformat(),
+                'timestamp': chat.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_project_pilot_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_project_pilot_chat(request, chat_id):
+    """Delete a Project Pilot chat and all its messages."""
+    try:
+        company_user = request.user
+        chat = PMProjectPilotChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_project_pilot_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -1939,8 +2368,9 @@ def project_pilot_from_file(request):
             available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
 
+        chat_history = _get_chat_history(request)
         agent = AgentRegistry.get_agent("project_pilot")
-        result = agent.process(question=question, context=context, available_users=available_users)
+        result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
@@ -2067,6 +2497,34 @@ def project_pilot_from_file(request):
                                 logger.warning(f"Fallback JSON object extraction also failed: {e2}")
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Failed to parse answer as JSON: {e}")
+
+        # Only run round-robin when user asked for "assign to ALL" and did NOT say "only N users"
+        if not isinstance(actions, list):
+            actions = []
+        import re as _re_file
+        _q_lower_file = question.lower()
+        _only_n_users_file = _re_file.search(r"only\s+\d+\s+users?", _q_lower_file)
+        _assign_to_all_phrases_file = [
+            "assign to all", "assign to all available", "assign to all users",
+            "distribute to all", "assign tasks to all", "all available users",
+            "all developers", "all users", "assign the tasks to all",
+        ]
+        _wants_assign_to_all_file = any(p in _q_lower_file for p in _assign_to_all_phrases_file)
+        if _wants_assign_to_all_file and not _only_n_users_file and available_users:
+            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
+            if _unassigned:
+                _user_ids = [u["id"] for u in available_users]
+                for i, action_data in enumerate(_unassigned):
+                    action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
+                logger.info(f"Backend fallback (from_file): assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
+        
+        _allowed_ids_file = _get_allowed_user_ids_for_only_n_users(question, available_users)
+        if _allowed_ids_file is not None:
+            _create_tasks_f = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
+            for i, action_data in enumerate(_create_tasks_f):
+                action_data["assignee_id"] = _allowed_ids_file[i % len(_allowed_ids_file)]
+            logger.info(f"Backend enforcement (from_file): restricted to only {len(_allowed_ids_file)} users")
 
         # Process actions (reuse same logic from project_pilot)
         action_results = []
@@ -2240,6 +2698,29 @@ def project_pilot_from_file(request):
                         except Exception:
                             due_date = None
                     
+                    # Default due_date when missing
+                    if due_date is None and project_id_for_task:
+                        try:
+                            from django.utils import timezone
+                            from datetime import datetime as dt_time
+                            task_project = Project.objects.filter(id=project_id_for_task).first()
+                            if task_project and getattr(task_project, "deadline", None):
+                                d = task_project.deadline
+                                if hasattr(d, "year"):
+                                    due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                    if timezone.is_naive(due_date):
+                                        due_date = timezone.make_aware(due_date)
+                            if due_date is None and task_project and getattr(task_project, "end_date", None):
+                                d = task_project.end_date
+                                if hasattr(d, "year"):
+                                    due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                    if timezone.is_naive(due_date):
+                                        due_date = timezone.make_aware(due_date)
+                            if due_date is None:
+                                due_date = timezone.now() + timedelta(days=14)
+                        except Exception:
+                            pass
+                    
                     # Parse estimated_hours
                     estimated_hours = action.get("estimated_hours")
                     if estimated_hours:
@@ -2266,6 +2747,13 @@ def project_pilot_from_file(request):
                         "task_id": task.id,
                         "task_title": task.title,
                         "project_id": project_id_for_task,
+                        "project_name": task.project.name if task.project else None,
+                        "message": f'Task "{task.title}" created successfully!',
+                        "priority": getattr(task, "priority", None) or "medium",
+                        "assignee_username": task.assignee.username if task.assignee else None,
+                        "assignee_name": _assignee_display(task.assignee),
+                        "due_date": task.due_date.isoformat() if task.due_date else None,
+                        "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
                     })
                 except Exception as e:
                     logger.exception(f"Error creating task: {action.get('task_title')}")

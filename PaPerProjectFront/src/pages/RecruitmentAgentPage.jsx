@@ -10,6 +10,7 @@ import {
   Building2, 
   BrainCircuit, 
   Megaphone,
+  Headphones,
   Loader2,
   Lock
 } from 'lucide-react';
@@ -236,10 +237,17 @@ const RecruitmentAgentPage = () => {
               section: 'marketing',
               onClick: () => navigate('/marketing/dashboard'),
             }] : []),
+            // Show Frontline Agent if purchased
+            ...(purchasedModules.includes('frontline_agent') ? [{
+              label: 'Frontline Agent',
+              icon: Headphones,
+              section: 'frontline',
+              onClick: () => navigate('/frontline/dashboard'),
+            }] : []),
           ]}
         />
 
-        <div className="container mx-auto px-4 py-8">
+        <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-full overflow-x-hidden">
           <RecruitmentDashboard />
         </div>
       </div>

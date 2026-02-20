@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -36,6 +37,7 @@ const JobDescriptions = ({ onUpdate }) => {
     type: 'Full-time',
     requirements: '',
     parse_keywords: true,
+    is_active: true,
   });
   const [submitting, setSubmitting] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -111,6 +113,7 @@ const JobDescriptions = ({ onUpdate }) => {
       type: job.type || 'Full-time',
       requirements: job.requirements || '',
       parse_keywords: true, // keywords regenerated when description is updated
+      is_active: job.is_active !== false,
     });
     setShowEditModal(true);
   };
@@ -129,7 +132,7 @@ const JobDescriptions = ({ onUpdate }) => {
       setSubmitting(true);
       const response = await updateJobDescription(editingJob.id, {
         ...formData,
-        is_active: editingJob.is_active,
+        is_active: formData.is_active,
       });
       if (response.status === 'success') {
         toast({
@@ -196,6 +199,7 @@ const JobDescriptions = ({ onUpdate }) => {
       type: 'Full-time',
       requirements: '',
       parse_keywords: true,
+      is_active: true,
     });
     setAiPrompt('');
   };
@@ -546,6 +550,18 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
             <SelectItem value="Internship">Internship</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="space-y-0.5">
+          <Label htmlFor="is_active">Status</Label>
+          <p className="text-sm text-muted-foreground">Active jobs are visible for CV matching and recruitment</p>
+        </div>
+        <Switch
+          id="is_active"
+          checked={formData.is_active !== false}
+          onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+        />
       </div>
 
       <div className="space-y-2">

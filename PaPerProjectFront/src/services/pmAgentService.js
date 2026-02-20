@@ -1,16 +1,24 @@
 // Project Manager Agent Service
 
 import { companyApi } from './companyAuthService';
+import { API_BASE_URL } from '@/config/apiConfig';
 
 /**
  * Project Pilot Agent - Create projects, tasks, and manage operations
+ * @param {string} question
+ * @param {number|null} projectId
+ * @param {Array<{role: string, content: string}>} chatHistory - Optional conversation history for this chat
  */
-export const projectPilot = async (question, projectId = null) => {
+export const projectPilot = async (question, projectId = null, chatHistory = null) => {
   try {
-    const response = await companyApi.post('/project-manager/ai/project-pilot', {
+    const body = {
       question: question.trim(),
       project_id: projectId || null,
-    });
+    };
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      body.chat_history = chatHistory.map((m) => ({ role: m.role, content: m.content || '' }));
+    }
+    const response = await companyApi.post('/project-manager/ai/project-pilot', body);
     return response;
   } catch (error) {
     console.error('Project Pilot error:', error);
@@ -40,18 +48,73 @@ export const taskPrioritization = async (action = 'prioritize', projectId = null
 
 /**
  * Knowledge Q&A Agent - Answer questions about projects
+ * @param {string} question
+ * @param {number|null} projectId
+ * @param {Array<{role: string, content: string}>} chatHistory - Optional conversation history for this chat
  */
-export const knowledgeQA = async (question, projectId = null) => {
+export const knowledgeQA = async (question, projectId = null, chatHistory = null) => {
   try {
-    const response = await companyApi.post('/project-manager/ai/knowledge-qa', {
+    const body = {
       question: question.trim(),
       project_id: projectId || null,
-    });
+    };
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      body.chat_history = chatHistory.map((m) => ({ role: m.role, content: m.content || '' }));
+    }
+    const response = await companyApi.post('/project-manager/ai/knowledge-qa', body);
     return response;
   } catch (error) {
     console.error('Knowledge Q&A error:', error);
     throw error;
   }
+};
+
+/** List all Knowledge QA chats */
+export const listKnowledgeQAChats = async () => {
+  const response = await companyApi.get('/project-manager/ai/knowledge-qa/chats');
+  return response;
+};
+
+/** Create a new Knowledge QA chat */
+export const createKnowledgeQAChat = async (data) => {
+  const response = await companyApi.post('/project-manager/ai/knowledge-qa/chats/create', data);
+  return response;
+};
+
+/** Update a Knowledge QA chat (add messages, optional title) */
+export const updateKnowledgeQAChat = async (chatId, data) => {
+  const response = await companyApi.patch(`/project-manager/ai/knowledge-qa/chats/${chatId}/update`, data);
+  return response;
+};
+
+/** Delete a Knowledge QA chat */
+export const deleteKnowledgeQAChat = async (chatId) => {
+  const response = await companyApi.delete(`/project-manager/ai/knowledge-qa/chats/${chatId}/delete`);
+  return response;
+};
+
+/** List all Project Pilot chats */
+export const listProjectPilotChats = async () => {
+  const response = await companyApi.get('/project-manager/ai/project-pilot/chats');
+  return response;
+};
+
+/** Create a new Project Pilot chat */
+export const createProjectPilotChat = async (data) => {
+  const response = await companyApi.post('/project-manager/ai/project-pilot/chats/create', data);
+  return response;
+};
+
+/** Update a Project Pilot chat (add messages, optional title) */
+export const updateProjectPilotChat = async (chatId, data) => {
+  const response = await companyApi.patch(`/project-manager/ai/project-pilot/chats/${chatId}/update`, data);
+  return response;
+};
+
+/** Delete a Project Pilot chat */
+export const deleteProjectPilotChat = async (chatId) => {
+  const response = await companyApi.delete(`/project-manager/ai/project-pilot/chats/${chatId}/delete`);
+  return response;
 };
 
 /**
@@ -104,16 +167,19 @@ export const generateSubtasks = async (projectId) => {
  * Project Pilot from File - Upload a file and process its content
  * @param {File} file - File to upload (txt, pdf, or docx)
  * @param {number|null} projectId - Optional project ID
+ * @param {Array<{role: string, content: string}>} chatHistory - Optional conversation history for this chat
  */
-export const projectPilotFromFile = async (file, projectId = null) => {
+export const projectPilotFromFile = async (file, projectId = null, chatHistory = null) => {
   try {
     const token = localStorage.getItem('company_auth_token');
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
     const formData = new FormData();
     formData.append('file', file);
     if (projectId) {
       formData.append('project_id', projectId);
+    }
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      formData.append('chat_history', JSON.stringify(chatHistory.map((m) => ({ role: m.role, content: m.content || '' }))));
     }
 
     const response = await fetch(`${API_BASE_URL}/project-manager/ai/project-pilot/upload-file`, {
@@ -140,6 +206,14 @@ export default {
   projectPilotFromFile,
   taskPrioritization,
   knowledgeQA,
+  listKnowledgeQAChats,
+  createKnowledgeQAChat,
+  updateKnowledgeQAChat,
+  deleteKnowledgeQAChat,
+  listProjectPilotChats,
+  createProjectPilotChat,
+  updateProjectPilotChat,
+  deleteProjectPilotChat,
   timelineGantt,
   generateSubtasks,
 };

@@ -295,11 +295,13 @@ INSTALLED_APPS = [
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
     'api',  # API app
+    'whitenoise.runserver_nostatic',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
+     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -307,6 +309,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'recruitment_agent.middleware.AutoInterviewFollowupMiddleware',  # Auto follow-up email checking
+   
 ]
 
 ROOT_URLCONF = 'project_manager_ai.urls'
@@ -342,11 +345,11 @@ DATABASES = {
         'USER': os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'OPTIONS': {
-            'driver': 'ODBC Driver 17 for SQL Server',
-            'extra_params': 'TrustServerCertificate=yes',  # Trust server certificate
-        },
+                'driver': 'ODBC Driver 18 for SQL Server',  # ← Change from 17 to 18
+                'extra_params': 'TrustServerCertificate=yes;Encrypt=Optional',  # Recomm                
+            },
         'CONN_MAX_AGE': 0,
-        'TIME_ZONE': None,
+        'TIME_ZONE': 'UTC',
     }
 }
 
@@ -373,8 +376,15 @@ USE_TZ = True
 # --------------------
 # Static files
 # --------------------
+DATABASE_CONNECTION_POOLING = False
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+# This is the key line that's missing
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # or '/app/staticfiles' – both work
+
+# Optional but recommended for production (uses Whitenoise efficiently)
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # --------------------
 # Media files (for file uploads)
@@ -388,6 +398,10 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # --------------------
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+if not DEBUG:
+    # Production memory optimizations
+    import gc
+    gc.set_threshold(700, 10, 10)  # more aggressive garbage collection
 
 # --------------------
 # Auth redirects
@@ -403,6 +417,18 @@ LOGIN_URL = '/login/'
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
 GROQ_REC_API_KEY = os.getenv('GROQ_REC_API_KEY', '')
+
+# OpenRouter API Settings (Highest Priority)
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '')
+OPENROUTER_EMBEDDING_MODEL = os.getenv('OPENROUTER_EMBEDDING_MODEL', 'deepseek/deepseek-r1-0528:free')
+
+# DeepSeek API Settings
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+DEEPSEEK_EMBEDDING_MODEL = os.getenv('DEEPSEEK_EMBEDDING_MODEL', 'deepseek/deepseek-r1-0528')
+
+# Embedding Provider Settings
+EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'auto')  # 'auto', 'openrouter', 'deepseek', 'groq', or 'openai'
+OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
 
 
 # --------------------
@@ -464,14 +490,18 @@ SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
 # --------------------
 # CORS Configuration
 # --------------------
-# Read CORS allowed origins from .env (comma-separated list). Set CORS_ALLOWED_ORIGINS in .env for your frontend URL(s).
-cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    cors_origins_env = os.getenv(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173',
+    )
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
 
-# Allow credentials (cookies, authorization headers, etc.)
 CORS_ALLOW_CREDENTIALS = True
 
-# Allow all headers
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -482,9 +512,10 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-company-user-id',
+    'x-company-id',
 ]
 
-# Allow all methods
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',
