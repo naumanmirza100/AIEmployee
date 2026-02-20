@@ -5,10 +5,12 @@ to identify opportunities, risks, and positioning strategies.
 """
 
 from .marketing_base_agent import MarketingBaseAgent
+from .platform_content import get_platform_response
 from typing import Dict, Optional, List
 from marketing_agent.models import MarketResearch
 from django.contrib.auth.models import User
 import json
+import re
 from datetime import datetime
 
 
@@ -40,7 +42,97 @@ class MarketResearchAgent(MarketingBaseAgent):
         
         Always provide data-driven insights, identify key trends, and suggest actionable strategies.
         Be specific, analytical, and strategic in your research findings."""
-    
+
+    INTENT_CLASSIFY_SYSTEM = """You are an intent classifier for a Market & Competitive Research agent.
+Given the user's message, reply with exactly one word:
+- greeting: hi, hello, how are you, thanks, bye, lets start, ready, small talk, etc. (NOT asking about the platform or what it does.)
+- platform_question: user is asking about THIS PLATFORM/APP/WEBSITE/SYSTEM—what it does, how helpful it is, how to use it, how to run a campaign (e.g. "what does this platform do", "how helpful is this platform", "what is this website", "what is this system", "how to use this", "how to run campaign here"). They want an answer about the product itself.
+- meta_question: user is asking what THIS RESEARCH AGENT can do or which topics it can research (e.g. what can you research, which topics, what questions can you answer, give me examples of research topics). They want to know research capabilities of this tab.
+- definition: user is asking for the MEANING, FULL FORM, or DEFINITION of a term/abbreviation (e.g. "meaning of AWS", "what is API"). NOT a research report.
+- off_topic: not a research request (e.g. dismissive, random, or unrelated).
+- research: user wants an actual REPORT on a market/competitor/customer/opportunity/risk topic (e.g. "cloud trends", "web and ai companies", "competitor analysis for Amazon"). They gave a topic to analyze.
+Ignore typos and casual language. Reply with only one word: greeting, platform_question, meta_question, definition, off_topic, or research."""
+
+    def _classify_intent(self, topic: str) -> str:
+        """
+        Use the LLM to classify user intent so any phrasing/typos are handled.
+        Returns one of: 'greeting', 'platform_question', 'meta_question', 'definition', 'off_topic', 'research'.
+        On failure or empty topic, returns 'greeting' for empty and 'research' otherwise (don't block real research).
+        """
+        if not topic or not isinstance(topic, str):
+            return 'greeting'
+        t = topic.strip()
+        if not t:
+            return 'greeting'
+        if not self.groq_client:
+            return 'research'
+        try:
+            prompt = f'User message: "{t[:500]}"'
+            out = self._call_llm_for_reasoning(
+                prompt,
+                self.INTENT_CLASSIFY_SYSTEM,
+                temperature=0.0,
+                max_tokens=20
+            )
+            if not out:
+                return 'research'
+            parts = out.strip().lower().split()
+            first = (parts[0] if parts else '').strip()
+            first = re.sub(r'[^a-z_]', '', first)
+            if first in ('greeting', 'platform_question', 'platform', 'meta_question', 'meta', 'definition', 'def', 'off_topic', 'offtopic', 'research'):
+                if first == 'platform':
+                    return 'platform_question'
+                if first == 'meta':
+                    return 'meta_question'
+                if first == 'def':
+                    return 'definition'
+                if first in ('offtopic', 'off_topic'):
+                    return 'off_topic'
+                return first
+            if 'greeting' in out.lower():
+                return 'greeting'
+            if 'platform' in out.lower():
+                return 'platform_question'
+            if 'meta' in out.lower() or 'question' in out.lower():
+                return 'meta_question'
+            if 'definition' in out.lower() or 'meaning' in out.lower() or 'define' in out.lower():
+                return 'definition'
+            if 'off' in out.lower() or 'topic' in out.lower():
+                return 'off_topic'
+            if 'research' in out.lower():
+                return 'research'
+            return 'research'
+        except Exception as e:
+            self.log_action("Intent classification failed, treating as research", {"error": str(e)})
+            return 'research'
+
+    def _get_short_definition(self, topic: str) -> str:
+        """Return a short (1-3 sentence) definition for the term the user asked about. Handles typos like 'meanin gof aws'."""
+        if not self.groq_client:
+            return (
+                "This agent does **market and competitive research** only. For the meaning of terms (e.g. AWS = Amazon Web Services), "
+                "try a quick search. If you want a research report on a topic, ask e.g. 'market trends for cloud computing' or 'competitor analysis for AWS'."
+            )
+        try:
+            prompt = f"""The user asked for the meaning or definition of something. They may have typos (e.g. "meanin gof aws" = meaning of AWS).
+Reply with a brief, clear definition in 1-3 sentences. If it's an abbreviation, give the full form first (e.g. "AWS = Amazon Web Services. It is ...").
+User message: "{topic[:200]}"
+Reply only with the definition, no preamble."""
+            out = self._call_llm_for_reasoning(
+                prompt,
+                "You are a helpful assistant that gives short, accurate definitions of terms and abbreviations. Be concise.",
+                temperature=0.2,
+                max_tokens=150
+            )
+            if out and out.strip():
+                return out.strip()
+        except Exception as e:
+            self.log_action("Short definition failed", {"error": str(e)})
+        return (
+            "This agent focuses on **market and competitive research**. For definitions, try a quick search. "
+            "If you want a research report (e.g. on the AWS/cloud market), ask e.g. 'market trends for cloud computing'."
+        )
+
     def process(self, research_type: str, topic: str, user_id: int, 
                 additional_context: Optional[Dict] = None) -> Dict:
         """
@@ -59,8 +151,84 @@ class MarketResearchAgent(MarketingBaseAgent):
             "type": research_type,
             "topic": topic[:100]
         })
-        
-        # Generate research insights using AI
+
+        intent = self._classify_intent(topic)
+        if intent == 'greeting':
+            return {
+                'success': True,
+                'research_id': None,
+                'research_type': research_type,
+                'topic': topic,
+                'findings': {},
+                'insights': "Hi! Enter a research topic to get started (e.g. market trends for cloud, competitor analysis for X). Choose a research type and add optional context above.",
+                'opportunities': [],
+                'risks': [],
+                'recommendations': [],
+                'source_urls': []
+            }
+        if intent == 'platform_question':
+            insights = get_platform_response(topic)
+            return {
+                'success': True,
+                'research_id': None,
+                'research_type': research_type,
+                'topic': topic,
+                'findings': {},
+                'insights': insights,
+                'opportunities': [],
+                'risks': [],
+                'recommendations': [],
+                'source_urls': []
+            }
+        if intent == 'meta_question':
+            return {
+                'success': True,
+                'research_id': None,
+                'research_type': research_type,
+                'topic': topic,
+                'findings': {},
+                'insights': (
+                    "You can research **market trends**, **competitors**, **customer behavior**, **opportunities**, or **risks**. "
+                    "Enter a topic (e.g. 'cloud adoption in UK', 'competitor analysis for Amazon', 'web and AI companies') and choose a research type above. "
+                    "Ask for a specific topic when you want a full report."
+                ),
+                'opportunities': [],
+                'risks': [],
+                'recommendations': [],
+                'source_urls': []
+            }
+        if intent == 'off_topic':
+            return {
+                'success': True,
+                'research_id': None,
+                'research_type': research_type,
+                'topic': topic,
+                'findings': {},
+                'insights': (
+                    "That doesn't look like a research topic. Ask about a **specific market**, **competitor**, or **trend**—e.g. "
+                    "'cloud adoption in UK', 'competitor analysis for Amazon', or 'customer behavior in e-commerce'."
+                ),
+                'opportunities': [],
+                'risks': [],
+                'recommendations': [],
+                'source_urls': []
+            }
+        if intent == 'definition':
+            definition_insights = self._get_short_definition(topic)
+            return {
+                'success': True,
+                'research_id': None,
+                'research_type': research_type,
+                'topic': topic,
+                'findings': {},
+                'insights': definition_insights,
+                'opportunities': [],
+                'risks': [],
+                'recommendations': [],
+                'source_urls': []
+            }
+
+        # Run research (no relevance check—accept the user's topic and selected type)
         research_findings = self._conduct_research(research_type, topic, additional_context)
         
         # Store research in database

@@ -54,7 +54,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
       } else {
         toast({
           title: 'Error',
-          description: response.message || 'Failed to get answer',
+          description: 'Something went wrong. Please try again.',
           variant: 'destructive',
         });
       }
@@ -62,7 +62,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
       console.error('Knowledge Q&A error:', error);
       toast({
         title: 'Error',
-        description: error.message || 'Failed to get answer',
+        description: 'Something went wrong. Please try again.',
         variant: 'destructive',
       });
     } finally {

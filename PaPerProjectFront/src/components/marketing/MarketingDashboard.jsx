@@ -479,7 +479,29 @@ const MarketingDashboard = () => {
             <div className="space-y-4">
               <Card>
                 <CardHeader>
+                  <div className="flex flex-row items-center justify-between">
                   <CardTitle>Marketing Overview</CardTitle>
+                   {/* Main action buttons */}
+                   <div className="flex flex-wrap gap-3">
+                    <Button
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => setActiveTab('campaigns')}
+                    >
+                      <Plus className="h-5 w-5" />
+                      Create campaign
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => setActiveTab('email')}
+                    >
+                      <Mail className="h-5 w-5" />
+                      Email accounts
+                    </Button>
+                  </div>
+                  </div>
                   <CardDescription>
                     Your marketing campaigns and performance metrics
                   </CardDescription>
@@ -489,26 +511,7 @@ const MarketingDashboard = () => {
                     Use the Campaigns tab to create and manage email campaigns. Use the Email tab to manage accounts and see sending stats.
                   </p>
 
-                  {/* Main action buttons */}
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      size="lg"
-                      className="gap-2"
-                      onClick={() => setActiveTab('campaigns')}
-                    >
-                      <Plus className="h-5 w-5" />
-                      Create campaign
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      className="gap-2"
-                      onClick={() => setActiveTab('email')}
-                    >
-                      <Mail className="h-5 w-5" />
-                      Email accounts
-                    </Button>
-                  </div>
+                 
 
                   {/* Campaigns list (like backend campaigns_list.html) */}
                   <div>
@@ -518,7 +521,7 @@ const MarketingDashboard = () => {
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
                       </div>
                     ) : campaigns.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-8 text-center">
+                      <div className="border-muted-foreground/30 bg-muted/20 p-8 text-center">
                         <Megaphone className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                         <p className="text-sm text-muted-foreground mb-4">No campaigns yet.</p>
                         <Button size="lg" className="gap-2" onClick={() => setActiveTab('campaigns')}>
@@ -527,7 +530,7 @@ const MarketingDashboard = () => {
                         </Button>
                       </div>
                     ) : (
-                      <div className="rounded-lg border overflow-hidden">
+                      <div className=" overflow-hidden">
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="bg-muted/50 border-b">
@@ -536,6 +539,7 @@ const MarketingDashboard = () => {
                               <th className="text-left font-semibold p-3">Type</th>
                               <th className="text-left font-semibold p-3">Created</th>
                               <th className="text-left font-semibold p-3">Scheduled</th>
+                              <th className="text-left font-semibold p-3">End Date</th>
                               <th className="text-left font-semibold p-3">Actions</th>
                             </tr>
                           </thead>
@@ -558,6 +562,7 @@ const MarketingDashboard = () => {
                                 <td className="p-3 text-muted-foreground">{campaign.campaign_type || '—'}</td>
                                 <td className="p-3 text-muted-foreground">{formatDate(campaign.created_at)}</td>
                                 <td className="p-3 text-muted-foreground">{campaign.start_date ? formatDate(campaign.start_date) : '—'}</td>
+                                <td className="p-3 text-muted-foreground">{campaign.end_date ? formatDate(campaign.end_date) : '—'}</td>
                                 <td className="p-3">
                                   <Button
                                     variant="default"
@@ -962,15 +967,15 @@ const MarketingDashboard = () => {
           </Dialog>
         </TabsContent>
 
-        <TabsContent value="campaigns">
+        <TabsContent value="campaigns" className="!mt-2 h-[calc(100vh-20rem)] min-h-[400px]">
           <Campaigns onRefresh={fetchStats} />
         </TabsContent>
 
-        <TabsContent value="qa">
+        <TabsContent value="qa" className="!mt-2 h-[calc(100vh-20rem)] min-h-[400px]">
           <MarketingQA />
         </TabsContent>
 
-        <TabsContent value="research">
+        <TabsContent value="research" className="!mt-2 h-[calc(100vh-20rem)] min-h-[400px]">
           <MarketResearch />
         </TabsContent>
 

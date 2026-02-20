@@ -10,6 +10,47 @@ import marketingAgentService from '@/services/marketingAgentService';
 
 const STORAGE_KEY = 'marketing_qa_chats';
 
+/** Normalize question for comparison: trim, lower, collapse spaces, remove trailing punctuation */
+function normalizeQuestion(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[?!.,;:]+\s*$/, '');
+}
+
+/** True if question is greeting/small talk – do not call API */
+function isGreetingOrSmallTalk(question) {
+  const t = normalizeQuestion(question);
+  if (!t) return true;
+  if (t.length > 40) return false;
+  const smallTalk = new Set([
+    'hi', 'hii', 'hello', 'hey', 'helo', 'yo', 'sup', 'thanks', 'thank you', 'thx',
+    'ok', 'okay', 'oky', 'okey', 'okie', 'k', 'kk', 'bye', 'goodbye', 'cya',
+    'good', 'great', 'nice', 'cool', 'alright', 'fine', 'got it', 'understood',
+    'perfect', 'sure', 'yeah', 'yep', 'yup', 'nope', 'no', 'yes',
+    'ok good', 'okay good', 'oky good', 'ok god', 'oky god', 'okay god',
+    'okya', 'okya good', 'okya god', 'okie good', 'gud', 'gud good',
+  ]);
+  if (smallTalk.has(t)) return true;
+  if (t.length <= 14 && /^ok[a-z]*\s*(good|god|gud)?$/.test(t)) return true;
+  return false;
+}
+
+/** True if question is meta (what can I ask) – do not call API. Platform/agent questions ("what is this platform", "how does this work") go to API. */
+function isMetaQuestion(question) {
+  const t = normalizeQuestion(question);
+  if (!t || t.length > 80) return false;
+  const metaPhrases = [
+    'what can i ask', 'what i can ask', 'how can you help', 'what do you do',
+    'what can you answer', 'what should i ask',
+    'example questions', 'give me examples', 'what to ask',
+  ];
+  return metaPhrases.some((p) => t.includes(p));
+}
+
 /** Markdown to HTML for Q&A answers - readable paragraphs, headings, bullets, tables */
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -92,6 +133,12 @@ function markdownToHtml(markdown) {
 
 /** Suggested questions matching backend / agents_test.html Knowledge Q&A + Analytics */
 const SUGGESTED_QUESTIONS = [
+  { group: 'Platform & getting started', options: [
+    'What is this platform?',
+    'How does this platform work?',
+    'How do I run a campaign?',
+    'What is this agent?',
+  ]},
   { group: 'Performance & Analytics', options: [
     'What campaigns are performing best?',
     'What is our overall ROI?',
@@ -120,10 +167,27 @@ const SUGGESTED_QUESTIONS = [
   ]},
 ];
 
+/** Normalize chat to { id, messages: [{ role, content, responseData? }], timestamp } */
+function normalizeChat(c) {
+  if (c.messages && Array.isArray(c.messages)) return c;
+  if (c.question != null) {
+    return {
+      id: c.id,
+      messages: [
+        { role: 'user', content: c.question },
+        { role: 'assistant', content: c.response || '', responseData: c.responseData },
+      ],
+      timestamp: c.timestamp || new Date().toISOString(),
+    };
+  }
+  return { id: c.id || Date.now().toString(), messages: [], timestamp: c.timestamp || new Date().toISOString() };
+}
+
 function loadChats() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const list = raw ? JSON.parse(raw) : [];
+    return list.map(normalizeChat);
   } catch {
     return [];
   }
@@ -149,7 +213,7 @@ const MarketingQA = () => {
   }, []);
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
-  const currentMessages = selectedChat ? [{ role: 'user', content: selectedChat.question }, { role: 'assistant', content: selectedChat.response }] : [];
+  const currentMessages = selectedChat?.messages ?? [];
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
@@ -166,15 +230,80 @@ const MarketingQA = () => {
       return;
     }
     const q = question.trim();
+
+    if (isGreetingOrSmallTalk(q)) {
+      const response = {
+        answer: "Hi! Ask me about your **campaigns**, **ROI**, **conversion rate**, **leads**, or **marketing performance**. You can pick a suggested question above or type your own.",
+        insights: [],
+      };
+      const responseText = response.answer;
+      const userMsg = { role: 'user', content: q };
+      const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
+      const now = new Date().toISOString();
+      if (selectedChatId) {
+        const chat = chats.find((c) => c.id === selectedChatId);
+        if (chat) {
+          const updatedChat = { ...chat, messages: [...(chat.messages || []), userMsg, assistantMsg], timestamp: now };
+          const updated = chats.map((c) => (c.id === selectedChatId ? updatedChat : c));
+          setChats(updated);
+          saveChats(updated);
+        } else {
+          createNewChat(q, responseText, response, userMsg, assistantMsg, now);
+        }
+      } else {
+        createNewChat(q, responseText, response, userMsg, assistantMsg, now);
+      }
+      setQuestion('');
+      setSuggestedValue('__none__');
+      setTimeout(scrollToBottom, 100);
+      return;
+    }
+
+    if (isMetaQuestion(q)) {
+      const response = {
+        answer: "You can ask about **campaign performance**, **ROI**, **conversion rates**, **leads**, **customer acquisition cost**, and more. Use the suggested questions above or type a specific marketing question.",
+        insights: [],
+      };
+      const responseText = response.answer;
+      const userMsg = { role: 'user', content: q };
+      const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
+      const now = new Date().toISOString();
+      if (selectedChatId) {
+        const chat = chats.find((c) => c.id === selectedChatId);
+        if (chat) {
+          const updatedChat = { ...chat, messages: [...(chat.messages || []), userMsg, assistantMsg], timestamp: now };
+          const updated = chats.map((c) => (c.id === selectedChatId ? updatedChat : c));
+          setChats(updated);
+          saveChats(updated);
+        } else {
+          createNewChat(q, responseText, response, userMsg, assistantMsg, now);
+        }
+      } else {
+        createNewChat(q, responseText, response, userMsg, assistantMsg, now);
+      }
+      setQuestion('');
+      setSuggestedValue('__none__');
+      setTimeout(scrollToBottom, 100);
+      return;
+    }
+
     try {
       setLoading(true);
-      setSelectedChatId(null);
-      const result = await marketingAgentService.marketingQA(q);
+      // Send last 6 Q&A pairs so the model can resolve "this campaign", "the active one", follow-up questions, etc.
+      const pairs = [];
+      const messages = currentMessages || [];
+      for (let i = 0; i < messages.length - 1; i++) {
+        if (messages[i].role === 'user' && messages[i + 1].role === 'assistant') {
+          const answer = messages[i + 1].responseData?.answer ?? messages[i + 1].content ?? '';
+          pairs.push({ question: messages[i].content, answer });
+        }
+      }
+      const conversationHistory = pairs.slice(-6);
+      const result = await marketingAgentService.marketingQA(q, conversationHistory);
       if (result.status === 'success' && result.data) {
         const response = result.data;
         const answer = response.answer || 'No answer provided.';
         const insights = response.insights || [];
-        const hasMultiple = insights.some((i) => i.value && String(i.value).includes(':')) || insights.length > 3;
         let responseText = answer;
         if (insights.length > 0) {
           responseText += '\n\n**Key Insights & Metrics**\n';
@@ -182,28 +311,53 @@ const MarketingQA = () => {
             responseText += `• **${i.title || 'N/A'}**: ${i.value || 'N/A'}\n`;
           });
         }
-        const newChat = {
-          id: Date.now().toString(),
-          question: q,
-          response: responseText,
-          responseData: response,
-          timestamp: new Date().toISOString(),
-        };
-        const updated = [newChat, ...chats];
-        setChats(updated);
-        saveChats(updated);
-        setSelectedChatId(newChat.id);
-        setQuestion('');
-        setSuggestedValue('__none__');
-        setTimeout(scrollToBottom, 100);
+        const userMsg = { role: 'user', content: q };
+        const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
+        const now = new Date().toISOString();
+
+        if (selectedChatId) {
+          const chat = chats.find((c) => c.id === selectedChatId);
+          if (chat) {
+            const updatedChat = {
+              ...chat,
+              messages: [...(chat.messages || []), userMsg, assistantMsg],
+              timestamp: now,
+            };
+            const updated = chats.map((c) => (c.id === selectedChatId ? updatedChat : c));
+            setChats(updated);
+            saveChats(updated);
+            setQuestion('');
+            setSuggestedValue('__none__');
+            setTimeout(scrollToBottom, 100);
+          } else {
+            createNewChat(q, responseText, response, userMsg, assistantMsg, now);
+          }
+        } else {
+          createNewChat(q, responseText, response, userMsg, assistantMsg, now);
+        }
       } else {
         throw new Error(result.message || 'Failed to get response');
       }
     } catch (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
+  };
+
+  const createNewChat = (q, responseText, response, userMsg, assistantMsg, now) => {
+    const newChat = {
+      id: Date.now().toString(),
+      messages: [userMsg, assistantMsg],
+      timestamp: now,
+    };
+    const updated = [newChat, ...chats];
+    setChats(updated);
+    saveChats(updated);
+    setSelectedChatId(newChat.id);
+    setQuestion('');
+    setSuggestedValue('__none__');
+    setTimeout(scrollToBottom, 100);
   };
 
   const newChat = () => {
@@ -232,7 +386,7 @@ const MarketingQA = () => {
   };
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-12rem)] min-h-[500px]">
+    <div className="h-full min-h-0 flex gap-4">
       {/* Sidebar - Previous chats */}
       <div className="w-64 shrink-0 flex flex-col rounded-lg border bg-card overflow-hidden">
         <div className="p-3 border-b flex items-center justify-between">
@@ -246,7 +400,7 @@ const MarketingQA = () => {
             <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
           ) : (
             <div className="p-2 space-y-1">
-              {chats.map((c) => (
+              {[...chats].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map((c) => (
                 <div
                   key={c.id}
                   className={`group flex items-start gap-1 w-full text-left p-3 rounded-lg text-sm transition-colors cursor-pointer ${
@@ -258,7 +412,7 @@ const MarketingQA = () => {
                   onKeyDown={(e) => e.key === 'Enter' && setSelectedChatId(c.id)}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{truncate(c.question, 40)}</div>
+                    <div className="font-medium truncate">{truncate(c.messages?.find((m) => m.role === 'user')?.content || 'New chat', 40)}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.timestamp)}</div>
                   </div>
                   <Button
@@ -279,7 +433,7 @@ const MarketingQA = () => {
       </div>
 
       {/* Main chat area */}
-      <Card className="flex-1 flex flex-col min-w-0">
+      <Card className="flex-1 flex flex-col min-w-0 min-h-0">
         <CardHeader className="shrink-0">
           <CardTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
@@ -291,7 +445,7 @@ const MarketingQA = () => {
         </CardHeader>
         <CardContent className="flex-1 flex flex-col min-h-0 p-0">
           {/* Messages area */}
-          <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 space-y-4">
             {!selectedChatId && chats.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
@@ -324,15 +478,15 @@ const MarketingQA = () => {
                     <>
                       <div
                         className="prose prose-base max-w-none [&_h2]:text-violet-600 [&_h2]:dark:text-violet-400 [&_strong]:font-semibold [&_p]:text-base [&_li]:text-base"
-                        dangerouslySetInnerHTML={{ __html: markdownToHtml(selectedChat?.responseData?.answer || msg.content) }}
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.responseData?.answer || msg.content) }}
                       />
-                      {selectedChat?.responseData?.insights?.length > 0 && (
+                      {msg.responseData?.insights?.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-border/50">
                           <p className="text-xs font-semibold mb-2">Key Insights</p>
                           <div className="overflow-x-auto">
                             <table className="w-full text-xs">
                               <tbody>
-                                {selectedChat.responseData.insights.map((insight, j) => (
+                                {msg.responseData.insights.map((insight, j) => (
                                   <tr key={j} className="border-b border-border/30">
                                     <td className="py-1 pr-2 font-medium">{insight.title || 'N/A'}</td>
                                     <td className="py-1 text-muted-foreground">{insight.value || 'N/A'}</td>
