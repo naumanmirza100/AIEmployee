@@ -949,6 +949,25 @@ def task_prioritization(request):
             for m in members
         ]
 
+        # For delegation (and to avoid empty team): include users who are assignees on project tasks but not in TeamMember
+        action = request.data.get("action", "prioritize")
+        if action == "delegation" or not team:
+            assignee_ids = [t.get("assignee_id") for t in tasks if t.get("assignee_id")]
+            assignee_ids = list(set(assignee_ids))
+            team_ids = {m["id"] for m in team}
+            missing_ids = [uid for uid in assignee_ids if uid not in team_ids]
+            if missing_ids:
+                User = get_user_model()
+                for u in User.objects.filter(id__in=missing_ids):
+                    team.append({
+                        "id": u.id,
+                        "username": u.username,
+                        "name": u.get_full_name() or u.username,
+                        "role": "member",
+                    })
+                    team_ids.add(u.id)
+                logger.info("task_prioritization: extended team with %d assignees not in TeamMember", len(missing_ids))
+
         # Calculate workload analysis for each team member
         workload_analysis = {}
         for member in team:
