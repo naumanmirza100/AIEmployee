@@ -782,9 +782,14 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
               </div>
             )}
 
-            {/* Delegation Suggestions */}
-            {(result.data?.suggestions || result.data?.suggestions?.suggestions) && (
+            {/* Delegation Suggestions - show when action is delegation (result has suggestions key or summary) */}
+            {(action === 'delegation' && (Array.isArray(result.data?.suggestions) || result.data?.summary)) && (
               <div className="space-y-4">
+                {result.data?.summary?.message && (
+                  <div className="p-3 rounded-lg bg-muted/60 border border-border text-sm text-muted-foreground">
+                    {result.data.summary.message}
+                  </div>
+                )}
                 {result.data?.summary && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                     <div className="p-3 border rounded-lg bg-card border-border">

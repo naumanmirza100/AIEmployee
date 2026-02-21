@@ -1665,27 +1665,25 @@ CALCULATE AND RETURN JSON:
                 'error': f'Project with ID {project_id} not found'
             }
         
-        # Group tasks by status as phases
+        # Group tasks by status as phases — always show all phases (empty if no tasks)
         tasks = Task.objects.filter(project=project)
-        
+        phase_order = ['todo', 'in_progress', 'review', 'done', 'blocked']
         phases_data = []
-        phase_order = ['todo', 'in_progress', 'review', 'done']
-        
+
         for phase_status in phase_order:
             phase_tasks = tasks.filter(status=phase_status)
-            if phase_tasks.exists():
-                phases_data.append({
-                    'phase': phase_status.replace('_', ' ').title(),
-                    'status': phase_status,
-                    'task_count': phase_tasks.count(),
-                    'tasks': [{
-                        'id': t.id,
-                        'title': t.title,
-                        'priority': t.priority,
-                        'due_date': t.due_date.isoformat() if t.due_date else None
-                    } for t in phase_tasks[:10]]  # Limit to 10 tasks per phase
-                })
-        
+            phases_data.append({
+                'phase': phase_status.replace('_', ' ').title(),
+                'status': phase_status,
+                'task_count': phase_tasks.count(),
+                'tasks': [{
+                    'id': t.id,
+                    'title': t.title,
+                    'priority': t.priority,
+                    'due_date': t.due_date.isoformat() if t.due_date else None
+                } for t in phase_tasks[:10]]  # Limit to 10 tasks per phase
+            })
+
         return {
             'success': True,
             'phases': phases_data,
@@ -1697,12 +1695,13 @@ CALCULATE AND RETURN JSON:
         Check and alert on upcoming deadlines and milestones.
         
         Shows:
-        1. Tasks that are not completed and have less than 20% of total time remaining
-        2. Tasks that have passed their deadline and are not completed
+        1. Overdue tasks (past due date, not completed)
+        2. Tasks due within the next days_ahead days (e.g. next 7 days)
+        3. Project end date if within days_ahead
         
         Args:
             project_id (int): Project ID
-            days_ahead (int): Number of days to look ahead (not used in new logic, kept for compatibility)
+            days_ahead (int): Number of days to look ahead (default 7). Tasks due within this window are shown.
             
         Returns:
             Dict: Upcoming deadlines and alerts
@@ -1720,30 +1719,35 @@ CALCULATE AND RETURN JSON:
         now = timezone.now()
         alerts = []
         
-        # Get all tasks that are not completed and have a due_date
+        # Tasks that are not 100% complete (exclude only status='done') and have a due_date
         incomplete_tasks = Task.objects.filter(
             project=project,
-            due_date__isnull=False,
-            status__in=['todo', 'in_progress', 'review', 'blocked']
-        ).select_related('assignee').order_by('due_date')
+            due_date__isnull=False
+        ).exclude(status='done').select_related('assignee').order_by('due_date')
         
         for task in incomplete_tasks:
             if not task.due_date:
                 continue
                 
-            # Convert due_date to datetime for comparison if it's a date
+            # Convert due_date to timezone-aware datetime for reliable comparison with now
             if isinstance(task.due_date, date_type):
                 task_due_datetime = datetime.combine(task.due_date, datetime.min.time())
                 task_due_datetime = timezone.make_aware(task_due_datetime)
             else:
                 task_due_datetime = task.due_date
+                if task_due_datetime is not None and timezone.is_naive(task_due_datetime):
+                    task_due_datetime = timezone.make_aware(task_due_datetime)
             
-            # Check if task is overdue (deadline has passed)
-            is_overdue = task_due_datetime < now
-            
+            if task_due_datetime is None:
+                continue
+            # Compare by date in local timezone so "due yesterday" is always overdue
+            task_due_local = timezone.localtime(task_due_datetime)
+            due_date_only = task_due_local.date() if hasattr(task_due_local, 'date') else task_due_local
+            now_date = timezone.localtime(now).date()
+            is_overdue = due_date_only < now_date
             if is_overdue:
                 # Task is overdue - show it
-                days_overdue = (now - task_due_datetime).days
+                days_overdue = (now_date - due_date_only).days
                 alerts.append({
                     'type': 'overdue',
                     'task_id': task.id,
@@ -1758,57 +1762,55 @@ CALCULATE AND RETURN JSON:
                     'assignee_name': task.assignee.username if task.assignee else 'Unassigned'
                 })
             else:
-                # Task is not overdue - check if less than 20% time remaining
-                # Calculate total time: from task start (created_at or project start) to due_date
-                task_start = None
-                if task.created_at:
-                    task_start = task.created_at
-                elif project.start_date:
-                    task_start = datetime.combine(project.start_date, datetime.min.time())
-                    if timezone.is_naive(task_start):
-                        task_start = timezone.make_aware(task_start)
-                else:
-                    # Fallback: use task creation date or project creation date
-                    task_start = now - timedelta(days=30)  # Default to 30 days ago if no start date
-                    if timezone.is_naive(task_start):
-                        task_start = timezone.make_aware(task_start)
-                
-                if isinstance(task_start, date_type):
-                    task_start = datetime.combine(task_start, datetime.min.time())
-                    if timezone.is_naive(task_start):
-                        task_start = timezone.make_aware(task_start)
-                
-                # Calculate total time duration
-                total_time_delta = task_due_datetime - task_start
-                total_time_days = total_time_delta.total_seconds() / (24 * 3600)
-                
-                # Calculate remaining time
+                # Task is not overdue - show if due within the next days_ahead days
                 remaining_time_delta = task_due_datetime - now
                 remaining_time_days = remaining_time_delta.total_seconds() / (24 * 3600)
+                days_until = int(remaining_time_days) if remaining_time_days >= 0 else 0
                 
-                # Check if less than 20% of total time is remaining
-                if total_time_days > 0:
-                    remaining_percentage = (remaining_time_days / total_time_days) * 100
-                    
-                    if remaining_percentage < 20:
-                        # Less than 20% time remaining - show this task
-                        days_until = remaining_time_days
-                        urgency = 'critical' if remaining_percentage < 5 else ('high' if remaining_percentage < 10 else 'medium')
-                        
-            alerts.append({
-                            'type': 'upcoming',
-                'task_id': task.id,
-                            'task_title': task.title,
-                'title': task.title,
-                            'due_date': task_due_datetime.isoformat(),
-                            'days_until': int(days_until) if days_until > 0 else 0,
-                            'urgency': urgency,
-                'status': task.status,
-                'priority': task.priority,
-                            'assignee': task.assignee.username if task.assignee else None,
-                            'assignee_name': task.assignee.username if task.assignee else 'Unassigned',
-                            'remaining_percentage': round(remaining_percentage, 1)
-            })
+                if days_until <= days_ahead:
+                    # Due within the look-ahead window - show with urgency based on days left
+                    if days_until <= 1:
+                        urgency = 'critical'
+                    elif days_until <= 3:
+                        urgency = 'high'
+                    elif days_until <= 5:
+                        urgency = 'medium'
+                    else:
+                        urgency = 'low'
+                    # Optional: remaining % for context (if we have a task start)
+                    remaining_percentage = None
+                    task_start = None
+                    if task.created_at:
+                        task_start = task.created_at
+                    elif project.start_date:
+                        task_start = datetime.combine(project.start_date, datetime.min.time())
+                        if timezone.is_naive(task_start):
+                            task_start = timezone.make_aware(task_start)
+                    if task_start is not None:
+                        if isinstance(task_start, date_type):
+                            task_start = datetime.combine(task_start, datetime.min.time())
+                            if timezone.is_naive(task_start):
+                                task_start = timezone.make_aware(task_start)
+                        total_time_delta = task_due_datetime - task_start
+                        total_time_days = total_time_delta.total_seconds() / (24 * 3600)
+                        if total_time_days > 0:
+                            remaining_percentage = round((remaining_time_days / total_time_days) * 100, 1)
+                    alert_entry = {
+                        'type': 'upcoming',
+                        'task_id': task.id,
+                        'task_title': task.title,
+                        'title': task.title,
+                        'due_date': task_due_datetime.isoformat(),
+                        'days_until': days_until,
+                        'urgency': urgency,
+                        'status': task.status,
+                        'priority': task.priority,
+                        'assignee': task.assignee.username if task.assignee else None,
+                        'assignee_name': task.assignee.username if task.assignee else 'Unassigned',
+                    }
+                    if remaining_percentage is not None:
+                        alert_entry['remaining_percentage'] = remaining_percentage
+                    alerts.append(alert_entry)
         
         # Check project deadline
         if project.end_date:
@@ -1823,12 +1825,17 @@ CALCULATE AND RETURN JSON:
                     'urgency': 'high' if project_days_until <= 3 else 'medium'
                 })
         
-        # Sort alerts by urgency and date
+        # Sort alerts: overdue first (by days_overdue desc), then upcoming (by days_until asc), then project_deadline
         urgency_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
-        alerts.sort(key=lambda a: (
-            urgency_order.get(a.get('urgency', 'low'), 3),
-            a.get('days_until', 999) if a.get('type') == 'upcoming' else -a.get('days_overdue', 0)
-        ))
+        def _sort_key(a):
+            t = a.get('type')
+            urgency = urgency_order.get(a.get('urgency', 'low'), 3)
+            if t == 'overdue':
+                return (0, -a.get('days_overdue', 0))  # overdue first, most overdue first
+            if t == 'upcoming':
+                return (1, a.get('days_until', 999))
+            return (2, a.get('days_until', 999))  # project_deadline etc.
+        alerts.sort(key=_sort_key)
         
         return {
             'success': True,

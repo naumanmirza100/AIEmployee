@@ -1401,33 +1401,74 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                 </div>
               )}
 
-              {/* Phases (from manage_phases action) */}
+              {/* Phases (from manage_phases action) - styled design */}
               {result.data?.phases && result.data.phases.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium">Project Phases:</p>
+                <div className="space-y-4 p-4 rounded-lg bg-muted/50 dark:bg-muted/30 border border-border/50">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Layers className="h-5 w-5 text-primary" />
+                    <h3 className="text-lg font-semibold text-foreground">Project Phases</h3>
+                    {result.data.total_phases != null && (
+                      <Badge variant="secondary" className="text-xs">
+                        {result.data.total_phases} phase{result.data.total_phases !== 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {result.data.phases.map((phase, index) => (
-                      <div key={index} className="p-3 border rounded-lg bg-card">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-medium">{phase.phase}</p>
-                          <Badge>{phase.task_count} tasks</Badge>
-                        </div>
-                        {phase.tasks && phase.tasks.length > 0 && (
-                          <div className="space-y-1 mt-2">
-                            {phase.tasks.slice(0, 5).map((task, taskIdx) => (
-                              <div key={taskIdx} className="text-sm text-muted-foreground">
-                                • {task.title}
+                    {result.data.phases.map((phase, index) => {
+                      const phaseStyles = {
+                        todo: { border: 'border-l-slate-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-slate-600 text-slate-100 dark:bg-slate-700 dark:text-slate-200', icon: '○' },
+                        in_progress: { border: 'border-l-blue-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-blue-600 text-blue-100 dark:bg-blue-800/80 dark:text-blue-200', icon: '◐' },
+                        review: { border: 'border-l-amber-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-amber-700 text-amber-100 dark:bg-amber-800/80 dark:text-amber-200', icon: '◇' },
+                        done: { border: 'border-l-emerald-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-emerald-700 text-emerald-100 dark:bg-emerald-800/80 dark:text-emerald-200', icon: '✓' },
+                        blocked: { border: 'border-l-red-400', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-red-600 text-red-100 dark:bg-red-800/80 dark:text-red-200', icon: '!' },
+                      };
+                      const style = phaseStyles[phase.status] || phaseStyles.todo;
+                      return (
+                        <Card key={index} className={`overflow-hidden border-l-4 ${style.border} ${style.bg} border border-border/50 shadow-sm`}>
+                          <CardHeader className="pb-2 pt-4 px-4">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg font-bold text-foreground/90" aria-hidden="true">{style.icon}</span>
+                                <CardTitle className="text-base m-0">{phase.phase}</CardTitle>
                               </div>
-                            ))}
-                            {phase.tasks.length > 5 && (
-                              <div className="text-xs text-muted-foreground">
-                                +{phase.tasks.length - 5} more tasks
-                              </div>
+                              <Badge className={style.badge} variant="secondary">
+                                {phase.task_count} task{phase.task_count !== 1 ? 's' : ''}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="px-4 pb-4 pt-0">
+                            {phase.tasks && phase.tasks.length > 0 ? (
+                              <ul className="space-y-2">
+                                {phase.tasks.slice(0, 10).map((task, taskIdx) => (
+                                  <li key={taskIdx} className="flex items-start gap-2 text-sm py-1.5 px-2 rounded-md bg-background/80 dark:bg-background/50 border border-border/60">
+                                    <span className="font-medium text-foreground truncate flex-1 min-w-0">{task.title}</span>
+                                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                                      {task.priority && (
+                                        <Badge variant="outline" className="text-xs capitalize">
+                                          {task.priority}
+                                        </Badge>
+                                      )}
+                                      {task.due_date && (
+                                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                          {new Date(task.due_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </li>
+                                ))}
+                                {phase.tasks.length > 10 && (
+                                  <li className="text-xs text-muted-foreground py-1 px-2">
+                                    +{phase.tasks.length - 10} more task{phase.tasks.length - 10 !== 1 ? 's' : ''}
+                                  </li>
+                                )}
+                              </ul>
+                            ) : (
+                              <p className="text-sm text-muted-foreground italic py-2">No tasks in this phase</p>
                             )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
                 </div>
               )}

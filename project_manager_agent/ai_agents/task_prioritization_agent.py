@@ -1120,15 +1120,63 @@ Return JSON:
                                  and t.get('status') in ['todo', 'in_progress']]
         
         all_tasks_to_delegate = unassigned_tasks + tasks_for_reassignment[:5]  # Limit reassignments
-        
-        if not all_tasks_to_delegate or not team_members:
+
+        def _build_workload_analysis(members: List[Dict], workload_by_user: dict) -> Dict:
+            """Build before_delegation workload analysis from current state."""
+            overloaded = []
+            underutilized = []
+            total_hours = 0
+            count = 0
+            for m in members:
+                uid = m.get('id')
+                w = workload_by_user.get(uid, {'active_tasks': [], 'total_hours': 0})
+                name = m.get('name') or m.get('username') or f'User #{uid}'
+                if len(w['active_tasks']) > 8 or w['total_hours'] > 40:
+                    overloaded.append(name)
+                elif w['total_hours'] < 10:
+                    underutilized.append(name)
+                total_hours += w['total_hours']
+                count += 1
+            avg = round(total_hours / count, 1) if count else 0
+            return {
+                'before_delegation': {
+                    'overloaded_members': overloaded,
+                    'underutilized_members': underutilized,
+                    'average_workload': avg,
+                }
+            }
+
+        if not team_members:
             return {
                 "suggestions": [],
                 "workload_analysis": {},
-                "summary": {"message": "No delegation needed"},
+                "summary": {
+                    "message": "No team members found for this project. Add members to the project team (or assign tasks to users) to get delegation suggestions.",
+                    "total_suggestions": 0,
+                    "new_assignments": 0,
+                    "reassignments": 0,
+                },
                 "reassignment_opportunities": []
             }
-        
+
+        if not all_tasks_to_delegate:
+            workload_analysis = _build_workload_analysis(team_members, workload_by_user)
+            return {
+                "suggestions": [],
+                "workload_analysis": workload_analysis,
+                "summary": {
+                    "message": "No delegation needed right now. All tasks are assigned and no one is overloaded (over 8 active tasks or 40 estimated hours).",
+                    "total_suggestions": 0,
+                    "new_assignments": 0,
+                    "reassignments": 0,
+                    "key_insights": [
+                        f"{len(unassigned_tasks)} unassigned task(s)." if unassigned_tasks else "All tasks have an assignee.",
+                        f"{len(overloaded_assignees)} overloaded member(s)." if overloaded_assignees else "No overloaded members.",
+                    ],
+                },
+                "reassignment_opportunities": []
+            }
+
         # Prepare team member data with workload
         team_data = []
         for member in team_members:

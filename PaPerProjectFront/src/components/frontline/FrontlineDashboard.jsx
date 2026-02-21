@@ -42,6 +42,15 @@ import {
   Pencil,
 } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
 
 const TEMPLATE_DEFAULT = { name: '', subject: '', body: '', notification_type: 'ticket_update', channel: 'email' };
 const WORKFLOW_STEPS_DEFAULT = '[{"type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}"}]';
@@ -473,6 +482,8 @@ function FrontlineWorkflowsTab() {
   );
 }
 
+const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+
 function FrontlineAnalyticsTab() {
   const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState('');
@@ -544,6 +555,72 @@ function FrontlineAnalyticsTab() {
                 <p className="text-2xl font-semibold">{data.avg_resolution_hours ?? '—'}</p>
               </div>
             </div>
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Tickets over time */}
+              {(data.tickets_by_date || []).length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Tickets over time</CardTitle>
+                    <CardDescription>Daily ticket count</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={data.tickets_by_date} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <Tooltip contentStyle={{ borderRadius: 8 }} />
+                        <Bar dataKey="count" name="Tickets" fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+              {/* By status */}
+              {(data.tickets_by_status || []).length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">By status</CardTitle>
+                    <CardDescription>Ticket distribution by status</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={data.tickets_by_status} layout="vertical" margin={{ top: 8, right: 8, left: 60, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <YAxis type="category" dataKey="status" width={56} tick={{ fontSize: 11 }} />
+                        <Tooltip contentStyle={{ borderRadius: 8 }} />
+                        <Bar dataKey="count" name="Tickets" fill={CHART_COLORS[1]} radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* By category - full width bar or pie */}
+            {(data.tickets_by_category || []).length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">By category</CardTitle>
+                  <CardDescription>Ticket distribution by category</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={data.tickets_by_category} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="category" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                      <Tooltip contentStyle={{ borderRadius: 8 }} />
+                      <Bar dataKey="count" name="Tickets" fill={CHART_COLORS[2]} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
             <div>
               <h4 className="font-medium mb-2">By status</h4>
               <div className="flex flex-wrap gap-2">
@@ -560,16 +637,6 @@ function FrontlineAnalyticsTab() {
                 ))}
               </div>
             </div>
-            {(data.tickets_by_date || []).length > 0 && (
-              <div>
-                <h4 className="font-medium mb-2">By date</h4>
-                <div className="max-h-48 overflow-y-auto space-y-1 text-sm">
-                  {data.tickets_by_date.map((d) => (
-                    <div key={d.date} className="flex justify-between"><span>{d.date}</span><span>{d.count}</span></div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </CardContent>
