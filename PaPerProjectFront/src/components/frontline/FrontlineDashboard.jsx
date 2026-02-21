@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -40,6 +46,9 @@ import {
   FileSearch,
   ListChecks,
   Pencil,
+  Menu,
+  Check,
+  LayoutDashboard,
 } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import {
@@ -484,6 +493,16 @@ function FrontlineWorkflowsTab() {
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
+const FRONTLINE_TAB_ITEMS = [
+  { value: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { value: 'documents', label: 'Documents', icon: FileText },
+  { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare },
+  { value: 'tickets', label: 'Tickets', icon: Ticket },
+  { value: 'notifications', label: 'Notifications', icon: Bell },
+  { value: 'workflows', label: 'Workflows', icon: GitBranch },
+  { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+];
+
 function FrontlineAnalyticsTab() {
   const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState('');
@@ -888,6 +907,8 @@ const FrontlineDashboard = () => {
   const currentMessages = selectedChat?.messages ?? [];
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
+  const currentTab = FRONTLINE_TAB_ITEMS.find((item) => item.value === activeTab) || FRONTLINE_TAB_ITEMS[0];
+
   const newChat = () => {
     setSelectedChatId(null);
     setQuestion('');
@@ -1031,13 +1052,13 @@ const FrontlineDashboard = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
+        <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Documents</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
+            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats?.total_documents || 0}</div>
@@ -1047,10 +1068,10 @@ const FrontlineDashboard = () => {
           </CardContent>
         </Card>
         
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tickets</CardTitle>
-            <Ticket className="h-4 w-4 text-muted-foreground" />
+            <Ticket className="h-4 w-4 text-muted-foreground shrink-0" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats?.total_tickets || 0}</div>
@@ -1060,10 +1081,10 @@ const FrontlineDashboard = () => {
           </CardContent>
         </Card>
         
-        <Card>
+        <Card className="w-full min-w-0 sm:col-span-2 lg:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Auto-Resolved</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            <CheckCircle2 className="h-4 w-4 text-muted-foreground shrink-0" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats?.auto_resolved_tickets || 0}</div>
@@ -1075,20 +1096,59 @@ const FrontlineDashboard = () => {
       </div>
 
       {/* Main Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="qa">Knowledge Q&A</TabsTrigger>
-          <TabsTrigger value="tickets">Tickets</TabsTrigger>
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
-          <TabsTrigger value="workflows">Workflows</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
+        {/* Mobile & Tablet: Hamburger menu (below lg) */}
+        <div className="lg:hidden w-full">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full justify-between h-11">
+                <div className="flex items-center gap-2 min-w-0">
+                  <currentTab.icon className="h-4 w-4 shrink-0" />
+                  <span className="font-medium truncate">{currentTab.label}</span>
+                </div>
+                <Menu className="h-5 w-5 text-muted-foreground shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto">
+              {FRONTLINE_TAB_ITEMS.map((item) => {
+                const isActive = item.value === activeTab;
+                return (
+                  <DropdownMenuItem
+                    key={item.value}
+                    onClick={() => setActiveTab(item.value)}
+                    className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-primary/10' : ''}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <item.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
+                    </div>
+                    {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
+        <div className="hidden lg:block overflow-x-auto pb-1">
+          <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+            {FRONTLINE_TAB_ITEMS.map((item) => (
+              <TabsTrigger
+                key={item.value}
+                value={item.value}
+                className="whitespace-nowrap shrink-0 px-3 py-1.5 text-sm flex items-center gap-2"
+              >
+                <item.icon className="h-4 w-4" />
+                {item.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-4">
-          <Card>
+        <TabsContent value="overview" className="space-y-4 mt-4">
+          <Card className="w-full min-w-0">
             <CardHeader>
               <CardTitle>Welcome to Frontline Agent</CardTitle>
               <CardDescription>
@@ -1142,14 +1202,14 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         {/* Documents Tab */}
-        <TabsContent value="documents" className="space-y-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
+        <TabsContent value="documents" className="space-y-4 mt-4">
+          <Card className="w-full min-w-0">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
                 <CardTitle>Documents</CardTitle>
                 <CardDescription>Upload and manage knowledge base documents</CardDescription>
               </div>
-              <Button onClick={() => setShowUploadDialog(true)}>
+              <Button onClick={() => setShowUploadDialog(true)} className="w-full sm:w-auto shrink-0">
                 <Upload className="mr-2 h-4 w-4" />
                 Upload Document
               </Button>
@@ -1162,18 +1222,18 @@ const FrontlineDashboard = () => {
               ) : (
                 <div className="space-y-2">
                   {documents.map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between p-3 border rounded">
-                      <div className="flex items-center space-x-3">
-                        <FileText className="h-5 w-5" />
-                        <div>
-                          <div className="font-medium">{doc.title}</div>
+                    <div key={doc.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <FileText className="h-5 w-5 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{doc.title}</div>
                           <div className="text-sm text-muted-foreground">
                             {doc.file_format.toUpperCase()} • {doc.document_type}
                             {doc.is_indexed && ' • Indexed'}
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
                         <Button variant="ghost" size="sm" onClick={() => handleSummarizeDocument(doc)} title="Summarize">
                           <FileSearch className="h-4 w-4" />
                         </Button>
@@ -1192,11 +1252,11 @@ const FrontlineDashboard = () => {
           </Card>
         </TabsContent>
 
-        {/* Knowledge Q&A Tab - Chat UI with sidebar (like Recruitment AI questions) */}
-        <TabsContent value="qa" className="space-y-4">
-          <div className="flex gap-4 w-full max-w-full">
-            {/* Sidebar - Previous chats */}
-            <div className="w-64 shrink-0 rounded-lg border bg-card">
+        {/* Knowledge Q&A Tab - Chat UI with sidebar */}
+        <TabsContent value="qa" className="space-y-4 mt-4">
+          <div className="flex flex-col lg:flex-row gap-4 w-full max-w-full min-w-0">
+            {/* Sidebar - Previous chats (full width on mobile, sidebar on lg+) */}
+            <div className="w-full lg:w-64 shrink-0 rounded-lg border bg-card min-w-0">
               <div className="p-3 border-b flex items-center justify-between shrink-0">
                 <span className="text-sm font-semibold">Previous conversations</span>
                 <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
@@ -1329,7 +1389,7 @@ const FrontlineDashboard = () => {
                 </div>
 
                 <form onSubmit={handleAskQuestion} className="shrink-0 border-t p-4 space-y-3 bg-muted/30">
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <Textarea
                       placeholder="Ask a question from your knowledge base..."
                       value={question}
@@ -1337,9 +1397,9 @@ const FrontlineDashboard = () => {
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAskQuestion(e); } }}
                       rows={2}
                       disabled={answering}
-                      className="min-h-[60px] resize-none"
+                      className="min-h-[60px] resize-none min-w-0"
                     />
-                    <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0">
+                    <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0 self-end sm:self-auto">
                       {answering ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                     </Button>
                   </div>
@@ -1350,19 +1410,19 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         {/* Tickets Tab */}
-        <TabsContent value="tickets" className="space-y-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
+        <TabsContent value="tickets" className="space-y-4 mt-4">
+          <Card className="w-full min-w-0">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
                 <CardTitle>Support Tickets</CardTitle>
                 <CardDescription>Create and filter your support tickets</CardDescription>
               </div>
-              <Button onClick={() => setShowTicketDialog(true)}>
+              <Button onClick={() => setShowTicketDialog(true)} className="w-full sm:w-auto shrink-0">
                 <Ticket className="mr-2 h-4 w-4" />
                 Create Ticket
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 overflow-x-hidden">
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={ticketFilters.status || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, status: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
                   <SelectTrigger className="w-[140px]">
@@ -1431,6 +1491,7 @@ const FrontlineDashboard = () => {
                 </div>
               ) : (
                 <>
+                  <div className="overflow-x-auto -mx-2 sm:mx-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1460,6 +1521,7 @@ const FrontlineDashboard = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                   {ticketsPagination.total_pages > 1 && (
                     <div className="flex items-center justify-between pt-2">
                       <p className="text-sm text-muted-foreground">
@@ -1482,17 +1544,17 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         {/* Notifications Tab */}
-        <TabsContent value="notifications" className="space-y-4">
+        <TabsContent value="notifications" className="space-y-4 mt-4">
           <FrontlineNotificationsTab />
         </TabsContent>
 
         {/* Workflows Tab */}
-        <TabsContent value="workflows" className="space-y-4">
+        <TabsContent value="workflows" className="space-y-4 mt-4">
           <FrontlineWorkflowsTab />
         </TabsContent>
 
         {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-4">
+        <TabsContent value="analytics" className="space-y-4 mt-4">
           <FrontlineAnalyticsTab />
         </TabsContent>
       </Tabs>

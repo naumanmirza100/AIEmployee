@@ -5,6 +5,12 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,7 +34,9 @@ import {
   Plus,
   Megaphone,
   Headphones,
-  Lock
+  Lock,
+  Menu,
+  Check,
 } from 'lucide-react';
 import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
@@ -37,6 +45,16 @@ import TimelineGanttAgent from '@/components/pm-agent/TimelineGanttAgent';
 import ManualProjectCreation from '@/components/pm-agent/ManualProjectCreation';
 import ManualTaskCreation from '@/components/pm-agent/ManualTaskCreation';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+
+const PM_TAB_ITEMS = [
+  { value: 'overview', label: 'Overview', icon: BrainCircuit },
+  { value: 'create-project', label: 'Create Project', icon: Plus },
+  { value: 'create-task', label: 'Create Task', icon: Plus },
+  { value: 'project-pilot', label: 'Project Pilot', icon: Target },
+  { value: 'task-prioritization', label: 'Task Prioritization', icon: ListChecks },
+  { value: 'knowledge-qa', label: 'Knowledge Q&A', icon: MessageSquare },
+  { value: 'timeline-gantt', label: 'Timeline & Gantt', icon: Calendar },
+];
 
 const ProjectManagerDashboardPage = () => {
   const [projects, setProjects] = useState([]);
@@ -238,6 +256,9 @@ const ProjectManagerDashboardPage = () => {
     }
   };
 
+  const currentTab = PM_TAB_ITEMS.find((item) => item.value === activeTab) || PM_TAB_ITEMS[0];
+  const CurrentTabIcon = currentTab.icon;
+
   // Show loading while checking access or loading modules
   if (checkingAccess || (companyUser && !modulesLoaded)) {
     return (
@@ -342,7 +363,7 @@ const ProjectManagerDashboardPage = () => {
         />
 
         {/* Main Content */}
-        <main className="container mx-auto px-4 py-8">
+        <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full max-w-full overflow-x-hidden">
           {/* Loading indicator */}
           {loading && (
             <div className="mb-4 flex items-center justify-center">
@@ -352,106 +373,128 @@ const ProjectManagerDashboardPage = () => {
           )}
           
           {/* Stats Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <Card>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
+            <Card className="w-full min-w-0">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-muted-foreground">Total Projects</p>
                     <p className="text-2xl font-bold">{projects.length}</p>
                   </div>
-                  <FolderKanban className="h-8 w-8 text-primary opacity-50" />
+                  <FolderKanban className="h-8 w-8 text-primary opacity-50 shrink-0" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="w-full min-w-0">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-muted-foreground">Active Projects</p>
                     <p className="text-2xl font-bold">
                       {projects.filter(p => p.status === 'active' || p.status === 'in_progress').length}
                     </p>
                   </div>
-                  <TrendingUp className="h-8 w-8 text-green-500 opacity-50" />
+                  <TrendingUp className="h-8 w-8 text-green-500 opacity-50 shrink-0" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="w-full min-w-0">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-muted-foreground">Planning</p>
                     <p className="text-2xl font-bold">
                       {projects.filter(p => p.status === 'planning').length}
                     </p>
                   </div>
-                  <Clock className="h-8 w-8 text-yellow-500 opacity-50" />
+                  <Clock className="h-8 w-8 text-yellow-500 opacity-50 shrink-0" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="w-full min-w-0">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-muted-foreground">Completed</p>
                     <p className="text-2xl font-bold">
                       {projects.filter(p => p.status === 'completed').length}
                     </p>
                   </div>
-                  <Sparkles className="h-8 w-8 text-blue-500 opacity-50" />
+                  <Sparkles className="h-8 w-8 text-blue-500 opacity-50 shrink-0" />
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* AI Agents Tabs */}
-          <Card>
+          <Card className="w-full min-w-0">
             <CardHeader>
               <CardTitle>AI Agents</CardTitle>
               <CardDescription>
                 Interact with AI-powered agents to manage your projects and tasks
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="min-w-0 overflow-x-auto">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-7">
-                  <TabsTrigger value="overview">
-                    <BrainCircuit className="h-4 w-4 mr-2" />
-                    Overview
-                  </TabsTrigger>
-                  <TabsTrigger value="create-project">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Project
-                  </TabsTrigger>
-                  <TabsTrigger value="create-task">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Task
-                  </TabsTrigger>
-                  <TabsTrigger value="project-pilot">
-                    <Target className="h-4 w-4 mr-2" />
-                    Project Pilot
-                  </TabsTrigger>
-                  <TabsTrigger value="task-prioritization">
-                    <ListChecks className="h-4 w-4 mr-2" />
-                    Task Prioritization
-                  </TabsTrigger>
-                  <TabsTrigger value="knowledge-qa">
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Knowledge Q&A
-                  </TabsTrigger>
-                  <TabsTrigger value="timeline-gantt">
-                    <Calendar className="h-4 w-4 mr-2" />
-                    Timeline & Gantt
-                  </TabsTrigger>
-                </TabsList>
+                {/* Mobile & Tablet: Hamburger menu (below lg) */}
+                <div className="lg:hidden w-full mb-4">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between h-11">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CurrentTabIcon className="h-4 w-4 shrink-0" />
+                          <span className="font-medium truncate">{currentTab.label}</span>
+                        </div>
+                        <Menu className="h-5 w-5 text-muted-foreground shrink-0" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto">
+                      {PM_TAB_ITEMS.map((item) => {
+                        const isActive = item.value === activeTab;
+                        const ItemIcon = item.icon;
+                        return (
+                          <DropdownMenuItem
+                            key={item.value}
+                            onClick={() => setActiveTab(item.value)}
+                            className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-primary/10' : ''}`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <ItemIcon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                              <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
+                            </div>
+                            {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
+                <div className="hidden lg:block overflow-x-auto pb-1">
+                  <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+                    {PM_TAB_ITEMS.map((item) => {
+                      const TabIcon = item.icon;
+                      return (
+                        <TabsTrigger
+                          key={item.value}
+                          value={item.value}
+                          className="whitespace-nowrap shrink-0 px-3 py-1.5 text-sm flex items-center gap-2"
+                        >
+                          <TabIcon className="h-4 w-4" />
+                          {item.label}
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
+                </div>
 
                 <TabsContent value="overview" className="mt-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Card>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
+                    <Card className="w-full min-w-0">
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <Target className="h-5 w-5 text-primary" />
@@ -471,7 +514,7 @@ const ProjectManagerDashboardPage = () => {
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="w-full min-w-0">
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <ListChecks className="h-5 w-5 text-primary" />
@@ -491,7 +534,7 @@ const ProjectManagerDashboardPage = () => {
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="w-full min-w-0">
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <MessageSquare className="h-5 w-5 text-primary" />
@@ -511,7 +554,7 @@ const ProjectManagerDashboardPage = () => {
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="w-full min-w-0">
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <Calendar className="h-5 w-5 text-primary" />
