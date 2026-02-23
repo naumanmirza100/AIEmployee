@@ -15,6 +15,8 @@ except ImportError:
     OpenAI = None  # Optional - only needed for document writing
 
 import os
+import time
+import re
 from django.conf import settings
 import logging
 
@@ -216,6 +218,7 @@ class MarketingBaseAgent:
     def _call_groq_qa(self, prompt, system_prompt=None, temperature=0.3, max_tokens=2000):
         """
         Call Groq API for Q&A tasks.
+        Retries on 429 rate limit (wait then retry up to 2 times).
         
         Args:
             prompt (str): User prompt/question
@@ -231,32 +234,38 @@ class MarketingBaseAgent:
                 "GROQ_API_KEY or GROQ_REC_API_KEY not found in environment variables. "
                 "Set one of them in your .env file to use LLM features."
             )
-        try:
-            messages = []
-            
-            if system_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
-                })
-            
-            messages.append({
-                "role": "user",
-                "content": prompt
-            })
-            
-            response = self.groq_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
-            
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            logger.error(f"Error in {self.agent_name} Groq Q&A call: {str(e)}")
-            raise
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        last_error = None
+        max_retries = 2  # 3 attempts total
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.groq_client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                last_error = e
+                err_str = str(e)
+                is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower()
+                if is_rate_limit and attempt < max_retries:
+                    wait_sec = 4
+                    match = re.search(r"try again in (\d+(?:\.\d+)?)\s*s", err_str, re.IGNORECASE)
+                    if match:
+                        wait_sec = max(3, min(15, int(float(match.group(1)) + 1)))
+                    logger.warning(f"Groq rate limit (429), waiting {wait_sec}s before retry {attempt + 1}/{max_retries}")
+                    time.sleep(wait_sec)
+                else:
+                    logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
+                    raise
+        if last_error:
+            raise last_error
     
     def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000):
         """

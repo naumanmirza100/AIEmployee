@@ -339,7 +339,12 @@ const MarketingQA = () => {
         throw new Error(result.message || 'Failed to get response');
       }
     } catch (error) {
-      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
+      const errMsg = error?.response?.data?.error ?? error?.response?.data?.message ?? error?.message ?? '';
+      const isRateLimit = /429|rate limit/i.test(errMsg);
+      const description = isRateLimit
+        ? 'Server is busy. Please try again in a few seconds.'
+        : 'Something went wrong. Please try again.';
+      toast({ title: 'Error', description, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
