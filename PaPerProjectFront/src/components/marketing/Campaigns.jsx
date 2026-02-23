@@ -21,12 +21,12 @@ const Campaigns = ({ onRefresh }) => {
       }
       if (onRefresh) onRefresh();
     } catch (error) {
-      console.error('Error fetching campaigns:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load campaigns',
-        variant: 'destructive',
-      });
+      // console.error('Error fetching campaigns:', error);
+      // toast({
+      //   title: 'Error',
+      //   description: 'Failed to load campaigns',
+      //   variant: 'destructive',
+      // });
     } finally {
       setLoading(false);
     }
@@ -52,7 +52,8 @@ const Campaigns = ({ onRefresh }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
       <OutreachCampaign onCampaignCreated={fetchCampaigns} />
 
       <div className="flex justify-between items-center">
@@ -119,6 +120,7 @@ const Campaigns = ({ onRefresh }) => {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 };

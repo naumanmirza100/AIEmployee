@@ -396,10 +396,15 @@ export const createCampaign = async (campaignData) => {
 
 /**
  * Marketing Q&A Agent
+ * @param {string} question - User's question
+ * @param {Array<{question: string, answer: string}>} [conversationHistory] - Recent Q&A pairs so the model can resolve "this campaign", "the active one", etc.
  */
-export const marketingQA = async (question) => {
+export const marketingQA = async (question, conversationHistory = []) => {
   try {
-    const response = await companyApi.post('/marketing/qa', { question });
+    const response = await companyApi.post('/marketing/qa', {
+      question,
+      conversation_history: Array.isArray(conversationHistory) ? conversationHistory : [],
+    });
     return response;
   } catch (error) {
     console.error('Marketing Q&A error:', error);

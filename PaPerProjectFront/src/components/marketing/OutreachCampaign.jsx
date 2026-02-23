@@ -29,6 +29,117 @@ const COMPANY_SIZES = [
   { value: '5000+', label: '5000+ employees' },
 ];
 
+/** Cut design to short summary: context + strategy only (before EMAIL CAMPAIGN PLAN etc.) */
+function condenseDesign(rawDesign) {
+  if (!rawDesign || typeof rawDesign !== 'string') return { short: '', hasMore: false };
+  const stopPhrases = [
+    'EMAIL CAMPAIGN PLAN',
+    'MESSAGING FRAMEWORK',
+    'TIMELINE & EXECUTION',
+    'RESOURCE ALLOCATION',
+    'PERFORMANCE METRICS',
+    'RECOMMENDATIONS',
+  ];
+  const lines = rawDesign.split('\n');
+  let cutIndex = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    const u = t.toUpperCase();
+    const isStop = stopPhrases.some(
+      (p) => u === p || u === '## ' + p || u.startsWith('**' + p) || (t.length < 60 && u.includes(p))
+    );
+    if (isStop) {
+      cutIndex = i;
+      break;
+    }
+  }
+  const maxLines = 85;
+  if (cutIndex > maxLines) cutIndex = maxLines;
+  const short = lines.slice(0, cutIndex).join('\n').trim();
+  const hasMore = cutIndex < lines.length;
+  return { short, hasMore };
+}
+
+/** Remove remaining markdown asterisks so ** and * never show in UI */
+function stripMarkdownAsterisks(s) {
+  if (!s || typeof s !== 'string') return s;
+  return s.replace(/\*\*/g, '').replace(/\*/g, '');
+}
+
+/** Convert *Label:* style to clean label (no asterisks); then apply bold/italic and strip any leftover */
+function formatDesignText(s) {
+  const escape = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const bold = (x) => x.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
+  const italic = (x) => x.replace(/\*(.+?)\*/g, '<span class="text-muted-foreground">$1</span>');
+  return stripMarkdownAsterisks(bold(italic(escape(s))));
+}
+
+/** Markdown to HTML - compact, professional style (no ** or * visible) */
+function markdownToHtmlCompact(markdown) {
+  if (!markdown || typeof markdown !== 'string') return '';
+  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = markdown.split('\n');
+  const out = [];
+  let inList = false;
+  let inSubList = false;
+  let i = 0;
+  const labelClass = 'text-xs font-semibold text-muted-foreground uppercase tracking-wide mt-3 mb-1';
+  const headingClass = 'text-sm font-semibold mt-3 mb-1 text-foreground';
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+    if (/^###\s+/.test(t)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<p class="${headingClass}">${stripMarkdownAsterisks(escape(t.slice(4)))}</p>`);
+      i++; continue;
+    }
+    if (/^##\s+/.test(t)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<p class="${headingClass}">${stripMarkdownAsterisks(escape(t.slice(3)))}</p>`);
+      i++; continue;
+    }
+    if (/^\*\*[^*]+\*\*$/.test(t) && t.length < 80) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      const content = stripMarkdownAsterisks(escape(t.replace(/^\*\*|\*\*$/g, '')));
+      out.push(`<p class="${headingClass}">${content}</p>`);
+      i++; continue;
+    }
+    if (/^\s+(?:\+|\*)\s+/.test(line)) {
+      if (!inSubList) { out.push('<ul class="list-[circle] pl-6 my-1 space-y-0.5 text-sm">'); inSubList = true; }
+      if (!inList) { inList = true; }
+      const content = line.replace(/^\s*(?:\+|\*)\s+/, '').trim();
+      out.push(`<li class="leading-relaxed">${formatDesignText(content)}</li>`);
+      i++; continue;
+    }
+    if (/^[\s]*(?:\*|\+|\-)\s+/.test(t) || /^\d+\.\s+/.test(t)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (!inList) { out.push('<ul class="list-disc pl-5 my-2 space-y-1 text-sm">'); inList = true; }
+      const content = t.replace(/^[\s]*(?:\*|\+|\-|\d+\.)\s+/, '');
+      out.push(`<li class="leading-relaxed">${formatDesignText(content)}</li>`);
+      i++; continue;
+    }
+    if (t === '' && (inList || inSubList)) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      i++; continue;
+    }
+    if (t && !t.startsWith('<')) {
+      if (inSubList) { out.push('</ul>'); inSubList = false; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      const isLabel = /^\*[^*]+\*:?\s*$/.test(t);
+      const cls = isLabel ? labelClass : 'my-1 text-sm leading-relaxed text-foreground';
+      out.push(`<p class="${cls}">${formatDesignText(t).replace(/\n/g, '<br/>')}</p>`);
+    }
+    i++;
+  }
+  if (inSubList) out.push('</ul>');
+  if (inList) out.push('</ul>');
+  return out.join('\n');
+}
+
 /** Markdown to HTML for campaign design / QA-style result - headings, lists, bold */
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -100,21 +211,38 @@ function markdownToHtml(markdown) {
 }
 
 /**
- * Format agent result for display (markdown-like text to simple HTML/JSX)
+ * Format agent result for display (markdown-like text to simple HTML/JSX).
+ * options: { designView: 'condensed'|'full', onShowFullDesign }
  */
-function formatResult(result, action) {
+function formatResult(result, action, options = {}) {
   if (!result) return null;
   if (result.success === false) {
     return <p className="text-destructive">{result.error || 'Action failed'}</p>;
   }
   const parts = [];
+  const designView = options.designView || 'condensed';
+  const onShowFullDesign = options.onShowFullDesign;
   if (result.campaign_design?.raw_design) {
+    const { short, hasMore } = condenseDesign(result.campaign_design.raw_design);
+    const designHtml = designView === 'full'
+      ? markdownToHtmlCompact(result.campaign_design.raw_design)
+      : markdownToHtmlCompact(short);
     parts.push(
-      <div
-        key="design"
-        className="prose prose-sm dark:prose-invert max-w-none text-foreground campaign-design-content"
-        dangerouslySetInnerHTML={{ __html: markdownToHtml(result.campaign_design.raw_design) }}
-      />
+      <div key="design" className="text-foreground campaign-design-content">
+        <div
+          className="prose prose-sm dark:prose-invert max-w-none"
+          dangerouslySetInnerHTML={{ __html: designHtml }}
+        />
+        {/* {designView === 'condensed' && hasMore && onShowFullDesign && (
+          <button
+            type="button"
+            className="text-sm text-violet-600 dark:text-violet-400 hover:underline mt-2"
+            onClick={onShowFullDesign}
+          >
+            Show full design
+          </button>
+        )} */}
+      </div>
     );
   }
   if (result.campaign_name) parts.push(<p key="name"><strong>Campaign:</strong> {result.campaign_name}</p>);
@@ -184,6 +312,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const [error, setError] = useState(null);
   const [designReady, setDesignReady] = useState(false);
   const [leadsFile, setLeadsFile] = useState(null);
+  const [showFullDesign, setShowFullDesign] = useState(false);
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -197,6 +326,10 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const [language, setLanguage] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  useEffect(() => {
+    setShowFullDesign(false);
+  }, [result, action]);
 
   useEffect(() => {
     const load = async () => {
@@ -572,8 +705,16 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             <h3 className="text-lg font-bold mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">
               {action === 'design' ? 'Campaign design' : action === 'create_multi_channel' ? 'Campaign created' : action === 'launch' ? 'Launch result' : action === 'schedule' ? 'Schedule result' : 'Result'}
             </h3>
-            <div className="max-h-[70vh] overflow-y-auto pr-1">
-              {formatResult(result, action)}
+            {action === 'design' && result.campaign_design?.raw_design && (
+              <p className="text-xs text-muted-foreground mb-3">
+                Strategy, target audience, key messaging, and channel recommendations.
+              </p>
+            )}
+            <div className="pr-1">
+              {formatResult(result, action, {
+                designView: showFullDesign ? 'full' : 'condensed',
+                onShowFullDesign: () => setShowFullDesign(true),
+              })}
             </div>
           </div>
         )}

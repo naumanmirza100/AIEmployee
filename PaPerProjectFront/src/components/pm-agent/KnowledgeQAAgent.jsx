@@ -124,10 +124,19 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
         setQuestion('');
         setTimeout(scrollToBottom, 100);
       } else {
-        throw new Error(response.message || 'Failed to get answer');
+        toast({
+          title: 'Error',
+          description: 'Something went wrong. Please try again.',
+          variant: 'destructive',
+        });
       }
     } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to get answer', variant: 'destructive' });
+      console.error('Knowledge Q&A error:', error);
+      toast({
+        title: 'Error',
+        description: 'Something went wrong. Please try again.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
