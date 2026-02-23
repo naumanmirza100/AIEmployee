@@ -5,7 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3, Menu, ChevronDown, Check } from 'lucide-react';
 import { 
   getJobDescriptions, 
   getInterviews, 
@@ -19,11 +25,29 @@ import Interviews from './Interviews';
 import CVRecords from './CVRecords';
 import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
+import RecruitmentApiTester from './RecruitmentApiTester';
+import AiInterviewQuestions from './AiInterviewQuestions';
+import { FlaskConical, HelpCircle } from 'lucide-react';
+
+// Tab items configuration
+const TAB_ITEMS = [
+  { value: 'dashboard', label: 'Dashboard', icon: FileText },
+  { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { value: 'cv-processing', label: 'CV Processing', icon: Upload },
+  { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
+  { value: 'ai-interview-questions', label: 'AI Questions', icon: HelpCircle },
+  { value: 'jobs', label: 'Job Descriptions', icon: Briefcase },
+  { value: 'candidates', label: 'Candidates', icon: Users },
+  { value: 'interviews', label: 'Interviews', icon: Calendar },
+  { value: 'settings', label: 'Settings', icon: Settings },
+];
 
 const PATH_TO_TAB = {
   dashboard: 'dashboard',
   cvprocessing: 'cv-processing',
   analytics: 'analytics',
+  'api-tester': 'api-tester',
+  'ai-interview-questions': 'ai-interview-questions',
   'job-descriptions': 'jobs',
   candidates: 'candidates',
   interviews: 'interviews',
@@ -33,6 +57,8 @@ const TAB_TO_PATH = {
   'dashboard': 'dashboard',
   'cv-processing': 'cvprocessing',
   'analytics': 'analytics',
+  'api-tester': 'api-tester',
+  'ai-interview-questions': 'ai-interview-questions',
   'jobs': 'job-descriptions',
   'candidates': 'candidates',
   'interviews': 'interviews',
@@ -52,6 +78,13 @@ const RecruitmentDashboard = () => {
     activeJobs: 0,
     pendingInterviews: 0,
   });
+
+  // Get current tab info for mobile display
+  const currentTab = TAB_ITEMS.find(item => item.value === activeTab) || TAB_ITEMS[0];
+
+  const handleTabChange = (tab) => {
+    navigate(`/recruitment/${TAB_TO_PATH[tab] || 'dashboard'}`);
+  };
 
   useEffect(() => {
     fetchStats();
@@ -139,34 +172,57 @@ const RecruitmentDashboard = () => {
       </div>
 
       {/* Main Tabs - each tab navigates to its URL */}
-      <Tabs value={activeTab} onValueChange={(tab) => navigate(`/recruitment/${TAB_TO_PATH[tab] || 'dashboard'}`)} className="w-full">
-        <TabsList className="grid w-full grid-cols-7">
-          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="analytics">
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Analytics
-          </TabsTrigger>
-          <TabsTrigger value="cv-processing">
-            <Upload className="h-4 w-4 mr-2" />
-            CV Processing
-          </TabsTrigger>
-          <TabsTrigger value="jobs">
-            <Briefcase className="h-4 w-4 mr-2" />
-            Job Descriptions
-          </TabsTrigger>
-          <TabsTrigger value="candidates">
-            <Users className="h-4 w-4 mr-2" />
-            Candidates
-          </TabsTrigger>
-          <TabsTrigger value="interviews">
-            <Calendar className="h-4 w-4 mr-2" />
-            Interviews
-          </TabsTrigger>
-          <TabsTrigger value="settings">
-            <Settings className="h-4 w-4 mr-2" />
-            Settings
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+        {/* Mobile & Tablet: Hamburger Menu (below lg) */}
+        <div className="lg:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full justify-between h-11">
+                <div className="flex items-center gap-2">
+                  <currentTab.icon className="h-4 w-4" />
+                  <span className="font-medium">{currentTab.label}</span>
+                </div>
+                <Menu className="h-5 w-5 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto">
+              {TAB_ITEMS.map((item) => {
+                const isActive = item.value === activeTab;
+                return (
+                  <DropdownMenuItem
+                    key={item.value}
+                    onClick={() => handleTabChange(item.value)}
+                    className={`flex items-center justify-between py-3 cursor-pointer ${
+                      isActive ? 'bg-primary/10' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <item.icon className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
+                    </div>
+                    {isActive && <Check className="h-4 w-4 text-primary" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Desktop: Regular Tabs (lg and above - 1024px+) with horizontal scroll */}
+        <div className="hidden lg:block overflow-x-auto pb-1">
+          <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+            {TAB_ITEMS.map((item) => (
+              <TabsTrigger 
+                key={item.value} 
+                value={item.value} 
+                className="whitespace-nowrap shrink-0 px-3 py-1.5 text-sm"
+              >
+                <item.icon className="h-4 w-4 mr-2" />
+                {item.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         <TabsContent value="dashboard" className="space-y-4">
           <Card>
@@ -175,7 +231,7 @@ const RecruitmentDashboard = () => {
               <CardDescription>Get started with recruitment tasks</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-full">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-full">
                 <Button
                   variant="outline"
                   className="h-auto flex-col items-start p-4"
@@ -211,6 +267,18 @@ const RecruitmentDashboard = () => {
                     Schedule interviews with candidates
                   </span>
                 </Button>
+
+                <Button
+                  variant="outline"
+                  className="h-auto flex-col items-start p-4"
+                  onClick={() => navigate('/recruitment/ai-interview-questions')}
+                >
+                  <HelpCircle className="h-6 w-6 mb-2" />
+                  <span className="font-semibold">AI Interview Questions</span>
+                  <span className="text-xs text-muted-foreground mt-1">
+                    Get suggested questions for a candidate + job
+                  </span>
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -222,6 +290,14 @@ const RecruitmentDashboard = () => {
 
         <TabsContent value="cv-processing">
           <CVProcessing onProcessComplete={fetchStats} />
+        </TabsContent>
+
+        <TabsContent value="api-tester">
+          <RecruitmentApiTester />
+        </TabsContent>
+
+        <TabsContent value="ai-interview-questions">
+          <AiInterviewQuestions />
         </TabsContent>
 
         <TabsContent value="jobs">

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,82 +6,142 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
-import { Loader2, Send, CheckCircle2, XCircle, Sparkles, Upload, FileText, X } from 'lucide-react';
+import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle } from 'lucide-react';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
-  const [question, setQuestion] = useState('');
-  const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [fileLoading, setFileLoading] = useState(false);
-  const fileInputRef = useRef(null);
   const { toast } = useToast();
-  
-  // Ensure projects is always an array
   const safeProjects = Array.isArray(projects) ? projects : [];
 
+  const [chats, setChats] = useState([]);
+  const [selectedChatId, setSelectedChatId] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [question, setQuestion] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const fileInputRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  const normalizeChat = (chat) => {
+    if (!chat) return chat;
+    return {
+      ...chat,
+      id: String(chat.id),
+      title: chat.title || 'Chat',
+      messages: chat.messages || [],
+      updatedAt: chat.updatedAt || chat.timestamp,
+      timestamp: chat.updatedAt || chat.timestamp,
+    };
+  };
+
+  const loadChatsFromApi = async () => {
+    try {
+      setLoadingChats(true);
+      const res = await pmAgentService.listProjectPilotChats();
+      if (res.status === 'success' && res.data) {
+        setChats((res.data || []).map(normalizeChat));
+      } else {
+        setChats([]);
+      }
+    } catch (err) {
+      console.error('Load Project Pilot chats error:', err);
+      setChats([]);
+    } finally {
+      setLoadingChats(false);
+    }
+  };
+
+  useEffect(() => {
+    loadChatsFromApi();
+  }, []);
+
+  const selectedChat = chats.find((c) => c.id === selectedChatId);
+  const currentMessages = selectedChat?.messages ?? [];
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+
+  const getProjectTitle = (projectId) => {
+    if (!projectId) return null;
+    const p = safeProjects.find((x) => String(x.id) === String(projectId));
+    return p ? (p.title || p.name) : null;
+  };
+
+  const addMessagePairToChat = async (userMsg, assistantMsg, titleSnippet) => {
+    const title = titleSnippet.slice(0, 40);
+    if (selectedChatId) {
+      const existing = chats.find((c) => c.id === selectedChatId);
+      if (existing) {
+        const updRes = await pmAgentService.updateProjectPilotChat(selectedChatId, {
+          messages: [userMsg, assistantMsg],
+          title: existing.title || title,
+        });
+        if (updRes.status === 'success' && updRes.data) {
+          const updatedChat = normalizeChat(updRes.data);
+          setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
+        } else throw new Error(updRes.message || 'Failed to save chat');
+      } else {
+        const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+        if (createRes.status === 'success' && createRes.data) {
+          const newChatData = normalizeChat(createRes.data);
+          setChats((prev) => [newChatData, ...prev]);
+          setSelectedChatId(newChatData.id);
+        } else throw new Error(createRes.message || 'Failed to create chat');
+      }
+    } else {
+      const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+      if (createRes.status === 'success' && createRes.data) {
+        const newChatData = normalizeChat(createRes.data);
+        setChats((prev) => [newChatData, ...prev]);
+        setSelectedChatId(newChatData.id);
+      } else throw new Error(createRes.message || 'Failed to create chat');
+    }
+    setQuestion('');
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setTimeout(scrollToBottom, 100);
+  };
+
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    
+    e?.preventDefault?.();
     if (!question.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a question or request',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: 'Please enter a request', variant: 'destructive' });
       return;
     }
+    const q = question.trim();
+    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectTitle = getProjectTitle(projectId);
 
     try {
       setLoading(true);
-      setResult(null);
-      
-      const projectId = selectedProjectId && selectedProjectId !== "all" ? selectedProjectId : null;
-      const response = await pmAgentService.projectPilot(
-        question,
-        projectId
-      );
-
-      console.log('Project Pilot response:', response);
-      
+      const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
       if (response.status === 'success') {
-        setResult(response);
-        
-        // Show success toast
-        const actionResults = response.action_results || response.data?.action_results || [];
-        if (actionResults.length > 0) {
-          const successCount = actionResults.filter(r => r.success).length;
-          if (successCount > 0) {
-            toast({
-              title: 'Success',
-              description: `${successCount} action(s) completed successfully`,
-            });
-            // Refresh projects if any were created/updated
-            if (onProjectUpdate) {
-              onProjectUpdate();
-            }
-          }
-        } else if (response.data?.answer || response.data?.cannot_do) {
-          toast({
-            title: 'Success',
-            description: 'Request processed successfully',
-          });
-        }
+        const data = response.data || response;
+        const answerText = data.answer || '';
+        const actionResults = data.action_results || response.action_results || [];
+        const cannotDo = data.cannot_do || response.cannot_do;
+        const userMsg = {
+          role: 'user',
+          content: q,
+          responseData: projectTitle ? { project_id: projectId, project_title: projectTitle } : undefined,
+        };
+        const assistantMsg = {
+          role: 'assistant',
+          content: answerText || (cannotDo || 'No response.'),
+          responseData: {
+            answer: answerText,
+            action_results: actionResults,
+            cannot_do: cannotDo,
+            project_id: projectId,
+            project_title: projectTitle,
+          },
+        };
+        await addMessagePairToChat(userMsg, assistantMsg, q);
+        if (actionResults.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
       } else {
-        toast({
-          title: 'Error',
-          description: response.message || 'Failed to process request',
-          variant: 'destructive',
-        });
+        throw new Error(response.message || 'Failed to process request');
       }
     } catch (error) {
-      console.error('Project Pilot error:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to process request',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message || 'Failed to process request', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -89,219 +149,363 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
 
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      const allowedTypes = ['.txt', '.pdf', '.docx'];
-      const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-      
-      if (!allowedTypes.includes(fileExtension)) {
-        toast({
-          title: 'Invalid file type',
-          description: `Please upload a ${allowedTypes.join(', ')} file`,
-          variant: 'destructive',
-        });
-        return;
-      }
-      
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        toast({
-          title: 'File too large',
-          description: 'Please upload a file smaller than 10MB',
-          variant: 'destructive',
-        });
-        return;
-      }
-      
-      setSelectedFile(file);
+    if (!file) return;
+    const allowed = ['.txt', '.pdf', '.docx'];
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    if (!allowed.includes(ext)) {
+      toast({ title: 'Invalid file type', description: `Use ${allowed.join(', ')}`, variant: 'destructive' });
+      return;
     }
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: 'File too large', description: 'Max 10MB', variant: 'destructive' });
+      return;
+    }
+    setSelectedFile(file);
   };
 
   const handleFileUpload = async () => {
     if (!selectedFile) {
-      toast({
-        title: 'Error',
-        description: 'Please select a file to upload',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: 'Please select a file', variant: 'destructive' });
       return;
     }
+    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectTitle = getProjectTitle(projectId);
 
     try {
       setFileLoading(true);
-      setResult(null);
-      
-      const projectId = selectedProjectId && selectedProjectId !== "all" ? selectedProjectId : null;
-      const response = await pmAgentService.projectPilotFromFile(selectedFile, projectId);
-
-      console.log('Project Pilot from file response:', response);
-      
+      const response = await pmAgentService.projectPilotFromFile(selectedFile, projectId, currentMessages);
       if (response.status === 'success') {
-        setResult(response);
-        
-        // Show success toast
-        const actionResults = response.data?.action_results || [];
-        if (actionResults.length > 0) {
-          const successCount = actionResults.filter(r => r.success).length;
-          if (successCount > 0) {
-            toast({
-              title: 'Success',
-              description: `${successCount} action(s) completed successfully from file`,
-            });
-            // Refresh projects if any were created/updated
-            if (onProjectUpdate) {
-              onProjectUpdate();
-            }
-          }
-        } else if (response.data?.answer || response.data?.cannot_do) {
-          toast({
-            title: 'Success',
-            description: 'File processed successfully',
-          });
-        }
-        
-        // Clear file selection
-        setSelectedFile(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
+        const data = response.data || response;
+        const answerText = data.answer || '';
+        const actionResults = data.action_results || [];
+        const cannotDo = data.cannot_do;
+        const userMsg = {
+          role: 'user',
+          content: `Uploaded file: ${selectedFile.name}`,
+          responseData: {
+            from_file: true,
+            file_name: selectedFile.name,
+            project_id: projectId,
+            project_title: projectTitle,
+          },
+        };
+        const assistantMsg = {
+          role: 'assistant',
+          content: answerText || (cannotDo || 'Processed.'),
+          responseData: {
+            answer: answerText,
+            action_results: actionResults,
+            cannot_do: cannotDo,
+            project_id: projectId,
+            project_title: projectTitle,
+            from_file: true,
+            file_name: selectedFile.name,
+          },
+        };
+        await addMessagePairToChat(userMsg, assistantMsg, `File: ${selectedFile.name}`);
+        if (actionResults.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
       } else {
-        toast({
-          title: 'Error',
-          description: response.message || 'Failed to process file',
-          variant: 'destructive',
-        });
+        throw new Error(response.message || 'Failed to process file');
       }
     } catch (error) {
-      console.error('Project Pilot from file error:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to process file',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message || 'Failed to process file', variant: 'destructive' });
     } finally {
       setFileLoading(false);
     }
   };
 
-  const removeFile = () => {
+  const newChat = () => {
+    setSelectedChatId(null);
+    setQuestion('');
     setSelectedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const deleteChat = async (e, chatId) => {
+    e.stopPropagation();
+    try {
+      const res = await pmAgentService.deleteProjectPilotChat(chatId);
+      if (res.status === 'success') {
+        setChats((prev) => prev.filter((c) => c.id !== chatId));
+        if (selectedChatId === chatId) setSelectedChatId(null);
+        toast({ title: 'Chat deleted' });
+      } else throw new Error(res.message || 'Failed to delete chat');
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || 'Could not delete chat', variant: 'destructive' });
+    }
+  };
+
+  const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
+  const formatDate = (iso) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
     }
   };
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
+    <div className="flex gap-4 w-full max-w-full">
+      {/* Sidebar */}
+      <div className="w-64 shrink-0 rounded-lg border bg-card">
+        <div className="p-3 border-b flex items-center justify-between shrink-0">
+          <span className="text-sm font-semibold">Previous conversations</span>
+          <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="overflow-y-auto overflow-x-hidden max-h-[min(60vh,420px)]">
+          {loadingChats ? (
+            <div className="p-4 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : chats.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Send a request or upload a file to start.</div>
+          ) : (
+            <div className="p-2 space-y-1">
+              {chats.map((c) => (
+                <div
+                  key={c.id}
+                  className={`flex items-center gap-1 rounded-lg text-sm transition-colors ${
+                    selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedChatId(c.id)}
+                    className="flex-1 min-w-0 text-left p-3 rounded-lg"
+                  >
+                    <div className="font-medium truncate">{truncate(c.title || (c.messages?.[0]?.content) || 'Chat', 40)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.updatedAt || c.timestamp)}</div>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={(e) => deleteChat(e, c.id)}
+                    title="Delete chat"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main chat area */}
+      <Card className="flex-1 min-w-0">
+        <CardHeader className="shrink-0">
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
             Project Pilot Agent
           </CardTitle>
           <CardDescription>
-            Create projects, tasks, and manage operations using natural language or upload a document (txt, pdf, docx).
-            Example: "Create a new project called 'Website Redesign' with high priority"
+            Create projects and tasks with natural language or upload a document (txt, pdf, docx). Select a project (optional) to scope actions. Previous conversations are in the sidebar.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {/* File Upload Section */}
-          <div className="mb-6 p-4 border rounded-lg bg-muted/50">
-            <div className="flex items-center justify-between mb-3">
+        <CardContent className="p-0 flex flex-col min-h-0">
+          <div className="px-4 pb-4 space-y-4 overflow-y-auto overflow-x-hidden max-h-[min(55vh,480px)] min-h-0">
+            {!selectedChatId && chats.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
+                <p className="font-medium">Send your first request</p>
+                <p className="text-sm">Type a request below or upload a file.</p>
+              </div>
+            )}
+            {!selectedChatId && chats.length > 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
+                <p className="font-medium">Select a conversation or send a new request</p>
+                <p className="text-sm">Click a previous chat in the sidebar to view it.</p>
+              </div>
+            )}
+            {currentMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                    msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted border'
+                  }`}
+                >
+                  {msg.role === 'user' ? (
+                    <>
+                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      {(msg.responseData?.project_title || msg.responseData?.file_name) && (
+                        <p className="text-xs opacity-80 mt-1">
+                          {msg.responseData.file_name && `File: ${msg.responseData.file_name}`}
+                          {msg.responseData.file_name && msg.responseData.project_title && ' · '}
+                          {msg.responseData.project_title && `Project: ${msg.responseData.project_title}`}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      {(msg.responseData?.answer) && (() => {
+                        const a = msg.responseData.answer;
+                        const looksLikeJson = typeof a === 'string' && (a.trim().startsWith('{') || a.trim().startsWith('['));
+                        if (looksLikeJson) return null;
+                        return <p className="text-sm whitespace-pre-wrap">{a}</p>;
+                      })()}
+                      {!(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
+                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      )}
+                      {(msg.responseData?.action_results?.length > 0) && (
+                        <div className="space-y-2 mt-2">
+                          {msg.responseData.action_results.map((action, idx) => {
+                            const isTaskAction = action.action === 'create_task' || action.action === 'update_task';
+                            const formatDate = (iso) => {
+                              if (!iso) return '—';
+                              try {
+                                const d = new Date(iso);
+                                return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+                              } catch {
+                                return iso;
+                              }
+                            };
+                            const assigneeDisplay = action.assignee_name || action.assignee_username || 'Unassigned';
+                            const priorityDisplay = action.priority ? String(action.priority).replace(/_/g, ' ') : '—';
+                            return (
+                              <div
+                                key={idx}
+                                className={`p-3 rounded border text-sm ${
+                                  action.success ? 'bg-green-50 border-green-200 dark:bg-green-950/50 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800'
+                                }`}
+                              >
+                                <div className="flex items-start gap-2">
+                                  {action.success ? (
+                                    <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+                                  ) : (
+                                    <XCircle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <Badge variant={action.success ? 'default' : 'destructive'} className="mb-1.5">
+                                      {action.action?.replace(/_/g, ' ') || 'Action'}
+                                    </Badge>
+                                    {(action.message || action.error) && (
+                                      <p className="text-xs text-muted-foreground mb-2">{action.message || action.error}</p>
+                                    )}
+                                    {isTaskAction && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-muted-foreground">
+                                        <span><strong className="text-foreground">Priority:</strong> {priorityDisplay}</span>
+                                        <span><strong className="text-foreground">Assigned to:</strong> {assigneeDisplay}</span>
+                                        <span><strong className="text-foreground">Deadline:</strong> {formatDate(action.due_date)}</span>
+                                        <span><strong className="text-foreground">Start:</strong> {formatDate(action.created_at)}</span>
+                                      </div>
+                                    )}
+                                    {action.project_name && !isTaskAction && (
+                                      <p className="text-xs text-muted-foreground mt-1">Project: {action.project_name}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {msg.responseData?.cannot_do && (
+                        <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">{msg.responseData.cannot_do}</p>
+                      )}
+                      {(msg.responseData?.project_title || msg.responseData?.file_name) && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {msg.responseData.file_name && `File: ${msg.responseData.file_name}`}
+                          {msg.responseData.file_name && msg.responseData.project_title && ' · '}
+                          {msg.responseData.project_title && `Project: ${msg.responseData.project_title}`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {(loading || fileLoading) && (
+              <div className="flex justify-start">
+                <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">{fileLoading ? 'Processing file...' : 'Processing...'}</span>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Form: file upload + project + text request */}
+          <div className="shrink-0 border-t p-4 space-y-3 bg-muted/30">
+            {/* File upload */}
+            <div className="p-3 border rounded-lg bg-background/50 space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Upload className="h-4 w-4" />
-                Upload Document (txt, pdf, docx)
+                Upload document (txt, pdf, docx)
               </label>
-            </div>
-            
-            {!selectedFile ? (
-              <div className="space-y-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".txt,.pdf,.docx"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload">
+              {!selectedFile ? (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.pdf,.docx"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    id="pilot-file-upload"
+                  />
                   <Button
                     type="button"
                     variant="outline"
-                    className="w-full cursor-pointer"
+                    className="w-full"
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload className="h-4 w-4 mr-2" />
-                    Choose File
+                    Choose file
                   </Button>
-                </label>
-                <p className="text-xs text-muted-foreground text-center">
-                  Supported formats: .txt, .pdf, .docx (max 10MB)
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2 bg-background rounded border">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-medium">{selectedFile.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      ({(selectedFile.size / 1024).toFixed(2)} KB)
-                    </span>
+                </>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="h-4 w-4 shrink-0 text-primary" />
+                    <span className="text-sm truncate">{selectedFile.name}</span>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={removeFile}
-                    className="h-6 w-6 p-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1 shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={fileLoading}
+                      onClick={handleFileUpload}
+                    >
+                      {fileLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      <span className="ml-1">{fileLoading ? 'Processing...' : 'Process file'}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <Button
-                  type="button"
-                  onClick={handleFileUpload}
-                  disabled={fileLoading}
-                  className="w-full"
-                >
-                  {fileLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Processing File...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4 mr-2" />
-                      Process File
-                    </>
-                  )}
-                </Button>
+              )}
+            </div>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
               </div>
-            )}
-          </div>
-
-          <div className="relative mb-4">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-muted/30 px-2 text-muted-foreground">Or type a request</span>
+              </div>
             </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">Or</span>
-            </div>
-          </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">
-                Select Project (optional)
-              </label>
-              <Select value={selectedProjectId || "all"} onValueChange={(value) => setSelectedProjectId(value === "all" ? "" : value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All Projects" />
+              <label className="text-sm font-medium mb-1 block">Select project (optional)</label>
+              <Select value={selectedProjectId || 'all'} onValueChange={(v) => setSelectedProjectId(v === 'all' ? '' : v)}>
+                <SelectTrigger className="mb-2">
+                  <SelectValue placeholder="All projects" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Projects</SelectItem>
-                  {safeProjects && safeProjects.length > 0 ? (
+                  <SelectItem value="all">All projects</SelectItem>
+                  {safeProjects.length > 0 ? (
                     safeProjects.map((project) => (
                       <SelectItem key={project.id} value={String(project.id)}>
                         {project.title || project.name}
@@ -314,126 +518,30 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
               </Select>
             </div>
 
-            <div>
-              <label className="text-sm font-medium mb-2 block">
-                Your Request
-              </label>
+            <form onSubmit={handleSubmit} className="flex gap-2">
               <Textarea
+                placeholder="e.g., Create a new project 'Website Redesign' with high priority..."
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="e.g., Create a new project called 'Mobile App Development' with deadline in 30 days, or Create 5 tasks for the current project..."
-                rows={4}
-                className="resize-none"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
+                rows={2}
+                disabled={loading || fileLoading}
+                className="min-h-[60px] resize-none flex-1"
               />
-            </div>
-
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Send className="h-4 w-4 mr-2" />
-                  Send Request
-                </>
-              )}
-            </Button>
-          </form>
+              <Button type="submit" disabled={loading || fileLoading} size="icon" className="h-[60px] w-12 shrink-0">
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              </Button>
+            </form>
+          </div>
         </CardContent>
       </Card>
-
-      {result && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Response</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Answer */}
-            {(result.data?.answer || result.answer) && (
-              <div className="p-4 bg-muted rounded-lg">
-                <p className="text-sm font-medium mb-2">AI Response:</p>
-                <p className="whitespace-pre-wrap">{result.data?.answer || result.answer}</p>
-              </div>
-            )}
-
-            {/* Action Results */}
-            {(result.action_results || result.data?.action_results) && (result.action_results || result.data?.action_results).length > 0 && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Actions Taken:</p>
-                {(result.action_results || result.data?.action_results).map((action, index) => (
-                  <div
-                    key={index}
-                    className={`p-3 rounded-lg border ${
-                      action.success
-                        ? 'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800'
-                        : 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      {action.success ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
-                      ) : (
-                        <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
-                      )}
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant={action.success ? 'default' : 'destructive'}>
-                            {action.action}
-                          </Badge>
-                          {action.success && (
-                            <span className="text-sm text-muted-foreground">
-                              {action.message || 'Completed successfully'}
-                            </span>
-                          )}
-                        </div>
-                        {action.error && (
-                          <p className="text-sm text-red-600 dark:text-red-400">
-                            {action.error}
-                          </p>
-                        )}
-                        {action.project_id && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Project ID: {action.project_id}
-                          </p>
-                        )}
-                        {action.task_id && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Task ID: {action.task_id}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Cannot Do Message */}
-            {(result.data?.cannot_do || result.cannot_do) && (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-950 dark:border-yellow-800">
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  {result.data?.cannot_do || result.cannot_do}
-                </p>
-              </div>
-            )}
-            
-            {/* Debug: Show raw response if no other content */}
-            {!result.data?.answer && !result.answer && !result.action_results && !result.data?.action_results && !result.data?.cannot_do && !result.cannot_do && (
-              <div className="p-4 bg-muted rounded-lg">
-                <p className="text-sm font-medium mb-2">Response received:</p>
-                <pre className="text-xs overflow-auto">{JSON.stringify(result, null, 2)}</pre>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 };
 
 export default ProjectPilotAgent;
-
-
-

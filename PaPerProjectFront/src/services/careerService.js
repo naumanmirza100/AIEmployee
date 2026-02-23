@@ -2,8 +2,14 @@
 
 import api from './api';
 
+// Same pattern as modulePurchaseService.getModulePrices - base can be with or without /api
+const getCareersUrl = () => {
+  const base = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
+  return base.includes('/api') ? `${base}/careers/positions` : `${base}/api/careers/positions`;
+};
+
 /**
- * Get all job positions
+ * Get all job positions (public endpoint - uses direct fetch to avoid auth/header issues)
  */
 export const getPositions = async (params = {}) => {
   try {
@@ -12,8 +18,23 @@ export const getPositions = async (params = {}) => {
     if (params.department) queryParams.department = params.department;
     if (params.type) queryParams.type = params.type;
 
-    const response = await api.get('/careers/positions', queryParams);
-    return response;
+    const queryString = new URLSearchParams(queryParams).toString();
+    const url = `${getCareersUrl()}${queryString ? `?${queryString}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const err = new Error(errData?.message || `HTTP ${response.status}`);
+      err.status = response.status;
+      err.data = errData;
+      throw err;
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Get positions error:', error);
     throw error;

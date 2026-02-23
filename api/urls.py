@@ -32,6 +32,7 @@ from api.views import company_projects_tasks
 from api.views import user_project_manager
 from api.views import recruitment_agent
 from api.views import marketing_agent
+from api.views import frontline_agent
 from api.views import module_purchase
 from api.views.health import health_check
 
@@ -184,6 +185,14 @@ urlpatterns = [
     re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),
     re_path(r'^project-manager/ai/timeline-gantt/?$', pm_agent.timeline_gantt, name='pm_timeline_gantt'),
     re_path(r'^project-manager/ai/knowledge-qa/?$', pm_agent.knowledge_qa, name='pm_knowledge_qa'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/?$', pm_agent.list_knowledge_qa_chats, name='pm_knowledge_qa_chats_list'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/create/?$', pm_agent.create_knowledge_qa_chat, name='pm_knowledge_qa_chats_create'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_knowledge_qa_chat, name='pm_knowledge_qa_chats_update'),
+    re_path(r'^project-manager/ai/knowledge-qa/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_knowledge_qa_chat, name='pm_knowledge_qa_chats_delete'),
+    re_path(r'^project-manager/ai/project-pilot/chats/?$', pm_agent.list_project_pilot_chats, name='pm_project_pilot_chats_list'),
+    re_path(r'^project-manager/ai/project-pilot/chats/create/?$', pm_agent.create_project_pilot_chat, name='pm_project_pilot_chats_create'),
+    re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_project_pilot_chat, name='pm_project_pilot_chats_update'),
+    re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_project_pilot_chat, name='pm_project_pilot_chats_delete'),
     
     # Manual Project and Task Creation endpoints (Company User)
     re_path(r'^project-manager/projects/create/?$', pm_agent.create_project_manual, name='pm_create_project_manual'),
@@ -208,7 +217,18 @@ urlpatterns = [
     re_path(r'^company/applications/(?P<id>\d+)/status/?$', company_jobs.update_company_application_status, name='update_company_application_status'),
     
     # Recruitment Agent endpoints (Company User)
-    re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST
+    re_path(r'^recruitment/process-cvs/?$', recruitment_agent.process_cvs, name='recruitment_process_cvs'),  # POST (full pipeline)
+    re_path(r'^recruitment/agents/cv/parse/?$', recruitment_agent.api_cv_parse, name='recruitment_api_cv_parse'),  # POST
+    re_path(r'^recruitment/agents/cv/summarize/?$', recruitment_agent.api_cv_summarize, name='recruitment_api_cv_summarize'),  # POST
+    re_path(r'^recruitment/agents/cv/enrich/?$', recruitment_agent.api_cv_enrich, name='recruitment_api_cv_enrich'),  # POST
+    re_path(r'^recruitment/agents/cv/qualify/?$', recruitment_agent.api_cv_qualify, name='recruitment_api_cv_qualify'),  # POST
+    re_path(r'^recruitment/agents/job-description/parse/?$', recruitment_agent.api_job_description_parse, name='recruitment_api_job_description_parse'),  # POST
+    re_path(r'^recruitment/ai/suggest-interview-questions/?$', recruitment_agent.suggest_interview_questions, name='recruitment_suggest_interview_questions'),  # POST
+    re_path(r'^recruitment/qa/?$', recruitment_agent.recruitment_qa, name='recruitment_qa'),  # POST
+    re_path(r'^recruitment/qa/chats/?$', recruitment_agent.list_qa_chats, name='recruitment_qa_chats_list'),  # GET
+    re_path(r'^recruitment/qa/chats/create/?$', recruitment_agent.create_qa_chat, name='recruitment_qa_chats_create'),  # POST
+    re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/update/?$', recruitment_agent.update_qa_chat, name='recruitment_qa_chats_update'),  # PATCH/PUT
+    re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/delete/?$', recruitment_agent.delete_qa_chat, name='recruitment_qa_chats_delete'),  # DELETE
     re_path(r'^recruitment/job-descriptions/?$', recruitment_agent.list_job_descriptions, name='recruitment_list_job_descriptions'),  # GET
     re_path(r'^recruitment/job-descriptions/generate/?$', recruitment_agent.generate_job_description, name='recruitment_generate_job_description'),  # POST
     re_path(r'^recruitment/job-descriptions/create/?$', recruitment_agent.create_job_description, name='recruitment_create_job_description'),  # POST
@@ -269,6 +289,45 @@ urlpatterns = [
     re_path(r'^marketing/notifications/monitor/?$', marketing_agent.proactive_notification_monitor, name='marketing_notifications_monitor'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/read/?$', marketing_agent.mark_notification_read, name='marketing_notification_read'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/delete/?$', marketing_agent.delete_notification, name='marketing_notification_delete'),  # POST
+
+    # Frontline Agent endpoints (Company User)
+    re_path(r'^frontline/dashboard/?$', frontline_agent.frontline_dashboard, name='frontline_dashboard'),  # GET
+    re_path(r'^frontline/documents/?$', frontline_agent.list_documents, name='frontline_list_documents'),  # GET
+    re_path(r'^frontline/documents/upload/?$', frontline_agent.upload_document, name='frontline_upload_document'),  # POST
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/?$', frontline_agent.get_document, name='frontline_get_document'),  # GET
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/delete/?$', frontline_agent.delete_document, name='frontline_delete_document'),  # POST
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/summarize/?$', frontline_agent.summarize_document, name='frontline_summarize_document'),  # POST
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/extract/?$', frontline_agent.extract_document, name='frontline_extract_document'),  # POST
+    re_path(r'^frontline/knowledge/qa/?$', frontline_agent.knowledge_qa, name='frontline_knowledge_qa'),  # POST
+    re_path(r'^frontline/knowledge/search/?$', frontline_agent.search_knowledge, name='frontline_search_knowledge'),  # GET
+    re_path(r'^frontline/qa/chats/?$', frontline_agent.list_qa_chats, name='frontline_qa_chats_list'),  # GET
+    re_path(r'^frontline/qa/chats/create/?$', frontline_agent.create_qa_chat, name='frontline_qa_chats_create'),  # POST
+    re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/update/?$', frontline_agent.update_qa_chat, name='frontline_qa_chats_update'),  # PATCH/PUT
+    re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/delete/?$', frontline_agent.delete_qa_chat, name='frontline_qa_chats_delete'),  # DELETE
+    re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
+    re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
+    re_path(r'^frontline/ticket-tasks/?$', frontline_agent.list_ticket_tasks, name='frontline_list_ticket_tasks'),  # GET
+    re_path(r'^frontline/ticket-tasks/(?P<ticket_id>\d+)/?$', frontline_agent.update_ticket_task, name='frontline_update_ticket_task'),  # PATCH/PUT
+    # Notifications
+    re_path(r'^frontline/notifications/templates/?$', frontline_agent.list_notification_templates, name='frontline_list_notification_templates'),  # GET
+    re_path(r'^frontline/notifications/templates/create/?$', frontline_agent.create_notification_template, name='frontline_create_notification_template'),  # POST
+    re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/?$', frontline_agent.get_notification_template, name='frontline_get_notification_template'),  # GET
+    re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/update/?$', frontline_agent.update_notification_template, name='frontline_update_notification_template'),  # PATCH/PUT
+    re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/delete/?$', frontline_agent.delete_notification_template, name='frontline_delete_notification_template'),  # DELETE
+    re_path(r'^frontline/notifications/scheduled/?$', frontline_agent.list_scheduled_notifications, name='frontline_list_scheduled_notifications'),  # GET
+    re_path(r'^frontline/notifications/schedule/?$', frontline_agent.schedule_notification, name='frontline_schedule_notification'),  # POST
+    re_path(r'^frontline/notifications/send/?$', frontline_agent.send_notification_now, name='frontline_send_notification_now'),  # POST
+    # Workflows
+    re_path(r'^frontline/workflows/?$', frontline_agent.list_workflows, name='frontline_list_workflows'),  # GET
+    re_path(r'^frontline/workflows/create/?$', frontline_agent.create_workflow, name='frontline_create_workflow'),  # POST
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/?$', frontline_agent.get_workflow, name='frontline_get_workflow'),  # GET
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/update/?$', frontline_agent.update_workflow, name='frontline_update_workflow'),  # PATCH/PUT
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/delete/?$', frontline_agent.delete_workflow, name='frontline_delete_workflow'),  # DELETE
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/execute/?$', frontline_agent.execute_workflow, name='frontline_execute_workflow'),  # POST
+    re_path(r'^frontline/workflows/executions/?$', frontline_agent.list_workflow_executions, name='frontline_list_workflow_executions'),  # GET
+    # Analytics
+    re_path(r'^frontline/analytics/?$', frontline_agent.frontline_analytics, name='frontline_analytics'),  # GET
+    re_path(r'^frontline/analytics/export/?$', frontline_agent.frontline_analytics_export, name='frontline_analytics_export'),  # GET
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)

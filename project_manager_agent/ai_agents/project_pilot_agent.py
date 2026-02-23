@@ -10,6 +10,13 @@ from typing import Dict, Optional, List
 import json
 import re
 
+# Words to ignore when matching user names from the question (e.g. "hamza and abdullah" must not match "and")
+_ASSIGNMENT_NAME_STOPWORDS = frozenset({
+    "and", "or", "the", "a", "an", "to", "for", "only", "all", "users", "user", "tasks", "task",
+    "assign", "assigned", "by", "with", "be", "is", "are", "its", "it", "as", "in", "on", "at",
+    "of", "no", "so", "do", "go", "we", "me", "my", "us", "am", "id", "to", "from", "into", "our",
+})
+
 
 class ProjectPilotAgent(BaseAgent):
     """
@@ -30,7 +37,7 @@ class ProjectPilotAgent(BaseAgent):
         CRITICAL INSTRUCTIONS:
         1. Always analyze the FULL context of the user's request before deciding what action to take
         2. Understand the INTENT behind the request, not just keywords
-        3. If the request is ambiguous or unclear, ASK FOR CLARIFICATION rather than making assumptions
+        3. When the user clearly asks to add task(s) to a named project (e.g. "add one task in [project name] for [topic]"), EXECUTE the action—do NOT ask for clarification. Only ask when project or intent is truly ambiguous.
         4. Distinguish clearly between:
            - Creating NEW projects vs updating existing tasks
            - Creating NEW tasks vs updating existing tasks
@@ -42,7 +49,7 @@ class ProjectPilotAgent(BaseAgent):
         You extract action details from user requests and return structured JSON, but ONLY when the intent is clear.
         If ambiguous, ask for clarification with helpful questions."""
     
-    def handle_action_request(self, question: str, context: Optional[Dict] = None, available_users: Optional[List[Dict]] = None) -> Dict:
+    def handle_action_request(self, question: str, context: Optional[Dict] = None, available_users: Optional[List[Dict]] = None, chat_history: Optional[List[Dict]] = None) -> Dict:
         """
         Handle action requests like creating projects and tasks.
         
@@ -180,8 +187,21 @@ class ProjectPilotAgent(BaseAgent):
             cannot_do = True
             cannot_do_item = 'team members directly'
         
-        # Build context string
+        # Build context string (optionally start with conversation history for this chat)
         context_str = ""
+        if chat_history:
+            recent = chat_history[-15:]  # last 15 messages
+            context_str += "\n📜 CONVERSATION HISTORY (this chat)—use this to understand follow-ups (e.g. 'yes', 'do it') and reference when relevant:\n"
+            for msg in recent:
+                role = (msg.get("role") or "user").lower()
+                content = (msg.get("content") or "").strip()
+                if not content:
+                    continue
+                if role == "assistant":
+                    context_str += f"Assistant: {content[:500]}{'...' if len(content) > 500 else ''}\n"
+                else:
+                    context_str += f"User: {content[:500]}{'...' if len(content) > 500 else ''}\n"
+            context_str += "\nCurrent user message (respond to this):\n"
         if context:
             # Always show all projects first
             if 'all_projects' in context:
@@ -569,43 +589,95 @@ Return ONLY text - NO JSON, NO actions."""
                                 wants_new_project = True
                                 break
                 
-                # Check if user mentions existing project by name
+                # Check if user mentions existing project by name (exact substring or fuzzy match)
+                def _normalize_for_match(text):
+                    """Normalize for project name matching: remove filler words, collapse spaces."""
+                    if not text:
+                        return ""
+                    t = text.lower().strip()
+                    for word in ("project", "system", "application", "app", "the", "a", "an"):
+                        t = re.sub(rf"\b{re.escape(word)}\b", " ", t)
+                    t = re.sub(r"\s+", " ", t).strip()
+                    # Normalize task/tasks, management/managing, etc.
+                    t = re.sub(r"\btasks\b", "task", t)
+                    t = re.sub(r"\bmanaging\b", "management", t)
+                    return t
+
                 existing_project_mentioned = False
                 project_id_to_use = None
                 if context.get('all_projects'):
+                    q_norm = _normalize_for_match(question)
                     for proj in context['all_projects']:
-                        proj_name = proj.get('name', '').lower()
-                        if proj_name and proj_name in question_lower:
+                        proj_name = proj.get('name', '')
+                        proj_norm = _normalize_for_match(proj_name)
+                        if not proj_norm:
+                            continue
+                        # Exact substring match
+                        if proj_name.lower() in question_lower or proj_norm in q_norm:
+                            existing_project_mentioned = True
+                            project_id_to_use = proj.get('id')
+                            break
+                        # Fuzzy: all significant words of project name appear in question
+                        proj_words = [w for w in proj_norm.split() if len(w) > 1]
+                        if len(proj_words) >= 2 and all(pw in q_norm for pw in proj_words):
+                            existing_project_mentioned = True
+                            project_id_to_use = proj.get('id')
+                            break
+                        # Fuzzy: first 15 chars of normalized project name in question (e.g. "daily task manag")
+                        if len(proj_norm) >= 5 and proj_norm[:15] in q_norm:
                             existing_project_mentioned = True
                             project_id_to_use = proj.get('id')
                             break
                 
+                # CRITICAL: If user said "add task in [name]" / "add a new task in [name]", that's the existing project—do NOT create a new project.
+                add_task_in_patterns = ['add task in', 'add a task in', 'add new task in', 'add tasks in', 'add a new task to', 'add task to', 'add tasks to', 'in the', 'in project']
+                if existing_project_mentioned or any(p in question_lower for p in add_task_in_patterns):
+                    # Prefer "add to existing project" when they named a project (or used "in X" / "to X")
+                    if existing_project_mentioned:
+                        wants_new_project = False
+                
                 if wants_new_project:
-                    # Check if user wants tasks assigned to all available developers
-                    assign_to_all_keywords = ['assign to all', 'assign to all available', 'assign to all developers', 
-                                             'assign to all users', 'distribute to all', 'assign tasks to all',
-                                             'all available developers', 'all developers', 'all users']
-                    wants_assign_to_all = any(keyword in question_lower for keyword in assign_to_all_keywords)
-                    
-                    # Check if user mentioned specific usernames to assign to
-                    # Look for patterns like "assign to following users:", "username: abdullah", etc.
+                    # Determine assignment intent from the user's words (no hardcoded keyword lists for "all").
+                    # First, try to find specific users mentioned by name/username (partial match: "hamza" matches "Ameer Hamza").
+                    _seen_ids = set()
                     specific_usernames = []
-                    assignment_keywords_in_question = ['assign to', 'assign tasks to', 'assign to following', 
-                                                      'assign to users', 'only assign', 'assign only',
-                                                      'following users', 'assign:', 'username:']
-                    has_specific_assignment = any(keyword in question_lower for keyword in assignment_keywords_in_question)
-                    
-                    # Extract usernames from the question if available_users is provided
-                    if has_specific_assignment and available_users:
-                        # Look for username patterns in the question
+                    if available_users:
                         for user_info in available_users:
-                            username = user_info.get('username', '').lower()
-                            name = user_info.get('name', '').lower()
-                            # Check if username or name appears in the question
+                            uid = user_info.get('id')
+                            if uid in _seen_ids:
+                                continue
+                            username = (user_info.get('username') or '').strip().lower()
+                            name = (user_info.get('name') or '').strip().lower()
+                            if not username and not name:
+                                continue
+                            # Full match
                             if username and username in question_lower:
                                 specific_usernames.append(user_info)
-                            elif name and name in question_lower:
+                                _seen_ids.add(uid)
+                                continue
+                            if name and name in question_lower:
                                 specific_usernames.append(user_info)
+                                _seen_ids.add(uid)
+                                continue
+                            # Partial match: any word from name or username (e.g. "hamza" in "Ameer Hamza"); skip stopwords like "and"
+                            name_words = [w for w in name.split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            username_words = [w for w in re.sub(r'[_.-]', ' ', username).split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            for word in name_words + username_words:
+                                if len(word) >= 2 and word not in _ASSIGNMENT_NAME_STOPWORDS and word in question_lower:
+                                    specific_usernames.append(user_info)
+                                    _seen_ids.add(uid)
+                                    break
+                    # "Assign to all" only when user clearly asks for everyone and did NOT limit to specific people or "only N users"
+                    only_n_users = re.search(r'only\s+\d+\s+users?', question_lower)
+                    wants_assign_to_all = (
+                        not only_n_users
+                        and not specific_usernames
+                        and any(phrase in question_lower for phrase in [
+                            'assign to all', 'assign to all available', 'assign to all users',
+                            'distribute to all', 'assign tasks to all', 'all available users',
+                            'all developers', 'all users', 'assign the tasks to all'
+                        ])
+                    )
                     
                     # User explicitly wants a NEW project
                     assignment_instruction = ""
@@ -619,21 +691,22 @@ The user wants tasks assigned to ALL available developers/users. You MUST distri
 - Use ALL user IDs from the available users list above
 - Example: If there are 3 users (IDs: 1, 2, 3) and you create 6 tasks, assign: task1→user1, task2→user2, task3→user3, task4→user1, task5→user2, task6→user3"""
                     elif specific_usernames:
-                        # User specified specific users to assign to
-                        usernames_list = ', '.join([u.get('username', 'Unknown') for u in specific_usernames])
+                        # User specified specific users (e.g. "only 2 users, hamza and abdullah") – give exact IDs so the LLM cannot assign to others
+                        usernames_list = ', '.join([u.get('username', u.get('name', 'Unknown')) for u in specific_usernames])
+                        ids_list = ', '.join([str(u.get('id')) for u in specific_usernames])
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
-The user wants tasks assigned ONLY to these specific users mentioned in their request: {usernames_list}
-- You MUST assign tasks ONLY to these users from the available users list above
-- Match the usernames mentioned in the request to the usernames in the available users list
-- Distribute tasks evenly across ONLY these specific users
-- Create at least one task per specified user, and distribute additional tasks among them
-- DO NOT assign to users not mentioned in the request
-- Example: If user mentioned "abdullah" and "hamza1", only use assignee_id for users with those usernames"""
+The user asked to assign tasks to ONLY these people: {usernames_list}. You MUST use ONLY these user IDs: {ids_list}.
+- Every assignee_id in every create_task MUST be one of: {ids_list}. No other user IDs are allowed.
+- Distribute tasks evenly between these users only (e.g. round-robin: first task → first ID, second → second ID, then repeat).
+- DO NOT assign to any user whose ID is not in {{ {ids_list} }}."""
                     elif wants_assign_to_all and not available_users:
                         assignment_instruction = "\nNOTE: User wants tasks assigned to all developers, but no users are available. Leave assignee_id as null."
                     else:
                         assignment_instruction = "\n- Use available user IDs from the list above if assignment is requested, otherwise leave assignee_id as null"
+                    
+                    from datetime import datetime as _dt
+                    _today = _dt.now().strftime('%Y-%m-%d')
                     
                     prompt = f"""You are an intelligent AI assistant that understands user intent and extracts actions from requests. 
 
@@ -641,6 +714,8 @@ CRITICAL: The user wants to CREATE A NEW PROJECT. They are NOT asking to update 
 - DO NOT return update_task actions
 - DO NOT modify existing tasks
 - ONLY return create_project and create_task actions
+
+TODAY'S DATE (use for calculating due_date): {_today}
 
 {context_str}
 {users_str}
@@ -675,9 +750,10 @@ Return ONLY this JSON format (no other text):
         "task_description": "COMPREHENSIVE task description (4-6 sentences) that includes: (1) WHAT the task is - clear explanation of what needs to be accomplished, (2) HOW to do it - step-by-step approach and methodology, (3) WHICH TOOLS to use - specific technologies, frameworks, libraries, and tools recommended, (4) MOST EFFICIENT WAY - best practices and efficient approaches to complete this task, including any shortcuts or optimizations. Make it actionable and detailed enough that a developer can understand exactly what to build and how to approach it.",
         "project_id": null,
         "assignee_id": user_id_or_null,
+        "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
-        "reasoning": "DETAILED AI reasoning and judgment (5-7 sentences) that includes: (1) WHY this task is important for the overall project and how it contributes to project completion, (2) TASK BREAKDOWN - logical decomposition of the task into manageable components, (3) EFFICIENCY ANALYSIS - reasoning about the most efficient approach considering dependencies, resources, and project timeline, (4) TECHNICAL DECISIONS - explanation of technology choices and why they're optimal for this specific task, (5) RISK ASSESSMENT - potential challenges and how to mitigate them, (6) BEST PRACTICES - industry standards and patterns to follow, (7) COMPLETION STRATEGY - recommended order and approach to ensure this task is completed most efficiently. Provide strategic thinking that helps ensure the project can be completed efficiently."
+        "reasoning": "DETAILED AI reasoning (5-7 sentences) including: (1) WHY this task matters and how it contributes to the project, (2) ESTIMATED EFFORT and why this due_date was chosen (how many days/weeks and why), (3) PRIORITY justification (why high/medium/low based on importance and urgency), (4) TASK BREAKDOWN and efficiency, (5) TECHNICAL DECISIONS, (6) RISK and best practices, (7) COMPLETION STRATEGY."
     }}
 ]
 
@@ -685,6 +761,12 @@ CRITICAL RULES:
 - Return ONLY the JSON array, no explanations or text outside JSON
 - NEVER include update_task actions when creating a new project
 - Break down ALL features/modules/services mentioned into separate tasks
+- DUE DATES (MANDATORY – use reasoning and effort estimation):
+  Set due_date for EVERY task in YYYY-MM-DD. TODAY'S DATE is {_today}. For each task:
+  (1) Estimate how long the task will take to complete based on scope, complexity, and dependencies (e.g. small/quick = 3–7 days, medium = 1–2 weeks, large/complex = 2–4 weeks).
+  (2) Consider task order: tasks that must be done first (e.g. database design, auth) get earlier due dates; dependent tasks get later dates.
+  (3) Set due_date = today + estimated working days (use calendar dates). Example: if today is {_today}, a 5-day task might be due in 7 calendar days; a 2-week task in 14 days.
+  Do not leave due_date empty. Each due_date should reflect realistic effort for that specific task.
 - Create 10-20 tasks that comprehensively cover:
   * Core Infrastructure Layer (Auth, Data Warehouse, Event Bus, Audit, Notifications)
   * All modules/services mentioned (e.g., creator-profile-service, avatar-classification-service, etc.)
@@ -694,42 +776,21 @@ CRITICAL RULES:
   * Frontend UI (if applicable)
   * Testing and deployment
 
-PRIORITY ASSIGNMENT (MANDATORY FOR ALL TASKS):
-You MUST analyze each task's importance to the project and assign appropriate priority:
-- HIGH priority: 
-  * Foundation/infrastructure tasks (database design, authentication, core APIs)
-  * Tasks that block other tasks (dependencies)
-  * Critical user-facing features that are core to the project
-  * Security and data integrity tasks
-  * Tasks on the critical path to project completion
-- MEDIUM priority:
-  * Important features that don't block others
-  * Supporting functionality and integrations
-  * UI/UX improvements
-  * Secondary features that enhance the system
-- LOW priority:
-  * Nice-to-have features
-  * Optional enhancements
-  * Non-critical optimizations
-  * Tasks that can be done later without impacting core functionality
-  * Polish and refinement tasks
+PRIORITY ASSIGNMENT (MANDATORY – based on importance AND urgency):
+Assign priority by considering (1) how important the task is for the project to succeed and (2) how urgent it is (needed early vs can wait):
+- HIGH priority: Critical for the project to work AND urgent — foundation/infrastructure (DB, auth, core APIs), tasks that block others, security/data integrity, tasks on the critical path. Without these, the project cannot function or progress.
+- MEDIUM priority: Important but not blocking — supporting features, integrations, UI/UX, secondary features. Needed for a complete product but not to unblock other work.
+- LOW priority: Not urgent, not critical — nice-to-have, optional enhancements, polish, refinements. Can be done later without impacting core functionality.
 
-Think carefully about each task: Is it foundational? Does it block others? Is it critical for the project to function? Assign priority accordingly.
+Ask for each task: "Is this required for the project to work? Is it blocking others? Is it urgent?" Assign high only when both important and urgent; medium when important; low when optional.
 - For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences) covering:
   * WHAT the task is - clear explanation
   * HOW to do it - step-by-step methodology
   * WHICH TOOLS to use - specific technologies/frameworks
   * MOST EFFICIENT WAY - best practices and optimizations
-- For each task's "reasoning" field, provide DETAILED strategic reasoning (5-7 sentences) covering:
-  * WHY it's important and how it contributes to project completion
-  * Task breakdown and component analysis
-  * Efficiency analysis with dependencies and timeline consideration
-  * Technical decisions and rationale
-  * Risk assessment and mitigation strategies
-  * Best practices and industry standards
-  * Completion strategy for maximum efficiency
-- Generate tasks with proper reasoning and judgment to ensure project can be completed most efficiently
-- Consider task dependencies and optimal ordering for efficient project completion
+- For each task's "reasoning" field, include: (1) why the task matters, (2) estimated effort and why this due_date was chosen, (3) why this priority (importance + urgency), (4) task breakdown and efficiency, (5) technical rationale, (6) risks and best practices, (7) completion strategy.
+- Generate tasks with proper reasoning; due_date and priority must be justified by effort and importance/urgency.
+- Consider task dependencies and optimal ordering; earlier/dependency tasks get earlier due dates.
 - {assignment_instruction}
 - Set project_id to null for all tasks (they'll be linked to the new project automatically)
 - Create a detailed project description that summarizes all features/modules/services mentioned"""
@@ -737,14 +798,54 @@ Think carefully about each task: Is it foundational? Does it block others? Is it
                     # User wants tasks in EXISTING project
                     target_project_id = project_id_to_use or (context.get('project', {}).get('id') if context.get('project') else None)
                     
-                    # Check if user wants tasks assigned to all available developers
-                    assign_to_all_keywords = ['assign to all', 'assign to all available', 'assign to all developers', 
-                                             'assign to all users', 'distribute to all', 'assign tasks to all',
-                                             'all available developers', 'all developers', 'all users']
-                    wants_assign_to_all = any(keyword in question_lower for keyword in assign_to_all_keywords)
+                    # Same assignment intent logic as new-project: specific users (partial name match) vs assign to all
+                    _seen_ids_ex = set()
+                    specific_usernames = []
+                    if available_users:
+                        for user_info in available_users:
+                            uid = user_info.get('id')
+                            if uid in _seen_ids_ex:
+                                continue
+                            username = (user_info.get('username') or '').strip().lower()
+                            name = (user_info.get('name') or '').strip().lower()
+                            if not username and not name:
+                                continue
+                            if username and username in question_lower:
+                                specific_usernames.append(user_info)
+                                _seen_ids_ex.add(uid)
+                                continue
+                            if name and name in question_lower:
+                                specific_usernames.append(user_info)
+                                _seen_ids_ex.add(uid)
+                                continue
+                            name_words = [w for w in name.split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            username_words = [w for w in re.sub(r'[_.-]', ' ', username).split() if len(w) > 1 and w not in _ASSIGNMENT_NAME_STOPWORDS]
+                            for word in name_words + username_words:
+                                if len(word) >= 2 and word not in _ASSIGNMENT_NAME_STOPWORDS and word in question_lower:
+                                    specific_usernames.append(user_info)
+                                    _seen_ids_ex.add(uid)
+                                    break
+                    only_n_users = re.search(r'only\s+\d+\s+users?', question_lower)
+                    wants_assign_to_all = (
+                        not only_n_users
+                        and not specific_usernames
+                        and any(phrase in question_lower for phrase in [
+                            'assign to all', 'assign to all available', 'assign to all users',
+                            'distribute to all', 'assign tasks to all', 'all available users',
+                            'all developers', 'all users', 'assign the tasks to all'
+                        ])
+                    )
                     
                     assignment_instruction = ""
-                    if wants_assign_to_all and available_users:
+                    if specific_usernames:
+                        usernames_list = ', '.join([u.get('username', u.get('name', 'Unknown')) for u in specific_usernames])
+                        ids_list = ', '.join([str(u.get('id')) for u in specific_usernames])
+                        assignment_instruction = f"""
+CRITICAL ASSIGNMENT INSTRUCTION:
+The user asked to assign tasks to ONLY these people: {usernames_list}. You MUST use ONLY these user IDs: {ids_list}.
+- Every assignee_id MUST be one of: {ids_list}. Do NOT use any other user ID.
+- Distribute tasks evenly between these users only (round-robin)."""
+                    elif wants_assign_to_all and available_users:
                         assignment_instruction = f"""
 CRITICAL ASSIGNMENT INSTRUCTION:
 The user wants tasks assigned to ALL available developers/users. You MUST distribute tasks across ALL available users listed above.
@@ -758,17 +859,27 @@ The user wants tasks assigned to ALL available developers/users. You MUST distri
                     else:
                         assignment_instruction = "\n- Use available user IDs from the list above if assignment is requested, otherwise leave assignee_id as null"
                     
+                    from datetime import datetime as _dt
+                    _today = _dt.now().strftime('%Y-%m-%d')
+                    
                     prompt = f"""You are an AI assistant that extracts actions from user requests. Analyze the request and return ONLY valid JSON.
+
+TODAY'S DATE (use for calculating due_date): {_today}
 
 {context_str}
 {users_str}
 
 User Request: {question}
 
-The user wants to add tasks to an EXISTING project. DO NOT create a new project.
+The user wants to add tasks to an EXISTING project. DO NOT create a new project. DO NOT ask for clarification—return the action(s) as JSON now.
 {assignment_instruction}
 
 Extract ONLY create_task actions. Use project_id: {target_project_id} for all tasks.
+
+CRITICAL: If the user asked to add "one task", "1 task", "a task", or "a new task" (with or without a topic), return exactly ONE create_task. Use their topic as task_title (e.g. fix "sementic" to "semantic") and write a concise task_description (2-4 sentences is fine).
+
+DUE DATES: Set due_date in YYYY-MM-DD. Estimate how long each task will take (small=3-7 days, medium=1-2 weeks, large=2-4 weeks). Set due_date = today + estimated days. In reasoning, justify why that due_date was chosen.
+PRIORITY: Set based on importance AND urgency. High = critical for project to work + urgent; Medium = important but not blocking; Low = optional. Justify in reasoning.
 
 Return ONLY this JSON format (no other text):
 [
@@ -778,17 +889,21 @@ Return ONLY this JSON format (no other text):
         "task_description": "COMPREHENSIVE task description (4-6 sentences) that includes: (1) WHAT the task is - clear explanation of what needs to be accomplished, (2) HOW to do it - step-by-step approach and methodology, (3) WHICH TOOLS to use - specific technologies, frameworks, libraries, and tools recommended, (4) MOST EFFICIENT WAY - best practices and efficient approaches to complete this task, including any shortcuts or optimizations. Make it actionable and detailed enough that a developer can understand exactly what to build and how to approach it.",
         "project_id": {target_project_id},
         "assignee_id": user_id_or_null,
+        "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
-        "reasoning": "DETAILED AI reasoning and judgment (5-7 sentences) that includes: (1) WHY this task is important for the overall project and how it contributes to project completion, (2) TASK BREAKDOWN - logical decomposition of the task into manageable components, (3) EFFICIENCY ANALYSIS - reasoning about the most efficient approach considering dependencies, resources, and project timeline, (4) TECHNICAL DECISIONS - explanation of technology choices and why they're optimal for this specific task, (5) RISK ASSESSMENT - potential challenges and how to mitigate them, (6) BEST PRACTICES - industry standards and patterns to follow, (7) COMPLETION STRATEGY - recommended order and approach to ensure this task is completed most efficiently. Provide strategic thinking that helps ensure the project can be completed efficiently."
+        "reasoning": "Include: (1) why this task matters, (2) estimated effort and why this due_date was chosen, (3) why this priority (importance + urgency), (4) task breakdown and efficiency, (5) technical rationale, (6) completion strategy."
     }}
 ]
 
 Rules:
-- Return ONLY the JSON array, no explanations
+- Return ONLY the JSON array, no explanations. Never respond with questions or clarification—only valid JSON.
 - DO NOT include create_project action
 - Use project_id: {target_project_id} for all tasks
-- Break down into logical tasks if multiple tasks requested (create 8-15 tasks covering all features)
+- Set due_date for every task: estimate effort (days/weeks) and set due_date = today + that. Justify in reasoning. Do not leave due_date empty.
+- Set priority by importance and urgency; justify in reasoning.
+- When user asked for ONE task only (e.g. "add only 1 task", "add a task for X"), return exactly one create_task with a short title and concise description.
+- When multiple tasks requested: break down into logical tasks (8-15 tasks covering features)
 - Create comprehensive tasks that cover: database design, backend API, frontend UI, authentication, core features, testing, deployment
 - For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences) covering:
   * WHAT the task is - clear explanation
@@ -827,12 +942,14 @@ Rules:
                     
                     if has_system_features or has_detailed_description or is_system_description:
                         # Likely a project creation request with detailed specs - NEVER treat as deletion
+                        from datetime import datetime as _dt
+                        _today = _dt.now().strftime('%Y-%m-%d')
                         prompt = f"""You are an intelligent AI assistant analyzing a user request.
 
 CRITICAL: The user has provided detailed features/modules/services or described a system/platform. 
 This STRONGLY indicates they want to CREATE A NEW PROJECT. This is NOT a deletion request. 
 
-CRITICAL: The user has provided detailed features/modules/services. This indicates they want to CREATE A NEW PROJECT.
+TODAY'S DATE (use for calculating due_date): {_today}
 
 {context_str}
 {users_str}
@@ -866,9 +983,10 @@ Return ONLY this JSON format (no other text):
         "task_description": "COMPREHENSIVE task description (4-6 sentences) that includes: (1) WHAT the task is - clear explanation of what needs to be accomplished, (2) HOW to do it - step-by-step approach and methodology, (3) WHICH TOOLS to use - specific technologies, frameworks, libraries, and tools recommended, (4) MOST EFFICIENT WAY - best practices and efficient approaches to complete this task, including any shortcuts or optimizations. Make it actionable and detailed enough that a developer can understand exactly what to build and how to approach it.",
         "project_id": null,
         "assignee_id": user_id_or_null,
+        "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
-        "reasoning": "DETAILED AI reasoning and judgment (5-7 sentences) that includes: (1) WHY this task is important for the overall project and how it contributes to project completion, (2) TASK BREAKDOWN - logical decomposition of the task into manageable components, (3) EFFICIENCY ANALYSIS - reasoning about the most efficient approach considering dependencies, resources, and project timeline, (4) TECHNICAL DECISIONS - explanation of technology choices and why they're optimal for this specific task, (5) RISK ASSESSMENT - potential challenges and how to mitigate them, (6) BEST PRACTICES - industry standards and patterns to follow, (7) COMPLETION STRATEGY - recommended order and approach to ensure this task is completed most efficiently."
+        "reasoning": "Include: (1) why this task matters, (2) estimated effort and why this due_date was chosen, (3) why this priority (importance + urgency), (4) task breakdown and efficiency, (5) technical rationale, (6) risks and completion strategy."
     }}
 ]
 
@@ -877,42 +995,11 @@ CRITICAL RULES:
 - NEVER include update_task actions - this is a NEW project creation
 - Create 10-20 tasks covering ALL features/modules/services mentioned
 - Break down each major component into separate tasks
-
-PRIORITY ASSIGNMENT (MANDATORY FOR ALL TASKS):
-You MUST analyze each task's importance to the project and assign appropriate priority:
-- HIGH priority: 
-  * Foundation/infrastructure tasks (database design, authentication, core APIs)
-  * Tasks that block other tasks (dependencies)
-  * Critical user-facing features that are core to the project
-  * Security and data integrity tasks
-  * Tasks on the critical path to project completion
-- MEDIUM priority:
-  * Important features that don't block others
-  * Supporting functionality and integrations
-  * UI/UX improvements
-  * Secondary features that enhance the system
-- LOW priority:
-  * Nice-to-have features
-  * Optional enhancements
-  * Non-critical optimizations
-  * Tasks that can be done later without impacting core functionality
-  * Polish and refinement tasks
-
-Think carefully about each task: Is it foundational? Does it block others? Is it critical for the project to function? Assign priority accordingly.
-- For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences) covering:
-  * WHAT the task is - clear explanation
-  * HOW to do it - step-by-step methodology
-  * WHICH TOOLS to use - specific technologies/frameworks
-  * MOST EFFICIENT WAY - best practices and optimizations
-- For each task's "reasoning" field, provide DETAILED strategic reasoning (5-7 sentences) covering:
-  * WHY it's important and how it contributes to project completion
-  * Task breakdown and component analysis
-  * Efficiency analysis with dependencies and timeline consideration
-  * Technical decisions and rationale
-  * Risk assessment and mitigation strategies
-  * Best practices and industry standards
-  * Completion strategy for maximum efficiency
-- Generate tasks with proper reasoning and judgment to ensure project can be completed most efficiently
+- DUE DATES: Estimate effort per task (small=3-7 days, medium=1-2 weeks, large=2-4 weeks). Set due_date = today + estimated days. Consider dependencies (earlier tasks get earlier due dates). Justify in reasoning. Do not leave due_date empty.
+- PRIORITY: Set by importance AND urgency. High = critical for project to work + urgent; Medium = important but not blocking; Low = optional. Justify in reasoning.
+- For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences).
+- For each task's "reasoning" field, include effort/due_date justification and priority justification.
+- Generate tasks with proper reasoning; due_date and priority must be justified.
 - {assignment_instruction}
 - Set project_id to null for all tasks (they'll be linked automatically)"""
                     else:
@@ -1081,17 +1168,18 @@ Return a helpful text response (NOT JSON) explaining this."""
     def process(self, question: str, **kwargs) -> Dict:
         """
         Main processing method for Project Pilot agent.
-        
+
         Args:
             question (str): User's request
-            **kwargs: Additional context parameters (context, available_users, etc.)
-            
+            **kwargs: Additional context parameters (context, available_users, chat_history, etc.)
+
         Returns:
             dict: Actions to perform
         """
         self.log_action("Processing action request", {"question": question[:50]})
-        
+
         context = kwargs.get('context', {})
         available_users = kwargs.get('available_users', [])
-        return self.handle_action_request(question, context, available_users)
+        chat_history = kwargs.get('chat_history') or []
+        return self.handle_action_request(question, context, available_users, chat_history=chat_history)
 

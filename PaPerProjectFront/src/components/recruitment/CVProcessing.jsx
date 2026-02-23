@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent } from 'lucide-react';
 import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
@@ -200,37 +200,44 @@ const CVProcessing = ({ onProcessComplete }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 w-full">
+      {/* Upload Form Card */}
       <Card>
-        <CardHeader>
-          <CardTitle>Process CV Files</CardTitle>
-          <CardDescription>
+        <CardHeader className="p-4 sm:p-6">
+          <CardTitle className="text-lg sm:text-xl">Process CV Files</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">
             Upload CV files to analyze and rank candidates based on job requirements
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 space-y-4">
           {/* File Upload */}
           <div className="space-y-2">
-            <Label htmlFor="cv-files">CV Files</Label>
-            <Input
-              id="cv-files"
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx"
-              onChange={handleFileChange}
-            />
+            <Label htmlFor="cv-files" className="text-sm font-medium">CV Files</Label>
+            <div className="relative">
+              <Input
+                id="cv-files"
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx"
+                onChange={handleFileChange}
+                className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+              />
+            </div>
             {files.length > 0 && (
-              <div className="text-sm text-muted-foreground">
-                {files.length} file(s) selected
+              <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground bg-muted/50 p-2 rounded-md">
+                <FileText className="h-4 w-4 shrink-0" />
+                <span>{files.length} file(s) selected</span>
               </div>
             )}
           </div>
 
           {/* Job Description Selection (Required) */}
           <div className="space-y-2">
-            <Label htmlFor="job-description">Select Job Description <span className="text-destructive">*</span></Label>
+            <Label htmlFor="job-description" className="text-sm font-medium">
+              Select Job Description <span className="text-destructive">*</span>
+            </Label>
             <Select value={selectedJobId || ""} onValueChange={handleJobSelection}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full text-sm">
                 <SelectValue placeholder="Select a job (required)" />
               </SelectTrigger>
               <SelectContent>
@@ -241,15 +248,17 @@ const CVProcessing = ({ onProcessComplete }) => {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Job selection is required to process CVs. Ensure interview settings are complete for the selected job.</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">
+              Job selection is required to process CVs. Ensure interview settings are complete for the selected job.
+            </p>
             
             {/* Display Keywords when job is selected */}
             {selectedJobId && selectedJobId !== "none" && displayedKeywords.length > 0 && (
-              <div className="mt-3 p-3 bg-muted/50 rounded-lg border">
-                <div className="text-sm font-semibold mb-2">Extracted Keywords:</div>
-                <div className="flex flex-wrap gap-2">
+              <div className="mt-3 p-2.5 sm:p-3 bg-muted/50 rounded-lg border">
+                <div className="text-xs sm:text-sm font-semibold mb-2">Extracted Keywords:</div>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {displayedKeywords.map((keyword, index) => (
-                    <Badge key={index} variant="secondary" className="text-xs">
+                    <Badge key={index} variant="secondary" className="text-[10px] sm:text-xs">
                       {keyword}
                     </Badge>
                   ))}
@@ -260,36 +269,43 @@ const CVProcessing = ({ onProcessComplete }) => {
 
           {/* Keywords (Optional) */}
           <div className="space-y-2">
-            <Label htmlFor="keywords">Keywords (Optional, comma-separated)</Label>
+            <Label htmlFor="keywords" className="text-sm font-medium">
+              Keywords <span className="text-muted-foreground text-xs">(Optional)</span>
+            </Label>
             <Input
               id="keywords"
               value={jobKeywords}
               onChange={(e) => setJobKeywords(e.target.value)}
-              placeholder="e.g., Python, React, 5 years experience"
+              placeholder="Python, React, etc."
+              className="text-sm"
             />
           </div>
 
           {/* Top N */}
           <div className="space-y-2">
-            <Label htmlFor="top-n">Top N Results (Optional)</Label>
+            <Label htmlFor="top-n" className="text-sm font-medium">
+              Top N Results <span className="text-muted-foreground text-xs">(Optional)</span>
+            </Label>
             <Input
               id="top-n"
               type="number"
               value={topN}
               onChange={(e) => setTopN(e.target.value)}
-              placeholder="Leave empty for all results"
+              placeholder="All results"
+              className="text-sm"
             />
           </div>
 
           <Button
             onClick={handleProcess}
             disabled={processing || files.length === 0 || !selectedJobId}
-            className="w-full"
+            className="w-full sm:w-auto sm:min-w-[200px] h-10 text-sm"
           >
             {processing ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Processing...
+                <span className="hidden sm:inline">Processing CVs...</span>
+                <span className="sm:hidden">Processing...</span>
               </>
             ) : (
               <>
@@ -304,43 +320,47 @@ const CVProcessing = ({ onProcessComplete }) => {
       {/* Results */}
       {results && results.results && (
         <Card>
-          <CardHeader>
-            <CardTitle>Processing Results</CardTitle>
-            <CardDescription>
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-lg sm:text-xl">Processing Results</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">
               {results.results.length} candidate(s) analyzed and ranked
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
+          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
+            <div className="space-y-3 sm:space-y-4">
               {results.results.map((result, index) => {
                 const qualified = result.qualified || {};
                 const summary = result.summary || {};
                 const parsed = result.parsed || {};
 
                 return (
-                  <Card key={index} className="border-l-4 border-l-primary">
-                    <CardHeader>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <CardTitle className="text-lg">
-                            #{index + 1} - {result.file_name}
+                  <Card key={index} className="border-l-4 border-l-primary overflow-hidden">
+                    <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-3">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <CardTitle className="text-sm sm:text-lg flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="shrink-0 text-xs">#{index + 1}</Badge>
+                            <span className="truncate">{result.file_name}</span>
                           </CardTitle>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                           {getDecisionBadge(qualified.decision)}
                           {qualified.priority && (
-                            <Badge variant="outline">{qualified.priority}</Badge>
+                            <Badge variant="outline" className="text-[10px] sm:text-xs">{qualified.priority}</Badge>
                           )}
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent className="p-3 sm:p-4 pt-0 sm:pt-0 space-y-3">
+                      {/* Summary */}
                       {summary.summary && (
-                        <div>
-                          <h4 className="font-semibold mb-1">Summary</h4>
-                          <p className="text-sm text-muted-foreground">{summary.summary}</p>
+                        <div className="bg-muted/30 rounded-md p-2.5 sm:p-3">
+                          <h4 className="font-semibold text-xs sm:text-sm mb-1">Summary</h4>
+                          <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">{summary.summary}</p>
                         </div>
                       )}
+                      
+                      {/* Qualification Reasoning */}
                       {qualified.reasoning && (
                         <QualificationReasoning 
                           reasoning={qualified.reasoning}
@@ -350,21 +370,29 @@ const CVProcessing = ({ onProcessComplete }) => {
                           inferredSkills={[]}
                         />
                       )}
-                      {parsed.name && (
-                        <div className="text-sm">
-                          <span className="font-medium">Name:</span> {parsed.name}
-                        </div>
-                      )}
-                      {parsed.email && (
-                        <div className="text-sm">
-                          <span className="font-medium">Email:</span> {parsed.email}
-                        </div>
-                      )}
-                      {qualified.confidence_score !== undefined && (
-                        <div className="text-sm">
-                          <span className="font-medium">Confidence Score:</span> {qualified.confidence_score}%
-                        </div>
-                      )}
+                      
+                      {/* Candidate Info */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs sm:text-sm pt-2 border-t">
+                        {parsed.name && (
+                          <div className="flex items-center gap-1.5">
+                            <User className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                            <span className="font-medium">{parsed.name}</span>
+                          </div>
+                        )}
+                        {parsed.email && (
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Mail className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                            <span className="text-muted-foreground truncate">{parsed.email}</span>
+                          </div>
+                        )}
+                        {qualified.confidence_score !== undefined && (
+                          <div className="flex items-center gap-1.5">
+                            <Percent className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                            <span className="font-medium">{qualified.confidence_score}%</span>
+                            <span className="text-muted-foreground hidden sm:inline">confidence</span>
+                          </div>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 );

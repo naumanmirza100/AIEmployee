@@ -4,7 +4,8 @@ import ModuleCard from './ModuleCard';
 import { 
   Users, 
   Megaphone, 
-  FolderKanban
+  FolderKanban,
+  Headphones
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -76,6 +77,26 @@ const ModuleCardsSection = () => {
         'Knowledge base Q&A',
         'Team collaboration tools',
         'Progress tracking & reports'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'Frontline Agent',
+      moduleName: 'frontline_agent',
+      description: 'AI-powered customer support system with automated ticket resolution, knowledge base Q&A, and document processing.',
+      icon: Headphones,
+      iconColor: 'text-orange-500',
+      gradientFrom: gradientColors['emerald-500'],
+      gradientTo: gradientColors['green-500'],
+      price: 149,
+      pricePeriod: 'month',
+      features: [
+        'Automated ticket classification & resolution',
+        'Knowledge base Q&A from documents',
+        'Document upload & processing',
+        'Multi-channel support (chat, email, web)',
+        'Proactive notifications & follow-ups',
+        'Analytics & performance tracking'
       ],
       highlight: false,
     }
