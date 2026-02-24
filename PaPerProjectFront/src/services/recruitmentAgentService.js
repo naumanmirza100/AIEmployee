@@ -549,6 +549,80 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
   }
 };
 
+// ========== AI Graph Generator APIs ==========
+
+/**
+ * Generate a graph/chart from a natural language prompt
+ * @param {string} prompt - Natural language description of the desired chart
+ */
+export const generateGraph = async (prompt) => {
+  try {
+    const response = await companyApi.post('/recruitment/ai/generate-graph', { prompt });
+    return response;
+  } catch (error) {
+    console.error('Generate graph error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get all saved graph prompts for the company user
+ */
+export const getSavedPrompts = async () => {
+  try {
+    const response = await companyApi.get('/recruitment/ai/graph-prompts');
+    return response;
+  } catch (error) {
+    console.error('Get saved prompts error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Save a graph prompt
+ * @param {object} promptData - { title, prompt, tags, chart_type }
+ */
+export const savePrompt = async (promptData) => {
+  try {
+    const response = await companyApi.post('/recruitment/ai/graph-prompts/save', promptData);
+    return response;
+  } catch (error) {
+    console.error('Save prompt error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a saved graph prompt
+ * @param {number} promptId - Prompt ID to delete
+ */
+export const deletePrompt = async (promptId) => {
+  try {
+    const response = await companyApi.delete(`/recruitment/ai/graph-prompts/${promptId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete prompt error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Toggle favorite status of a saved prompt
+ * @param {number} promptId - Prompt ID
+ * @param {boolean} isFavorite - New favorite status
+ */
+export const toggleFavorite = async (promptId, isFavorite) => {
+  try {
+    const response = await companyApi.patch(`/recruitment/ai/graph-prompts/${promptId}/favorite`, {
+      is_favorite: isFavorite,
+    });
+    return response;
+  } catch (error) {
+    console.error('Toggle favorite error:', error);
+    throw error;
+  }
+};
+
 export default {
   processCVs,
   getJobDescriptions,
@@ -575,6 +649,11 @@ export default {
   createQAChat,
   updateQAChat,
   deleteQAChat,
+  generateGraph,
+  getSavedPrompts,
+  savePrompt,
+  deletePrompt,
+  toggleFavorite,
 };
 
 
