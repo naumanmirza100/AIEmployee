@@ -85,6 +85,7 @@ function FrontlineNotificationsTab() {
   const { toast } = useToast();
   const [templates, setTemplates] = useState([]);
   const [scheduled, setScheduled] = useState([]);
+  const [notificationTicketsList, setNotificationTicketsList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sendForm, setSendForm] = useState({ template_id: '', recipient_email: '', ticket_id: '' });
   const [sending, setSending] = useState(false);
@@ -93,9 +94,14 @@ function FrontlineNotificationsTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const [tRes, sRes] = await Promise.all([frontlineAgentService.listNotificationTemplates(), frontlineAgentService.listScheduledNotifications()]);
+      const [tRes, sRes, tickRes] = await Promise.all([
+        frontlineAgentService.listNotificationTemplates(),
+        frontlineAgentService.listScheduledNotifications(),
+        frontlineAgentService.listTickets({ limit: 100 }),
+      ]);
       setTemplates((tRes.status === 'success' && tRes.data) ? tRes.data : []);
       setScheduled((sRes.status === 'success' && sRes.data) ? sRes.data : []);
+      setNotificationTicketsList((tickRes.status === 'success' && tickRes.data) ? tickRes.data : []);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to load', variant: 'destructive' });
     } finally {
@@ -210,8 +216,16 @@ function FrontlineNotificationsTab() {
             <Input placeholder="email@example.com" value={sendForm.recipient_email} onChange={(e) => setSendForm((f) => ({ ...f, recipient_email: e.target.value }))} className="w-[200px]" />
           </div>
           <div className="space-y-1">
-            <Label>Ticket ID (optional)</Label>
-            <Input placeholder="123" value={sendForm.ticket_id} onChange={(e) => setSendForm((f) => ({ ...f, ticket_id: e.target.value }))} className="w-[80px]" />
+            <Label>Ticket (optional)</Label>
+            <Select value={sendForm.ticket_id || '_none'} onValueChange={(v) => setSendForm((f) => ({ ...f, ticket_id: v === '_none' ? '' : v }))}>
+              <SelectTrigger className="w-[260px] max-w-full"><SelectValue placeholder="Select ticket" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">No ticket</SelectItem>
+                {notificationTicketsList.map((t) => (
+                  <SelectItem key={t.id} value={String(t.id)}>#{t.id}: {(t.title || '').slice(0, 35)}{(t.title || '').length > 35 ? '…' : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <Button type="submit" disabled={sending}>Send now</Button>
         </form>
