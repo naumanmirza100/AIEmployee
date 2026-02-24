@@ -2890,3 +2890,228 @@ def api_job_description_parse(request):
         logger.exception("api_job_description_parse error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ============================================================================
+# AI Graph Generator APIs
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_generate_graph(request):
+    """
+    Generate a graph/chart from a natural language prompt using AI.
+    POST: {"prompt": "Show monthly CV processing trends as a line chart"}
+    Returns: {"status": "success", "data": {"chart": {...}, "insights": "..."}}
+    """
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        prompt = data.get('prompt', '').strip()
+        
+        if not prompt:
+            return Response({
+                'status': 'error',
+                'message': 'Please provide a prompt describing the graph you want to generate.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Use AI Graph Generator Agent
+        from recruitment_agent.agents.graph_generator_agent import GraphGeneratorAgent
+        
+        agents = get_agents()
+        groq_client = agents['groq_client']
+        
+        graph_agent = GraphGeneratorAgent(groq_client, company_user)
+        result = graph_agent.generate_graph(prompt)
+        
+        return Response({
+            'status': 'success',
+            'data': {
+                'chart': result['chart'],
+                'insights': result.get('insights', ''),
+            }
+        })
+        
+    except Exception as e:
+        logger.exception("api_generate_graph error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_get_saved_prompts(request):
+    """
+    Get all saved graph prompts for the current company user.
+    GET: Returns list of saved prompts.
+    """
+    try:
+        from recruitment_agent.models import SavedGraphPrompt
+        company_user = request.user
+        
+        prompts = SavedGraphPrompt.objects.filter(company_user=company_user)
+        
+        data = [{
+            'id': p.id,
+            'title': p.title,
+            'prompt': p.prompt,
+            'chart_type': p.chart_type,
+            'tags': p.tags or [],
+            'is_favorite': p.is_favorite,
+            'run_count': p.run_count,
+            'last_run_at': p.last_run_at.isoformat() if p.last_run_at else None,
+            'created_at': p.created_at.isoformat(),
+            'updated_at': p.updated_at.isoformat(),
+        } for p in prompts]
+        
+        return Response({
+            'status': 'success',
+            'data': data,
+        })
+        
+    except Exception as e:
+        logger.exception("api_get_saved_prompts error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_save_prompt(request):
+    """
+    Save a graph prompt for later use.
+    POST: {"title": "...", "prompt": "...", "tags": [...], "chart_type": "..."}
+    """
+    try:
+        from recruitment_agent.models import SavedGraphPrompt
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        
+        title = data.get('title', '').strip()
+        prompt = data.get('prompt', '').strip()
+        tags = data.get('tags', [])
+        chart_type = data.get('chart_type', 'bar')
+        
+        if not title:
+            return Response({
+                'status': 'error',
+                'message': 'Title is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not prompt:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        saved_prompt = SavedGraphPrompt.objects.create(
+            company_user=company_user,
+            title=title,
+            prompt=prompt,
+            tags=tags if isinstance(tags, list) else [],
+            chart_type=chart_type,
+        )
+        
+        return Response({
+            'status': 'success',
+            'message': 'Prompt saved successfully.',
+            'data': {
+                'id': saved_prompt.id,
+                'title': saved_prompt.title,
+                'prompt': saved_prompt.prompt,
+                'chart_type': saved_prompt.chart_type,
+                'tags': saved_prompt.tags,
+                'is_favorite': saved_prompt.is_favorite,
+                'created_at': saved_prompt.created_at.isoformat(),
+            }
+        })
+        
+    except Exception as e:
+        logger.exception("api_save_prompt error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_delete_prompt(request, prompt_id):
+    """
+    Delete a saved graph prompt.
+    DELETE: /recruitment/ai/graph-prompts/{prompt_id}/delete
+    """
+    try:
+        from recruitment_agent.models import SavedGraphPrompt
+        company_user = request.user
+        
+        try:
+            prompt = SavedGraphPrompt.objects.get(id=prompt_id, company_user=company_user)
+        except SavedGraphPrompt.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        prompt.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': 'Prompt deleted successfully.'
+        })
+        
+    except Exception as e:
+        logger.exception("api_delete_prompt error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_toggle_prompt_favorite(request, prompt_id):
+    """
+    Toggle favorite status of a saved prompt.
+    PATCH: {"is_favorite": true/false}
+    """
+    try:
+        from recruitment_agent.models import SavedGraphPrompt
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        
+        try:
+            prompt = SavedGraphPrompt.objects.get(id=prompt_id, company_user=company_user)
+        except SavedGraphPrompt.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        is_favorite = data.get('is_favorite')
+        if is_favorite is not None:
+            prompt.is_favorite = bool(is_favorite)
+            prompt.save(update_fields=['is_favorite', 'updated_at'])
+        
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': prompt.id,
+                'is_favorite': prompt.is_favorite,
+            }
+        })
+        
+    except Exception as e:
+        logger.exception("api_toggle_prompt_favorite error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

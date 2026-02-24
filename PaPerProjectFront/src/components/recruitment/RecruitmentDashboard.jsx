@@ -27,12 +27,14 @@ import RecruiterSettings from './RecruiterSettings';
 import RecruitmentAnalytics from './RecruitmentAnalytics';
 import RecruitmentApiTester from './RecruitmentApiTester';
 import AiInterviewQuestions from './AiInterviewQuestions';
-import { FlaskConical, HelpCircle } from 'lucide-react';
+import AIGraphGenerator from './AIGraphGenerator';
+import { FlaskConical, HelpCircle, Sparkles } from 'lucide-react';
 
 // Tab items configuration
 const TAB_ITEMS = [
   { value: 'dashboard', label: 'Dashboard', icon: FileText },
   { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { value: 'ai-graphs', label: 'AI Graphs', icon: Sparkles },
   { value: 'cv-processing', label: 'CV Processing', icon: Upload },
   { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
   { value: 'ai-interview-questions', label: 'AI Questions', icon: HelpCircle },
@@ -46,6 +48,7 @@ const PATH_TO_TAB = {
   dashboard: 'dashboard',
   cvprocessing: 'cv-processing',
   analytics: 'analytics',
+  'ai-graphs': 'ai-graphs',
   'api-tester': 'api-tester',
   'ai-interview-questions': 'ai-interview-questions',
   'job-descriptions': 'jobs',
@@ -57,6 +60,7 @@ const TAB_TO_PATH = {
   'dashboard': 'dashboard',
   'cv-processing': 'cvprocessing',
   'analytics': 'analytics',
+  'ai-graphs': 'ai-graphs',
   'api-tester': 'api-tester',
   'ai-interview-questions': 'ai-interview-questions',
   'jobs': 'job-descriptions',
@@ -286,6 +290,10 @@ const RecruitmentDashboard = () => {
 
         <TabsContent value="analytics">
           <RecruitmentAnalytics />
+        </TabsContent>
+
+        <TabsContent value="ai-graphs">
+          <AIGraphGenerator />
         </TabsContent>
 
         <TabsContent value="cv-processing">
