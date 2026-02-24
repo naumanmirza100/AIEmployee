@@ -73,6 +73,59 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
         logger.exception("_run_notification_triggers failed: %s", e)
 
 
+def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old_status=None):
+    """
+    Run workflows whose trigger_conditions match this ticket event.
+    trigger_conditions: {"on": "ticket_created"|"ticket_updated", "category": "...", "priority": "...", "status": "..." (for ticket_updated = new status)}.
+    executed_by_user: Django User (e.g. from _get_or_create_user_for_company_user(company_user)).
+    """
+    try:
+        workflows = FrontlineWorkflow.objects.filter(company_id=company_id, is_active=True)
+        for w in workflows:
+            tc = (w.trigger_conditions or {})
+            if tc.get('on') != event_type:
+                continue
+            if tc.get('category') is not None and ticket.category != tc.get('category'):
+                continue
+            if tc.get('priority') is not None and ticket.priority != tc.get('priority'):
+                continue
+            if event_type == 'ticket_updated' and tc.get('status') is not None and ticket.status != tc.get('status'):
+                continue
+            context_data = {
+                'ticket_id': ticket.id,
+                'ticket_title': ticket.title,
+                'description': getattr(ticket, 'description', '') or '',
+                'resolution': (ticket.resolution or ''),
+                'customer_name': getattr(ticket.created_by, 'email', '') or '',
+                'recipient_email': getattr(ticket.created_by, 'email', '') or '',
+                'status': ticket.status,
+                'priority': ticket.priority,
+                'category': ticket.category,
+            }
+            if event_type == 'ticket_updated' and old_status is not None:
+                context_data['old_status'] = old_status
+            try:
+                exec_obj = FrontlineWorkflowExecution.objects.create(
+                    workflow=w,
+                    workflow_name=w.name,
+                    workflow_description=w.description or '',
+                    executed_by=executed_by_user,
+                    status='in_progress',
+                    context_data=context_data,
+                )
+                success, result_data, err = _execute_workflow_steps(w, context_data, executed_by_user)
+                exec_obj.status = 'completed' if success else 'failed'
+                exec_obj.result_data = result_data or {}
+                exec_obj.error_message = err
+                exec_obj.completed_at = timezone.now()
+                exec_obj.save()
+                logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
+            except Exception as e:
+                logger.exception("Workflow trigger: execution failed for workflow %s (ticket %s): %s", w.id, ticket.id, e)
+    except Exception as e:
+        logger.exception("_run_workflow_triggers failed: %s", e)
+
+
 def _get_or_create_user_for_company_user(company_user):
     """
     Get or create a Django User for a CompanyUser.
@@ -731,9 +784,22 @@ def knowledge_qa(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Optional Q&A scope: restrict to document type(s) and/or specific document IDs
+        scope_document_type = data.get('scope_document_type')
+        if scope_document_type is not None:
+            scope_document_type = [scope_document_type] if isinstance(scope_document_type, str) else list(scope_document_type)
+        scope_document_ids = data.get('scope_document_ids')
+        if scope_document_ids is not None:
+            scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
+        
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
-        result = agent.answer_question(question, company_id=company.id)
+        result = agent.answer_question(
+            question,
+            company_id=company.id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
         
         # When agent doesn't have verified info, create a ticket task assigned to this company user
         ticket_task_created = False
@@ -752,6 +818,7 @@ def knowledge_qa(request):
                     status='new',
                     priority='medium',
                     category='knowledge_gap',
+                    company=company,
                     created_by=user,
                     assigned_to=user,
                     auto_resolved=False,
@@ -760,6 +827,7 @@ def knowledge_qa(request):
                 ticket_task_id = ticket.id
                 logger.info(f"Created KB-gap ticket task {ticket.id} for company_user {company_user.id}, question: {question[:50]}")
                 _run_notification_triggers(company.id, 'ticket_created', ticket)
+                _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
             except Exception as e:
                 logger.exception("Failed to create KB-gap ticket task: %s", e)
             
@@ -798,6 +866,12 @@ def search_knowledge(request):
         
         query = request.GET.get('q', '').strip()
         max_results = int(request.GET.get('max_results', 5))
+        scope_document_type = request.GET.get('scope_document_type')
+        if scope_document_type is not None:
+            scope_document_type = [s.strip() for s in scope_document_type.split(',') if s.strip()]
+        scope_document_ids = request.GET.get('scope_document_ids')
+        if scope_document_ids is not None:
+            scope_document_ids = [int(x) for x in scope_document_ids.split(',') if str(x).strip().isdigit()]
         
         if not query:
             return Response(
@@ -807,7 +881,13 @@ def search_knowledge(request):
         
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
-        result = agent.search_knowledge(query, company_id=company.id)
+        result = agent.search_knowledge(
+            query,
+            company_id=company.id,
+            max_results=max_results,
+            scope_document_type=scope_document_type or None,
+            scope_document_ids=scope_document_ids or None,
+        )
         
         return Response({
             'status': 'success',
@@ -951,17 +1031,17 @@ def update_ticket_task(request, ticket_id):
                 status=status.HTTP_404_NOT_FOUND,
             )
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        old_status = ticket.status
         if 'status' in data:
             ticket.status = data['status']
-        old_status = ticket.status
         if 'resolution' in data:
             ticket.resolution = data['resolution']
             if data.get('status') in ('resolved', 'closed'):
-                from django.utils import timezone
                 ticket.resolved_at = timezone.now()
         ticket.save()
         if old_status != ticket.status:
             _run_notification_triggers(company_user.company_id, 'ticket_updated', ticket, old_status=old_status)
+            # Workflow triggers for ticket_updated run via post_save signal (Frontline_agent.signals)
         return Response({
             'status': 'success',
             'data': {
@@ -1016,6 +1096,7 @@ def create_ticket(request):
             ticket = Ticket.objects.filter(id=ticket_id).first()
             if ticket:
                 _run_notification_triggers(company.id, 'ticket_created', ticket)
+                _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
         return Response({
             'status': 'success',
             'data': result
@@ -1174,6 +1255,22 @@ def _render_template_body(body, context):
     return text
 
 
+def _generate_llm_notification_body(template, context, company_id):
+    """
+    If the template has use_llm_personalization, generate a short personalized body via LLM.
+    Returns the generated body string, or None to use the template body.
+    """
+    if not getattr(template, 'use_llm_personalization', False):
+        return None
+    try:
+        agent = FrontlineAgent(company_id=company_id)
+        result = agent.generate_notification_body(context, template_body_hint=template.body)
+        return result
+    except Exception as e:
+        logger.warning("LLM notification body generation failed: %s", e)
+        return None
+
+
 def _send_notification_email(recipient_email, subject, body):
     """Send email via Django's email backend."""
     try:
@@ -1199,7 +1296,7 @@ def list_notification_templates(request):
     try:
         company = request.user.company
         qs = NotificationTemplate.objects.filter(company=company).order_by('-updated_at')
-        data = [{'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'created_at': t.created_at.isoformat(), 'updated_at': t.updated_at.isoformat()} for t in qs]
+        data = [{'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'trigger_config': getattr(t, 'trigger_config', {}), 'use_llm_personalization': getattr(t, 'use_llm_personalization', False), 'created_at': t.created_at.isoformat(), 'updated_at': t.updated_at.isoformat()} for t in qs]
         return Response({'status': 'success', 'data': data})
     except Exception as e:
         logger.exception("list_notification_templates failed")
@@ -1224,8 +1321,9 @@ def create_notification_template(request):
             body=data.get('body') or '',
             notification_type=data.get('notification_type') or 'ticket_update',
             channel=data.get('channel') or 'email',
+            use_llm_personalization=bool(data.get('use_llm_personalization', False)),
         )
-        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel}})
+        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'use_llm_personalization': t.use_llm_personalization}})
     except Exception as e:
         logger.exception("create_notification_template failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1241,7 +1339,7 @@ def get_notification_template(request, template_id):
         t = NotificationTemplate.objects.filter(company=company, id=template_id).first()
         if not t:
             return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel}})
+        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'trigger_config': getattr(t, 'trigger_config', {}), 'use_llm_personalization': getattr(t, 'use_llm_personalization', False)}})
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1267,8 +1365,10 @@ def update_notification_template(request, template_id):
             t.notification_type = data['notification_type']
         if 'channel' in data:
             t.channel = data['channel']
+        if 'use_llm_personalization' in data:
+            t.use_llm_personalization = bool(data['use_llm_personalization'])
         t.save()
-        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body}})
+        return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'use_llm_personalization': t.use_llm_personalization}})
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1386,6 +1486,9 @@ def send_notification_now(request):
                 context.setdefault('ticket_title', related_ticket.title)
                 context.setdefault('resolution', related_ticket.resolution or '')
         body = _render_template_body(template.body, context)
+        personalized_body = _generate_llm_notification_body(template, context, company.id)
+        if personalized_body:
+            body = personalized_body
         subject = _render_template_body(template.subject, context)
         if template.channel == 'email':
             ok = _send_notification_email(recipient_email, subject, body)
@@ -1418,12 +1521,17 @@ def _execute_workflow_steps(workflow, context_data, user):
         step_type = (step.get('type') or '').lower()
         if step_type == 'send_email':
             template_id = step.get('template_id')
-            recipient = (step.get('recipient_email') or context_data.get('recipient_email') or '').strip()
+            raw_recipient = (step.get('recipient_email') or context_data.get('recipient_email') or '{{recipient_email}}').strip()
+            recipient = _render_template_body(raw_recipient, context_data).strip()
             if template_id and recipient:
                 template = NotificationTemplate.objects.filter(id=template_id).first()
                 if template:
-                    body = _render_template_body(template.body, {**context_data, **step.get('context', {})})
-                    subject = _render_template_body(template.subject, {**context_data, **step.get('context', {})})
+                    merged = {**context_data, **step.get('context', {})}
+                    body = _render_template_body(template.body, merged)
+                    personalized_body = _generate_llm_notification_body(template, merged, workflow.company_id)
+                    if personalized_body:
+                        body = personalized_body
+                    subject = _render_template_body(template.subject, merged)
                     _send_notification_email(recipient, subject, body)
             result_data['results'].append({'step': i, 'type': step_type, 'done': True})
         elif step_type == 'update_ticket':

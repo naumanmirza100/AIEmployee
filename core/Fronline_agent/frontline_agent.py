@@ -38,23 +38,30 @@ class FrontlineAgent(BaseAgent):
         self.system_prompt = FRONTLINE_SYSTEM_PROMPT
         logger.info(f"FrontlineAgent initialized (company_id: {company_id})")
     
-    def answer_question(self, question: str, company_id: Optional[int] = None) -> Dict:
+    def answer_question(
+        self,
+        question: str,
+        company_id: Optional[int] = None,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> Dict:
         """
         Answer a question using only verified knowledge base information.
-        
-        Args:
-            question: User's question
-            
-        Returns:
-            Dictionary with answer or indication that no verified info exists
+        scope_document_type: optional list of document types to restrict to (e.g. ['policy', 'knowledge_base']).
+        scope_document_ids: optional list of document IDs to restrict to specific documents.
         """
         logger.info(f"Processing question: {question[:100]} (company_id: {company_id})")
         
         # Use provided company_id or instance company_id
         search_company_id = company_id or self.company_id
         
-        # Search knowledge base
-        knowledge_result = self.knowledge_service.get_answer(question, company_id=search_company_id)
+        # Search knowledge base (with optional scope)
+        knowledge_result = self.knowledge_service.get_answer(
+            question,
+            company_id=search_company_id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
         
         if not knowledge_result.get('has_verified_info', False):
             logger.info("No verified information found, cannot answer")
@@ -187,7 +194,7 @@ class FrontlineAgent(BaseAgent):
             logger.info(f"LLM extraction: intent={llm_extraction.get('intent')}, category={llm_extraction.get('suggested_category')}, entities={llm_extraction.get('entities')}")
         
         # Use ticket service to process (with optional LLM augmentation)
-        result = self.ticket_service.process_ticket(title, description, user_id, llm_extraction=llm_extraction)
+        result = self.ticket_service.process_ticket(title, description, user_id, llm_extraction=llm_extraction, company_id=self.company_id)
         
         if not result.get('success', False):
             logger.error(f"Ticket processing failed: {result.get('error')}")
@@ -221,20 +228,24 @@ class FrontlineAgent(BaseAgent):
         
         return result
     
-    def search_knowledge(self, query: str, company_id: Optional[int] = None) -> Dict:
-        """
-        Search knowledge base for information.
-        
-        Args:
-            query: Search query
-            company_id: Optional company ID to search company-specific documents
-            
-        Returns:
-            Search results dictionary
-        """
+    def search_knowledge(
+        self,
+        query: str,
+        company_id: Optional[int] = None,
+        max_results: int = 5,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> Dict:
+        """Search knowledge base; optionally restrict by document type and/or document IDs."""
         search_company_id = company_id or self.company_id
         logger.info(f"Searching knowledge base: {query[:100]} (company_id: {search_company_id})")
-        return self.knowledge_service.search_knowledge(query, company_id=search_company_id)
+        return self.knowledge_service.search_knowledge(
+            query,
+            max_results=max_results,
+            company_id=search_company_id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
     
     def process(self, action: str, **kwargs) -> Dict:
         """
@@ -379,3 +390,36 @@ class FrontlineAgent(BaseAgent):
         except Exception as e:
             logger.error(f"Generate analytics narrative failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'narrative': None}
+
+    def generate_notification_body(self, context: Dict, template_body_hint: Optional[str] = None) -> Optional[str]:
+        """
+        Generate a short, empathetic notification email body from context (ticket, customer, etc.).
+        Used when a template has use_llm_personalization enabled.
+        Returns the generated text, or None on failure (caller should fall back to template body).
+        """
+        try:
+            parts = []
+            for k, v in (context or {}).items():
+                if v is not None and str(v).strip():
+                    parts.append(f"{k}: {str(v)[:200]}")
+            context_str = "\n".join(parts) if parts else "No context provided."
+            prompt = (
+                "Write a short, empathetic email body (2-4 sentences) for a customer notification. "
+                "Use only the context below. Be clear, professional, and confirm any action or next step. "
+                "Do not invent information. Output only the email body, no subject or greetings.\n\nContext:\n"
+                + context_str
+            )
+            if template_body_hint:
+                prompt += "\n\nTemplate hint (tone/purpose): " + (template_body_hint[:300] or "")
+            body = self._call_llm(
+                prompt=prompt,
+                system_prompt="You are a helpful support agent. Write only the email body text, concise and empathetic.",
+                temperature=0.5,
+                max_tokens=400
+            )
+            if body and len((body or "").strip()) > 0:
+                return (body.strip())[:2000]
+            return None
+        except Exception as e:
+            logger.warning(f"Generate notification body failed: {e}", exc_info=True)
+            return None
