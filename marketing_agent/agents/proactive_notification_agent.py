@@ -2141,33 +2141,49 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
     
     def get_notifications(self, user_id: int, unread_only: bool = False,
                           notification_type: Optional[str] = None,
-                          campaign_id: Optional[int] = None) -> Dict:
+                          campaign_id: Optional[int] = None,
+                          read_only: bool = False,
+                          page: int = 1,
+                          page_size: int = 20) -> Dict:
         """
-        Get notifications for a user
-        
+        Get notifications for a user with pagination.
+
         Args:
             user_id (int): User ID
             unread_only (bool): Only return unread notifications
             notification_type (str): Filter by notification type
             campaign_id (int): Filter by campaign
-            
+            read_only (bool): Only return read notifications (for history)
+            page (int): Page number (1-based)
+            page_size (int): Items per page
+
         Returns:
-            Dict: List of notifications
+            Dict: notifications, total, unread_count, page, page_size
         """
         try:
-            notifications = MarketingNotification.objects.filter(user_id=user_id)
-            
+            notifications = (
+                MarketingNotification.objects.filter(user_id=user_id)
+                .select_related('campaign')
+            )
+
             if unread_only:
                 notifications = notifications.filter(is_read=False)
-            
+            if read_only:
+                notifications = notifications.filter(is_read=True)
+
             if notification_type:
                 notifications = notifications.filter(notification_type=notification_type)
-            
+
             if campaign_id:
                 notifications = notifications.filter(campaign_id=campaign_id)
-            
-            notifications = notifications.order_by('-created_at')[:100]
-            
+
+            notifications = notifications.order_by('-created_at')
+            total = notifications.count()
+            page = max(1, page)
+            page_size = max(1, min(100, page_size))
+            offset = (page - 1) * page_size
+            page_qs = notifications[offset:offset + page_size]
+
             notification_list = [
                 {
                     'id': n.id,
@@ -2183,12 +2199,15 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
                     'metadata': n.metadata,
                     'created_at': n.created_at.isoformat(),
                 }
-                for n in notifications
+                for n in page_qs
             ]
-            
+
             return {
                 'success': True,
                 'count': len(notification_list),
+                'total': total,
+                'page': page,
+                'page_size': page_size,
                 'unread_count': MarketingNotification.objects.filter(user_id=user_id, is_read=False).count(),
                 'notifications': notification_list
             }

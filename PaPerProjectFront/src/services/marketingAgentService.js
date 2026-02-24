@@ -487,14 +487,16 @@ export const outreachCampaign = async (action, campaignData = {}, campaignId = n
 };
 
 /**
- * List marketing documents.
- * API: GET /api/marketing/documents?type=&campaign_id=
+ * List marketing documents (paginated).
+ * API: GET /api/marketing/documents?type=&campaign_id=&page=&page_size=
  */
 export const listDocuments = async (params = {}) => {
   try {
     const query = {};
     if (params.type) query.type = params.type;
     if (params.campaign_id != null && params.campaign_id !== '') query.campaign_id = params.campaign_id;
+    if (params.page != null) query.page = params.page;
+    if (params.page_size != null) query.page_size = params.page_size;
     const response = await companyApi.get('/marketing/documents', query);
     return response;
   } catch (error) {
@@ -583,8 +585,11 @@ export const getNotifications = async (params = {}) => {
   try {
     const query = {};
     if (params.unread_only !== undefined) query.unread_only = String(params.unread_only);
+    if (params.read_only !== undefined) query.read_only = String(params.read_only);
     if (params.type) query.type = params.type;
     if (params.campaign_id != null) query.campaign_id = params.campaign_id;
+    if (params.page != null) query.page = params.page;
+    if (params.page_size != null) query.page_size = params.page_size;
     const response = await companyApi.get('/marketing/notifications', query);
     return response;
   } catch (error) {

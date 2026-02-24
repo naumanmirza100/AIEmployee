@@ -393,8 +393,8 @@ const MarketingQA = () => {
   return (
     <div className="h-full min-h-0 flex gap-4">
       {/* Sidebar - Previous chats */}
-      <div className="w-64 shrink-0 flex flex-col rounded-lg border bg-card overflow-hidden">
-        <div className="p-3 border-b flex items-center justify-between">
+      <div className="w-80 shrink-0 flex flex-col rounded-lg border bg-card overflow-hidden">
+        <div className="p-4 border-b flex items-center justify-between">
           <span className="text-sm font-semibold">Previous conversations</span>
           <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
             <Plus className="h-4 w-4" />
@@ -402,13 +402,13 @@ const MarketingQA = () => {
         </div>
         <div className="flex-1 overflow-y-auto">
           {chats.length === 0 ? (
-            <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
+            <div className="p-6 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
           ) : (
-            <div className="p-2 space-y-1">
+            <div className="p-3 space-y-2">
               {[...chats].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map((c) => (
                 <div
                   key={c.id}
-                  className={`group flex items-start gap-1 w-full text-left p-3 rounded-lg text-sm transition-colors cursor-pointer ${
+                  className={`group flex items-start gap-1 w-full text-left p-4 rounded-lg text-sm transition-colors cursor-pointer ${
                     selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
                   }`}
                   role="button"

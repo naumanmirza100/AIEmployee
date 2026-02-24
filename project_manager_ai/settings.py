@@ -336,18 +336,23 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 # --------------------
 # Database (SQL Server Express)
 # --------------------
+# Install Microsoft ODBC Driver: https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server
+# Then set DB_DRIVER in .env to match (e.g. "ODBC Driver 17 for SQL Server" or "ODBC Driver 18 for SQL Server").
+# List installed drivers: Get-OdbcDriver (PowerShell) or run: pyodbc.drivers() in Python.
+_db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 17 for SQL Server')
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
         'NAME': os.getenv('DB_NAME'),
         'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT'),
+        'PORT': os.getenv('DB_PORT', '1433'),
         'USER': os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'OPTIONS': {
-                'driver': 'ODBC Driver 18 for SQL Server',  # ← Change from 17 to 18
-                'extra_params': 'TrustServerCertificate=yes;Encrypt=Optional',  # Recomm                
-            },
+            'driver': _db_driver,
+            # Driver 17: use TrustServerCertificate=yes (Encrypt=Optional is Driver 18 only)
+            'extra_params': 'TrustServerCertificate=yes',
+        },
         'CONN_MAX_AGE': 0,
         'TIME_ZONE': 'UTC',
     }

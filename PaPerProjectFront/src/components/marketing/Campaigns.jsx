@@ -1,40 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, TrendingUp, Pause, Play, Trash2 } from 'lucide-react';
+import { Loader2, Plus, TrendingUp, Pause, Play, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import OutreachCampaign from './OutreachCampaign';
+
+const PAGE_SIZE = 10;
 
 const Campaigns = ({ onRefresh }) => {
   const { toast } = useToast();
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const fetchCampaigns = async () => {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const fetchCampaigns = useCallback(async (pageNum = 1) => {
     try {
       setLoading(true);
-      const response = await marketingAgentService.listCampaigns();
+      const response = await marketingAgentService.listCampaigns({
+        page: pageNum,
+        limit: PAGE_SIZE,
+      });
       if (response?.status === 'success' && response?.data) {
         setCampaigns(response.data.campaigns || []);
+        setTotal(response.data.total ?? 0);
       }
       if (onRefresh) onRefresh();
     } catch (error) {
-      // console.error('Error fetching campaigns:', error);
-      // toast({
-      //   title: 'Error',
-      //   description: 'Failed to load campaigns',
-      //   variant: 'destructive',
-      // });
+      setCampaigns([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [onRefresh]);
 
   useEffect(() => {
-    fetchCampaigns();
-  }, []);
+    fetchCampaigns(page);
+  }, [page]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -54,11 +59,11 @@ const Campaigns = ({ onRefresh }) => {
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
-      <OutreachCampaign onCampaignCreated={fetchCampaigns} />
+      <OutreachCampaign onCampaignCreated={() => fetchCampaigns(page)} />
 
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold">Your Campaigns</h3>
-        <Button onClick={fetchCampaigns} variant="outline" size="sm">
+        <Button onClick={() => fetchCampaigns(page)} variant="outline" size="sm" disabled={loading}>
           Refresh
         </Button>
       </div>
@@ -118,6 +123,35 @@ const Campaigns = ({ onRefresh }) => {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!loading && total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-4 pb-2 border-t">
+          <p className="text-sm text-muted-foreground">
+            Showing page {page} of {totalPages} ({total} total campaigns)
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       )}
       </div>

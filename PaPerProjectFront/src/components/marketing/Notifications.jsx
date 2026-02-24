@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, RefreshCw, Search, Trash2, CheckCheck, Inbox, History, BarChart3 } from 'lucide-react';
+import { Loader2, RefreshCw, Search, Trash2, CheckCheck, Inbox, History, BarChart3, ChevronLeft, ChevronRight } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { cn } from '@/lib/utils';
 
@@ -41,6 +41,47 @@ const ISSUE_TYPES = ['performance_alert', 'anomaly', 'email_delivery', 'engageme
 
 /** Only count high/critical priority as "issues" for the stats. */
 const HIGH_PRIORITY = ['high', 'critical'];
+
+const NOTIFICATIONS_PAGE_SIZE = 10;
+
+/** Reusable pagination bar: previous / page info / next */
+const PaginationBar = ({ page, totalItems, pageSize, loading, onPageChange }) => {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const from = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, totalItems);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 mt-4">
+      <p className="text-sm text-muted-foreground">
+        {totalItems === 0 ? 'No items' : `Showing ${from}–${to} of ${totalItems}`}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page <= 1 || loading}
+          onClick={() => onPageChange((p) => Math.max(1, p - 1))}
+          className="gap-1"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Previous
+        </Button>
+        <span className="text-sm text-muted-foreground min-w-[100px] text-center">
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page >= totalPages || loading}
+          onClick={() => onPageChange((p) => p + 1)}
+          className="gap-1"
+        >
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+};
 
 /** Treat as connection/backend unreachable – don't show error toast or banner; show blank/empty state instead. */
 const isConnectionError = (err) => {
@@ -85,7 +126,12 @@ const Notifications = ({ onUnreadCountChange }) => {
   const [monitoring, setMonitoring] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadPage, setUnreadPage] = useState(1);
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [history, setHistory] = useState([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [monitorSummary, setMonitorSummary] = useState(null);
   const [error, setError] = useState(null);
   const [actioningId, setActioningId] = useState(null);
@@ -103,23 +149,30 @@ const Notifications = ({ onUnreadCountChange }) => {
     }
   }, []);
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (page = 1) => {
     setError(null);
     setLoading(true);
     try {
-      const response = await marketingAgentService.getNotifications({ unread_only: true });
+      const response = await marketingAgentService.getNotifications({
+        unread_only: true,
+        page,
+        page_size: NOTIFICATIONS_PAGE_SIZE,
+      });
       if (response.status === 'success' && response.data) {
         const data = response.data;
         setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+        setUnreadTotal(typeof data.total === 'number' ? data.total : 0);
         setUnreadCount(typeof data.unread_count === 'number' ? data.unread_count : 0);
         onUnreadCountChange?.();
       } else {
         setNotifications([]);
+        setUnreadTotal(0);
         setUnreadCount(0);
         onUnreadCountChange?.();
       }
     } catch (err) {
       setNotifications([]);
+      setUnreadTotal(0);
       setUnreadCount(0);
       onUnreadCountChange?.();
       if (!isConnectionError(err)) {
@@ -133,17 +186,26 @@ const Notifications = ({ onUnreadCountChange }) => {
     }
   }, [toast, onUnreadCountChange]);
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = useCallback(async (page = 1) => {
+    setHistoryLoading(true);
     try {
-      const response = await marketingAgentService.getNotifications({ unread_only: false });
+      const response = await marketingAgentService.getNotifications({
+        read_only: true,
+        page,
+        page_size: NOTIFICATIONS_PAGE_SIZE,
+      });
       if (response.status === 'success' && response.data && Array.isArray(response.data.notifications)) {
-        const read = response.data.notifications.filter((n) => n.is_read);
-        setHistory(read);
+        setHistory(response.data.notifications);
+        setHistoryTotal(typeof response.data.total === 'number' ? response.data.total : 0);
       } else {
         setHistory([]);
+        setHistoryTotal(0);
       }
     } catch {
       setHistory([]);
+      setHistoryTotal(0);
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -152,12 +214,12 @@ const Notifications = ({ onUnreadCountChange }) => {
   }, [fetchCampaigns]);
 
   useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
+    fetchNotifications(unreadPage);
+  }, [unreadPage]);
 
   useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
+    fetchHistory(historyPage);
+  }, [historyPage]);
 
   const runMonitor = async () => {
     setMonitoring(true);
@@ -168,8 +230,8 @@ const Notifications = ({ onUnreadCountChange }) => {
       const response = await marketingAgentService.monitorCampaigns(cid);
       if (response.status === 'success' && response.data) {
         setMonitorSummary(response.data);
-        await fetchNotifications();
-        await fetchHistory();
+        await fetchNotifications(unreadPage);
+        await fetchHistory(historyPage);
         onUnreadCountChange?.();
         toast({
           title: 'Monitoring complete',
@@ -192,8 +254,8 @@ const Notifications = ({ onUnreadCountChange }) => {
     try {
       const response = await marketingAgentService.markNotificationRead(id);
       if (response.status === 'success') {
-        await fetchNotifications();
-        await fetchHistory();
+        await fetchNotifications(unreadPage);
+        await fetchHistory(historyPage);
         onUnreadCountChange?.();
         toast({ title: 'Marked as read' });
       } else {
@@ -214,8 +276,8 @@ const Notifications = ({ onUnreadCountChange }) => {
     try {
       const response = await marketingAgentService.deleteNotification(id);
       if (response.status === 'success') {
-        await fetchNotifications();
-        await fetchHistory();
+        await fetchNotifications(unreadPage);
+        await fetchHistory(historyPage);
         onUnreadCountChange?.();
         toast({ title: 'Notification deleted' });
       } else {
@@ -231,8 +293,8 @@ const Notifications = ({ onUnreadCountChange }) => {
   };
 
   const refreshAll = () => {
-    fetchNotifications();
-    fetchHistory();
+    fetchNotifications(unreadPage);
+    fetchHistory(historyPage);
   };
 
   const renderNotification = (n, isHistory) => (
@@ -325,10 +387,10 @@ const Notifications = ({ onUnreadCountChange }) => {
     </div>
   );
 
-  const allNotifications = [...notifications, ...history];
-  const { totalIssues, totalOpportunities } = getNotificationStats(allNotifications);
-  const totalNotifications = allNotifications.length;
-  const totalRead = history.length;
+  const currentPageNotifications = [...notifications, ...history];
+  const { totalIssues, totalOpportunities } = getNotificationStats(currentPageNotifications);
+  const totalNotifications = unreadTotal + historyTotal;
+  const totalRead = historyTotal;
   const totalUnread = unreadCount;
 
   return (
@@ -476,9 +538,20 @@ const Notifications = ({ onUnreadCountChange }) => {
               description="Run a monitor above to check for new alerts, or you’re all caught up."
             />
           ) : (
-            <ul className="space-y-3">
-              {notifications.map((n) => renderNotification(n, false))}
-            </ul>
+            <>
+              <ul className="space-y-3">
+                {notifications.map((n) => renderNotification(n, false))}
+              </ul>
+              {unreadTotal > NOTIFICATIONS_PAGE_SIZE && (
+                <PaginationBar
+                  page={unreadPage}
+                  totalItems={unreadTotal}
+                  pageSize={NOTIFICATIONS_PAGE_SIZE}
+                  loading={loading}
+                  onPageChange={setUnreadPage}
+                />
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -493,25 +566,41 @@ const Notifications = ({ onUnreadCountChange }) => {
             <div>
               <CardTitle className="text-base">History</CardTitle>
               <CardDescription className="text-xs">
-                {history.length} read notification{history.length !== 1 ? 's' : ''}
-          </CardDescription>
+                {historyTotal} read notification{historyTotal !== 1 ? 's' : ''}
+              </CardDescription>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchHistory} disabled={loading}>
-            Refresh
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => fetchHistory(historyPage)} disabled={historyLoading}>
+            {historyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            <span className="ml-1.5">Refresh</span>
           </Button>
         </CardHeader>
         <CardContent>
-          {history.length === 0 ? (
+          {historyLoading && history.length === 0 ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : history.length === 0 ? (
             <EmptyState
               icon={History}
               title="No history yet"
               description="Notifications you mark as read will appear here."
             />
           ) : (
-            <ul className="space-y-3">
-              {history.map((n) => renderNotification(n, true))}
-            </ul>
+            <>
+              <ul className="space-y-3">
+                {history.map((n) => renderNotification(n, true))}
+              </ul>
+              {historyTotal > NOTIFICATIONS_PAGE_SIZE && (
+                <PaginationBar
+                  page={historyPage}
+                  totalItems={historyTotal}
+                  pageSize={NOTIFICATIONS_PAGE_SIZE}
+                  loading={historyLoading}
+                  onPageChange={setHistoryPage}
+                />
+              )}
+            </>
           )}
         </CardContent>
       </Card>

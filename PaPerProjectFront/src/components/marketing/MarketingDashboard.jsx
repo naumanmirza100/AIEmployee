@@ -37,7 +37,9 @@ import {
   Pencil,
   Trash2,
   Send,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import MarketingQA from './MarketingQA';
@@ -129,6 +131,9 @@ const MarketingDashboard = () => {
     activeCampaigns: 0,
   });
   const [campaigns, setCampaigns] = useState([]);
+  const [campaignsPage, setCampaignsPage] = useState(1);
+  const [campaignsTotal, setCampaignsTotal] = useState(0);
+  const DASHBOARD_CAMPAIGNS_PAGE_SIZE = 10;
 
   // Email tab: sidebar and modals
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -174,11 +179,11 @@ const MarketingDashboard = () => {
 
   useEffect(() => {
     if (activeTab === 'dashboard') {
-      fetchCampaigns();
+      fetchCampaigns(campaignsPage);
     } else if (activeTab === 'email') {
       fetchEmailAccounts();
     }
-  }, [activeTab]);
+  }, [activeTab, campaignsPage]);
 
   const fetchStats = async () => {
     try {
@@ -198,15 +203,20 @@ const MarketingDashboard = () => {
     }
   };
 
-  const fetchCampaigns = async () => {
+  const fetchCampaigns = async (page = 1) => {
     try {
       setCampaignsLoading(true);
-      const response = await marketingAgentService.listCampaigns();
+      const response = await marketingAgentService.listCampaigns({
+        page,
+        limit: DASHBOARD_CAMPAIGNS_PAGE_SIZE,
+      });
       if (response?.status === 'success' && response?.data) {
         setCampaigns(response.data.campaigns || []);
+        setCampaignsTotal(response.data.total ?? 0);
       }
     } catch {
       setCampaigns([]);
+      setCampaignsTotal(0);
     } finally {
       setCampaignsLoading(false);
     }
@@ -530,53 +540,82 @@ const MarketingDashboard = () => {
                         </Button>
                       </div>
                     ) : (
-                      <div className=" overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-muted/50 border-b">
-                              <th className="text-left font-semibold p-3">Campaign Name</th>
-                              <th className="text-left font-semibold p-3">Status</th>
-                              <th className="text-left font-semibold p-3">Type</th>
-                              <th className="text-left font-semibold p-3">Created</th>
-                              <th className="text-left font-semibold p-3">Scheduled</th>
-                              <th className="text-left font-semibold p-3">End Date</th>
-                              <th className="text-left font-semibold p-3">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {campaigns.map((campaign) => (
-                              <tr key={campaign.id} className="border-b last:border-0 hover:bg-muted/30">
-                                <td className="p-3">
-                                  <div className="font-medium">{campaign.name}</div>
-                                  {campaign.description && (
-                                    <div className="text-muted-foreground truncate max-w-[200px]" title={campaign.description}>
-                                      {campaign.description.length > 30 ? campaign.description.slice(0, 30) + '…' : campaign.description}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="p-3">
-                                  <Badge variant="secondary" className={STATUS_BADGE_CLASS[campaign.status] || 'bg-gray-100 text-gray-800'}>
-                                    {STATUS_LABELS[campaign.status] || campaign.status}
-                                  </Badge>
-                                </td>
-                                <td className="p-3 text-muted-foreground">{campaign.campaign_type || '—'}</td>
-                                <td className="p-3 text-muted-foreground">{formatDate(campaign.created_at)}</td>
-                                <td className="p-3 text-muted-foreground">{campaign.start_date ? formatDate(campaign.start_date) : '—'}</td>
-                                <td className="p-3 text-muted-foreground">{campaign.end_date ? formatDate(campaign.end_date) : '—'}</td>
-                                <td className="p-3">
-                                  <Button
-                                    variant="default"
-                                    size="sm"
-                                    asChild
-                                  >
-                                    <Link to={`/marketing/dashboard/campaign/${campaign.id}`}>Manage</Link>
-                                  </Button>
-                                </td>
+                      <>
+                        <div className=" overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-muted/50 border-b">
+                                <th className="text-left font-semibold p-3">Campaign Name</th>
+                                <th className="text-left font-semibold p-3">Status</th>
+                                <th className="text-left font-semibold p-3">Type</th>
+                                <th className="text-left font-semibold p-3">Created</th>
+                                <th className="text-left font-semibold p-3">Scheduled</th>
+                                <th className="text-left font-semibold p-3">End Date</th>
+                                <th className="text-left font-semibold p-3">Actions</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                            </thead>
+                            <tbody>
+                              {campaigns.map((campaign) => (
+                                <tr key={campaign.id} className="border-b last:border-0 hover:bg-muted/30">
+                                  <td className="p-3">
+                                    <div className="font-medium">{campaign.name}</div>
+                                    {campaign.description && (
+                                      <div className="text-muted-foreground truncate max-w-[200px]" title={campaign.description}>
+                                        {campaign.description.length > 30 ? campaign.description.slice(0, 30) + '…' : campaign.description}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="p-3">
+                                    <Badge variant="secondary" className={STATUS_BADGE_CLASS[campaign.status] || 'bg-gray-100 text-gray-800'}>
+                                      {STATUS_LABELS[campaign.status] || campaign.status}
+                                    </Badge>
+                                  </td>
+                                  <td className="p-3 text-muted-foreground">{campaign.campaign_type || '—'}</td>
+                                  <td className="p-3 text-muted-foreground">{formatDate(campaign.created_at)}</td>
+                                  <td className="p-3 text-muted-foreground">{campaign.start_date ? formatDate(campaign.start_date) : '—'}</td>
+                                  <td className="p-3 text-muted-foreground">{campaign.end_date ? formatDate(campaign.end_date) : '—'}</td>
+                                  <td className="p-3">
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      asChild
+                                    >
+                                      <Link to={`/marketing/dashboard/campaign/${campaign.id}`}>Manage</Link>
+                                    </Button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {campaignsTotal > DASHBOARD_CAMPAIGNS_PAGE_SIZE && (
+                          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-4 border-t">
+                            <p className="text-sm text-muted-foreground">
+                              Showing page {campaignsPage} of {Math.max(1, Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE))} ({campaignsTotal} total campaigns)
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={campaignsPage <= 1 || campaignsLoading}
+                                onClick={() => setCampaignsPage((p) => Math.max(1, p - 1))}
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                                Previous
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={campaignsPage >= Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE) || campaignsLoading}
+                                onClick={() => setCampaignsPage((p) => p + 1)}
+                              >
+                                Next
+                                <ChevronRight className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </CardContent>
@@ -967,15 +1006,15 @@ const MarketingDashboard = () => {
           </Dialog>
         </TabsContent>
 
-        <TabsContent value="campaigns" className="!mt-2 h-[calc(100vh-20rem)] min-h-[400px]">
+        <TabsContent value="campaigns" className="!mt-2 min-h-[400px]">
           <Campaigns onRefresh={fetchStats} />
         </TabsContent>
 
-        <TabsContent value="qa" className="!mt-2 h-[calc(100vh-20rem)] min-h-[400px]">
+        <TabsContent value="qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[400px] scrollbar-black">
           <MarketingQA />
         </TabsContent>
 
-        <TabsContent value="research" className="!mt-2 h-[calc(100vh-20rem)] min-h-[400px]">
+        <TabsContent value="research" className="!mt-2 h-[500px] overflow-y-auto min-h-[400px] scrollbar-black">
           <MarketResearch />
         </TabsContent>
 

@@ -223,9 +223,10 @@ function formatResult(result, action, options = {}) {
   const designView = options.designView || 'condensed';
   const onShowFullDesign = options.onShowFullDesign;
   if (result.campaign_design?.raw_design) {
-    const { short, hasMore } = condenseDesign(result.campaign_design.raw_design);
+    const raw = stripMarkdownAsterisks(result.campaign_design.raw_design);
+    const { short, hasMore } = condenseDesign(raw);
     const designHtml = designView === 'full'
-      ? markdownToHtmlCompact(result.campaign_design.raw_design)
+      ? markdownToHtmlCompact(raw)
       : markdownToHtmlCompact(short);
     parts.push(
       <div key="design" className="text-foreground campaign-design-content">

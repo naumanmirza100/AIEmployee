@@ -253,7 +253,7 @@ class MarketingBaseAgent:
             except Exception as e:
                 last_error = e
                 err_str = str(e)
-                is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower()
+                is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower()
                 if is_rate_limit and attempt < max_retries:
                     wait_sec = 4
                     match = re.search(r"try again in (\d+(?:\.\d+)?)\s*s", err_str, re.IGNORECASE)
@@ -263,8 +263,13 @@ class MarketingBaseAgent:
                     time.sleep(wait_sec)
                 else:
                     logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
+                    if is_rate_limit:
+                        raise RuntimeError("The service is busy. Please try again in a moment.")
                     raise
         if last_error:
+            err_str = str(last_error)
+            if "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower():
+                raise RuntimeError("The service is busy. Please try again in a moment.")
             raise last_error
     
     def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000):

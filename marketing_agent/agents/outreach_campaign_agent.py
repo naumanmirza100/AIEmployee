@@ -978,91 +978,39 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
         return context
     
     def _generate_campaign_design(self, context: str) -> str:
-        """Generate email-only campaign design using AI"""
-        prompt = f"""Design a comprehensive EMAIL-ONLY marketing campaign based on the following requirements:
+        """Generate email-only campaign design using AI — brief and to the point."""
+        prompt = f"""Design an EMAIL-ONLY marketing campaign based on the following. Keep the design BRIEF and TO THE POINT: short bullet points, 1–2 lines per item, no long paragraphs.
 
 {context}
 
-Create a detailed EMAIL campaign design that includes:
+Output a concise design with these sections (2–4 bullets per section max):
 
 ## CAMPAIGN STRATEGY
-- Campaign name and positioning
-- Primary objectives and KPIs
-- Target audience personas
-- Key messaging and value propositions
+- Name, positioning, objectives, target audience, key message (one line each).
 
 ## EMAIL CAMPAIGN PLAN
-
-### Email Campaign Strategy
-- Email campaign type and goals
-- Overall email marketing approach
-
-### Content Themes and Messaging
-- Email content themes
-- Key messages and value propositions
-- Email copy guidelines
-
-### Send Schedule and Frequency
-- Email sending schedule
-- Frequency recommendations
-- Best sending times
-
-### Segmentation Approach
-- Audience segmentation strategy
-- Personalization approach
-- List management
-
-### Email Types and Sequences
-- Welcome emails
-- Promotional emails
-- Newsletter emails
-- Transactional emails
-- Re-engagement campaigns
+- Email type and goals; content themes; send schedule and frequency; segmentation in 1–2 bullets each.
 
 ## MESSAGING FRAMEWORK
-- Core messaging framework
-- Brand voice guidelines
-- Email-specific messaging style
-- Consistency guidelines
+- Core message, brand voice, email tone (brief).
 
 ## TIMELINE & EXECUTION
-- Campaign timeline (pre-launch, launch, post-launch)
-- Email sequence timing
-- Key milestones
-- Dependencies
-
-## RESOURCE ALLOCATION
-- Email campaign resources
-- Cost estimates for email tools/services
+- Pre-launch, launch, post-launch in 2–3 bullets; key milestones only.
 
 ## PERFORMANCE METRICS
-- Email KPIs (open rate, click-through rate, conversion rate, etc.)
-- Tracking and measurement plan
-- Success criteria
+- KPIs (open rate, CTR, conversion); success criteria (2–3 bullets).
 
 ## RECOMMENDATIONS
-Provide 5-10 specific, actionable recommendations for:
-- Email content optimization
-- Segmentation strategies
-- Send timing and frequency
-- Personalization approaches
-- A/B testing opportunities
-- Best practices for email deliverability and engagement
+- 3–5 actionable bullets (content, segmentation, send time, A/B tests, deliverability).
 
-Format recommendations as clear, actionable bullet points.
-
-IMPORTANT: This is an EMAIL-ONLY campaign. Do NOT include social media, paid advertising, 
-partnerships, or any other channels. Focus ONLY on email marketing strategy and execution.
-
-Provide a comprehensive, actionable email campaign design with clear timelines, 
-messaging guidelines, performance metrics, and specific recommendations."""
+RULES: EMAIL-ONLY. No social, paid ads, or other channels. Be concise—short bullets only. No long paragraphs or repetition. Do NOT use ** or * in the output; use plain text only (e.g. write "Content:" not "Content:**", and no bold/italic markdown)."""
         
         try:
             design = self._call_llm_for_reasoning(
                 prompt,
                 self.system_prompt,
                 temperature=0.7,  # Creative but structured
-                max_tokens=3000
+                max_tokens=1800   # Keep design brief
             )
             return design
         except Exception as e:

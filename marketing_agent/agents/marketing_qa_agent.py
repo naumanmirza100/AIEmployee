@@ -7,7 +7,7 @@ This is the BRAIN that all other agents will use.
 from .marketing_base_agent import MarketingBaseAgent
 from .platform_content import get_platform_response
 from typing import Dict, Optional, List
-from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, EmailSendHistory, Reply
+from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, EmailSendHistory, Reply, CampaignLead
 import json
 import re
 from datetime import datetime, timedelta
@@ -45,11 +45,13 @@ class MarketingQAAgent(MarketingBaseAgent):
         
         You provide intelligent, data-driven answers to questions like:
         - "Why are sales dropping?"
-        - "What campaigns are performing best?"
+        - "What campaigns are performing best?" (always name the best campaign(s) first with a short reason, then optionally list others)
         - "Which channels are most effective?"
         - "What should we focus on?"
         
         Always base your answers on the data provided. Be specific, actionable, and data-driven.
+        When asked "which/what campaigns are performing best?", you must state clearly which campaign(s) are best and why (e.g. highest open rate, conversion progress)—do not only list all campaigns.
+        When asked general questions like "best practices for our industry" or "industry best practices", give general best practices only—do not list campaign names, metrics, Key Trends, or "which campaign is this about".
         Do NOT put your reasoning in the answer (no "To answer your question...", "I will look at...", "The last Q&A..."). Give only the direct answer with numbers. Never repeat the same sentence or paragraph—state each fact once, then stop.
 
         CONVERSATION CONTEXT (apply this first, for every question):
@@ -342,41 +344,62 @@ Give a brief, direct answer only (definition, full form, or general knowledge). 
         if user_id:
             campaigns_query = campaigns_query.filter(owner_id=user_id)
         
-        campaigns = campaigns_query.select_related('owner').prefetch_related('performance_metrics')
-        
-        # Get campaign data (including email stats from EmailSendHistory and Reply)
+        campaigns = list(campaigns_query.select_related('owner').prefetch_related('performance_metrics'))
+        campaign_ids = [c.id for c in campaigns]
+
+        # Bulk aggregates to avoid N+1 queries (one query per aggregate type)
+        email_stats = {}
+        if campaign_ids:
+            sent_statuses = ['sent', 'delivered', 'opened', 'clicked']
+            for row in EmailSendHistory.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
+                total_sent=Count('id', filter=Q(status__in=sent_statuses)),
+                total_opened=Count('id', filter=Q(status__in=['opened', 'clicked'])),
+                total_clicked=Count('id', filter=Q(status='clicked')),
+                total_bounced=Count('id', filter=Q(status='bounced')),
+                total_failed=Count('id', filter=Q(status='failed')),
+            ).order_by('campaign_id'):
+                email_stats[row['campaign_id']] = row
+
+        reply_stats = {}
+        if campaign_ids:
+            for row in Reply.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
+                total_replied=Count('id'),
+                positive_replies=Count('id', filter=Q(interest_level__in=['positive', 'neutral', 'requested_info', 'objection'])),
+                negative_replies=Count('id', filter=Q(interest_level__in=['negative', 'unsubscribe'])),
+            ).order_by('campaign_id'):
+                reply_stats[row['campaign_id']] = row
+
+        lead_counts = {}
+        if campaign_ids:
+            for row in CampaignLead.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(count=Count('id')).order_by('campaign_id'):
+                lead_counts[row['campaign_id']] = row['count']
+
+        # Build campaign data using prefetched metrics and bulk lookups
         campaigns_data = []
         for campaign in campaigns:
-            # Legacy performance metrics (CampaignPerformance table)
-            metrics = CampaignPerformance.objects.filter(campaign=campaign)
-            # Email campaign stats (source of truth for sent, open, click, reply rates)
-            email_sends = EmailSendHistory.objects.filter(campaign=campaign)
-            total_sent = email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
-            total_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
-            total_clicked = email_sends.filter(status='clicked').count()
-            total_bounced = email_sends.filter(status='bounced').count()
-            total_replied = Reply.objects.filter(campaign=campaign).count()
-            total_failed = email_sends.filter(status='failed').count()
-            leads_count = campaign.leads.count()
-            # Positive/neutral = conversions (same as dashboard "Progress Towards Targets")
-            positive_replies = Reply.objects.filter(
-                campaign=campaign,
-                interest_level__in=['positive', 'neutral', 'requested_info', 'objection']
-            ).count()
-            negative_replies = Reply.objects.filter(
-                campaign=campaign,
-                interest_level__in=['negative', 'unsubscribe']
-            ).count()
+            cid = campaign.id
+            es = email_stats.get(cid, {})
+            rs = reply_stats.get(cid, {})
+            total_sent = es.get('total_sent') or 0
+            total_opened = es.get('total_opened') or 0
+            total_clicked = es.get('total_clicked') or 0
+            total_bounced = es.get('total_bounced') or 0
+            total_failed = es.get('total_failed') or 0
+            total_replied = rs.get('total_replied') or 0
+            positive_replies = rs.get('positive_replies') or 0
+            negative_replies = rs.get('negative_replies') or 0
+            leads_count = lead_counts.get(cid, 0)
+
             target_leads = getattr(campaign, 'target_leads', None)
             target_conversions = getattr(campaign, 'target_conversions', None)
             conversion_progress = round((positive_replies / target_conversions * 100), 1) if target_conversions and target_conversions > 0 else None
             leads_progress = round((leads_count / target_leads * 100), 1) if target_leads and target_leads > 0 else None
-            # Rates (only when we have sends)
             open_rate = round((total_opened / total_sent) * 100, 2) if total_sent > 0 else None
             click_rate = round((total_clicked / total_sent) * 100, 2) if total_sent > 0 else None
             reply_rate = round((total_replied / total_sent) * 100, 2) if total_sent > 0 else None
             bounce_rate = round((total_bounced / total_sent) * 100, 2) if total_sent > 0 else None
 
+            metrics_prefetched = list(campaign.performance_metrics.all())[:20]
             camp_dict = {
                 'id': campaign.id,
                 'name': campaign.name,
@@ -385,13 +408,8 @@ Give a brief, direct answer only (definition, full form, or general knowledge). 
                 'start_date': campaign.start_date.isoformat() if campaign.start_date else None,
                 'end_date': campaign.end_date.isoformat() if campaign.end_date else None,
                 'metrics': [
-                    {
-                        'name': m.metric_name,
-                        'value': float(m.metric_value),
-                        'date': m.date.isoformat(),
-                        'channel': m.channel
-                    }
-                    for m in metrics[:20]
+                    {'name': m.metric_name, 'value': float(m.metric_value), 'date': m.date.isoformat(), 'channel': m.channel}
+                    for m in metrics_prefetched
                 ],
                 'goals': campaign.goals,
                 'channels': campaign.channels,
@@ -470,13 +488,12 @@ Give a brief, direct answer only (definition, full form, or general knowledge). 
         conv_history = (additional_context or {}).get('conversation_history') or []
         if conv_history:
             parts.append("RECENT CONVERSATION – Campaign in context = the campaign from the **last Q&A only**. If the user says 'the campaign', 'it', 'its', or 'performance/issues/improvement of the campaign' (and did NOT say 'all campaigns'), answer **ONLY** for that one campaign. Do NOT add summer sales 26, testing compagin, or any other campaign. If user says 'all campaigns' or 'of all campaigns', answer for ALL campaigns.")
-            for i, pair in enumerate(conv_history[-6:], 1):  # last 6 Q&A
+            for i, pair in enumerate(conv_history[-4:], 1):  # last 4 Q&A to keep prompt smaller
                 q = pair.get('question') or pair.get('q') or ''
                 a = pair.get('answer') or pair.get('a') or ''
                 if q or a:
                     parts.append(f"  Q{i}: {q}")
-                    # Keep enough of the answer so the TOPIC is clear (e.g. CC/BC + email tips)
-                    parts.append(f"  A{i}: {a[:1200]}{'...' if len(a) > 1200 else ''}")
+                    parts.append(f"  A{i}: {a[:600]}{'...' if len(a) > 600 else ''}")
             parts.append("")
 
         context = "\n".join(parts) if parts else ""
@@ -558,6 +575,7 @@ Give a brief, direct answer only (definition, full form, or general knowledge). 
 {context}
 
 CRITICAL RULES:
+- **GENERAL / INDUSTRY QUESTIONS – no campaign data:** When the user asks **general** questions like "What are the best practices for our industry?", "best practices for email marketing?", "industry best practices", or "best practices for [marketing/campaigns]", give **general** best practices only (e.g. clear subject lines, A/B testing, segmentation, lead nurturing, clear CTAs, mobile-friendly, optimize send time). Do NOT list campaign names, conversion rates, "Key Trends", "Active Campaigns: 1", "Total campaigns: 5", "Campaign: tutor nearby users", "Which campaign is this about?", or any CAMPAIGNS data. One optional short line like "You can apply these to your campaigns" is fine; no dump of campaign metrics or status.
 - **NEVER repeat the same sentence or paragraph.** If you have already stated a metric or fact once, STOP. Do not output "However, since the user..." or the same conversion/rate line again. One short answer only. If you find yourself writing the same line twice, delete it and end the response.
 - **Do NOT put reasoning in your answer.** Do NOT write "To answer your question...", "I will look at the most recent Q&A...", "The last Q&A pair is...", "Since the user asked...", "Let me...". Give ONLY the direct answer with numbers (e.g. "For **summer sales 26**: conversion rate 0/100 = **0%**."). The user must see only the result.
 - **Override – "all campaigns" in current question:** If the user says "all campaigns", "of all campaigns", "for all campaigns", "each campaign", "every campaign", or "all campagins" in the **current question**, answer for **ALL** campaigns (list metric or detail for every campaign). Do NOT answer only for the last-discussed campaign.
@@ -567,6 +585,7 @@ CRITICAL RULES:
 - **"This platform" / "this agent":** Use PLATFORM CONTEXT.
 - **"For all campaigns" / "tell generally":** Apply the PREVIOUS answer's topic to all campaigns; give the actual content, not just campaign names.
 - **Always name campaigns with status**: When listing or naming campaigns, always include **status** (draft/active/paused) after each name, e.g. "summer sales 261 (paused)", "testing compagin (draft)". Do not list campaign names without their status.
+- **"What campaigns are performing best?" / "Which campaigns are performing best?" / "best performing campaigns"**: You MUST **name the best campaign(s) first** with a short reason (e.g. highest open rate, conversion progress, or reply rate). Then optionally list others briefly. Example: "**summer sales 261** (paused) is performing best: 54.55% open rate, 72.73% reply rate, 70% conversion progress. Other campaigns have 0 emails sent or 0% rates." Do NOT only list all campaigns with metrics—always state clearly "**X** is performing best" (or "**X** and **Y**") and why, then stop or briefly summarize the rest.
 - **"How are our campaigns performing?" / "campaigns performing this month?"**: The user wants **performance metrics**, not just names. For each campaign in CAMPAIGNS, give name **with status** (e.g. summer sales 261 (paused)), then: Emails sent, Open rate, Click rate, Reply rate, Conversion progress, Leads progress. Do NOT reply with only "Total: 4, Active: 0" and a list of names—include actual performance numbers per campaign, each with status.
 - **Campaign count/status questions** (e.g. "how many campaigns", "give their names"): Answer with numbers from OVERVIEW and list each campaign with its status, e.g. "summer sales 2 (draft), testing compagin (draft), summer sales 261 (paused), summer sales 26 (paused)".
 - **"Are we on track to meet our campaign goals?"**: Answer **first with Yes or No** (e.g. "**No.**" or "**Yes**, for [campaign name]."), then give reasons. Format: "**No.** Reasons: (1) ... (2) ..." or "**Yes**, for summer sales 261. Reasons: ...". Do NOT start with "Reasons:" only—always state Yes or No first.
@@ -577,8 +596,9 @@ CRITICAL RULES:
 - **"How do they need optimization?" / "how do [these] campaigns need to be optimized?"** (follow-up after "which need optimization"): Give **specific optimization steps** using CAMPAIGNS data. Do NOT repeat the list of campaign names only. For each campaign (or in summary): **Paused/draft** → Resume or launch; **Low open rate** → Improve subject lines and send time; **Low click rate** → Improve email content and CTA; **Low leads/conversion progress** → Improve targeting, lead magnets, follow-up. Use actual metrics (e.g. summer sales 261 (paused): click rate 9.09% → improve CTAs; leads 3/100 → improve lead gen). Give concrete **how** (actions/steps), not just names.
 - **"Ideal email template" / "best email template" / "what should email template include"**: Answer with **template structure and best practices** (e.g. clear subject line, preview text, personalized greeting, short body, one clear CTA, signature, mobile-friendly, concise). Do NOT paste full campaign stats (Emails sent, Open rate, etc.) in this answer—give template advice only. Optionally one short line on how it helps open/click rates, but no campaign data dump.
 - **Campaign details / "proper details" / "give details"**: Use the EMAIL stats from the CAMPAIGNS section (Emails sent, Open rate, Click rate, Reply rate, Leads, Failed emails). These are the real numbers. Do NOT use "Legacy metrics" when a campaign has "Emails sent" and rates listed.
-- **Conversion rate** (when the user asks "conversion rate" or "our conversion rate" only—NOT "lead conversion rate"): This is progress toward the **Conversions Target**. Use: positive_replies (conversions) / target_conversions from CAMPAIGNS. Report per campaign, e.g. "summer sales 261: 7/10 = **70%**". Do NOT use leads_count or target_leads for this. Match the dashboard "Conversions Target" (e.g. 7/10, 70% Complete).
+- **Conversion rate** (when the user asks "conversion rate" or "our conversion rate" only—NOT "lead conversion rate"): This is progress toward the **Conversions Target** (positive_replies / target_conversions). When the user does NOT name a campaign, report for **every campaign that has conversion data**, e.g. "summer sales 261: **70%** (7/10); summer sales 26: 0%; others: 0%." Do NOT default to only the first or "active" campaign—that can wrongly show 0%. If only one campaign has non-zero conversion progress, say e.g. "**70%** for summer sales 261; other campaigns have 0%." so the user sees the real number.
 - **Lead conversion rate** (when the user asks "lead conversion rate" or "our lead conversion rate"): This is **only** leads_count / target_leads (Leads Target progress). Report e.g. "summer sales 261: 3/100 = **3%**". **Never** report positive_replies/target_conversions (e.g. 7/10 = 70%) as "lead conversion rate"—that is "conversion rate". Lead conversion rate = leads progress only (3/100 = 3%). If specific campaign in context, use that; otherwise give for all campaigns.
+- **"About which campaign are you answering?" / "which campaign is this about?" / "which campaign u are answering?"**: Answer from the **last answer** you gave. If the last answer was about **one** campaign (because the user had asked about "this campaign" or named a campaign), say "I was answering about **[that campaign name]**." If the last answer was about **all** campaigns (e.g. "what campaigns are performing best?", "how are campaigns performing?"), say "I was answering about **all** your campaigns—you didn’t specify one, so I summarized or compared all of them." Do NOT guess or pick the first/active campaign name when the user had asked about all campaigns.
 - **Default: SHORT.** Unless the user asks for "details", "full analysis", "recommendations", "insights", "strategy", or "why", give 1–4 sentences only. No "Key Insights", "Recommendations", or long tables.
 - **Simple factual questions** (how many, list, count, total, which, status): One direct sentence or brief list; include campaign names **with status** (e.g. summer sales 261 (paused)) when listing campaigns. No trend analysis.
 - **Only when the user explicitly asks for more** (e.g. "analyze", "recommend", "insights", "strategy"): You may add ## Key Insights and ## Recommendations. Otherwise do not.
@@ -628,9 +648,9 @@ Be specific and use numbers. Give only the direct answer; then stop."""
                 'status': 'good' if active_percentage > 50 else 'warning'
             })
         
-        # Performance insights (if metrics exist)
+        # Performance insights (email stats or legacy metrics)
         if campaigns:
-            campaigns_with_metrics = [c for c in campaigns if c.get('metrics')]
+            campaigns_with_metrics = [c for c in campaigns if c.get('metrics') or (c.get('emails_sent') is not None and c.get('emails_sent', 0) > 0)]
             if campaigns_with_metrics:
                 insights.append({
                     'type': 'performance',
