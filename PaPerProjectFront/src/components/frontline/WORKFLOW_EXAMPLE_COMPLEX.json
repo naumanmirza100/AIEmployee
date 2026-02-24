@@ -1,0 +1,59 @@
+[
+  {
+    "type": "send_email",
+    "template_id": 1,
+    "recipient_email": "{{recipient_email}}",
+    "context": { "note": "Acknowledgement" }
+  },
+  {
+    "type": "update_ticket",
+    "status": "open"
+  },
+  {
+    "type": "send_email",
+    "template_id": 1,
+    "recipient_email": "{{recipient_email}}",
+    "context": { "note": "Confirmation" }
+  },
+  {
+    "type": "update_ticket",
+    "status": "in_progress"
+  },
+  {
+    "type": "send_email",
+    "template_id": 2,
+    "recipient_email": "{{recipient_email}}"
+  },
+  {
+    "type": "update_ticket",
+    "resolution": "Workflow: customer notified. Ticket is being processed."
+  },
+  {
+    "type": "send_email",
+    "template_id": 2,
+    "recipient_email": "{{recipient_email}}"
+  },
+  {
+    "type": "update_ticket",
+    "resolution": "Update: in progress. Customer notified. Reference ticket ID from context."
+  },
+  {
+    "type": "send_email",
+    "template_id": 2,
+    "recipient_email": "{{recipient_email}}"
+  },
+  {
+    "type": "update_ticket",
+    "status": "resolved",
+    "resolution": "Resolved via workflow. Ticket: {{ticket_title}}. Customer received all notifications."
+  },
+  {
+    "type": "send_email",
+    "template_id": 3,
+    "recipient_email": "{{recipient_email}}"
+  },
+  {
+    "type": "update_ticket",
+    "status": "closed"
+  }
+]

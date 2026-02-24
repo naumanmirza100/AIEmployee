@@ -616,7 +616,7 @@ class TicketAutomationService:
         
         return True, resolution_text, solution
     
-    def process_ticket(self, title: str, description: str, user_id: int, llm_extraction: Optional[Dict] = None) -> Dict:
+    def process_ticket(self, title: str, description: str, user_id: int, llm_extraction: Optional[Dict] = None, company_id: Optional[int] = None) -> Dict:
         """
         Process a ticket: classify, search for solution, and determine action.
         Optionally augments classification with LLM intent/entity extraction.
@@ -626,6 +626,7 @@ class TicketAutomationService:
             description: Ticket description
             user_id: User ID who created the ticket
             llm_extraction: Optional dict from LLM with intent, entities, suggested_category, suggested_priority
+            company_id: Optional company ID for the ticket (used for workflow triggers)
             
         Returns:
             Processing result dictionary
@@ -672,6 +673,7 @@ class TicketAutomationService:
                     category=classification.get('category', 'other'),
                     priority=classification.get('priority', 'medium'),
                     created_by=user,
+                    company_id=company_id,
                     status='auto_resolved' if can_auto_resolve else 'open',
                     auto_resolved=can_auto_resolve,
                     resolution=resolution_text if can_auto_resolve else None,

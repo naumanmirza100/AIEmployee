@@ -187,7 +187,7 @@ class FrontlineAgent(BaseAgent):
             logger.info(f"LLM extraction: intent={llm_extraction.get('intent')}, category={llm_extraction.get('suggested_category')}, entities={llm_extraction.get('entities')}")
         
         # Use ticket service to process (with optional LLM augmentation)
-        result = self.ticket_service.process_ticket(title, description, user_id, llm_extraction=llm_extraction)
+        result = self.ticket_service.process_ticket(title, description, user_id, llm_extraction=llm_extraction, company_id=self.company_id)
         
         if not result.get('success', False):
             logger.error(f"Ticket processing failed: {result.get('error')}")
@@ -379,3 +379,36 @@ class FrontlineAgent(BaseAgent):
         except Exception as e:
             logger.error(f"Generate analytics narrative failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'narrative': None}
+
+    def generate_notification_body(self, context: Dict, template_body_hint: Optional[str] = None) -> Optional[str]:
+        """
+        Generate a short, empathetic notification email body from context (ticket, customer, etc.).
+        Used when a template has use_llm_personalization enabled.
+        Returns the generated text, or None on failure (caller should fall back to template body).
+        """
+        try:
+            parts = []
+            for k, v in (context or {}).items():
+                if v is not None and str(v).strip():
+                    parts.append(f"{k}: {str(v)[:200]}")
+            context_str = "\n".join(parts) if parts else "No context provided."
+            prompt = (
+                "Write a short, empathetic email body (2-4 sentences) for a customer notification. "
+                "Use only the context below. Be clear, professional, and confirm any action or next step. "
+                "Do not invent information. Output only the email body, no subject or greetings.\n\nContext:\n"
+                + context_str
+            )
+            if template_body_hint:
+                prompt += "\n\nTemplate hint (tone/purpose): " + (template_body_hint[:300] or "")
+            body = self._call_llm(
+                prompt=prompt,
+                system_prompt="You are a helpful support agent. Write only the email body text, concise and empathetic.",
+                temperature=0.5,
+                max_tokens=400
+            )
+            if body and len((body or "").strip()) > 0:
+                return (body.strip())[:2000]
+            return None
+        except Exception as e:
+            logger.warning(f"Generate notification body failed: {e}", exc_info=True)
+            return None

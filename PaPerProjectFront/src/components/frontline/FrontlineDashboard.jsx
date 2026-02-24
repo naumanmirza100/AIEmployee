@@ -23,6 +23,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Loader2, 
   FileText, 
@@ -39,6 +40,8 @@ import {
   MessageCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Bell,
   GitBranch,
   BarChart3,
@@ -61,8 +64,22 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-const TEMPLATE_DEFAULT = { name: '', subject: '', body: '', notification_type: 'ticket_update', channel: 'email' };
+const TEMPLATE_DEFAULT = { name: '', subject: '', body: '', notification_type: 'ticket_update', channel: 'email', use_llm_personalization: false };
 const WORKFLOW_STEPS_DEFAULT = '[{"type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}"}]';
+const WORKFLOW_STEPS_COMPLEX_EXAMPLE = `[
+  { "type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}", "context": { "note": "Acknowledgement" } },
+  { "type": "update_ticket", "status": "open" },
+  { "type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}", "context": { "note": "Confirmation" } },
+  { "type": "update_ticket", "status": "in_progress" },
+  { "type": "send_email", "template_id": 2, "recipient_email": "{{recipient_email}}" },
+  { "type": "update_ticket", "resolution": "Workflow: customer notified. Ticket is being processed." },
+  { "type": "send_email", "template_id": 2, "recipient_email": "{{recipient_email}}" },
+  { "type": "update_ticket", "resolution": "Update: in progress. Customer notified. Reference ticket ID from context." },
+  { "type": "send_email", "template_id": 2, "recipient_email": "{{recipient_email}}" },
+  { "type": "update_ticket", "status": "resolved", "resolution": "Resolved via workflow. Customer received all notifications." },
+  { "type": "send_email", "template_id": 3, "recipient_email": "{{recipient_email}}" },
+  { "type": "update_ticket", "status": "closed" }
+]`;
 
 function FrontlineNotificationsTab() {
   const { toast } = useToast();
@@ -111,7 +128,7 @@ function FrontlineNotificationsTab() {
     }
   };
   const openCreateTemplate = () => setTemplateDialog({ open: true, editingId: null, ...TEMPLATE_DEFAULT });
-  const openEditTemplate = (t) => setTemplateDialog({ open: true, editingId: t.id, name: t.name || '', subject: t.subject || '', body: t.body || '', notification_type: t.notification_type || 'ticket_update', channel: t.channel || 'email' });
+  const openEditTemplate = (t) => setTemplateDialog({ open: true, editingId: t.id, name: t.name || '', subject: t.subject || '', body: t.body || '', notification_type: t.notification_type || 'ticket_update', channel: t.channel || 'email', use_llm_personalization: !!t.use_llm_personalization });
   const handleSaveTemplate = async (e) => {
     e.preventDefault();
     if (!templateDialog.name.trim()) {
@@ -127,6 +144,7 @@ function FrontlineNotificationsTab() {
           body: templateDialog.body,
           notification_type: templateDialog.notification_type,
           channel: templateDialog.channel,
+          use_llm_personalization: !!templateDialog.use_llm_personalization,
         });
         if (res.status === 'success') {
           toast({ title: 'Saved', description: 'Template updated.' });
@@ -140,6 +158,7 @@ function FrontlineNotificationsTab() {
           body: templateDialog.body,
           notification_type: templateDialog.notification_type,
           channel: templateDialog.channel,
+          use_llm_personalization: !!templateDialog.use_llm_personalization,
         });
         if (res.status === 'success') {
           toast({ title: 'Created', description: 'Template created.' });
@@ -205,6 +224,7 @@ function FrontlineNotificationsTab() {
                   <div key={t.id} className="flex justify-between items-center p-2 border rounded text-sm">
                     <span>{t.name}</span>
                     <div className="flex items-center gap-1">
+                      {t.use_llm_personalization && <Badge variant="secondary" className="text-xs">LLM</Badge>}
                       <Badge variant="outline">{t.channel}</Badge>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditTemplate(t)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteTemplate(t)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
@@ -273,6 +293,16 @@ function FrontlineNotificationsTab() {
               </Select>
             </div>
           </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="use_llm_personalization"
+              checked={!!templateDialog.use_llm_personalization}
+              onCheckedChange={(checked) => setTemplateDialog((d) => ({ ...d, use_llm_personalization: !!checked }))}
+            />
+            <Label htmlFor="use_llm_personalization" className="text-sm font-normal cursor-pointer">
+              Use LLM personalization — generate a short, empathetic email body from ticket/customer context (fallback to template body if unavailable)
+            </Label>
+          </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setTemplateDialog((d) => ({ ...d, open: false }))}>Cancel</Button>
             <Button type="submit" disabled={savingTemplate}>{savingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save</Button>
@@ -291,14 +321,124 @@ function FrontlineWorkflowsTab() {
   const [loading, setLoading] = useState(true);
   const [executeForm, setExecuteForm] = useState({ workflow_id: '', ticket_id: '', recipient_email: '' });
   const [executing, setExecuting] = useState(false);
-  const [workflowDialog, setWorkflowDialog] = useState({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+  const [workflowDialog, setWorkflowDialog] = useState({
+    open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true,
+    triggerOn: 'none', triggerCategory: '', triggerPriority: '', triggerStatus: '',
+  });
   const [savingWorkflow, setSavingWorkflow] = useState(false);
+  const [executeTicketsList, setExecuteTicketsList] = useState([]);
+  const [stepBuilderOpen, setStepBuilderOpen] = useState(false);
+  const [stepBuilderSteps, setStepBuilderSteps] = useState([]);
+  const [stepBuilderTemplates, setStepBuilderTemplates] = useState([]);
+  const [stepBuilderTickets, setStepBuilderTickets] = useState([]);
+  const [stepBuilderTemplatesLoading, setStepBuilderTemplatesLoading] = useState(false);
+  const [stepForm, setStepForm] = useState(null);
+  const [stepEditIndex, setStepEditIndex] = useState(null);
+  const TRIGGER_ON_OPTIONS = [{ value: 'none', label: 'None (manual only)' }, { value: 'ticket_created', label: 'Ticket created' }, { value: 'ticket_updated', label: 'Ticket updated' }];
+  const CATEGORY_OPTIONS = ['technical', 'billing', 'account', 'feature_request', 'bug', 'knowledge_gap', 'other'];
+  const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
+  const STATUS_OPTIONS = ['new', 'open', 'in_progress', 'resolved', 'closed', 'auto_resolved'];
+  const STEP_STATUS_OPTIONS = [{ value: '_optional', label: '(optional)' }, ...STATUS_OPTIONS.map((s) => ({ value: s, label: s.replace('_', ' ') }))];
+
+  const openStepBuilder = async () => {
+    let steps = [];
+    try {
+      const parsed = JSON.parse(workflowDialog.stepsJson || '[]');
+      if (Array.isArray(parsed)) steps = parsed;
+    } catch (_) {}
+    setStepBuilderSteps(steps);
+    setStepForm(null);
+    setStepEditIndex(null);
+    setStepBuilderOpen(true);
+    setStepBuilderTemplatesLoading(true);
+    try {
+      const [tRes, tickRes] = await Promise.all([
+        frontlineAgentService.listNotificationTemplates(),
+        frontlineAgentService.listTickets({ limit: 100 }),
+      ]);
+      setStepBuilderTemplates((tRes.status === 'success' && tRes.data) ? tRes.data : []);
+      setStepBuilderTickets((tickRes.status === 'success' && tickRes.data) ? tickRes.data : []);
+    } catch (_) {
+      setStepBuilderTemplates([]);
+      setStepBuilderTickets([]);
+    } finally {
+      setStepBuilderTemplatesLoading(false);
+    }
+  };
+
+  const closeStepBuilder = (apply) => {
+    if (apply && stepBuilderSteps.length > 0) {
+      setWorkflowDialog((d) => ({ ...d, stepsJson: JSON.stringify(stepBuilderSteps, null, 2) }));
+    }
+    setStepBuilderOpen(false);
+    setStepForm(null);
+    setStepEditIndex(null);
+  };
+
+  const addStepToBuilder = (step) => {
+    const normalized = { type: step.type };
+    if (step.type === 'send_email') {
+      const tid = parseInt(step.template_id, 10);
+      if (!tid) return;
+      normalized.template_id = tid;
+      normalized.recipient_email = (step.recipient_email || '').trim() || '{{recipient_email}}';
+    }
+    if (step.type === 'update_ticket') {
+      if (step.status && step.status !== '_optional') normalized.status = step.status;
+      if (step.resolution && step.resolution.trim()) normalized.resolution = step.resolution.trim();
+      const tid = (step.ticket_id || '').trim();
+      if (tid) normalized.ticket_id = parseInt(tid, 10) || undefined;
+      if (normalized.ticket_id === undefined && !normalized.status && !normalized.resolution) return;
+    }
+    if (stepEditIndex !== null) {
+      setStepBuilderSteps((prev) => prev.map((s, i) => (i === stepEditIndex ? normalized : s)));
+      setStepEditIndex(null);
+    } else {
+      setStepBuilderSteps((prev) => [...prev, normalized]);
+    }
+    setStepForm(null);
+  };
+
+  const removeStepAt = (index) => {
+    setStepBuilderSteps((prev) => prev.filter((_, i) => i !== index));
+    if (stepEditIndex === index) { setStepForm(null); setStepEditIndex(null); }
+    else if (stepEditIndex !== null && stepEditIndex > index) setStepEditIndex(stepEditIndex - 1);
+  };
+
+  const moveStep = (index, dir) => {
+    if (dir === -1 && index <= 0) return;
+    if (dir === 1 && index >= stepBuilderSteps.length - 1) return;
+    const next = [...stepBuilderSteps];
+    const j = index + dir;
+    [next[index], next[j]] = [next[j], next[index]];
+    setStepBuilderSteps(next);
+    if (stepEditIndex === index) setStepEditIndex(j);
+    else if (stepEditIndex === j) setStepEditIndex(index);
+  };
+
+  const stepSummary = (s) => {
+    if (s.type === 'send_email') return `Send email: template ${s.template_id || '?'} → ${(s.recipient_email || '').slice(0, 30)}${(s.recipient_email || '').length > 30 ? '…' : ''}`;
+    if (s.type === 'update_ticket') {
+      const parts = [];
+      if (s.status) parts.push(`status=${s.status}`);
+      if (s.resolution) parts.push('resolution');
+      if (s.ticket_id) parts.push(`ticket_id=${s.ticket_id}`);
+      return `Update ticket: ${parts.length ? parts.join(', ') : '(no fields)'}`;
+    }
+    return `Step: ${s.type || 'unknown'}`;
+  };
+
   const load = async () => {
     setLoading(true);
     try {
-      const [wRes, eRes] = await Promise.all([frontlineAgentService.listWorkflows(), frontlineAgentService.listWorkflowExecutions()]);
+      const [wRes, eRes, tRes] = await Promise.all([
+        frontlineAgentService.listWorkflows(),
+        frontlineAgentService.listWorkflowExecutions(),
+        frontlineAgentService.listTickets({ limit: 100 }),
+      ]);
       setWorkflows((wRes.status === 'success' && wRes.data) ? wRes.data : []);
       setExecutions((eRes.status === 'success' && eRes.data) ? eRes.data : []);
+      setExecuteTicketsList((tRes.status === 'success' && tRes.data) ? tRes.data : []);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to load', variant: 'destructive' });
     } finally {
@@ -328,12 +468,19 @@ function FrontlineWorkflowsTab() {
       setExecuting(false);
     }
   };
-  const openCreateWorkflow = () => setWorkflowDialog({ open: true, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
-  const openEditWorkflow = (w) => setWorkflowDialog({
-    open: true, editingId: w.id, name: w.name || '', description: w.description || '',
-    stepsJson: Array.isArray(w.steps) ? JSON.stringify(w.steps, null, 2) : (typeof w.steps === 'string' ? w.steps : WORKFLOW_STEPS_DEFAULT),
-    is_active: w.is_active !== false,
+  const openCreateWorkflow = () => setWorkflowDialog({
+    open: true, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true,
+    triggerOn: 'none', triggerCategory: '', triggerPriority: '', triggerStatus: '',
   });
+  const openEditWorkflow = (w) => {
+    const tc = w.trigger_conditions || {};
+    setWorkflowDialog({
+      open: true, editingId: w.id, name: w.name || '', description: w.description || '',
+      stepsJson: Array.isArray(w.steps) ? JSON.stringify(w.steps, null, 2) : (typeof w.steps === 'string' ? w.steps : WORKFLOW_STEPS_DEFAULT),
+      is_active: w.is_active !== false,
+      triggerOn: tc.on || 'none', triggerCategory: tc.category || '', triggerPriority: tc.priority || '', triggerStatus: tc.status || '',
+    });
+  };
   const handleSaveWorkflow = async (e) => {
     e.preventDefault();
     if (!workflowDialog.name.trim()) {
@@ -350,16 +497,23 @@ function FrontlineWorkflowsTab() {
     }
     setSavingWorkflow(true);
     try {
+      const trigger_conditions = workflowDialog.triggerOn === 'none' ? {} : {
+        on: workflowDialog.triggerOn,
+        ...(workflowDialog.triggerCategory && { category: workflowDialog.triggerCategory }),
+        ...(workflowDialog.triggerPriority && { priority: workflowDialog.triggerPriority }),
+        ...(workflowDialog.triggerOn === 'ticket_updated' && workflowDialog.triggerStatus && { status: workflowDialog.triggerStatus }),
+      };
       if (workflowDialog.editingId) {
         const res = await frontlineAgentService.updateWorkflow(workflowDialog.editingId, {
           name: workflowDialog.name.trim(),
           description: workflowDialog.description,
           steps,
           is_active: workflowDialog.is_active,
+          trigger_conditions,
         });
         if (res.status === 'success') {
           toast({ title: 'Saved', description: 'Workflow updated.' });
-          setWorkflowDialog({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+          setWorkflowDialog({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true, triggerOn: 'none', triggerCategory: '', triggerPriority: '', triggerStatus: '' });
           load();
         } else throw new Error(res.message);
       } else {
@@ -368,10 +522,11 @@ function FrontlineWorkflowsTab() {
           description: workflowDialog.description,
           steps,
           is_active: workflowDialog.is_active,
+          trigger_conditions,
         });
         if (res.status === 'success') {
           toast({ title: 'Created', description: 'Workflow created.' });
-          setWorkflowDialog({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true });
+          setWorkflowDialog({ open: false, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true, triggerOn: 'none', triggerCategory: '', triggerPriority: '', triggerStatus: '' });
           load();
         } else throw new Error(res.message);
       }
@@ -415,8 +570,16 @@ function FrontlineWorkflowsTab() {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>Ticket ID (optional)</Label>
-            <Input placeholder="123" value={executeForm.ticket_id} onChange={(e) => setExecuteForm((f) => ({ ...f, ticket_id: e.target.value }))} className="w-[90px]" />
+            <Label>Ticket (optional)</Label>
+            <Select value={executeForm.ticket_id || '_none'} onValueChange={(v) => setExecuteForm((f) => ({ ...f, ticket_id: v === '_none' ? '' : v }))}>
+              <SelectTrigger className="w-[280px] max-w-full"><SelectValue placeholder="Select ticket" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">No ticket (manual context only)</SelectItem>
+                {executeTicketsList.map((t) => (
+                  <SelectItem key={t.id} value={String(t.id)}>#{t.id}: {(t.title || '').slice(0, 40)}{(t.title || '').length > 40 ? '…' : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1">
             <Label>Recipient email (optional)</Label>
@@ -425,14 +588,15 @@ function FrontlineWorkflowsTab() {
           <Button type="submit" disabled={executing}>Execute</Button>
         </form>
         {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
-          <>
-            <div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0">
+            <div className="min-w-0">
               <h4 className="font-medium mb-2">Workflows ({workflows.length})</h4>
-              <div className="space-y-2 max-h-32 overflow-y-auto">
+              <div className="space-y-2 max-h-96 overflow-y-auto">
                 {workflows.length === 0 ? <p className="text-sm text-muted-foreground">No workflows yet. Click &quot;Create workflow&quot; to add one.</p> : workflows.map((w) => (
                   <div key={w.id} className="flex justify-between items-center p-2 border rounded text-sm">
-                    <span>{w.name}</span>
-                    <div className="flex items-center gap-1">
+                    <span className="truncate min-w-0">{w.name}</span>
+                    <div className="flex items-center gap-1 flex-wrap justify-end shrink-0">
+                      {(w.trigger_conditions?.on) && <Badge variant="outline" className="text-xs">{w.trigger_conditions.on.replace('_', ' ')}</Badge>}
                       <Badge variant={w.is_active ? 'default' : 'secondary'}>{w.is_active ? 'Active' : 'Inactive'}</Badge>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditWorkflow(w)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteWorkflow(w)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
@@ -441,28 +605,29 @@ function FrontlineWorkflowsTab() {
                 ))}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <h4 className="font-medium mb-2">Recent executions</h4>
-              <div className="space-y-2 max-h-32 overflow-y-auto">
+              <div className="space-y-2 max-h-96 overflow-y-auto">
                 {executions.length === 0 ? <p className="text-sm text-muted-foreground">No executions yet.</p> : executions.slice(0, 15).map((ex) => (
-                  <div key={ex.id} className="flex justify-between items-center p-2 border rounded text-sm">
-                    <span>{ex.workflow_name} · {new Date(ex.started_at).toLocaleString()}</span>
-                    <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'}>{ex.status}</Badge>
+                  <div key={ex.id} className="flex justify-between items-center p-2 border rounded text-sm gap-2">
+                    <span className="truncate min-w-0">{ex.workflow_name} · {new Date(ex.started_at).toLocaleString()}</span>
+                    <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'} className="shrink-0">{ex.status}</Badge>
                   </div>
                 ))}
               </div>
             </div>
-          </>
+          </div>
         )}
       </CardContent>
     </Card>
     <Dialog open={workflowDialog.open} onOpenChange={(open) => !open && setWorkflowDialog((d) => ({ ...d, open: false }))}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
+      <DialogContent className="max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{workflowDialog.editingId ? 'Edit workflow' : 'Create workflow'}</DialogTitle>
-          <DialogDescription>Steps run in order. Types: send_email (template_id, recipient_email), update_ticket (ticket_id, status). Use {`{{ticket_id}}`}, {`{{recipient_email}}`} in context.</DialogDescription>
+          <DialogDescription>Steps run in order. When triggered by a ticket, context includes ticket_id, ticket_title, recipient_email, etc.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSaveWorkflow} className="space-y-4">
+        <form onSubmit={handleSaveWorkflow} className="flex flex-col min-h-0 flex-1 overflow-hidden">
+          <div className="overflow-y-auto flex-1 min-h-0 space-y-4 pr-1">
           <div className="space-y-2">
             <Label>Name</Label>
             <Input value={workflowDialog.name} onChange={(e) => setWorkflowDialog((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Ticket follow-up flow" required />
@@ -471,20 +636,181 @@ function FrontlineWorkflowsTab() {
             <Label>Description (optional)</Label>
             <Input value={workflowDialog.description} onChange={(e) => setWorkflowDialog((d) => ({ ...d, description: e.target.value }))} placeholder="Short description" />
           </div>
+          <div className="space-y-3 p-3 border rounded-lg bg-muted/40">
+            <Label className="text-sm font-medium">Trigger (run automatically)</Label>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Run when</Label>
+                <Select value={workflowDialog.triggerOn} onValueChange={(v) => setWorkflowDialog((d) => ({ ...d, triggerOn: v, triggerStatus: v === 'ticket_updated' ? d.triggerStatus : '' }))}>
+                  <SelectTrigger className="w-full max-w-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TRIGGER_ON_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {workflowDialog.triggerOn !== 'none' && (
+                <div className="flex flex-wrap gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Category (optional)</Label>
+                    <Select value={workflowDialog.triggerCategory || '_any'} onValueChange={(v) => setWorkflowDialog((d) => ({ ...d, triggerCategory: v === '_any' ? '' : v }))}>
+                      <SelectTrigger className="w-[160px]"><SelectValue placeholder="Any" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_any">Any</SelectItem>
+                        {CATEGORY_OPTIONS.map((c) => <SelectItem key={c} value={c}>{c.replace('_', ' ')}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Priority (optional)</Label>
+                    <Select value={workflowDialog.triggerPriority || '_any'} onValueChange={(v) => setWorkflowDialog((d) => ({ ...d, triggerPriority: v === '_any' ? '' : v }))}>
+                      <SelectTrigger className="w-[120px]"><SelectValue placeholder="Any" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_any">Any</SelectItem>
+                        {PRIORITY_OPTIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {workflowDialog.triggerOn === 'ticket_updated' && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">New status (optional)</Label>
+                      <Select value={workflowDialog.triggerStatus || '_any'} onValueChange={(v) => setWorkflowDialog((d) => ({ ...d, triggerStatus: v === '_any' ? '' : v }))}>
+                        <SelectTrigger className="w-[140px]"><SelectValue placeholder="Any" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_any">Any</SelectItem>
+                          {STATUS_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
           <div className="space-y-2">
-            <Label>Steps (JSON array)</Label>
-            <Textarea value={workflowDialog.stepsJson} onChange={(e) => setWorkflowDialog((d) => ({ ...d, stepsJson: e.target.value }))} rows={8} className="font-mono text-sm resize-y" placeholder={WORKFLOW_STEPS_DEFAULT} />
-            <p className="text-xs text-muted-foreground">Example: send_email with template_id and recipient_email; update_ticket with status.</p>
+            <Label>Steps</Label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button type="button" variant="outline" onClick={openStepBuilder}>
+                {(() => {
+                  let n = 0;
+                  try {
+                    const p = JSON.parse(workflowDialog.stepsJson || '[]');
+                    n = Array.isArray(p) ? p.length : 0;
+                  } catch (_) {}
+                  return n ? `${n} step(s) configured — Configure steps` : 'Configure steps (add send email / update ticket)';
+                })()}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Add steps in order: send email (template + recipient) or update ticket (status/resolution). Use {`{{recipient_email}}`} or {`{{ticket_id}}`} when triggered by a ticket.
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <input type="checkbox" id="wf-active" checked={workflowDialog.is_active} onChange={(e) => setWorkflowDialog((d) => ({ ...d, is_active: e.target.checked }))} className="rounded border" />
             <Label htmlFor="wf-active">Active (can be executed)</Label>
           </div>
-          <DialogFooter>
+          </div>
+          <DialogFooter className="shrink-0 border-t pt-4 mt-4 flex-shrink-0">
             <Button type="button" variant="outline" onClick={() => setWorkflowDialog((d) => ({ ...d, open: false }))}>Cancel</Button>
             <Button type="submit" disabled={savingWorkflow}>{savingWorkflow ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save</Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+
+    {/* Step builder dialog */}
+    <Dialog open={stepBuilderOpen} onOpenChange={(open) => !open && closeStepBuilder(false)}>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>Configure workflow steps</DialogTitle>
+          <DialogDescription>Add steps in order. They run one after another when the workflow runs.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col min-h-0 flex-1 overflow-hidden space-y-4">
+          <div className="overflow-y-auto min-h-0 space-y-2">
+            {stepBuilderSteps.length === 0 && !stepForm && (
+              <p className="text-sm text-muted-foreground">No steps yet. Click &quot;Add send email&quot; or &quot;Add update ticket&quot; below.</p>
+            )}
+            {stepBuilderSteps.map((s, i) => (
+              <div key={i} className="flex items-center gap-2 p-2 border rounded bg-muted/30">
+                <span className="text-xs text-muted-foreground w-6">{i + 1}.</span>
+                <span className="flex-1 min-w-0 truncate text-sm">{stepSummary(s)}</span>
+                <div className="flex items-center shrink-0">
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => moveStep(i, -1)} title="Move up"><ChevronUp className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => moveStep(i, 1)} title="Move down"><ChevronDown className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setStepForm(s.type === 'send_email' ? { type: 'send_email', template_id: String(s.template_id ?? ''), recipient_email: s.recipient_email ?? '' } : { type: 'update_ticket', status: s.status ?? '', resolution: s.resolution ?? '', ticket_id: s.ticket_id ? String(s.ticket_id) : '' }); setStepEditIndex(i); }} title="Edit"><Pencil className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeStepAt(i)} title="Remove"><Trash2 className="h-4 w-4" /></Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {!stepForm ? (
+            <div className="flex gap-2 shrink-0">
+              <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'send_email', template_id: (stepBuilderTemplates[0] && stepBuilderTemplates[0].id) ? String(stepBuilderTemplates[0].id) : '', recipient_email: '{{recipient_email}}' })}>Add send email</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'update_ticket', status: '', resolution: '', ticket_id: '' })}>Add update ticket</Button>
+            </div>
+          ) : (
+            <div className="rounded-lg border p-4 space-y-3 bg-muted/20 shrink-0">
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-sm">{stepForm.type === 'send_email' ? 'Send email' : 'Update ticket'}</span>
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setStepForm(null); setStepEditIndex(null); }}>Cancel</Button>
+              </div>
+              {stepForm.type === 'send_email' && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Template</Label>
+                    <Select value={stepForm.template_id || ''} onValueChange={(v) => setStepForm((f) => ({ ...f, template_id: v }))} disabled={stepBuilderTemplatesLoading}>
+                      <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
+                      <SelectContent>
+                        {stepBuilderTemplates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name} (ID: {t.id})</SelectItem>)}
+                        {stepBuilderTemplates.length === 0 && !stepBuilderTemplatesLoading && <SelectItem value="_no_templates" disabled>No templates — create one in Notifications tab</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Recipient email</Label>
+                    <Input value={stepForm.recipient_email || ''} onChange={(e) => setStepForm((f) => ({ ...f, recipient_email: e.target.value }))} placeholder="{{recipient_email}} or email@example.com" />
+                  </div>
+                </>
+              )}
+              {stepForm.type === 'update_ticket' && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Status (optional)</Label>
+                    <Select value={stepForm.status || '_optional'} onValueChange={(v) => setStepForm((f) => ({ ...f, status: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                      <SelectContent>
+                        {STEP_STATUS_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Resolution (optional)</Label>
+                    <Textarea value={stepForm.resolution || ''} onChange={(e) => setStepForm((f) => ({ ...f, resolution: e.target.value }))} rows={2} placeholder="Text to set on the ticket" className="resize-y" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Ticket (optional — use from context when triggered)</Label>
+                    <Select value={stepForm.ticket_id || '_context'} onValueChange={(v) => setStepForm((f) => ({ ...f, ticket_id: v === '_context' ? '' : v }))}>
+                      <SelectTrigger><SelectValue placeholder="Use from context" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_context">Use from context</SelectItem>
+                        {stepBuilderTickets.map((t) => (
+                          <SelectItem key={t.id} value={String(t.id)}>#{t.id}: {(t.title || '').slice(0, 35)}{(t.title || '').length > 35 ? '…' : ''}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+              <Button type="button" size="sm" onClick={() => addStepToBuilder(stepForm)}>
+                {stepEditIndex !== null ? 'Save' : 'Add step'}
+              </Button>
+            </div>
+          )}
+        </div>
+        <DialogFooter className="shrink-0 border-t pt-4 mt-4">
+          <Button type="button" variant="outline" onClick={() => closeStepBuilder(false)}>Cancel</Button>
+          <Button type="button" onClick={() => closeStepBuilder(true)}>Apply</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </>
