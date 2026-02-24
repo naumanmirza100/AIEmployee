@@ -41,6 +41,7 @@ AGENT_DETAILS = {
 # Phrases that indicate the user is asking about ONE specific agent (order matters: more specific first).
 SINGLE_AGENT_PHRASES = [
     ('research', ['research agent', 'market research agent', 'market research tab', 'this research tab', 'research tab']),
+
     ('qa', ['qa agent', 'q&a agent', 'knowledge qa', 'knowledge q&a', 'qa tab', 'q&a tab', 'this qa tab', 'this agent']),
     ('campaign', ['campaign agent', 'campaigns agent', 'campaign tab', 'campaigns tab', 'how to run campaign', 'how to build campaign', 'how to create campaign']),
     ('notification', ['notification agent', 'notifications agent', 'notification tab', 'notifications tab']),

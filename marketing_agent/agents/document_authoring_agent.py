@@ -145,7 +145,6 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             'document_id': document.id,
             'title': document.title,
             'document_type': document.document_type,
-            'status': document.status,
             'content': content,
             'message': f'Document "{document.title}" created successfully'
         }
@@ -172,6 +171,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         # Post-process: ensure Phase 2 is never missing in timeline sections (strategy and brief)
         if document_type == 'strategy':
             content = self._fix_timeline_phase2(content, document_type='strategy', campaign=None)
+            content = self._strip_strategy_duplicate_sections(content)
         elif document_type == 'brief':
             content = self._fix_timeline_phase2(content, document_type='brief', campaign=campaign)
         
@@ -181,9 +181,32 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         # Post-process: ensure [CHART] values are numbers only (no % sign) so chart renderer works
         if document_type in ('report', 'brief'):
             content = self._fix_chart_values_numeric(content)
+        # Post-process: clean markdown so headings are neat (no **## or **Strategy Document**)
+        content = self._clean_markdown_headings(content)
         
         return content
     
+    def _clean_markdown_headings(self, content: str) -> str:
+        """Remove bold around section headings and strip leading document-type title lines like **Strategy Document**."""
+        if not content or not content.strip():
+            return content
+        lines = content.split('\n')
+        out = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Skip leading document-type title only (e.g. "**Strategy Document**"), not "**## Section**"
+            if i < 3 and stripped and not stripped.startswith('##') and not stripped.startswith('['):
+                if re.match(r'^\*\*(?!##)[^*]+\*\*\s*$', stripped) and len(stripped) < 80:
+                    continue
+            # Fix "**## Section Name**" or "## **Section Name**" -> "## Section Name"
+            if '**##' in line or stripped.startswith('## **'):
+                line = re.sub(r'^\s*\*\*+', '', line)
+                line = re.sub(r'\*\*+\s*$', '', line)
+                line = re.sub(r'^(\s*)##\s+\*\*+', r'\1## ', line)
+                line = re.sub(r'\*\*+(\s*)$', r'\1', line)
+            out.append(line)
+        return '\n'.join(out).strip()
+
     def _fix_chart_values_numeric(self, content: str) -> str:
         """Strip % from values: lines inside [CHART]...[/CHART] so values are numbers only."""
         if not content or '[CHART]' not in content:
@@ -216,6 +239,11 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 r'\n\s*\*\*Lead Details\*\*\s*(\n|$)',
                 r'\n\s*\*\*Email Campaign Performance Metrics Table\*\*',
                 r'\n\s*\*\*Email Campaign Performance Metrics\*\*\s*(\n|$)',
+                # Table-style duplicates (model often repeats as markdown table after Conclusion)
+                r'\n\s*\|\s*\*\*Email Campaign Performance Metrics\*\*',
+                r'\n\s*\|\s*\*\*Lead Engagement Metrics\*\*',
+                r'\n\s*\|\s*\*\*Objectives\*\*',
+                r'\n\s*\*\*Timeline\*\*\s*(\n|$)',
                 r'\n\s*\*\*Target Audience Table\*\*',
                 r'\n\s*\*\*Target Audience\*\*\s*(\n|$)',
                 r'\n\s*\*\*Target Leads and Conversions Table\*\*',
@@ -230,11 +258,13 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 r'\n\s*\*\*Target Audience\*\*',
                 r'\n\s*\*\*Key Messaging\*\*',
                 r'\n\s*\*\*Campaign Timeline\*\*',
+                r'\n\s*\*\*Timeline\*\*\s*(\n|$)',
                 r'\n\s*\*\*Success Criteria\*\*',
                 r'\n\s*\*\*Email Campaign Performance\*\*',
                 r'\n\s*\*\*Lead Engagement Data\*\*',
                 r'\n\s*\*\*Issues\s*/\s*Challenges\*\*',
                 r'\n\s*\*\*Improvements\s*/\s*Recommendations\*\*',
+                r'\n\s*\*\*Recommendations\*\*\s*(\n|$)',  # duplicate often uses just "Recommendations"
             ]
         else:
             # Report: end after **Future Outlook** or ## Future Outlook (then allow [CHART])
@@ -268,23 +298,82 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             match = re.search(pattern, after, re.IGNORECASE)
             if match and (first_dup == -1 or match.start() < first_dup):
                 first_dup = match.start()
-        # Fallback for brief: strip any repeat section header after Conclusion (match at line start)
+        # Fallback for brief: strip any repeat section or table header after Conclusion (match at line start)
         if document_type == 'brief' and first_dup == -1:
             for needle in (
                 '\n**Lead Details Table**',
                 '\n**Lead Details**',
                 '\n**Email Campaign Performance Metrics Table**',
                 '\n**Email Campaign Performance Metrics**',
+                '\n| **Email Campaign Performance Metrics**',
+                '\n| **Lead Engagement Metrics**',
+                '\n| **Objectives**',
+                '\n**Timeline**',
                 '\n**Target Audience Table**',
                 '\n**Target Audience**',
                 '\n**Target Leads and Conversions Table**',
                 '\n**Target Leads and Conversions**',
+                '\n**Success Criteria**',
+                '\n**Key Messaging**',
+                '\n**Campaign Timeline**',
+                '\n**Recommendations**',
             ):
                 i = after.find(needle)
                 if i != -1 and (first_dup == -1 or i < first_dup):
                     first_dup = i
         if first_dup != -1:
             content = content[: search_start + first_dup].rstrip()
+        # Fallback for brief: strip any "Lead Details" or "The following leads" block after Conclusion
+        if document_type == 'brief' and content:
+            concl_re = re.compile(r'\n(##\s+Conclusion|\*\*Conclusion\*\*)\b', re.IGNORECASE)
+            m = concl_re.search(content)
+            if m:
+                after_concl = content[m.start():]
+                # Match "**Lead Details**" or "## Lead Details" or common phrase "The following leads have been"
+                lead_detail_re = re.compile(
+                    r'\n\s*(##\s*Lead\s+Details|\*\*Lead\s+Details\*\*|The\s+following\s+leads\s+have\s+been)',
+                    re.IGNORECASE
+                )
+                lead_match = lead_detail_re.search(after_concl)
+                if lead_match:
+                    # Cut from this point in the full content
+                    cut_at = m.start() + lead_match.start()
+                    content = content[:cut_at].rstrip()
+        return content
+
+    def _strip_strategy_duplicate_sections(self, content: str) -> str:
+        """Remove duplicate sections that appear after Conclusion and Next Steps in Marketing Strategy.
+        The model sometimes adds Lead Details, Email Performance Metrics, Lead Engagement, or duplicate
+        Timeline/Success Metrics after Conclusion—strip everything after the Conclusion section."""
+        if not content:
+            return content
+        # Find Conclusion and Next Steps (either ## or **bold**)
+        conclusion_m = re.search(
+            r'\n(##\s+Conclusion\s+and\s+Next\s+Steps\b|\*\*Conclusion\s+and\s+Next\s+Steps\*\*)',
+            content,
+            re.IGNORECASE
+        )
+        if not conclusion_m:
+            return content
+        # Everything after the conclusion section is suspect; find first duplicate section header
+        after_start = conclusion_m.start()
+        after_content = content[after_start:]
+        dup_patterns = [
+            r'\n\*\*Lead\s+Details\*\*',
+            r'\n\*\*Email\s+Performance\s+Metrics\*\*',
+            r'\n\*\*Lead\s+Engagement\*\*',
+            r'\n\*\*Timeline\s+and\s+Milestones\*\*',
+            r'\n##\s+Timeline\s+and\s+Milestones\b',
+            r'\n##\s+Success\s+Metrics\b',
+            r'\n##\s+[^\n*]+',  # any ## section after conclusion
+        ]
+        first_dup = -1
+        for pattern in dup_patterns:
+            m = re.search(pattern, after_content[1:], re.IGNORECASE)  # skip first char
+            if m and (first_dup == -1 or m.start() < first_dup):
+                first_dup = m.start()
+        if first_dup != -1:
+            content = content[: after_start + 1 + first_dup].rstrip()
         return content
 
     def _fix_timeline_phase2(self, content: str, document_type: str = 'strategy', campaign: Optional[Campaign] = None) -> str:
@@ -348,8 +437,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         # Frontend sends 'notes'; also support 'requirements' and 'key_points'
         requirements = document_data.get('requirements') or document_data.get('notes', '')
         key_points = document_data.get('key_points') or document_data.get('notes', '')
-        # Pages (1-20), tables, charts - user-controlled. Performance Report: default and minimum 6 pages.
-        default_pages = 6 if document_type == 'report' else 5
+        # Pages (1-20), tables, charts - user-controlled. Performance Report: default and minimum 6 pages. Brief: default 4 to avoid length-driven duplication.
+        default_pages = 6 if document_type == 'report' else (4 if document_type == 'brief' else 5)
         min_pages = 6 if document_type == 'report' else 1
         target_pages = min(20, max(min_pages, int(document_data.get('pages', default_pages))))
         target_tables = max(0, int(document_data.get('tables', 3)))
@@ -381,6 +470,13 @@ ADDITIONAL KEY POINTS (what the user wants in this document - YOU MUST ADDRESS T
 LENGTH AND FORMAT REQUIREMENTS (USER-SPECIFIED - MANDATORY, NO EXCEPTIONS):
 
 **PAGE COUNT (STRICT):** Target = {target_pages} page(s). One rendered page ≈ 450 words. Your output MUST be at least {target_pages * 450} words ({target_pages * 450} words minimum). Write detailed paragraphs—do NOT stop early. If you finish a section and are under the minimum, expand with NEW unique content only: additional analysis, implications, recommendations, or interpretations related to the campaign. NEVER fill space by repeating or rephrasing the same content—every paragraph and bullet must be unique.
+
+**STRUCTURE OVERRIDES LENGTH (ALL DOCUMENT TYPES):** Every document has a fixed structure and MUST end at the designated final section. Even if you are below the word minimum, do NOT add any section, table, or list after that final section. To add length, expand ONLY within the allowed sections (longer paragraphs, more analysis)—never by adding repeat or summary sections at the end.
+- **Strategy:** END at ## Conclusion and Next Steps. No content after that.
+- **Proposal:** END at ## Next Steps. No content after that.
+- **Report:** END at ## Future Outlook. No content after that. Charts go inside Performance Metrics and KPIs only.
+- **Brief:** END at ## Conclusion. No content after that.
+- **Presentation:** END at Conclusion/Next Steps slide. No repeat slides (objectives, metrics, recommendations appear on one slide only).
 
 **TABLES:** {"User requested ZERO tables. You MUST NOT include any markdown tables (no | column | format). Present ALL metrics, lead data, timelines, and information using bullet lists (•) or numbered lists or paragraphs ONLY. Do NOT use pipe characters (|) to create tables. This overrides any other instruction." if target_tables == 0 else f"Include exactly {target_tables} markdown table(s). Table types: {table_types_str}. Create tables in | col | col | format."}
 {f'''- CHARTS (MANDATORY): Include exactly {target_charts} chart(s) using [CHART]...[/CHART] blocks. Chart type: {chart_type}. You MUST insert these chart blocks—do NOT skip them.
@@ -425,16 +521,23 @@ You MUST cater to this in the document:
                     sparse_hint = '\nNOTE: This campaign has NO email sending activity in the database yet (no emails sent, no open/click rates). In the document, state that clearly (e.g. "Email campaign not yet launched" or "No email metrics available yet") in the Email Performance section and focus on campaign setup, targets, timeline, and recommendations for launch. Do NOT invent email metrics or fake numbers.\n'
                 elif not has_lead_data:
                     sparse_hint = '\nNOTE: This campaign has NO leads in the database yet. In the document, state that clearly (e.g. "No leads added yet" or "Lead list pending") in the Lead section and focus on campaign objectives, target audience, and how to add leads. Do NOT invent or list fake leads.\n'
+            strategy_campaign_hint = ''
+            if document_type == 'strategy':
+                strategy_campaign_hint = '\nFOR MARKETING STRATEGY: Use the campaign data above only for context and targets (campaign name, dates, target leads/conversions, and if present open/click rates as target KPIs in Success Metrics and KPIs). Do NOT add "Lead Details", "Email Performance Metrics", or "Lead Engagement" sections or tables—no lead list table, no email metrics table. Strategy is a plan document; those sections belong in Performance Reports only. The strategy must END after ## Conclusion and Next Steps with no content after that.\n'
             prompt += f"""
 ═══════════════════════════════════════════════════════════════
 CAMPAIGN DATA (REAL DATA FROM DATABASE - USE ALL OF THIS):
 ═══════════════════════════════════════════════════════════════
 {self._format_campaign_data(campaign_data)}
 ═══════════════════════════════════════════════════════════════
-{"ANTI-DUPLICATION RULE (BRIEF/REPORT): (A) Lead list, email metrics table, and objectives/targets table each appear ONCE in their section. Do NOT add any repeat section or table after ## Conclusion (brief) or after ## Future Outlook (report). (B) Report and Brief must NOT contain identical tables: Report uses a markdown table with headers | Email | Name | Company | Status | for leads; Brief uses a different format (narrative bullets or compact lines), not the same table. (C) In Performance Report, every table MUST have a header row over the columns (e.g. | Email | Name | Company | Status |); do NOT use '1. Email: ... Name: ...' for lead details." if document_type in ('brief', 'report') else ''}
+When a campaign is linked, you MUST include the campaign's current status (from the data above: e.g. Active, Paused, Draft, Scheduled) in the document—in Campaign Overview, Executive Summary, or the first section that describes the campaign. Use the exact status label from the data (e.g. "The campaign is currently Paused" or "Campaign status: Active").
+{"ANTI-DUPLICATION RULE (BRIEF/REPORT): (A) Lead list, email metrics table, and objectives/targets table each appear ONCE in their section. Do NOT add any repeat section or table after ## Conclusion (brief) or after ## Future Outlook (report). (B) Both Report and Brief use a markdown table for leads with header row | Email | Name | Company | Status | and one row per lead. (C) Every table MUST have a header row over the columns; do NOT use '1. Email: ... Name: ...' for lead details." if document_type in ('brief', 'report') else ''}
+{"CAMPAIGN BRIEF - PRIORITY RULE: This document has a FIXED structure and ENDS at ## Conclusion. Do NOT add any section, table, or list after ## Conclusion—not Lead Details, not Email Campaign Performance Metrics, not Timeline, not Success Criteria, not Target Audience, not Key Messaging, not Recommendations. Even if under word count, STOP after Conclusion. To reach length, write longer paragraphs only within the sections listed in the brief instructions below." if document_type == 'brief' else ''}
+{"PERFORMANCE REPORT - PRIORITY RULE: This document ENDS at ## Future Outlook. Do NOT add any section, table, or list after Future Outlook—no Lead Details table, no Performance Metrics table, no summary section. Even if under word count, STOP after Future Outlook. To reach length, expand only within the sections listed in the report instructions (e.g. more paragraphs in Key Achievements, Challenges and Issues, or Recommendations)." if document_type == 'report' else ''}
+{strategy_campaign_hint}
 {sparse_hint}
 CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
-0. NO DUPLICATION OF SECTIONS OR DATA: For Campaign Brief and Performance Report ONLY: (a) Each piece of data must appear in exactly ONE place. Do NOT show Lead Details (email, name, company, status) in more than one section or table—include it ONCE only (e.g. in "Lead Details" or "Lead Engagement"). (b) Do NOT show Email Performance metrics (sent, open rate, click rate, reply rate, bounce rate) twice—include them ONCE (e.g. in "Email Campaign Performance" or "Performance Metrics"). (c) Do NOT add any extra section at the end such as "Lead Details Table", "Performance Metrics Table", "Summary Table", or similar—that would duplicate data already shown. The report must END after Future Outlook (and any chart that belongs in Performance Metrics). (d) Do NOT repeat Success Criteria, Objectives, or Timeline in another section or table. (e) Conclusion: write 2–3 NEW paragraphs that summarize key takeaways in your own words—do NOT copy-paste or re-list the same metrics table, lead table, achievements list, or challenges list. Call to Action: only concrete next steps (who does what, when)—do NOT repeat the Recommendations section. Future Outlook: only forward-looking content (trends, risks, opportunities ahead)—do NOT repeat Conclusion, do NOT re-show the Lead Status table or metrics, do NOT re-list achievements/challenges/recommendations. (f) To meet page minimum, add NEW unique content only (e.g. deeper analysis, implications, examples)—never duplicate or rephrase the same section, table, list, or phrase. (g) Avoid repeating the same sentence template (e.g. "indicating that the campaign's content resonated with the target audience")—vary wording and say each point once.
+0. NO DUPLICATION OF SECTIONS OR DATA: For ALL document types (strategy, proposal, report, brief, presentation): do NOT present the same information in paragraph (or prose) form and then repeat it in a table or bullet list elsewhere—each piece of data or topic appears in ONE place and ONE format only. For Campaign Brief and Performance Report ONLY: (a) Each piece of data must appear in exactly ONE place. Do NOT show Lead Details (email, name, company, status) in more than one section or table—include it ONCE only (e.g. in "Lead Details" or "Lead Engagement"). (b) Do NOT show Email Performance metrics (sent, open rate, click rate, reply rate, bounce rate) twice—include them ONCE (e.g. in "Email Campaign Performance" or "Performance Metrics"). (c) Do NOT add any extra section at the end such as "Lead Details Table", "Performance Metrics Table", "Summary Table", or similar—that would duplicate data already shown. The report must END after Future Outlook (and any chart that belongs in Performance Metrics). (d) Do NOT repeat Success Criteria, Objectives, or Timeline in another section or table. (e) For Campaign Brief specifically: do NOT present the same information twice—once in paragraph form and then again in a table or bullet list (e.g. do NOT write leads in "Lead Engagement Data" and then add a "Lead Details" table; do NOT write email metrics in prose and then add an "Email Campaign Performance Metrics" table; do NOT add a "Timeline" or "Success Criteria" or "Target Audience" section after Conclusion). (f) Conclusion: write 2–3 NEW paragraphs that summarize key takeaways in your own words—do NOT copy-paste or re-list the same metrics table, lead table, achievements list, or challenges list. Call to Action: only concrete next steps (who does what, when)—do NOT repeat the Recommendations section. Future Outlook: only forward-looking content (trends, risks, opportunities ahead)—do NOT repeat Conclusion, do NOT re-show the Lead Status table or metrics, do NOT re-list achievements/challenges/recommendations. (g) To meet page minimum, add NEW unique content only (e.g. deeper analysis, implications, examples)—never duplicate or rephrase the same section, table, list, or phrase. (h) Avoid repeating the same sentence template (e.g. "indicating that the campaign's content resonated with the target audience")—vary wording and say each point once.
 1. For briefs/reports: address what the user asked for (e.g. issues, improvement, engagement). For strategy/proposal: produce a full, professional document with all sections; if the user gave a title or notes (or specific details like budget, timeline, audience), incorporate those in the relevant sections—budget in Resource Breakdown, timeline in Timeline, audience/industry in Target Audience, etc. Do not ignore or genericize user-provided details.
 2. ALL data above is REAL data fetched from the database for this specific campaign
 3. You MUST include ALL performance metrics, statistics, and data points provided above
@@ -442,7 +545,8 @@ CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
 5. Use the actual values provided above - do NOT use placeholder, generic, or invented data
 6. NEVER write [insert date], [insert duration], or any [insert ...] placeholder. If Start Date or End Date are "Not set" in the data, write "Not specified" or "To be determined"
 7. If a field is missing from the data above, write "Not specified" or "Not available" - do NOT make up values or placeholders
-8. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided. For briefs/reports: "Target conversions" in the data means the number of conversions (e.g. 10), not a percentage—do not write "10% conversion rate" unless the data explicitly says so. If the data shows a lead count (e.g. 3 leads), say "the campaign has 3 leads" or "Total leads: 3"—do not say "has not yet generated any leads" when leads are present in the data.
+8. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided. For briefs/reports: "Target conversions" in the data means the number of conversions (e.g. 10), not a percentage—do not write "10% conversion rate" unless the data explicitly says so. If the data shows a lead count (e.g. 3 leads), say "the campaign has 3 leads" or "Total leads: 3"—do not say "has not yet generated any leads" when leads are present in the data. For Marketing Strategy: use campaign data only for targets and context in the right sections (e.g. Success Metrics and KPIs); do NOT create Lead Details, Email Performance Metrics, or Lead Engagement sections or tables.
+""" + ("""
 9. For email campaigns: Create a detailed "Email Performance Metrics" section with:
    - Total emails sent (actual number)
    - Open rate (actual percentage)
@@ -452,8 +556,9 @@ CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
    - Analysis of what these metrics mean
 10. For leads: Create a detailed "Lead Engagement" section with:
    - Total leads count (actual number)
-   - Lead details: in Performance Report use a markdown table with header row | Email | Name | Company | Status | and one row per lead (do NOT use "1. Email: ... Name: ..." format). In Campaign Brief use a different format (see brief instructions)—do not duplicate the same full table as in the Report.
+   - Lead details: in both Performance Report and Campaign Brief use a markdown table with header row | Email | Name | Company | Status | and one row per lead (do NOT use "1. Email: ... Name: ..." format).
    - Lead status breakdown and engagement analysis
+""" if document_type in ('report', 'brief') else "") + """
 11. For Performance Reports: (a) {"Campaign metrics and Lead Details (every lead) as bullet lists—NO tables (user requested 0 tables)." if target_tables == 0 else f"Campaign metrics table (with header row) and Lead Details table with columns Email | Name | Company | Status and one row per lead. Include {target_tables} tables total. Every table MUST have a header row over the columns."} (b) Use ## for main sections only—do NOT use ### (H3). (c) Charts: you MUST add the chart(s) requested in LENGTH AND FORMAT REQUIREMENTS using [CHART]...[/CHART] blocks—do NOT omit them. (d) Key Achievements and Challenges and Issues: each point must have a full paragraph. (e) Always include ## Call to Action and ## Future Outlook. (f) Output MUST be at least {target_pages * 450} words ({target_pages} pages).
 12. Make the document VERY DETAILED and SPECIFIC to this campaign using ALL the real data above
 13. {"Do NOT use markdown tables. Use bullet lists and paragraphs for all data." if target_tables == 0 else f"Include {target_tables} markdown tables of the types specified."} Charts and detailed breakdowns where appropriate.
@@ -471,10 +576,12 @@ NO CAMPAIGN LINKED: This document is not tied to a specific campaign.
 
 {doc_instructions}
 
-FORMATTING: Use **text** for bold (e.g. **Brand Awareness**: description). For Performance Reports: {'You MUST include ' + str(target_charts) + ' chart(s) using [CHART] blocks. Each chart MUST use REAL data from CAMPAIGN DATA only (actual open rate, click rate, reply rate, bounce rate, or counts)—NO placeholder data (no Jan/Feb/Mar/Apr, no 25/30/28/32). Place charts inside Performance Metrics and KPIs.' if target_charts > 0 else 'Do NOT add [CHART] blocks—charts are not used in this report.'} For strategy/proposal/brief you may optionally include charts using [CHART] blocks.
+FORMATTING - KEEP DOCUMENT CLEAN:
+- Section headings: use ONLY "## Section Name" on its own line. Do NOT wrap headings in bold: never write "**## Executive Summary**" or "**Strategy Document**". Never put asterisks around ## (e.g. write "## Executive Summary" not "**## Executive Summary**"). Start the document with the first section (e.g. ## Executive Summary) or one plain title line; do not add a bold document-type line like "**Strategy Document**" at the top.
+- Within paragraphs use **text** for bold (e.g. **Brand Awareness**: description). For Performance Reports: {'You MUST include ' + str(target_charts) + ' chart(s) using [CHART] blocks. Each chart MUST use REAL data from CAMPAIGN DATA only (actual open rate, click rate, reply rate, bounce rate, or counts)—NO placeholder data (no Jan/Feb/Mar/Apr, no 25/30/28/32). Place charts inside Performance Metrics and KPIs.' if target_charts > 0 else 'Do NOT add [CHART] blocks—charts are not used in this report.'} For strategy/proposal/brief you may optionally include charts using [CHART] blocks.
 
 DOCUMENT STRUCTURE REQUIREMENTS:
-- Use ## for main sections only. Do NOT use ### or #### in any document (strategy, proposal, report, brief). Use **bold** subheads or bullet points followed by full paragraphs instead of ###/#### subsections.
+- Use ## for main sections only (e.g. ## Executive Summary). Do NOT use ### or ####. Do NOT write "**## Section**" or "**Strategy Document**"—headings must be clean "## Section Name" with no asterisks around the ## or the heading. Use **bold** only for sub-items within paragraphs, not for section titles.
 - When listing numbered phases (Phase 1, Phase 2, Phase 3) or steps, do NOT skip numbers—include every phase in sequence (e.g. Phase 1, then Phase 2, then Phase 3; never Phase 1 then Phase 3). In Marketing Strategy Timeline and Milestones, you MUST include Phase 2 (e.g. Phase 2: Month 3–4); never output only Phase 1 and Phase 3.
 - Professional language and tone throughout
 - VERY DETAILED content - write comprehensive, in-depth sections
@@ -492,8 +599,8 @@ DETAIL AND DEPTH REQUIREMENTS:
 5. Include multiple paragraphs per section explaining the data
 6. Add context and interpretation for all metrics
 7. Output MUST be at least {target_pages * 450} words ({target_pages} pages). Do not stop until you reach this minimum. Expand with NEW unique content only (e.g. extra analysis, implications, recommendations)—never repeat or rephrase the same content to fill space.
-
-PERFORMANCE METRICS SECTION REQUIREMENTS:
+""" + ("""
+PERFORMANCE METRICS SECTION REQUIREMENTS (for Performance Report and Campaign Brief ONLY—do NOT use this section in Strategy or Proposal):
 If campaign data includes performance metrics, you MUST create a detailed section like:
 
 ## Performance Metrics and Analysis
@@ -513,7 +620,9 @@ If campaign data includes performance metrics, you MUST create a detailed sectio
 - **Engagement Analysis**: [detailed analysis]
 
 [Detailed paragraph analyzing lead engagement, conversion potential, etc.]
-
+""" if document_type in ('report', 'brief') else """
+FOR MARKETING STRATEGY: Do NOT add a "Performance Metrics and Analysis" section—that belongs in Performance Reports only. Strategy has "Success Metrics and KPIs" once; do not repeat it. Do NOT add any section after ## Conclusion and Next Steps (no duplicate Timeline, no duplicate Success Metrics, no Performance Metrics and Analysis).
+""") + """
 CONCLUSION SECTION REQUIREMENTS:
 The conclusion MUST be a proper, professional ending that:
 1. Summarizes key points in your own words (at least 2-3 paragraphs)—do NOT copy-paste or re-list the same tables, bullet lists, or metrics that already appear earlier in the document.
@@ -527,6 +636,7 @@ The conclusion MUST be a proper, professional ending that:
 
 **FINAL REMINDERS BEFORE YOU WRITE:**
 - Minimum length: {target_pages * 450} words ({target_pages} pages). Do not stop early.
+- Document MUST end at the designated final section—do NOT add any section, table, or list after it, even if under word count. Expand length only within the allowed sections. (Strategy: end at ## Conclusion and Next Steps. Proposal: end at ## Next Steps. Report: end at ## Future Outlook. Brief: end at ## Conclusion. Presentation: end at Conclusion/Next Steps slide.)
 - NO REPETITION: Every paragraph and bullet must be unique. To reach the minimum length, add NEW campaign-related content (e.g. more analysis, implications, recommendations)—never duplicate or rephrase existing content.
 - Tables: {"ZERO. Use lists and paragraphs only—no | table | format." if target_tables == 0 else f"Exactly {target_tables} markdown tables."}
 - Use ALL REAL campaign data provided above
@@ -715,7 +825,7 @@ The conclusion MUST be a proper, professional ending that:
                     if lead.get('status'):
                         lead_str += f" | Status: {lead.get('status')}"
                     lines.append(lead_str)
-                lines.append("(Performance Report: present as a markdown table with header row | Email | Name | Company | Status | and one row per lead—do NOT use '1. Email: ... Name: ...' format. Campaign Brief: use a different format, e.g. narrative bullets, not the same table as the Report.)")
+                lines.append("(Performance Report and Campaign Brief: present leads in a markdown table with header row | Email | Name | Company | Status | and one row per lead—do NOT use '1. Email: ... Name: ...' format.)")
         
         # Handle nested dicts
         for key, value in campaign_data.items():
@@ -731,6 +841,8 @@ The conclusion MUST be a proper, professional ending that:
         """Get document type specific instructions. target_tables=0 means no tables, use lists only."""
         instructions = {
             'strategy': """
+STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Conclusion and Next Steps. Even if under word count, do NOT add any section after that. To add length, expand only within the sections below. No Performance Metrics and Analysis, Lead Details, or Email Performance sections—those belong in reports only.
+
 Create a LONG, comprehensive Marketing Strategy document—like a consultant's full deliverable (8–12+ pages when rendered). Use ## for main sections only; do NOT use ### or ####. Use **bold** subheads or bullet points followed by full paragraphs. Every section must have substantial content (multiple paragraphs or bullets with explanation).
 
 USER THEME: The DOCUMENT TITLE and ADDITIONAL KEY POINTS define the strategy's focus (e.g. "Overcome Other Tech Companies", "B2B SaaS lead generation", "UK market expansion"). Weave this theme into the ENTIRE document—Executive Summary, Market Analysis, Competitor Analysis, Objectives, Tactics, and Conclusion. Do not write a generic strategy; make it specific to what the user asked for.
@@ -777,12 +889,18 @@ Use at least 4–6 time buckets or 4–6 phases with clear deliverables for each
 ## Conclusion and Next Steps
 2–4 full paragraphs. Summarise the strategy, strategic priorities, implementation roadmap, and expected outcomes. List 4–6 concrete next steps (e.g. establish team, finalise budget, launch Phase 1, set up Pay Per Project campaigns). End with a strong closing that ties back to the user's theme (e.g. how this positions the organisation to overcome competitors or achieve the stated goal).
 
+ONE FORMAT ONLY—NO DUPLICATION: Do NOT present the same information in paragraph form and then repeat it in a table or list. Each section and each data type (objectives, timeline, success metrics, audience, resources) appears ONCE only. CRITICAL - NO DUPLICATE SECTIONS: The strategy document has each section ONCE only. Do NOT add "Performance Metrics and Analysis", "Email Campaign Performance", "Lead Engagement", "Lead Details", or "Email Performance Metrics" as sections or tables—those belong in Performance Reports only. Do NOT include a lead list table or email metrics table (even if campaign data is provided): in Success Metrics and KPIs you may cite target numbers only (e.g. 100 leads, 10 conversions, 20% open rate). Do NOT repeat "Timeline and Milestones" or "Success Metrics and KPIs" anywhere. The document MUST END with ## Conclusion and Next Steps—output nothing after that section (no Lead Details, no Email Performance Metrics, no Lead Engagement, no duplicate Timeline, no summary tables that repeat earlier content).
+
 LENGTH AND QUALITY: Aim for a document that would be 8–12+ pages when rendered. Every section must have multiple paragraphs or detailed bullets with explanation. Do not produce a short or generic strategy—match the depth of a professional consultant deliverable.
 
 TIMELINE RULE: In ## Timeline and Milestones you MUST include Phase 2 (and every phase in order). Never write only Phase 1 and Phase 3—always Phase 1, then Phase 2, then Phase 3 (and more if needed). Skipping Phase 2 is forbidden.
 """,
             'proposal': """
+STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Next Steps. Even if under word count, do NOT add any section or table after that. To add length, expand only within the sections below. Do NOT add report-style sections (Performance Metrics, Lead Engagement, Appendices).
+
 Create a LONG, comprehensive Campaign Proposal (full paragraphs and tables—like a professional client-ready document). Use ## for main sections only; NEVER use ### or ####. Use **bold** only for sub-sections (e.g. **Email Marketing** under Campaign Strategy)—never # or ## for those.
+
+ONE FORMAT ONLY—NO DUPLICATION: Do NOT present the same information in paragraph form and then repeat it in a table or list. Each piece of information (objectives, audience, timeline, resources, expected results) appears in one place only. Do not write the same content in prose and then add a summary table or repeat section (e.g. do not list objectives in ## Objectives and Goals and then add an "Objectives" table at the end). The document ends after ## Next Steps—no summary tables or repeat sections after that.
 
 CRITICAL - PROPOSAL ONLY (do NOT add report-style sections):
 Do NOT include in a Campaign Proposal: "Performance Metrics and Analysis", "Email Campaign Performance", "Lead Engagement Metrics", "Brand Awareness Metrics", "Appendices", or any section that reports or analyzes actual campaign performance. Those belong in a Performance Report. A proposal is a plan to get approval—not a report on results.
@@ -798,23 +916,20 @@ Structure (proposal sections only):
 2+ full paragraphs: how the campaign will be executed (email, social media, content, SEO), target audience segmentation, and how objectives will be measured (open rates, click-through rates, conversion, ROI).
 
 ## Objectives and Goals
-For each objective use: **Objective Name**: One-line goal. Then a bullet (•) and a full paragraph explaining how you will achieve it.
+For each objective use **bold** for the name only (do NOT use ### or ####). Format: **Objective Name**: One-line goal. Then a bullet (•) and a full paragraph explaining how you will achieve it.
 Example: **Conversion**: Convert a minimum of 20% of leads into paying customers. • [Full paragraph on lead nurturing, content, trust, etc.]
-Do this for Conversion, Lead Generation, Brand Awareness (or as many as relevant).
+Do this for Conversion, Lead Generation, Brand Awareness (or as many as relevant). Use **Conversion**, **Lead Generation**, **Brand Awareness**—not ## or ### subheadings.
 
 ## Target Audience
 Paragraph on how audience will be identified (market research, buyer personas). Then a markdown table: Segment | Description | Demographics (e.g. Decision-Makers, Influencers, Users with descriptions and age/role).
 
-## Campaign Strategy
-Intro paragraph (strong online presence, email marketing, lead nurturing; mention leveraging the platform's email marketing agent, Pay Per Project, for email execution). Then **bold** sub-heads with bullets and short text:
-**Email Marketing** • [bullet points]
-**Content Marketing** • [bullet points]
-**Social Media Advertising** • [bullet points]
-
-## Tactics and Channels
-**Email Marketing** • Utilize Pay Per Project for email execution. • [1–2 more bullets]
-**Content Marketing** • [bullets]
-**Social Media Advertising** • [bullets]
+## Campaign Strategy and Tactics
+ONE section only—do NOT split into "Campaign Strategy" and "Tactics and Channels". Use a single ## Campaign Strategy and Tactics with **bold** sub-heads for each channel. Each channel appears ONCE with one set of bullets (approach + tactics together). Do NOT repeat the same channel (e.g. Email Marketing) under two different ## headings.
+Intro paragraph: strong online presence, lead nurturing, mention Pay Per Project for email execution. Then **bold** sub-heads with 3–5 bullets each (mix of approach and specific tactics):
+**Email Marketing** • Utilize Pay Per Project for email execution. • [2–3 more bullets: list building, sequences, measurement—do not repeat this channel elsewhere]
+**Content Marketing** • [3–4 bullets only here—do not repeat under another heading]
+**Social Media Advertising** • [3–4 bullets only here—do not repeat under another heading]
+NO DUPLICATION: Do NOT add a separate "Tactics and Channels" section. Do NOT use ### or ####—only ## and **bold** for sub-heads.
 
 ## Resource Breakdown
 One compact table only: Resource / Item | Allocation / Cost (3–4 rows + Total). Short labels and numbers so it fits on one page.
@@ -834,80 +949,88 @@ Bullet list (e.g. Approve and implement; Monitor and analyze performance).
 ## Next Steps
 Bullet list (e.g. Schedule meeting with marketing team; Monitor performance; make adjustments).
 
-End the proposal here. Do NOT add Performance Metrics and Analysis, Email Campaign Performance, Lead Engagement Metrics, Brand Awareness Metrics, Appendices, or any report-style sections. Always produce a LONG, detailed proposal with full paragraphs in Executive Summary, Campaign Overview, Objectives, Target Audience, Campaign Strategy, and Conclusion. Use at most 3–4 compact tables. NEVER use ### or ####—only ## and **bold**.
+End the proposal here. Do NOT add Performance Metrics and Analysis, Email Campaign Performance, Lead Engagement Metrics, Appendices, or any report-style sections. Do NOT add a separate "Tactics and Channels" section—channels are covered once under ## Campaign Strategy and Tactics. Always produce a LONG, detailed proposal with full paragraphs in Executive Summary, Campaign Overview, Objectives, Target Audience, Campaign Strategy and Tactics, and Conclusion. Use at most 3–4 compact tables. NEVER use ### or ####—only ## and **bold** for sub-heads.
 """,
             'report': """
-Create a LONG, detailed Performance Report (full paragraphs throughout—not short bullets). Use ## for main sections only; do NOT use ### (H3) subsections—use **bold** labels or bullet points followed by full paragraphs.
+STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Future Outlook. Even if under word count, do NOT add any section, table, or list after Future Outlook. To add length, expand only within the sections below—more paragraphs, deeper analysis, more context in each heading. Never duplicate content across sections.
 
-NO DUPLICATION: (1) Lead Details (email, name, company, status) must appear in exactly ONE place—either one table OR one list; do NOT repeat the same lead list/table in Conclusion, Call to Action, or Future Outlook. (2) Email/performance metrics (sent, open rate, click rate, reply rate, bounce rate) must appear in exactly ONE place—one table or one bullet list; do NOT repeat the same metrics in another section. (3) Do NOT add a "Lead Details Table", "Performance Metrics Table", or any summary/repeat section at the end—the report ends with ## Future Outlook (and charts go inside Performance Metrics and KPIs). (4) Do not repeat Success Criteria, Objectives, or Timeline in a second section or table. (5) Conclusion: 2–3 paragraphs summarizing takeaways in your own words—do NOT re-list metrics, lead table, achievements, or challenges. Call to Action: only concrete next steps (who, what, when)—do NOT repeat Recommendations. Future Outlook: forward-looking only (what could happen next, risks, opportunities)—do NOT re-copy Conclusion, do NOT re-show the Lead Status table or any metrics table, do NOT re-list achievements/challenges/recommendations. (6) If you need more length, add NEW unique analysis—never duplicate or rephrase existing content. (7) Vary wording—do not reuse the same phrase (e.g. "resonated with the target audience") multiple times.
+DETAIL REQUIRED—EVERY HEADING RICH IN CONTENT: Write a LONG, detailed Performance Report. Every section must have substantial content: multiple full paragraphs or multiple **bold** points each with a full paragraph (4–6 sentences). Do NOT write one-line bullets or single short paragraphs per section. To add depth: explain what the numbers mean, why they matter, how they compare to targets, what drives them, and what the implications are. Each piece of data (metrics, leads, achievements, challenges) appears in exactly ONE section—never repeat the same facts in another heading.
 
-Sections:
-- Executive Summary (2–3 full paragraphs)
-- Campaign Overview: present campaign info, target audience, goals/targets in flowing prose and bullet lists where useful; then add a short paragraph summarizing the campaign. Do NOT use ### under Campaign Overview.
-- Performance Metrics and KPIs: include campaign metrics and REAL data; write full paragraphs analyzing what the numbers mean. Present metrics as a markdown table ONLY if user requested tables; otherwise use bullet lists.
-- Lead Details: list EVERY lead (Email, Name, Company, Status). You MUST use a markdown table with column headers in the first row: | Email | Name | Company | Status |, then a separator row (e.g. | --- | --- | --- | --- |), then one data row per lead. Do NOT use a numbered list format (e.g. "1. Email: ... Name: ..."). Every table in the report must have a header row over the columns.
-- Key Achievements: each achievement as a bullet or bold point PLUS a full paragraph explaining it (do not just list one-line bullets). If there are positive opportunities (e.g. strong metrics, engaged leads, growth potential), include them here and make that part a bit long.
-- Challenges and Issues: ALWAYS include this section. Keep it a bit long—each challenge as a **bold** label (e.g. **Low Email Open Rates**, **Limited Lead Engagement**) PLUS a full paragraph (3–5 sentences) explaining what it is, why it matters, and its impact. Do not use one-line bullets only.
-- Analysis and Insights: 2–4 full paragraphs based on REAL performance data. If there are positive opportunities, mention them and make that part a bit long.
-- Recommendations: ALWAYS include this section. Keep it a bit long—each recommendation as a **bold** label (e.g. **Gather Audience Data**, **Optimize Email Marketing**) PLUS a full paragraph (3–5 sentences) on what to do, why it helps, and how to implement. Do not use one-line bullets only.
-- Conclusion: comprehensive summary and key takeaways (2–3 paragraphs).
-- Call to Action: always include this section (## Call to Action) with clear, actionable next steps (e.g. what to do next week, who to follow up with, decisions needed).
-- Future Outlook: always include this section (## Future Outlook) with outlook for the campaign (e.g. expected trends, risks, opportunities, next quarter).
+ONE FORMAT ONLY—NO DUPLICATION: Do NOT present the same information in paragraph form and then repeat it in a table or list elsewhere. (1) Lead Details (email, name, company, status) in exactly ONE place—the Lead Details section only; do NOT repeat the lead table in Conclusion, Call to Action, or Future Outlook. (2) Email/performance metrics in exactly ONE place—Performance Metrics and KPIs only; do NOT repeat the same metrics elsewhere. (3) Do NOT add a repeat "Lead Details Table" or "Performance Metrics Table" at the end. (4) Conclusion: 2–3 paragraphs in your own words—do NOT re-list metrics, lead table, achievements, or challenges. Call to Action: concrete next steps only—do NOT repeat Recommendations. Future Outlook: forward-looking only—do NOT re-copy Conclusion or re-show tables. (5) To add length, add NEW unique analysis and context within each section—never duplicate or rephrase the same points.
+
+Sections (each must have multiple paragraphs or multiple bold items with full paragraphs):
+- Executive Summary: 3–4 full paragraphs. The FIRST paragraph must cover only: timeline (launch date, end date, current status), objectives (target leads, target conversions, goals from the data), and purpose (what the campaign was for—e.g. summer sales, lead generation). Do NOT mention email metrics (open rate, click rate, reply rate, emails sent) or lead details (lead count, individual emails) in the first paragraph—those belong in Performance Metrics and KPIs and Lead Details. Paragraphs 2–4: then summarise key metrics, main achievements, main challenges, and overall takeaway with real detail.
+- Campaign Overview: 3–4 full paragraphs. Paragraph 1: campaign name, status, dates, description, and objectives from the data. Paragraph 2: target audience and goals (target leads, target conversions). Paragraph 3: how the campaign was executed (email, sequences, etc.) and current state. Paragraph 4: short summary of how this report is structured. Do NOT use ### under Campaign Overview.
+- Performance Metrics and KPIs: 3+ full paragraphs. Present campaign metrics (Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate, Total Leads) as a markdown table ONLY if user requested tables; otherwise use bullet list. Then write multiple paragraphs: what each metric means, how it compares to targets or benchmarks, what is working and what is not, and why. Use REAL data only. If charts are requested, place [CHART] blocks here.
+- Lead Details: table only (see below). Then 2–3 paragraphs: who the leads are, status mix, engagement level, and what it means for the campaign. Table: | Email | Name | Company | Status |, separator row, one row per lead. Do NOT use "1. Email: ..." format.
+- Key Achievements: 3–5 achievements. For each: **Bold achievement name** plus a FULL paragraph (4–6 sentences) explaining what was achieved, evidence from the data, and why it matters. Include positive opportunities (strong metrics, engaged leads, growth potential) with real detail. No one-line bullets.
+- Challenges and Issues: ALWAYS include. 3–5 issues. For each: **Bold issue name** plus a FULL paragraph (4–6 sentences). Base ONLY on actual data (e.g. low click rate only if data shows it; do not flag low open rate if open rate is 50%+). May include **Limited Lead Engagement** or **Missing Audience Data** when appropriate. No one-line bullets.
+- Analysis and Insights: 3–5 full paragraphs. Deep analysis of performance: what the data shows, patterns, causes, implications for next steps. Use REAL data only. If there are opportunities, expand on them here with detail.
+- Recommendations: ALWAYS include. 3–5 recommendations. For each: **Bold recommendation name** plus a FULL paragraph (4–6 sentences): what to do, why it helps, how to implement, and expected impact. No one-line bullets.
+- Conclusion: 3 full paragraphs. Summarise key takeaways, overall assessment, and priority actions in your own words. Do NOT re-list metrics, lead table, achievements, or challenges.
+- Call to Action: 1–2 full paragraphs. Concrete next steps: who, what, when. Do NOT repeat Recommendations verbatim.
+- Future Outlook: 2–3 full paragraphs. Expected trends, risks, opportunities, next quarter. Do NOT re-copy Conclusion or re-show any table.
 
 MANDATORY:
-1. Campaign metrics: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate, Total Leads. Present as a markdown table (| Metric | Value |) ONLY if user requested tables; otherwise use bullet list.
-2. Lead Details: every lead from the data in a markdown table with header row | Email | Name | Company | Status | and one row per lead. Do NOT use "1. Email: ... Name: ..." format—always use a proper table with headings over columns. All report tables must have a header row.
-3. Do NOT use ### (H3) headings—use ## for main sections and **bold** or bullets + paragraphs for sub-content.
-4. Charts: you MUST add [CHART] blocks when user requested them. Use the exact format (type, title, labels, values). Values must be NUMBERS ONLY (e.g. 50, 16.67, 50, 0)—never include % in the values line (write 50 not 50%). Labels and values from CAMPAIGN DATA only. Place each chart inside "Performance Metrics and KPIs"—do NOT put charts after Future Outlook. Never omit requested charts.
-5. Always include ## Call to Action and ## Future Outlook as separate section headings with full paragraphs.
-6. Always write a LONG report: full paragraphs in every section, especially Achievements and Challenges (each point must have a paragraph). Aim for thorough, readable length.
-7. ALWAYS include Challenges and Issues and Recommendations; keep both sections a bit long (full paragraphs per item). If there are positive opportunities (e.g. strong performance, upside potential), include them in Key Achievements or Analysis and make that part a bit long too.
+1. Executive Summary first paragraph: timeline (dates, status), objectives (target leads, target conversions), and purpose only—do NOT include email metrics or lead details in that paragraph.
+2. Campaign metrics (Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate, Total Leads) in one place only (Performance Metrics and KPIs). Table format only if user requested tables; else bullet list.
+3. Lead Details: every lead in a markdown table | Email | Name | Company | Status |, one row per lead. Then 2–3 paragraphs of context. Do NOT repeat this table elsewhere.
+4. Use ## for main sections only; **bold** or bullets + full paragraphs for sub-content. No ###.
+5. Charts: add [CHART] blocks when requested; place inside Performance Metrics and KPIs only. Values NUMBERS ONLY; labels/values from CAMPAIGN DATA.
+6. Every section must have substantial length: multiple paragraphs or multiple bold items each with a full paragraph. No duplication across sections.
 """,
             'brief': """
-Create a DETAILED Campaign Brief that reads like a proper campaign briefing. Use ONLY the campaign data provided above. Use ## for main sections only; do NOT use ### or ####. Every section MUST have substantive content (paragraphs or bullets with explanation)—do NOT leave sections empty or one-line.
+CAMPAIGN BRIEF - ALLOWED SECTIONS ONLY (in this order). Do NOT add any section that is not in this list. The LAST section is ## Conclusion; after Conclusion you output NOTHING.
 
-NO DUPLICATION: (1) Lead list and Email metrics each appear in exactly ONE place: leads in "Lead Engagement Data", email metrics in "Email Campaign Performance". Do NOT show the same lead table or email metrics table again anywhere. (2) Do NOT use the same table structures as the Performance Report: the Brief must use a different presentation—e.g. for leads use narrative or compact bullets (e.g. "• [Name] ([Email]) – [Company], [Status]") or a short summary table with different column order/labels, so Report and Brief never contain identical tables. (3) The document MUST END with the Conclusion section. Do NOT add ANY section or table after Conclusion—no "Lead Details", no "Lead Details Table", no "Email Campaign Performance Metrics", no "Target Audience", no "Target Leads and Conversions", no "Timeline" table after Conclusion. Nothing after ## Conclusion. (4) Do NOT repeat Objectives/Success Criteria/Timeline in a second section or table. (5) To add length, use NEW unique content only—never duplicate sections, tables, or the same phrasing.
+DETAIL REQUIRED—EVERY HEADING RICH IN CONTENT: Create a DETAILED Campaign Brief. Every section must have substantial content: multiple full paragraphs (3–5 sentences each) or multiple **bold** points each with a full paragraph. Do NOT write one-line bullets or single short paragraphs per section. Use ONLY the campaign data provided; to add depth, explain context, implications, and what the data means within each section. Each piece of data (campaign info, metrics, leads, achievements, issues) appears in exactly ONE section—never repeat the same facts under another heading.
 
-Sections (use ONLY these—do NOT add "Performance Metrics and Analysis", "Lead Engagement Metrics", "Engagement Analysis", "Improvement Opportunities", or "Action Items" as extra ## sections):
+CRITICAL - LEAD LIST IN ONE PLACE ONLY: The lead list appears ONLY inside ## Lead Engagement Data as a markdown table (| Email | Name | Company | Status |, separator, one row per lead). Do NOT add "Lead Details" elsewhere. Document ENDS at ## Conclusion; output nothing after it.
+
+NO DUPLICATION: (1) Lead list only in ## Lead Engagement Data. (2) Email metrics only in ## Email Campaign Performance. (3) Do NOT repeat Campaign Overview, Objectives, Timeline, or Recommendations after ## Conclusion. (4) To add length, expand WITHIN each section with more paragraphs and analysis—never add new sections or repeat data.
+
+Sections (use ONLY these—in this order; each section must have multiple paragraphs or multiple bold items with full paragraphs):
 
 ## Campaign Overview
-2–3 full paragraphs. Paragraph 1: Campaign name, description, status, start date, end date (from CAMPAIGN INFORMATION). Paragraph 2: Objectives (target leads, target conversions, goals from TARGETS/GOALS). Paragraph 3: Summary of target audience and focus. Use the exact data—do not write "no data available" if the data is in the prompt above.
+3–4 full paragraphs. Paragraph 1: **Campaign name**, **status** (Active, Paused, Draft), **start date**, **end date**, and **description** from the data—with a sentence or two on what the campaign is for. Paragraph 2: **Objectives and targets** (target leads, target conversions, goals)—explain what success looks like and how the campaign is set up to achieve it. Paragraph 3: Current state (e.g. paused, active), what has been done so far, and how it is positioned to meet goals. Paragraph 4: Brief summary of audience and key messaging focus. Use exact data from CAMPAIGN INFORMATION and TARGETS/GOALS; do not write "no data available" when the data is in the prompt.
 
 ## Objectives and Goals
-List each target from the data (Target Leads, Target Conversions) and goals. For each: **Target name**: value. Then a short paragraph explaining what it means and how the campaign will achieve it. Do not write only one bullet with no context.
+For each target from the data (Target Leads, Target Conversions, and any goals): **Target name**: value. Then a FULL paragraph (4–5 sentences) explaining what it means, why it matters, and how the campaign will achieve it. Do not write one-line bullets—each objective needs real context.
 
 ## Target Audience
-Use ONLY the TARGET AUDIENCE section from the CAMPAIGN DATA above. If the data provides demographics, age, location, industry, interests, or company size, use them. If the campaign data has NO target audience or no demographics/interests/company size, write "Not specified" or "Target audience not defined in campaign data" in one short paragraph—do NOT invent demographics (e.g. no "18-35", "young adults", "summer sales interests") or company sizes unless they appear in the data.
+2–3 paragraphs. Use ONLY the TARGET AUDIENCE data from CAMPAIGN DATA. If the data has demographics, age, location, industry, interests, or company size, describe them in detail across 2–3 paragraphs. If no target audience data, write 1–2 paragraphs stating "Not specified" and why defining audience would help—do NOT invent demographics.
 
 ## Key Messaging
-1–2 paragraphs derived from the campaign description and goals. What will the campaign communicate? What value proposition? Use the data.
+2–3 full paragraphs. What will the campaign communicate? Value proposition, key themes, and how messaging supports the objectives. Derive from campaign description and goals; add context and implications. Use the data.
 
 ## Campaign Timeline
-Use ONLY the campaign's Start Date and End Date from the data. Phases MUST fall strictly within this period—every phase start and end date must be on or between Start Date and End Date. If the campaign is Feb 20–Feb 21, do NOT add Phase 2 or Phase 3 ending on Feb 22 or later; use one or two phases within Feb 20–21 only (e.g. Phase 1: Feb 20, Phase 2: Feb 21). For longer campaigns, split into 2–4 phases with dates between start and end. NEVER use timeframes that extend beyond End Date. If dates are "Not set", write "Not specified".
+2–3 paragraphs. Use ONLY the campaign Start Date and End Date. Describe phases within this period (e.g. Phase 1: launch; Phase 2: execution; Phase 3: review) with dates. For short windows (e.g. Feb 20–21), use 1–2 phases within those dates only. Then a short paragraph on what each phase delivers. If dates "Not set", write "Not specified" in 1–2 sentences.
 
 ## Success Criteria
-Use the targets from the data exactly. "Target conversions" means the number of conversions (e.g. 10), not a percentage—do not write "10% conversion rate" unless the data explicitly says that. Full paragraph or bullets on how success will be measured.
+2 full paragraphs. Use targets from the data exactly ("Target conversions" = the number, e.g. 10, not a percentage). Paragraph 1: How success will be measured (leads, conversions, open/click rates if relevant). Paragraph 2: What good looks like and how the team will track it.
 
 ## Email Campaign Performance
-Use the exact EMAIL CAMPAIGN METRICS from the CAMPAIGN DATA above only. List: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate—use the exact numbers from the prompt (e.g. if data says 10 sent, 30% open, write those numbers). Use correct tense: if the data shows emails already sent (e.g. Emails Sent: 10), write "The campaign has sent X emails" / "Total emails sent: X", not "will send". Do not invent metrics. If the prompt has no email metrics at all, write one short paragraph: "Email campaign not yet launched."
+2–3 full paragraphs. Use exact EMAIL CAMPAIGN METRICS from the data: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate—exact numbers. Paragraph 1: The numbers (and table or bullets if helpful) and what they mean. Paragraph 2: What is working well or not, and why. Use correct tense (e.g. "The campaign has sent X emails"). If no email metrics in the data, write 1–2 paragraphs: "Email campaign not yet launched" and what will be measured when it is.
 
 ## Lead Engagement Data
-Use the exact LEAD DATA from the data. State the total lead count (e.g. "Total leads: 3"). Present each lead in a compact format that is NOT the same as the Performance Report table: use narrative bullets (e.g. "• Name (Company) – email – Status") or short lines, so the Brief does not duplicate the Report's | Email | Name | Company | Status | table. List EVERY lead; then 1–2 paragraphs on engagement. Do NOT say "has not yet generated any leads" when the data shows leads—use the actual count.
+State total lead count. Present EVERY lead in a markdown table: | Email | Name | Company | Status |, separator, one row per lead. Then 2–3 full paragraphs: how leads are progressing, status mix, engagement level, and what it means for the campaign. Do NOT add a "Lead Details" section later; do NOT repeat the lead list after ## Conclusion.
+
+## Key Achievements
+ALWAYS include. 3–5 **bold** points, each with a FULL paragraph (4–5 sentences). Base only on REAL data: strong open/reply rate, leads vs target, low bounce, on-time execution, etc. Explain what was achieved and why it matters. If little or no performance data, 1–2 paragraphs stating that and what will be measured. No one-line bullets.
 
 ## Issues / Challenges
-ALWAYS include this section. Keep it a bit long—each issue must have real detail. For each issue: **Bold issue name** (e.g. **Low Email Open Rates**, **Limited Lead Engagement**, **Missing Audience Data**) followed by a FULL PARAGRAPH (3–5 sentences) explaining: what the issue is, why it matters, cause/context from the campaign data, and impact on the campaign. Do NOT write only one-line bullets. Minimum 2–4 issues, each with a bold heading and a full paragraph. Base on actual data (open rate, click rate, lead count, audience fields, conversions).
+ALWAYS include. 3–5 issues. For each: **Bold issue name** plus a FULL PARAGRAPH (4–6 sentences). Base only on actual data (e.g. low click rate only if data shows it). May include **Missing Audience Data** or **Limited Lead Engagement** when appropriate. No one-line bullets.
 
 ## Improvements / Recommendations
-ALWAYS include this section. Keep it a bit long—each recommendation must have real detail. For each: **Bold recommendation name** (e.g. **Gather Audience Data**, **Optimize Email Marketing**, **Develop Valuable Content**) followed by a FULL PARAGRAPH (3–5 sentences) explaining: what to do, why it will help, and how to implement it. Do NOT write only one-line bullets. Minimum 2–4 recommendations, each with a bold heading and a full paragraph. Examples: audience research, A/B testing subject lines, content calendar, lead nurturing, tracking setup.
-
-If the campaign has positive opportunities (e.g. strong open rate, engaged leads, growth potential), mention them in the Conclusion or in a short paragraph—and make that part a bit long (2–4 sentences minimum).
+ALWAYS include. 3–5 recommendations. For each: **Bold name** plus a FULL PARAGRAPH (4–6 sentences): what to do, why it helps, how to implement. Examples: audience research, A/B testing, content improvements, lead nurturing. No one-line bullets.
 
 ## Conclusion
-2–3 full paragraphs: campaign readiness, launch recommendations, expected outcomes. Summarize the brief and state whether the campaign is ready and what is needed.
+3 full paragraphs: campaign status, readiness, and what is needed next (launch, optimization, follow-up). Do NOT repeat lead list, metrics table, or other section data. This is the LAST section—after ## Conclusion output NOTHING else.
 
-CRITICAL: (1) Use ONLY the numbers and dates from the CAMPAIGN DATA above—Email Campaign Performance and Lead Engagement must use the exact values from "EMAIL CAMPAIGN METRICS" and "LEAD DATA" (do not change or round). (2) Use the Start Date and End Date format given (e.g. "February 20, 2026")—do not output raw dates like 2026-02-20. (3) The document MUST END with the Conclusion section. Do NOT add ANY content after Conclusion—no "Lead Details", "Lead Details Table", "Email Campaign Performance Metrics", "Target Leads and Conversions", "Timeline", or any other section or table after Conclusion. Output Conclusion and then STOP. (4) Each piece of data (leads, email metrics, targets) appears in only one section—never repeat the same table or list. (5) Campaign Timeline: phase dates must be within Start and End date only. (6) "Target conversions" = the number (e.g. 10), not "10%". (7) Issues/Challenges and Improvements/Recommendations: both required; each item **bold** + full paragraph. (8) Campaign Brief only—do not change strategy, proposal, or report.
+CRITICAL: (1) Use ONLY numbers and dates from CAMPAIGN DATA. (2) Document ENDS at ## Conclusion. (3) Lead list ONLY in ## Lead Engagement Data. (4) "Target conversions" = the number (e.g. 10), not "10%". (5) Every section must have substantial content—multiple paragraphs or multiple bold items with full paragraphs. (6) NO DUPLICATION: After ## Conclusion output NOTHING. Do NOT add any table or section that repeats Email Campaign Performance Metrics, Lead Engagement Metrics, Timeline, Success Criteria, Objectives, Target Audience, Key Messaging, or Recommendations—each of these appears ONCE earlier in the document; repeating them after Conclusion is forbidden.
 """,
             'presentation': """
+STRUCTURE OVERRIDES LENGTH: End with the Conclusion/Next Steps slide. Do NOT add extra slides that repeat objectives, metrics, timeline, or recommendations already shown. Each topic appears on one slide only. To add content, expand within the listed slides—never duplicate a topic on another slide.
+
 Create a presentation document with slides covering:
 - Title Slide
 - Agenda/Overview
@@ -919,6 +1042,8 @@ Create a presentation document with slides covering:
 - Key Insights (based on REAL campaign data)
 - Recommendations
 - Conclusion/Next Steps (MUST include a final slide with comprehensive summary and clear next steps)
+
+NO DUPLICATION: Each topic or data type (objectives, audience, metrics, timeline, recommendations) appears on one slide only. Do NOT repeat the same information on multiple slides (e.g. do not show objectives in one slide and then again in a summary table on another). Conclusion/Next Steps should summarize and close—not re-list every metric or objective already shown.
 """,
         }
         

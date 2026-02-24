@@ -38,11 +38,13 @@ const TYPE_BADGE_CLASS = {
   presentation: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
 };
 
-const STATUS_BADGE_CLASS = {
+const CAMPAIGN_STATUS_BADGE = {
   draft: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  in_progress: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-  completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  archived: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300',
+  scheduled: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
+  active: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  paused: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  completed: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300',
+  cancelled: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
 };
 
 const formatDate = (iso) => {
@@ -54,6 +56,8 @@ const formatDate = (iso) => {
   }
 };
 
+const PAGE_SIZE = 10;
+
 const Documents = () => {
   const { toast } = useToast();
   const [documents, setDocuments] = useState([]);
@@ -61,6 +65,8 @@ const Documents = () => {
   const [loadingList, setLoadingList] = useState(true);
   const [filterType, setFilterType] = useState('');
   const [filterCampaignId, setFilterCampaignId] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
   const [createExpanded, setCreateExpanded] = useState(false);
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [documentType, setDocumentType] = useState('strategy');
@@ -78,12 +84,17 @@ const Documents = () => {
   const fetchDocuments = useCallback(async () => {
     setLoadingList(true);
     try {
-      const params = {};
+      const params = { page, page_size: PAGE_SIZE };
       if (filterType) params.type = filterType;
       if (filterCampaignId) params.campaign_id = filterCampaignId;
       const response = await marketingAgentService.listDocuments(params);
-      if (response?.status === 'success' && response?.data?.documents) {
-        setDocuments(response.data.documents);
+      if (response?.status === 'success' && response?.data) {
+        setDocuments(response.data.documents ?? []);
+        setPagination(response.data.pagination ?? { page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
+        const totalPages = response.data.pagination?.total_pages ?? 1;
+        if ((response.data.documents?.length ?? 0) === 0 && page > 1 && totalPages > 0) {
+          setPage(Math.min(page - 1, totalPages));
+        }
       } else {
         setDocuments([]);
       }
@@ -92,7 +103,7 @@ const Documents = () => {
     } finally {
       setLoadingList(false);
     }
-  }, [filterType, filterCampaignId]);
+  }, [filterType, filterCampaignId, page]);
 
   const fetchCampaigns = useCallback(async () => {
     try {
@@ -108,6 +119,10 @@ const Documents = () => {
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filterType, filterCampaignId]);
 
   useEffect(() => {
     fetchCampaigns();
@@ -195,14 +210,17 @@ const Documents = () => {
       const campaignIdNum = hasCampaign ? Number(campaignId) : null;
       const response = await marketingAgentService.documentAuthoring('create', documentType, documentData, campaignIdNum, {});
       if (response.status === 'error') {
-        setError(response.message || 'Request failed');
-        toast({ title: 'Error', description: response.message, variant: 'destructive' });
+        const msg = /429|rate limit/i.test(response.message || '') ? 'The service is busy. Please try again in a moment.' : (response.message || 'Request failed');
+        setError(msg);
+        toast({ title: 'Error', description: msg, variant: 'destructive' });
         return;
       }
       const data = response.data;
       if (data.success === false) {
-        setError(data.error || 'Document generation failed');
-        toast({ title: 'Error', description: data.error, variant: 'destructive' });
+        const errMsg = data.error || 'Document generation failed';
+        const msg = /429|rate limit/i.test(errMsg) ? 'The service is busy. Please try again in a moment.' : errMsg;
+        setError(msg);
+        toast({ title: 'Error', description: msg, variant: 'destructive' });
         return;
       }
       setResult(data);
@@ -213,8 +231,10 @@ const Documents = () => {
         openDetail(data.document_id);
       }
     } catch (err) {
-      setError(err.message || 'Failed to generate document');
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      const raw = err.message || 'Failed to generate document';
+      const msg = /429|rate limit/i.test(raw) ? 'The service is busy. Please try again in a moment.' : raw;
+      setError(msg);
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
     } finally {
       setLoadingCreate(false);
     }
@@ -385,6 +405,7 @@ const Documents = () => {
               </Button>
             </div>
           ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -441,6 +462,35 @@ const Documents = () => {
                 </tbody>
               </table>
             </div>
+            {pagination.total_pages > 1 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 bg-muted/30">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(pagination.page - 1) * pagination.page_size + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total)} of {pagination.total} documents
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pagination.page <= 1 || loadingList}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    Page {pagination.page} of {pagination.total_pages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pagination.page >= pagination.total_pages || loadingList}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -459,11 +509,15 @@ const Documents = () => {
                   <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', TYPE_BADGE_CLASS[detailDoc.document_type])}>
                     {detailDoc.document_type_display}
                   </span>
-                  <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', STATUS_BADGE_CLASS[detailDoc.status])}>
-                    {detailDoc.status_display}
-                  </span>
                   {detailDoc.campaign_name && (
-                    <span className="flex items-center gap-1">Campaign: <span className="font-medium text-foreground">{detailDoc.campaign_name}</span></span>
+                    <span className="flex items-center gap-1.5">
+                      Campaign: <span className="font-medium text-foreground">{detailDoc.campaign_name}</span>
+                      {detailDoc.campaign_status_display && (
+                        <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', CAMPAIGN_STATUS_BADGE[detailDoc.campaign_status] || 'bg-muted text-muted-foreground')}>
+                          {detailDoc.campaign_status_display}
+                        </span>
+                      )}
+                    </span>
                   )}
                   <span className="tabular-nums">{formatDate(detailDoc.created_at)}</span>
                 </div>

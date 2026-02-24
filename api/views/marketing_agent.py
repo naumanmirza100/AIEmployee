@@ -9,10 +9,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.core.paginator import Paginator
 from django.db.models import Q, Count, Sum, Avg
 from django.contrib.auth.models import User
 from django.http import HttpResponse
 from datetime import timedelta, datetime
+import inspect
 import json
 import logging
 import csv
@@ -30,6 +32,17 @@ from marketing_agent.services.email_service import EmailService
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
+
+# User-friendly message when LLM/API rate limit (429) is hit — do not expose raw provider errors
+RATE_LIMIT_MESSAGE = "The service is busy. Please try again in a moment."
+
+
+def _normalize_error_message(e):
+    """Return a user-friendly message for rate limit (429) errors; otherwise return str(e)."""
+    msg = str(e)
+    if "429" in msg or "rate limit" in msg.lower() or "rate_limit" in msg.lower():
+        return RATE_LIMIT_MESSAGE
+    return msg
 
 
 def _get_or_create_user_for_company_user(company_user):
@@ -943,8 +956,9 @@ def marketing_qa(request):
         
     except Exception as e:
         logger.exception("marketing_qa failed")
+        err_msg = _normalize_error_message(e)
         return Response(
-            {'status': 'error', 'message': 'Marketing Q&A failed', 'error': str(e)},
+            {'status': 'error', 'message': err_msg if err_msg == RATE_LIMIT_MESSAGE else 'Marketing Q&A failed', 'error': err_msg},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -985,8 +999,9 @@ def market_research(request):
         
     except Exception as e:
         logger.exception("market_research failed")
+        err_msg = _normalize_error_message(e)
         return Response(
-            {'status': 'error', 'message': 'Market research failed', 'error': str(e)},
+            {'status': 'error', 'message': err_msg if err_msg == RATE_LIMIT_MESSAGE else 'Market research failed', 'error': err_msg},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -1057,8 +1072,9 @@ def outreach_campaign(request):
         
     except Exception as e:
         logger.exception("outreach_campaign failed")
+        err_msg = _normalize_error_message(e)
         return Response(
-            {'status': 'error', 'message': 'Outreach campaign failed', 'error': str(e)},
+            {'status': 'error', 'message': err_msg if err_msg == RATE_LIMIT_MESSAGE else 'Outreach campaign failed', 'error': err_msg},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -1067,7 +1083,7 @@ def outreach_campaign(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_documents(request):
-    """List marketing documents for company user. Query: type, campaign_id."""
+    """List marketing documents for company user. Query: type, campaign_id, page, page_size."""
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
@@ -1081,17 +1097,27 @@ def list_documents(request):
                 qs = qs.filter(campaign_id=int(campaign_id))
             except ValueError:
                 pass
+        try:
+            page_size = min(100, max(1, int(request.query_params.get('page_size', 10))))
+        except (TypeError, ValueError):
+            page_size = 10
+        try:
+            page_num = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            page_num = 1
+        paginator = Paginator(qs, page_size)
+        page_obj = paginator.get_page(page_num)
         documents = []
-        for doc in qs:
+        for doc in page_obj.object_list:
             documents.append({
                 'id': doc.id,
                 'document_type': doc.document_type,
                 'document_type_display': doc.get_document_type_display(),
                 'title': doc.title,
-                'status': doc.status,
-                'status_display': doc.get_status_display(),
                 'campaign_id': doc.campaign_id,
                 'campaign_name': doc.campaign.name if doc.campaign else None,
+                'campaign_status': doc.campaign.status if doc.campaign else None,
+                'campaign_status_display': doc.campaign.get_status_display() if doc.campaign else None,
                 'created_at': doc.created_at.isoformat() if doc.created_at else None,
                 'updated_at': doc.updated_at.isoformat() if doc.updated_at else None,
                 'content_preview': (doc.content[:200] + '...') if doc.content and len(doc.content) > 200 else (doc.content or ''),
@@ -1101,6 +1127,12 @@ def list_documents(request):
             'data': {
                 'documents': documents,
                 'count': len(documents),
+                'pagination': {
+                    'page': page_num,
+                    'page_size': page_size,
+                    'total': paginator.count,
+                    'total_pages': paginator.num_pages,
+                },
             },
         }, status=status.HTTP_200_OK)
     except Exception as e:
@@ -1130,10 +1162,10 @@ def document_detail(request, document_id):
                 'document_type_display': document.get_document_type_display(),
                 'title': document.title,
                 'content': document.content,
-                'status': document.status,
-                'status_display': document.get_status_display(),
                 'campaign_id': document.campaign_id,
                 'campaign_name': document.campaign.name if document.campaign else None,
+                'campaign_status': document.campaign.status if document.campaign else None,
+                'campaign_status_display': document.campaign.get_status_display() if document.campaign else None,
                 'created_at': document.created_at.isoformat() if document.created_at else None,
                 'updated_at': document.updated_at.isoformat() if document.updated_at else None,
                 'available_formats': [{'code': c, 'name': n} for c, n in available_formats],
@@ -1248,8 +1280,9 @@ def document_authoring(request):
         
     except Exception as e:
         logger.exception("document_authoring failed")
+        err_msg = _normalize_error_message(e)
         return Response(
-            {'status': 'error', 'message': 'Document authoring failed', 'error': str(e)},
+            {'status': 'error', 'message': err_msg, 'error': err_msg},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -1266,21 +1299,39 @@ def get_notifications(request):
         agent = AgentRegistry.get_agent("proactive_notification")
         
         unread_only = request.GET.get('unread_only', 'false').lower() == 'true'
+        read_only = request.GET.get('read_only', 'false').lower() == 'true'
         notification_type = request.GET.get('type')
         campaign_id = request.GET.get('campaign_id')
-        
+        try:
+            page = max(1, int(request.GET.get('page', 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            page_size = max(1, min(100, int(request.GET.get('page_size', 20))))
+        except (ValueError, TypeError):
+            page_size = 20
+
         if campaign_id:
             try:
                 campaign_id = int(campaign_id)
             except ValueError:
                 campaign_id = None
-        
-        result = agent.get_notifications(
-            user_id=user.id,
-            unread_only=unread_only,
-            notification_type=notification_type,
-            campaign_id=campaign_id
-        )
+
+        # Build kwargs so we support both old and new agent signatures (e.g. before/after pagination)
+        allowed = set(inspect.signature(agent.get_notifications).parameters.keys())
+        kwargs = {
+            'user_id': user.id,
+            'unread_only': unread_only,
+            'notification_type': notification_type,
+            'campaign_id': campaign_id,
+        }
+        if 'read_only' in allowed:
+            kwargs['read_only'] = read_only
+        if 'page' in allowed:
+            kwargs['page'] = page
+        if 'page_size' in allowed:
+            kwargs['page_size'] = page_size
+        result = agent.get_notifications(**kwargs)
         
         return Response({
             'status': 'success',

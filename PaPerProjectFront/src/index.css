@@ -117,6 +117,24 @@
       .fluid-text-h2 {
         font-size: clamp(2rem, 4vw + 1rem, 3.25rem);
       }
+
+      /* Black scrollbar for QA and Research tabs */
+      .scrollbar-black {
+        scrollbar-color: #000 transparent; /* Firefox */
+      }
+      .scrollbar-black::-webkit-scrollbar {
+        width: 8px;
+      }
+      .scrollbar-black::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .scrollbar-black::-webkit-scrollbar-thumb {
+        background: #000;
+        border-radius: 4px;
+      }
+      .scrollbar-black::-webkit-scrollbar-thumb:hover {
+        background: #333;
+      }
     }
     
     .my-masonry-grid {
