@@ -26,19 +26,20 @@ class KnowledgeService:
         self.embedding_service = EmbeddingService()
         logger.info(f"KnowledgeService initialized (company_id: {company_id}, embeddings: {self.embedding_service.is_available()})")
     
-    def search_knowledge(self, query: str, max_results: int = 5, company_id: Optional[int] = None) -> Dict:
+    def search_knowledge(
+        self,
+        query: str,
+        max_results: int = 5,
+        company_id: Optional[int] = None,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> Dict:
         """
         Search knowledge base (FAQs, policies, manuals, uploaded documents) for relevant information.
-        
-        Args:
-            query: Search query
-            max_results: Maximum number of results per category
-            company_id: Optional company ID to filter documents
-            
-        Returns:
-            Dictionary with search results and metadata
+        scope_document_type: optional list of document types to restrict uploaded docs (e.g. ['policy']).
+        scope_document_ids: optional list of document IDs to restrict uploaded docs to specific documents.
         """
-        logger.info(f"Searching knowledge base for: {query[:100]} (company_id: {company_id})")
+        logger.info(f"Searching knowledge base for: {query[:100]} (company_id: {company_id}, scope: type={scope_document_type}, ids={scope_document_ids})")
         
         try:
             # Search all knowledge sources
@@ -81,7 +82,11 @@ class KnowledgeService:
             # Search uploaded documents if company_id is provided
             documents_count = 0
             if company_id:
-                documents = self._search_documents(query, company_id, max_results)
+                documents = self._search_documents(
+                    query, company_id, max_results,
+                    scope_document_type=scope_document_type,
+                    scope_document_ids=scope_document_ids,
+                )
                 documents_count = len(documents)
                 for doc in documents:
                     all_results.append({
@@ -118,9 +123,18 @@ class KnowledgeService:
                 'count': 0
             }
     
-    def _search_documents(self, query: str, company_id: int, max_results: int) -> List[Dict]:
+    def _search_documents(
+        self,
+        query: str,
+        company_id: int,
+        max_results: int,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> List[Dict]:
         """
         Search uploaded documents for company using semantic search (embeddings) with keyword fallback.
+        scope_document_type: optional list of document_type values to restrict search (e.g. ['policy', 'knowledge_base']).
+        scope_document_ids: optional list of document IDs to restrict search to specific documents.
         """
         try:
             from Frontline_agent.models import Document
@@ -132,6 +146,10 @@ class KnowledgeService:
                 is_indexed=True,
                 processed=True
             )
+            if scope_document_type is not None and len(scope_document_type) > 0:
+                all_documents = all_documents.filter(document_type__in=scope_document_type)
+            if scope_document_ids is not None and len(scope_document_ids) > 0:
+                all_documents = all_documents.filter(id__in=scope_document_ids)
             
             # Try semantic search first if embeddings are available
             if self.embedding_service.is_available():
@@ -352,19 +370,18 @@ class KnowledgeService:
             logger.error(f"Document search failed: {e}", exc_info=True)
             return []
     
-    def get_answer(self, question: str, company_id: Optional[int] = None) -> Dict:
+    def get_answer(
+        self,
+        question: str,
+        company_id: Optional[int] = None,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> Dict:
         """
         Get answer to a question from knowledge base and uploaded documents.
-        Uses semantic search (embeddings) if available, with keyword fallback.
-        
-        Args:
-            question: User's question
-            company_id: Optional company ID to search company-specific documents
-            
-        Returns:
-            Dictionary with answer or indication that no answer was found
+        scope_document_type / scope_document_ids restrict search to specific document types or IDs.
         """
-        logger.info(f"Getting answer for question: {question[:100]} (company_id: {company_id})")
+        logger.info(f"Getting answer for question: {question[:100]} (company_id: {company_id}, scope: type={scope_document_type}, ids={scope_document_ids})")
         
         # Check if embeddings are available for semantic search
         use_semantic = self.embedding_service.is_available()
@@ -374,7 +391,11 @@ class KnowledgeService:
             logger.info("Using keyword search (embeddings not available)")
         
         # Try full question first - this will use semantic search if embeddings are available
-        search_results = self.search_knowledge(question, max_results=5, company_id=company_id)
+        search_results = self.search_knowledge(
+            question, max_results=5, company_id=company_id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
         
         # If no results, try extracting keywords and searching again
         if not search_results['success'] or search_results['count'] == 0:
@@ -387,7 +408,11 @@ class KnowledgeService:
             if keywords:
                 # Try searching with individual keywords
                 for keyword in keywords[:3]:  # Try top 3 keywords
-                    keyword_results = self.search_knowledge(keyword, max_results=3, company_id=company_id)
+                    keyword_results = self.search_knowledge(
+                        keyword, max_results=3, company_id=company_id,
+                        scope_document_type=scope_document_type,
+                        scope_document_ids=scope_document_ids,
+                    )
                     if keyword_results['success'] and keyword_results['count'] > 0:
                         search_results = keyword_results
                         logger.info(f"Found results using keyword: {keyword}")

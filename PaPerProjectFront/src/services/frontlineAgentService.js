@@ -119,10 +119,15 @@ export const deleteDocument = async (documentId) => {
 
 /**
  * Knowledge Q&A - Ask a question
+ * @param {string} question
+ * @param {{ scope_document_type?: string[], scope_document_ids?: number[] }} options - Optional scope to restrict answers to document type(s) and/or specific document IDs
  */
-export const knowledgeQA = async (question) => {
+export const knowledgeQA = async (question, options = {}) => {
   try {
-    const response = await companyApi.post('/frontline/knowledge/qa', { question });
+    const body = { question };
+    if (options.scope_document_type?.length) body.scope_document_type = options.scope_document_type;
+    if (options.scope_document_ids?.length) body.scope_document_ids = options.scope_document_ids;
+    const response = await companyApi.post('/frontline/knowledge/qa', body);
     return response;
   } catch (error) {
     console.error('Knowledge Q&A error:', error);

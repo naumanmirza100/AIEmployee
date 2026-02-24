@@ -784,9 +784,22 @@ def knowledge_qa(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Optional Q&A scope: restrict to document type(s) and/or specific document IDs
+        scope_document_type = data.get('scope_document_type')
+        if scope_document_type is not None:
+            scope_document_type = [scope_document_type] if isinstance(scope_document_type, str) else list(scope_document_type)
+        scope_document_ids = data.get('scope_document_ids')
+        if scope_document_ids is not None:
+            scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
+        
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
-        result = agent.answer_question(question, company_id=company.id)
+        result = agent.answer_question(
+            question,
+            company_id=company.id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
         
         # When agent doesn't have verified info, create a ticket task assigned to this company user
         ticket_task_created = False
@@ -853,6 +866,12 @@ def search_knowledge(request):
         
         query = request.GET.get('q', '').strip()
         max_results = int(request.GET.get('max_results', 5))
+        scope_document_type = request.GET.get('scope_document_type')
+        if scope_document_type is not None:
+            scope_document_type = [s.strip() for s in scope_document_type.split(',') if s.strip()]
+        scope_document_ids = request.GET.get('scope_document_ids')
+        if scope_document_ids is not None:
+            scope_document_ids = [int(x) for x in scope_document_ids.split(',') if str(x).strip().isdigit()]
         
         if not query:
             return Response(
@@ -862,7 +881,13 @@ def search_knowledge(request):
         
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
-        result = agent.search_knowledge(query, company_id=company.id)
+        result = agent.search_knowledge(
+            query,
+            company_id=company.id,
+            max_results=max_results,
+            scope_document_type=scope_document_type or None,
+            scope_document_ids=scope_document_ids or None,
+        )
         
         return Response({
             'status': 'success',

@@ -65,6 +65,15 @@ import {
 } from 'recharts';
 
 const TEMPLATE_DEFAULT = { name: '', subject: '', body: '', notification_type: 'ticket_update', channel: 'email', use_llm_personalization: false };
+// Document types for Q&A scope (must match backend Document.DOCUMENT_TYPE_CHOICES)
+const DOCUMENT_TYPE_OPTIONS = [
+  { value: 'knowledge_base', label: 'Knowledge Base' },
+  { value: 'policy', label: 'Policy' },
+  { value: 'procedure', label: 'Procedure' },
+  { value: 'report', label: 'Report' },
+  { value: 'ticket_attachment', label: 'Ticket Attachment' },
+  { value: 'other', label: 'Other' },
+];
 const WORKFLOW_STEPS_DEFAULT = '[{"type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}"}]';
 const WORKFLOW_STEPS_COMPLEX_EXAMPLE = `[
   { "type": "send_email", "template_id": 1, "recipient_email": "{{recipient_email}}", "context": { "note": "Acknowledgement" } },
@@ -1025,6 +1034,12 @@ const FrontlineDashboard = () => {
   const [answering, setAnswering] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
   const messagesEndRef = useRef(null);
+  // Q&A scope: restrict answers to document type(s) or specific documents
+  const [qaScopeMode, setQaScopeMode] = useState('all'); // 'all' | 'type' | 'documents'
+  const [qaScopeDocumentTypes, setQaScopeDocumentTypes] = useState([]); // e.g. ['policy', 'knowledge_base']
+  const [qaScopeDocumentIds, setQaScopeDocumentIds] = useState([]);
+  const [qaDocumentsList, setQaDocumentsList] = useState([]); // full list for "Specific documents" selector
+  const [qaDocumentsLoading, setQaDocumentsLoading] = useState(false);
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
@@ -1069,6 +1084,25 @@ const FrontlineDashboard = () => {
       mediaQuery.removeEventListener('change', checkDarkMode);
     };
   }, []);
+
+  // Load document list for Q&A scope when user selects "Specific documents"
+  useEffect(() => {
+    if (qaScopeMode !== 'documents') return;
+    let cancelled = false;
+    (async () => {
+      setQaDocumentsLoading(true);
+      try {
+        const res = await frontlineAgentService.listDocuments({ limit: 200 });
+        const list = res?.data?.documents ?? (Array.isArray(res?.data) ? res.data : []);
+        if (!cancelled) setQaDocumentsList(list);
+      } catch {
+        if (!cancelled) setQaDocumentsList([]);
+      } finally {
+        if (!cancelled) setQaDocumentsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [qaScopeMode]);
 
   const fetchDashboard = async () => {
     try {
@@ -1277,9 +1311,12 @@ const FrontlineDashboard = () => {
       return;
     }
     const q = question.trim();
+    const scopeOptions = {};
+    if (qaScopeMode === 'type' && qaScopeDocumentTypes.length > 0) scopeOptions.scope_document_type = qaScopeDocumentTypes;
+    if (qaScopeMode === 'documents' && qaScopeDocumentIds.length > 0) scopeOptions.scope_document_ids = qaScopeDocumentIds;
     try {
       setAnswering(true);
-      const response = await frontlineAgentService.knowledgeQA(q);
+      const response = await frontlineAgentService.knowledgeQA(q, scopeOptions);
       if (response.status === 'success' && response.data) {
         const data = response.data;
         const answerText = data.answer || 'No answer available.';
@@ -1729,6 +1766,80 @@ const FrontlineDashboard = () => {
                 </div>
 
                 <form onSubmit={handleAskQuestion} className="shrink-0 border-t p-4 space-y-3 bg-muted/30">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Answer from:</span>
+                      <Select value={qaScopeMode} onValueChange={(v) => { setQaScopeMode(v); if (v !== 'type') setQaScopeDocumentTypes([]); if (v !== 'documents') setQaScopeDocumentIds([]); }}>
+                        <SelectTrigger className="w-[180px] h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All documents</SelectItem>
+                          <SelectItem value="type">By document type</SelectItem>
+                          <SelectItem value="documents">Specific documents</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {qaScopeMode === 'type' && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {DOCUMENT_TYPE_OPTIONS.map((opt) => (
+                            <label key={opt.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                              <Checkbox
+                                checked={qaScopeDocumentTypes.includes(opt.value)}
+                                onCheckedChange={(checked) => {
+                                  setQaScopeDocumentTypes((prev) =>
+                                    checked ? [...prev, opt.value] : prev.filter((t) => t !== opt.value)
+                                  );
+                                }}
+                              />
+                              <span>{opt.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      {qaScopeMode === 'documents' && (
+                        <Select
+                          value="_add"
+                          onValueChange={(v) => {
+                            if (v === '_add' || v === '_none') return;
+                            const id = Number(v);
+                            if (!qaScopeDocumentIds.includes(id)) setQaScopeDocumentIds((prev) => [...prev, id]);
+                          }}
+                        >
+                          <SelectTrigger className="w-[220px] h-8">
+                            <SelectValue placeholder={qaDocumentsLoading ? 'Loading...' : (qaScopeDocumentIds.length ? 'Add another document...' : 'Add document...')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="_add">Add document...</SelectItem>
+                            {!qaDocumentsLoading && qaDocumentsList
+                              .filter((d) => !qaScopeDocumentIds.includes(d.id))
+                              .map((d) => (
+                                <SelectItem key={d.id} value={String(d.id)}>{d.title || `Document ${d.id}`}</SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                    {qaScopeMode === 'documents' && qaScopeDocumentIds.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {qaScopeDocumentIds.map((id) => {
+                          const doc = qaDocumentsList.find((d) => d.id === id);
+                          return (
+                            <Badge key={id} variant="secondary" className="gap-1 pr-1">
+                              {doc?.title || `Doc ${id}`}
+                              <button
+                                type="button"
+                                onClick={() => setQaScopeDocumentIds((prev) => prev.filter((x) => x !== id))}
+                                className="rounded-full hover:bg-muted-foreground/20 p-0.5"
+                                aria-label="Remove"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                              </button>
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Textarea
                       placeholder="Ask a question from your knowledge base..."

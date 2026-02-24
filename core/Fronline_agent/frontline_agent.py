@@ -38,23 +38,30 @@ class FrontlineAgent(BaseAgent):
         self.system_prompt = FRONTLINE_SYSTEM_PROMPT
         logger.info(f"FrontlineAgent initialized (company_id: {company_id})")
     
-    def answer_question(self, question: str, company_id: Optional[int] = None) -> Dict:
+    def answer_question(
+        self,
+        question: str,
+        company_id: Optional[int] = None,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> Dict:
         """
         Answer a question using only verified knowledge base information.
-        
-        Args:
-            question: User's question
-            
-        Returns:
-            Dictionary with answer or indication that no verified info exists
+        scope_document_type: optional list of document types to restrict to (e.g. ['policy', 'knowledge_base']).
+        scope_document_ids: optional list of document IDs to restrict to specific documents.
         """
         logger.info(f"Processing question: {question[:100]} (company_id: {company_id})")
         
         # Use provided company_id or instance company_id
         search_company_id = company_id or self.company_id
         
-        # Search knowledge base
-        knowledge_result = self.knowledge_service.get_answer(question, company_id=search_company_id)
+        # Search knowledge base (with optional scope)
+        knowledge_result = self.knowledge_service.get_answer(
+            question,
+            company_id=search_company_id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
         
         if not knowledge_result.get('has_verified_info', False):
             logger.info("No verified information found, cannot answer")
@@ -221,20 +228,24 @@ class FrontlineAgent(BaseAgent):
         
         return result
     
-    def search_knowledge(self, query: str, company_id: Optional[int] = None) -> Dict:
-        """
-        Search knowledge base for information.
-        
-        Args:
-            query: Search query
-            company_id: Optional company ID to search company-specific documents
-            
-        Returns:
-            Search results dictionary
-        """
+    def search_knowledge(
+        self,
+        query: str,
+        company_id: Optional[int] = None,
+        max_results: int = 5,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+    ) -> Dict:
+        """Search knowledge base; optionally restrict by document type and/or document IDs."""
         search_company_id = company_id or self.company_id
         logger.info(f"Searching knowledge base: {query[:100]} (company_id: {search_company_id})")
-        return self.knowledge_service.search_knowledge(query, company_id=search_company_id)
+        return self.knowledge_service.search_knowledge(
+            query,
+            max_results=max_results,
+            company_id=search_company_id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
     
     def process(self, action: str, **kwargs) -> Dict:
         """
