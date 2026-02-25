@@ -4,10 +4,18 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2 } from 'lucide-react';
 import { recruitmentQA, listQAChats, createQAChat, updateQAChat, deleteQAChat } from '@/services/recruitmentAgentService';
 
-/** Markdown to HTML for Q&A answers - readable paragraphs, headings, bullets, tables */
+/** Markdown to HTML for Q&A answers - proper heading, subheading, lists, tables */
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
   const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -15,12 +23,20 @@ function markdownToHtml(markdown) {
   const lines = markdown.split('\n');
   const out = [];
   let inList = false;
+  let listType = null; // 'ul' | 'ol'
   let i = 0;
+  const closeList = () => {
+    if (inList) {
+      out.push(listType === 'ol' ? '</ol>' : '</ul>');
+      inList = false;
+      listType = null;
+    }
+  };
   while (i < lines.length) {
     const line = lines[i];
     const t = line.trim();
     if (t.startsWith('|') && t.endsWith('|')) {
-      if (inList) { out.push('</ul>'); inList = false; }
+      closeList();
       const tableRows = [];
       let j = i;
       while (j < lines.length && lines[j].trim().startsWith('|')) {
@@ -31,7 +47,7 @@ function markdownToHtml(markdown) {
       }
       i = j;
       if (tableRows.length > 0) {
-        out.push('<div class="my-5 rounded-lg border border-border"><table class="w-full text-base">');
+        out.push('<div class="my-5 rounded-lg border border-border overflow-hidden"><table class="w-full text-base">');
         out.push('<thead><tr class="bg-muted">');
         tableRows[0].forEach(cell => out.push(`<th class="px-4 py-3 text-left font-semibold">${bold(escape(cell))}</th>`));
         out.push('</tr></thead><tbody>');
@@ -45,43 +61,74 @@ function markdownToHtml(markdown) {
       continue;
     }
     if (/^---+$/.test(t)) {
-      if (inList) { out.push('</ul>'); inList = false; }
+      closeList();
       out.push('<hr class="my-5 border-border"/>');
       i++; continue;
     }
+    // # heading (h1)
+    if (/^# [^#]/.test(t)) {
+      closeList();
+      out.push(`<h1 class="text-2xl font-bold mt-4 mb-4 text-violet-700 dark:text-violet-300">${bold(escape(t.slice(2)))}</h1>`);
+      i++; continue;
+    }
+    // ## heading (h2)
     if (/^## /.test(t)) {
-      if (inList) { out.push('</ul>'); inList = false; }
+      closeList();
       out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t.slice(3)))}</h2>`);
       i++; continue;
     }
+    // ### subheading (h3)
     if (/^### /.test(t)) {
-      if (inList) { out.push('</ul>'); inList = false; }
-      out.push(`<h3 class="text-lg font-bold mt-4 mb-2 text-foreground">${bold(escape(t.slice(4)))}</h3>`);
+      closeList();
+      out.push(`<h3 class="text-lg font-semibold mt-4 mb-2 text-foreground">${bold(escape(t.slice(4)))}</h3>`);
       i++; continue;
     }
-    if (t.endsWith(':') && t.length > 10 && !t.startsWith('-') && !t.startsWith('*')) {
-      if (inList) { out.push('</ul>'); inList = false; }
+    // #### sub-subheading (h4)
+    if (/^#### /.test(t)) {
+      closeList();
+      out.push(`<h4 class="text-base font-semibold mt-3 mb-1.5 text-muted-foreground">${bold(escape(t.slice(5)))}</h4>`);
+      i++; continue;
+    }
+    if (t.endsWith(':') && t.length > 10 && !t.startsWith('-') && !t.startsWith('*') && !/^\d+\./.test(t)) {
+      closeList();
       out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t))}</h2>`);
       i++; continue;
     }
-    if (/^[\s]*(?:•|-|\*|\d+\.)\s+/.test(t)) {
-      if (!inList) { out.push('<ul class="list-disc pl-6 my-4 space-y-2">'); inList = true; }
-      const content = t.replace(/^[\s]*(?:•|-|\*|\d+\.)\s+/, '');
+    // Numbered list (1. 2. 3.)
+    if (/^[\s]*\d+\.\s+/.test(t)) {
+      if (!inList || listType !== 'ol') {
+        closeList();
+        out.push('<ol class="list-decimal pl-6 my-4 space-y-2">');
+        inList = true;
+        listType = 'ol';
+      }
+      const content = t.replace(/^[\s]*\d+\.\s+/, '');
+      out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
+      i++; continue;
+    }
+    // Bullet list (•, -, *)
+    if (/^[\s]*(?:•|-|\*)\s+/.test(t)) {
+      if (!inList || listType !== 'ul') {
+        closeList();
+        out.push('<ul class="list-disc pl-6 my-4 space-y-2">');
+        inList = true;
+        listType = 'ul';
+      }
+      const content = t.replace(/^[\s]*(?:•|-|\*)\s+/, '');
       out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
       i++; continue;
     }
     if (t === '' && inList) {
-      out.push('</ul>');
-      inList = false;
+      closeList();
       i++; continue;
     }
     if (t && !t.startsWith('<')) {
-      if (inList) { out.push('</ul>'); inList = false; }
+      closeList();
       out.push(`<p class="my-4 text-base leading-relaxed">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
     }
     i++;
   }
-  if (inList) out.push('</ul>');
+  closeList();
   return out.join('\n');
 }
 
@@ -130,6 +177,7 @@ const AiInterviewQuestions = () => {
   const [suggestedValue, setSuggestedValue] = useState('__none__');
   const [loading, setLoading] = useState(false);
   const [loadingChats, setLoadingChats] = useState(true);
+  const [deleteConfirmChatId, setDeleteConfirmChatId] = useState(null);
   const messagesEndRef = useRef(null);
 
   const loadChatsFromApi = async () => {
@@ -249,12 +297,13 @@ const AiInterviewQuestions = () => {
   };
 
   const deleteChat = async (e, chatId) => {
-    e.stopPropagation();
+    e?.stopPropagation?.();
     try {
       const res = await deleteQAChat(chatId);
       if (res.status === 'success') {
         setChats((prev) => prev.filter((c) => c.id !== chatId));
         if (selectedChatId === chatId) setSelectedChatId(null);
+        setDeleteConfirmChatId(null);
         toast({ title: 'Chat deleted' });
       } else {
         throw new Error(res.message || 'Failed to delete chat');
@@ -262,6 +311,11 @@ const AiInterviewQuestions = () => {
     } catch (err) {
       toast({ title: 'Error', description: err.message || 'Could not delete chat', variant: 'destructive' });
     }
+  };
+
+  const confirmDeleteChat = (e, chatId) => {
+    e.stopPropagation();
+    setDeleteConfirmChatId(chatId);
   };
 
   const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
@@ -296,8 +350,8 @@ const AiInterviewQuestions = () => {
               {chats.map((c) => (
                 <div
                   key={c.id}
-                  className={`flex items-center gap-1 rounded-lg text-sm transition-colors ${
-                    selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
+                  className={`flex items-center gap-1 rounded-lg border text-sm transition-colors ${
+                    selectedChatId === c.id ? 'border-primary/20 bg-primary/10' : 'border-border hover:bg-muted'
                   }`}
                 >
                   <button
@@ -313,7 +367,7 @@ const AiInterviewQuestions = () => {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                    onClick={(e) => deleteChat(e, c.id)}
+                    onClick={(e) => confirmDeleteChat(e, c.id)}
                     title="Delete chat"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -324,6 +378,29 @@ const AiInterviewQuestions = () => {
           )}
         </div>
       </div>
+
+      {/* Delete chat confirmation modal */}
+      <Dialog open={!!deleteConfirmChatId} onOpenChange={(open) => !open && setDeleteConfirmChatId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete chat?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this chat? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmChatId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteConfirmChatId && deleteChat(null, deleteConfirmChatId)}
+            >
+              Yes, delete chat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Main chat area */}
       <Card className="flex-1 min-w-0 flex flex-col max-h-[calc(100vh-40px)]">

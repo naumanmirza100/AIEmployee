@@ -11,13 +11,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3, Menu, ChevronDown, Check } from 'lucide-react';
+import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3, Menu, ChevronDown, Check, LayoutDashboard, BarChart2 } from 'lucide-react';
 import { 
   getJobDescriptions, 
   getInterviews, 
   getCVRecords,
   getEmailSettings,
-  getInterviewSettings 
+  getInterviewSettings,
+  getSavedPrompts,
+  isPromptOnDashboard,
 } from '@/services/recruitmentAgentService';
 import CVProcessing from './CVProcessing';
 import JobDescriptions from './JobDescriptions';
@@ -82,6 +84,8 @@ const RecruitmentDashboard = () => {
     activeJobs: 0,
     pendingInterviews: 0,
   });
+  const [dashboardPrompts, setDashboardPrompts] = useState([]);
+  const [loadingDashboardPrompts, setLoadingDashboardPrompts] = useState(false);
 
   // Get current tab info for mobile display
   const currentTab = TAB_ITEMS.find(item => item.value === activeTab) || TAB_ITEMS[0];
@@ -93,6 +97,25 @@ const RecruitmentDashboard = () => {
   useEffect(() => {
     fetchStats();
   }, []);
+
+  const fetchDashboardPrompts = async () => {
+    try {
+      setLoadingDashboardPrompts(true);
+      const res = await getSavedPrompts();
+      const list = res?.data || [];
+      setDashboardPrompts(list.filter(isPromptOnDashboard));
+    } catch (e) {
+      console.error('Error fetching dashboard prompts:', e);
+    } finally {
+      setLoadingDashboardPrompts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      fetchDashboardPrompts();
+    }
+  }, [activeTab]);
 
   const fetchStats = async () => {
     try {
@@ -284,6 +307,49 @@ const RecruitmentDashboard = () => {
                   </span>
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Dashboard graph cards - saved prompts added via "Add to dashboard" */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LayoutDashboard className="h-5 w-5" />
+                Dashboard Graphs
+              </CardTitle>
+              <CardDescription>
+                Your saved graphs. Click a card to open and view the graph in AI Graphs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingDashboardPrompts ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : dashboardPrompts.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">
+                  No graphs on dashboard yet. Save a prompt in AI Graphs and use &quot;Add to dashboard&quot; to see cards here.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {dashboardPrompts.map((prompt) => (
+                    <Button
+                      key={prompt.id}
+                      variant="outline"
+                      className="h-auto flex-col items-start p-4 text-left"
+                      onClick={() => navigate(`/recruitment/ai-graphs?runPromptId=${prompt.id}`)}
+                    >
+                      <BarChart2 className="h-5 w-5 mb-2 text-muted-foreground" />
+                      <span className="font-medium truncate w-full">{prompt.title}</span>
+                      {prompt.chart_type && (
+                        <Badge variant="secondary" className="mt-1 text-[10px]">
+                          {prompt.chart_type}
+                        </Badge>
+                      )}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

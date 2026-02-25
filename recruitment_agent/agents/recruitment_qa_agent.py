@@ -186,7 +186,13 @@ STRICT RULES:
 2. Do NOT add "Overview", "Qualification Settings", or "No jobs/candidates" unless the user explicitly asked for that (e.g. "what are my qualification settings?" or "give me an overview").
 3. For simple questions (e.g. "how many jobs?"): give a short direct answer with the exact number. Add nothing else unless the user asked for more.
 4. Use ONLY numbers and names from the data. No invented data.
-5. If the user asked only about jobs – answer only jobs. If only about candidates – answer only candidates. If only about settings – answer only settings."""
+5. If the user asked only about jobs – answer only jobs. If only about candidates – answer only candidates. If only about settings – answer only settings.
+
+FORMATTING (when your answer has multiple parts or a list):
+- Use markdown: ## for main heading, ### for subheading, #### for sub-subheading.
+- Use bullet lists with - or * for multiple items.
+- Use numbered lists (1. 2. 3.) when order or steps matter.
+- Keep headings short; put details in lists or short paragraphs under them."""
 
     def __init__(self, groq_client: Optional[GroqClient] = None):
         self.groq_client = groq_client or GroqClient()
@@ -267,7 +273,23 @@ STRICT RULES:
 - Recruitment best practices, what to assess, how to evaluate skills
 - Any recruitment or hiring-related knowledge
 
-Format your answers in clear markdown: use ## for main sections, bullet points, and tables when helpful.
+FORMAT YOUR ANSWER WITH CLEAR STRUCTURE (mandatory):
+1. Use ## for the main heading (e.g. "React Interview Questions").
+2. Use ### for subheadings (e.g. "Basic Questions", "Advanced Questions").
+3. Use #### for sub-subheadings if needed.
+4. Use bullet lists (- or *) for multiple items under each section.
+5. Use numbered lists (1. 2. 3.) for steps or ordered questions.
+6. Use tables only when comparing multiple columns (e.g. topic vs level).
+
+Example structure:
+## Main Topic
+### Subheading
+- Item one
+- Item two
+### Another subheading
+1. First step
+2. Second step
+
 Be practical and specific. Give actionable lists of questions recruiters can use."""
         try:
             return self.groq_client.send_prompt_text(
@@ -472,13 +494,15 @@ Be practical and specific. Give actionable lists of questions recruiters can use
 
 The user must see this EXACT first line (from database): "{direct_answer}"
 
-Your job: Answer ONLY what was asked. If the first line above fully answers the question, add NOTHING or at most one short relevant sentence. Do NOT add Overview, Qualification Settings, Job Details, or any other section. No extra lists or tables unless the user asked for them."""
+Your job: Answer ONLY what was asked. If the first line above fully answers the question, add NOTHING or at most one short relevant sentence. Do NOT add Overview, Qualification Settings, Job Details, or any other section. No extra lists or tables unless the user asked for them.
+If you add more content, format it with ## for heading, ### for subheading, and use - or * for list items."""
         else:
             prompt = f"""Question: "{question}"
 
 {context}
 
-INSTRUCTIONS: Answer ONLY this question. Use exact numbers from DIRECT FACTS in your first sentence. Do NOT add Overview, Qualification Settings, Job Details, or "No jobs/candidates" unless the user explicitly asked for that. If they asked "how many jobs" – give only the number and maybe job titles. If they asked "which jobs are active" – list only those. Nothing extra."""
+INSTRUCTIONS: Answer ONLY this question. Use exact numbers from DIRECT FACTS in your first sentence. Do NOT add Overview, Qualification Settings, Job Details, or "No jobs/candidates" unless the user explicitly asked for that. If they asked "how many jobs" – give only the number and maybe job titles. If they asked "which jobs are active" – list only those. Nothing extra.
+Format your answer with markdown: ## for main heading, ### for subheading, and use bullet lists (- or *) or numbered lists (1. 2. 3.) for multiple items."""
 
         try:
             llm_answer = self.groq_client.send_prompt_text(

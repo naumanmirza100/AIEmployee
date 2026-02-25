@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -41,8 +42,9 @@ import {
   RefreshCw,
   Copy,
   Download,
+  LayoutDashboard,
 } from 'lucide-react';
-import { generateGraph, getSavedPrompts, savePrompt, deletePrompt, toggleFavorite } from '@/services/recruitmentAgentService';
+import { generateGraph, getSavedPrompts, savePrompt, deletePrompt, toggleFavorite, toggleDashboardPrompt, isPromptOnDashboard } from '@/services/recruitmentAgentService';
 
 // Chart Components
 const SimpleBarChart = ({ data, colors, height = 250, title }) => {
@@ -330,6 +332,9 @@ const examplePrompts = [
 
 const AIGraphGenerator = () => {
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const runPromptIdFromUrl = searchParams.get('runPromptId');
+  const hasRunFromUrl = useRef(false);
   const [activeTab, setActiveTab] = useState('generate');
   
   // Generate tab state
@@ -355,6 +360,43 @@ const AIGraphGenerator = () => {
       fetchSavedPrompts();
     }
   }, [activeTab]);
+
+  // When opened with ?runPromptId=123 (e.g. from dashboard card), run that saved prompt and show graph
+  useEffect(() => {
+    const id = runPromptIdFromUrl ? parseInt(runPromptIdFromUrl, 10) : null;
+    if (!id || hasRunFromUrl.current) return;
+
+    const run = async () => {
+      hasRunFromUrl.current = true;
+      try {
+        const response = await getSavedPrompts();
+        const list = response?.data || [];
+        const savedPrompt = list.find((p) => p.id === id);
+        if (savedPrompt) {
+          setPrompt(savedPrompt.prompt);
+          setActiveTab('generate');
+          setGenerating(true);
+          setGeneratedChart(null);
+          setChartInsights('');
+          const genResponse = await generateGraph(savedPrompt.prompt);
+          if (genResponse.status === 'success') {
+            setGeneratedChart(genResponse.data.chart);
+            setChartInsights(genResponse.data.insights || '');
+          }
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('runPromptId');
+            return next;
+          });
+        }
+      } catch (e) {
+        console.error('Error running prompt from URL:', e);
+      } finally {
+        setGenerating(false);
+      }
+    };
+    run();
+  }, [runPromptIdFromUrl]);
 
   const fetchSavedPrompts = async () => {
     try {
@@ -522,6 +564,28 @@ const AIGraphGenerator = () => {
       }
     } catch (error) {
       console.error('Error toggling favorite:', error);
+    }
+  };
+
+  const handleToggleDashboard = async (savedPrompt) => {
+    try {
+      const response = await toggleDashboardPrompt(savedPrompt.id);
+      if (response.status === 'success' && response.data) {
+        setSavedPrompts(prev => prev.map(p =>
+          p.id === savedPrompt.id ? { ...p, tags: response.data.tags || p.tags } : p
+        ));
+        toast({
+          title: response.data.on_dashboard ? 'Added to dashboard' : 'Removed from dashboard',
+          description: response.data.on_dashboard ? 'Card will appear on recruitment dashboard' : '',
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling dashboard:', error);
+      toast({
+        title: 'Failed',
+        description: 'Could not update dashboard',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -800,6 +864,10 @@ const AIGraphGenerator = () => {
                                 <DropdownMenuItem onClick={() => handleCopyPrompt(savedPrompt.prompt)}>
                                   <Copy className="h-4 w-4 mr-2" />
                                   Copy prompt
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleToggleDashboard(savedPrompt)}>
+                                  <LayoutDashboard className="h-4 w-4 mr-2" />
+                                  {isPromptOnDashboard(savedPrompt) ? 'Remove from dashboard' : 'Add to dashboard'}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem 
