@@ -478,12 +478,12 @@ const Notifications = ({ onUnreadCountChange }) => {
         {/* Animated background for unread notifications */}
         {!n.is_read && !isHistory && (
           <motion.div
-            className="absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-transparent"
+            className="absolute inset-0 bg-gradient-to-r from-primary/0.5 via-transparent to-transparent"
             animate={{
-              x: ['0%', '100%', '0%'],
+              x: ['0%', '80%', '0%'],
             }}
             transition={{
-              duration: 3,
+              duration: 9,
               repeat: Infinity,
               ease: "linear"
             }}
@@ -926,28 +926,37 @@ const Notifications = ({ onUnreadCountChange }) => {
                 >
                   <div className="flex w-full rounded-lg bg-muted/40 p-1 gap-0.5">
                     <Button
-                      variant={filterType === 'all' ? 'default' : 'ghost'}
+                      variant="ghost"
                       size="sm"
                       onClick={() => setFilterType('all')}
-                      className="flex-1 gap-2 rounded-md shadow-sm"
+                      className={cn(
+                        'flex-1 gap-2 rounded-md shadow-sm',
+                        filterType === 'all' && 'bg-violet-500/30 hover:bg-violet-600 text-white hover:text-white'
+                      )}
                     >
                       <Bell className="h-4 w-4 shrink-0" />
                       All
                     </Button>
                     <Button
-                      variant={filterType === 'issues' ? 'default' : 'ghost'}
+                      variant="ghost"
                       size="sm"
                       onClick={() => setFilterType('issues')}
-                      className="flex-1 gap-2 rounded-md shadow-sm"
+                      className={cn(
+                        'flex-1 gap-2 rounded-md shadow-sm',
+                        filterType === 'issues' && 'bg-rose-400/20 hover:bg-rose-400/50 text-white hover:text-white'
+                      )}
                     >
                       <AlertCircle className="h-4 w-4 shrink-0" />
                       Issues
                     </Button>
                     <Button
-                      variant={filterType === 'opportunities' ? 'default' : 'ghost'}
+                      variant="ghost"
                       size="sm"
                       onClick={() => setFilterType('opportunities')}
-                      className="flex-1 gap-2 rounded-md shadow-sm"
+                      className={cn(
+                        'flex-1 gap-2 rounded-md shadow-sm',
+                        filterType === 'opportunities' && 'bg-emerald-500/50 hover:bg-emerald-600 text-white hover:text-white'
+                      )}
                     >
                       <TrendingUp className="h-4 w-4 shrink-0" />
                       Opportunities
