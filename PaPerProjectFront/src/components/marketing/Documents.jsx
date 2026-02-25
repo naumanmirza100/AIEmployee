@@ -421,8 +421,10 @@ const Documents = () => {
               size="lg" 
               className={cn(
                 "shrink-0 gap-2 transition-all",
-                createExpanded ? 'bg-secondary' : 'bg-primary hover:bg-primary/90'
-              )}
+                createExpanded ? 'bg-secondary hover:bg-secondary/90' : 'bg-primary/50 hover:bg-primary/30',
+                'shadow-none'
+              )
+            }
             >
               {createExpanded ? (
                 <>
@@ -747,7 +749,7 @@ const Documents = () => {
             ) : (
               <>
                 <div className="overflow-x-hidden">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm border-2  rounded-lg">
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="text-left font-semibold p-4 text-muted-foreground">Document</th>
