@@ -466,3 +466,100 @@ class FrontlineAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"Generate notification body failed: {e}", exc_info=True)
             return None
+
+    def generate_analytics_chart(self, prompt: str, analytics_data: Dict) -> Dict:
+        """
+        Generate a chart configuration from a natural language prompt (AI graph maker).
+        Uses only the provided analytics_data (controlled). Returns same shape as recruitment graph API:
+        { chart: { type, title, data, colors, color }, insights }.
+        """
+        import json as _json
+        try:
+            # Build data summary for LLM (no raw ticket content)
+            data = analytics_data
+            data_summary = f"""
+TICKETS DATA (support tickets for the company):
+- Total tickets: {data.get('total_tickets', 0)}
+- Auto-resolved count: {data.get('auto_resolved_count', 0)}
+- Average resolution time (hours): {data.get('avg_resolution_hours') or 'N/A'}
+
+By status (use tickets_by_status_obj for bar/pie): {_json.dumps(data.get('tickets_by_status_obj', {}))}
+By category (use tickets_by_category_obj for bar/pie): {_json.dumps(data.get('tickets_by_category_obj', {}))}
+By priority (use tickets_by_priority_obj for bar/pie): {_json.dumps(data.get('tickets_by_priority_obj', {}))}
+
+Over time - daily (use tickets_by_date_line for line/area): {_json.dumps((data.get('tickets_by_date_line') or [])[-20:])}
+"""
+            system = """You are an AI that generates chart configurations for a support/frontline dashboard.
+Use ONLY the data provided below. Return ONLY a valid JSON object (no markdown, no explanation).
+
+Output format:
+{
+  "chart_type": "bar" | "pie" | "line" | "area",
+  "title": "Chart title",
+  "data": either { "Label1": value1, "Label2": value2 } for bar/pie, OR [ { "label": "x", "value": y } ] for line/area,
+  "insights": "Brief 1-2 sentence insight",
+  "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+}
+
+Rules:
+- bar/pie: data must be object with string keys and number values.
+- line/area: data must be array of objects with "label" and "value" (use tickets_by_date_line for trends).
+- Only use data from the provided summary; do not invent numbers.
+- For "over time", "trend", "daily", "by date" use chart_type "line" or "area" and tickets_by_date_line.
+- For "by status", "by category", "by priority" use chart_type "bar" or "pie" and the corresponding _obj data.
+- If user asks "top N", limit to N items (sorted by value descending).
+- Sort bar/pie by value descending unless chronological order is requested.
+"""
+            user_msg = f"Generate a chart for: {prompt}"
+            raw = self._call_llm(
+                prompt=user_msg,
+                system_prompt=system + "\n\nAvailable data:\n" + data_summary,
+                temperature=0.2,
+                max_tokens=800,
+            )
+            raw = (raw or "").strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                start = 1 if lines[0].strip().startswith("```") else 0
+                end = len(lines)
+                for i in range(start, len(lines)):
+                    if lines[i].strip() == "```":
+                        end = i
+                        break
+                raw = "\n".join(lines[start:end])
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+            chart_config = _json.loads(raw)
+            chart_type = chart_config.get("chart_type") or "bar"
+            title = chart_config.get("title") or "Frontline Analytics"
+            chart_data = chart_config.get("data")
+            if chart_data is None:
+                chart_data = data.get("tickets_by_status_obj") or {"New": 0}
+            colors = chart_config.get("colors") or ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+            color = colors[0] if colors else "#3b82f6"
+            return {
+                "chart": {
+                    "type": chart_type,
+                    "title": title,
+                    "data": chart_data,
+                    "colors": colors,
+                    "color": color,
+                },
+                "insights": chart_config.get("insights") or "",
+            }
+        except Exception as e:
+            logger.warning(f"generate_analytics_chart failed: {e}", exc_info=True)
+            # Fallback: bar chart by status
+            status_obj = analytics_data.get("tickets_by_status_obj") or {}
+            if not status_obj and analytics_data.get("tickets_by_status"):
+                status_obj = {item.get("status", ""): item.get("count", 0) for item in analytics_data["tickets_by_status"]}
+            return {
+                "chart": {
+                    "type": "bar",
+                    "title": "Tickets by Status",
+                    "data": status_obj or {"No data": 0},
+                    "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"],
+                    "color": "#3b82f6",
+                },
+                "insights": f"Total tickets in range: {analytics_data.get('total_tickets', 0)}.",
+            }

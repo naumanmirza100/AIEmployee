@@ -54,7 +54,9 @@ import {
   LayoutDashboard,
   Monitor,
   Copy,
+  Sparkles,
 } from 'lucide-react';
+import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import {
   BarChart,
@@ -853,6 +855,7 @@ const FRONTLINE_TAB_ITEMS = [
   { value: 'notifications', label: 'Notifications', icon: Bell },
   { value: 'workflows', label: 'Workflows', icon: GitBranch },
   { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { value: 'ai-graphs', label: 'AI Graphs', icon: Sparkles },
 ];
 
 function FrontlineAnalyticsTab() {
@@ -2210,6 +2213,11 @@ const FrontlineDashboard = () => {
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="space-y-4 mt-4">
           <FrontlineAnalyticsTab />
+        </TabsContent>
+
+        {/* AI Graphs Tab */}
+        <TabsContent value="ai-graphs" className="space-y-4 mt-4">
+          <FrontlineAIGraphs />
         </TabsContent>
       </Tabs>
 

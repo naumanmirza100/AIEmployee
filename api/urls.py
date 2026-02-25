@@ -339,6 +339,11 @@ urlpatterns = [
     # Analytics
     re_path(r'^frontline/analytics/?$', frontline_agent.frontline_analytics, name='frontline_analytics'),  # GET
     re_path(r'^frontline/analytics/ask/?$', frontline_agent.frontline_nl_analytics, name='frontline_nl_analytics'),  # POST
+    re_path(r'^frontline/analytics/generate-graph/?$', frontline_agent.frontline_generate_graph, name='frontline_generate_graph'),  # POST
+    re_path(r'^frontline/analytics/graph-prompts/?$', frontline_agent.frontline_graph_prompts_list, name='frontline_graph_prompts_list'),  # GET
+    re_path(r'^frontline/analytics/graph-prompts/save/?$', frontline_agent.frontline_graph_prompts_save, name='frontline_graph_prompts_save'),  # POST
+    re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/delete/?$', frontline_agent.frontline_graph_prompts_delete, name='frontline_graph_prompts_delete'),  # DELETE
+    re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', frontline_agent.frontline_graph_prompts_favorite, name='frontline_graph_prompts_favorite'),  # PATCH
     re_path(r'^frontline/analytics/export/?$', frontline_agent.frontline_analytics_export, name='frontline_analytics_export'),  # GET
 
     # Module Purchase endpoints

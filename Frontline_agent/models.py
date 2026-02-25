@@ -408,3 +408,34 @@ class FrontlineQAChatMessage(models.Model):
     def __str__(self):
         return f"{self.role}: {self.content[:50]}..."
 
+
+class SavedGraphPrompt(models.Model):
+    """Saved AI graph prompts for Frontline analytics. Users can save, favorite, and reuse prompts."""
+    CHART_TYPE_CHOICES = [
+        ('bar', 'Bar Chart'),
+        ('pie', 'Pie Chart'),
+        ('line', 'Line Chart'),
+        ('area', 'Area Chart'),
+    ]
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='frontline_saved_graph_prompts',
+    )
+    title = models.CharField(max_length=255)
+    prompt = models.TextField()
+    chart_type = models.CharField(max_length=20, choices=CHART_TYPE_CHOICES, default='bar')
+    tags = models.JSONField(default=list, blank=True)
+    is_favorite = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-is_favorite', '-updated_at']
+        verbose_name = 'Saved Graph Prompt'
+        verbose_name_plural = 'Saved Graph Prompts'
+
+    def __str__(self):
+        return f"{self.title} ({self.chart_type})"
+

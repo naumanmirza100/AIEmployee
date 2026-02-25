@@ -29,6 +29,7 @@ from core.models import CompanyUser, Company
 from Frontline_agent.models import (
     Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
+    SavedGraphPrompt,
 )
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
@@ -1862,20 +1863,29 @@ def _compute_frontline_analytics_data(company_user, date_from_str=None, date_to_
     by_date = {}
     by_status = {}
     by_category = {}
+    by_priority = {}
     resolution_times = []
     for t in tickets:
         d = t.created_at.date().isoformat()
         by_date[d] = by_date.get(d, 0) + 1
         by_status[t.status] = by_status.get(t.status, 0) + 1
         by_category[t.category] = by_category.get(t.category, 0) + 1
+        by_priority[t.priority] = by_priority.get(t.priority, 0) + 1
         if t.resolved_at and t.created_at:
             delta = (t.resolved_at - t.created_at).total_seconds() / 3600
             resolution_times.append(delta)
     avg_resolution_hours = sum(resolution_times) / len(resolution_times) if resolution_times else None
+    # Line/area charts need [{ label, value }]; bar/pie can use object { "Label": count }
+    tickets_by_date_sorted = sorted(by_date.items())
     return {
-        'tickets_by_date': [{'date': k, 'count': v} for k, v in sorted(by_date.items())],
+        'tickets_by_date': [{'date': k, 'count': v} for k, v in tickets_by_date_sorted],
+        'tickets_by_date_line': [{'label': k, 'value': v} for k, v in tickets_by_date_sorted],
         'tickets_by_status': [{'status': k, 'count': v} for k, v in by_status.items()],
+        'tickets_by_status_obj': dict(by_status),
         'tickets_by_category': [{'category': k, 'count': v} for k, v in by_category.items()],
+        'tickets_by_category_obj': dict(by_category),
+        'tickets_by_priority': [{'priority': k, 'count': v} for k, v in by_priority.items()],
+        'tickets_by_priority_obj': dict(by_priority),
         'total_tickets': len(tickets),
         'avg_resolution_hours': round(avg_resolution_hours, 2) if avg_resolution_hours is not None else None,
         'auto_resolved_count': sum(1 for t in tickets if t.auto_resolved),
@@ -1921,6 +1931,145 @@ def frontline_nl_analytics(request):
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_generate_graph(request):
+    """AI Graph Maker: generate a chart from a natural language prompt (e.g. 'Show tickets by status as pie chart')."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        data = json.loads(request.body) if request.body else {}
+        prompt = (data.get('prompt') or '').strip()
+        if not prompt:
+            return Response(
+                {'status': 'error', 'message': 'prompt is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        date_from_str = data.get('date_from')
+        date_to_str = data.get('date_to')
+        analytics_data = _compute_frontline_analytics_data(company_user, date_from_str, date_to_str)
+        agent = FrontlineAgent(company_id=company.id)
+        result = agent.generate_analytics_chart(prompt, analytics_data)
+        return Response({
+            'status': 'success',
+            'data': {
+                'chart': result.get('chart'),
+                'insights': result.get('insights', ''),
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("frontline_generate_graph failed")
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_graph_prompts_list(request):
+    """Get all saved graph prompts for the current company user."""
+    try:
+        company_user = request.user
+        prompts = SavedGraphPrompt.objects.filter(company_user=company_user)
+        data = [{
+            'id': p.id,
+            'title': p.title,
+            'prompt': p.prompt,
+            'chart_type': p.chart_type,
+            'tags': p.tags or [],
+            'is_favorite': p.is_favorite,
+            'created_at': p.created_at.isoformat(),
+            'updated_at': p.updated_at.isoformat(),
+        } for p in prompts]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("frontline_graph_prompts_list failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_graph_prompts_save(request):
+    """Save a graph prompt. Body: title, prompt, tags (list), chart_type."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(getattr(request, 'data', None), dict) else (json.loads(request.body) if request.body else {})
+        title = (data.get('title') or '').strip()
+        prompt = (data.get('prompt') or '').strip()
+        tags = data.get('tags', [])
+        chart_type = data.get('chart_type', 'bar')
+        if not title:
+            return Response({'status': 'error', 'message': 'Title is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not prompt:
+            return Response({'status': 'error', 'message': 'Prompt is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        tags = list(tags) if isinstance(tags, list) else []
+        saved = SavedGraphPrompt.objects.create(
+            company_user=company_user,
+            title=title,
+            prompt=prompt,
+            tags=tags,
+            chart_type=chart_type,
+        )
+        return Response({
+            'status': 'success',
+            'message': 'Prompt saved.',
+            'data': {
+                'id': saved.id,
+                'title': saved.title,
+                'prompt': saved.prompt,
+                'chart_type': saved.chart_type,
+                'tags': saved.tags,
+                'is_favorite': saved.is_favorite,
+                'created_at': saved.created_at.isoformat(),
+            }
+        })
+    except Exception as e:
+        logger.exception("frontline_graph_prompts_save failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_graph_prompts_delete(request, prompt_id):
+    """Delete a saved graph prompt."""
+    try:
+        company_user = request.user
+        prompt = SavedGraphPrompt.objects.filter(id=prompt_id, company_user=company_user).first()
+        if not prompt:
+            return Response({'status': 'error', 'message': 'Prompt not found.'}, status=status.HTTP_404_NOT_FOUND)
+        prompt.delete()
+        return Response({'status': 'success', 'message': 'Prompt deleted.'})
+    except Exception as e:
+        logger.exception("frontline_graph_prompts_delete failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_graph_prompts_favorite(request, prompt_id):
+    """Toggle favorite. Body: is_favorite (bool)."""
+    try:
+        company_user = request.user
+        prompt = SavedGraphPrompt.objects.filter(id=prompt_id, company_user=company_user).first()
+        if not prompt:
+            return Response({'status': 'error', 'message': 'Prompt not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(getattr(request, 'data', None), dict) else (json.loads(request.body) if request.body else {})
+        is_fav = data.get('is_favorite')
+        if is_fav is not None:
+            prompt.is_favorite = bool(is_fav)
+            prompt.save(update_fields=['is_favorite', 'updated_at'])
+        return Response({'status': 'success', 'data': {'id': prompt.id, 'is_favorite': prompt.is_favorite}})
+    except Exception as e:
+        logger.exception("frontline_graph_prompts_favorite failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
