@@ -391,6 +391,49 @@ class FrontlineAgent(BaseAgent):
             logger.error(f"Generate analytics narrative failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'narrative': None}
 
+    def answer_analytics_question(self, question: str, analytics_data: Dict) -> Dict:
+        """
+        Answer a natural-language analytics question using only the provided analytics data (controlled).
+        Returns answer text and optional chart_type suggestion (by_date, by_status, by_category, or none).
+        """
+        try:
+            import json as _json
+            data_str = _json.dumps(analytics_data, indent=0)[:3500]
+            prompt = (
+                "The user asked a question about support ticket analytics. Answer using ONLY the data below. "
+                "Be concise (2-5 sentences). Use numbers from the data. If the question cannot be answered from the data, say so.\n\n"
+                "User question: " + (question or "").strip() + "\n\nAnalytics data:\n" + data_str + "\n\n"
+                "After your answer, on a new line write exactly one of: CHART: by_date | CHART: by_status | CHART: by_category | CHART: none "
+                "to suggest which chart would help (by_date=over time, by_status=by status, by_category=by category, none=no chart)."
+            )
+            raw = self._call_llm(
+                prompt=prompt,
+                system_prompt="You are a concise business analyst. Use only the provided data. Output the answer then CHART: <type>.",
+                temperature=0.2,
+                max_tokens=400,
+            )
+            raw = (raw or "").strip()
+            answer = raw
+            chart_type = None
+            if "CHART:" in raw:
+                idx = raw.rfind("CHART:")
+                answer = raw[:idx].strip()
+                rest = raw[idx:].strip()
+                for opt in ("by_date", "by_status", "by_category"):
+                    if opt in rest:
+                        chart_type = opt
+                        break
+            if not answer:
+                answer = "I couldn't generate an answer from the analytics data."
+            return {
+                'success': True,
+                'answer': answer,
+                'chart_type': chart_type,
+            }
+        except Exception as e:
+            logger.error(f"Answer analytics question failed: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'answer': None, 'chart_type': None}
+
     def generate_notification_body(self, context: Dict, template_body_hint: Optional[str] = None) -> Optional[str]:
         """
         Generate a short, empathetic notification email body from context (ticket, customer, etc.).

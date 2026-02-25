@@ -49,6 +49,8 @@ import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
+import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
+import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
 import ProtectedRoute from '@/components/common/ProtectedRoute';
 import PublicLayout from '@/components/layout/PublicLayout';
@@ -134,6 +136,10 @@ import { useTranslation } from 'react-i18next';
             <Route path="/frontline/dashboard" element={<FrontlineAgentPage />}>
               <Route index element={<FrontlineDashboard />} />
             </Route>
+
+            {/* Embeddable chat widget & web form (public, no auth) */}
+            <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />
+            <Route path="/embed/form" element={<FrontlineEmbedFormPage />} />
             
             {/* Module purchase Stripe success (public) */}
             <Route path="/module-purchase-success" element={<PublicLayout><ModulePurchaseSuccessPage /></PublicLayout>} />

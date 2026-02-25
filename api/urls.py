@@ -298,6 +298,10 @@ urlpatterns = [
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/delete/?$', marketing_agent.delete_notification, name='marketing_notification_delete'),  # POST
 
     # Frontline Agent endpoints (Company User)
+    # Public widget/form (no auth – use widget_key to identify company)
+    re_path(r'^frontline/public/qa/?$', frontline_agent.public_qa, name='frontline_public_qa'),  # POST
+    re_path(r'^frontline/public/submit/?$', frontline_agent.public_submit, name='frontline_public_submit'),  # POST
+    re_path(r'^frontline/widget-config/?$', frontline_agent.frontline_widget_config, name='frontline_widget_config'),  # GET
     re_path(r'^frontline/dashboard/?$', frontline_agent.frontline_dashboard, name='frontline_dashboard'),  # GET
     re_path(r'^frontline/documents/?$', frontline_agent.list_documents, name='frontline_list_documents'),  # GET
     re_path(r'^frontline/documents/upload/?$', frontline_agent.upload_document, name='frontline_upload_document'),  # POST
@@ -334,6 +338,7 @@ urlpatterns = [
     re_path(r'^frontline/workflows/executions/?$', frontline_agent.list_workflow_executions, name='frontline_list_workflow_executions'),  # GET
     # Analytics
     re_path(r'^frontline/analytics/?$', frontline_agent.frontline_analytics, name='frontline_analytics'),  # GET
+    re_path(r'^frontline/analytics/ask/?$', frontline_agent.frontline_nl_analytics, name='frontline_nl_analytics'),  # POST
     re_path(r'^frontline/analytics/export/?$', frontline_agent.frontline_analytics_export, name='frontline_analytics_export'),  # GET
 
     # Module Purchase endpoints

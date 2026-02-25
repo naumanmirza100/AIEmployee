@@ -20,6 +20,7 @@ import csv
 import re
 import os
 import hashlib
+import uuid
 from pathlib import Path
 
 from api.authentication import CompanyUserTokenAuthentication
@@ -217,6 +218,33 @@ def frontline_dashboard(request):
         logger.exception("frontline_dashboard failed")
         return Response(
             {'status': 'error', 'message': 'Failed to load frontline dashboard', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_widget_config(request):
+    """Get or create widget key and return embed URLs/snippet for chat widget and web form."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        if not company.frontline_widget_key:
+            company.frontline_widget_key = str(uuid.uuid4())
+            company.save(update_fields=['frontline_widget_key'])
+        key = company.frontline_widget_key
+        # Frontend builds full embed URLs from its own origin (window.location.origin)
+        return Response({
+            'status': 'success',
+            'data': {
+                'widget_key': key,
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("frontline_widget_config failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to load widget config', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -763,6 +791,128 @@ def _build_knowledge_gap_task_description(question: str, agent_response: str) ->
 3. Once the document is uploaded and indexed, the agent will be able to answer similar questions automatically.
 4. Close this ticket from the Ticket Tasks tab when done.
 """
+
+
+def _get_company_by_widget_key(request):
+    """Resolve company from widget_key in body (POST) or query/header. Returns (company, error_response) or (company, None)."""
+    widget_key = None
+    if request.method == 'POST' and request.body:
+        try:
+            data = json.loads(request.body)
+            widget_key = (data.get('widget_key') or data.get('key') or '').strip()
+        except Exception:
+            pass
+    if not widget_key:
+        widget_key = (request.GET.get('widget_key') or request.GET.get('key') or '').strip()
+    if not widget_key:
+        widget_key = (request.headers.get('X-Widget-Key') or request.headers.get('X-Frontline-Widget-Key') or '').strip()
+    if not widget_key:
+        return None, Response(
+            {'status': 'error', 'message': 'widget_key is required (body, query, or X-Widget-Key header)'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    company = Company.objects.filter(frontline_widget_key=widget_key, is_active=True).first()
+    if not company:
+        return None, Response(
+            {'status': 'error', 'message': 'Invalid widget key'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    return company, None
+
+
+@api_view(["POST"])
+@permission_classes([])
+@authentication_classes([])
+def public_qa(request):
+    """Public Knowledge Q&A for embedded chat/widget. No auth. Identify company by widget_key in body or X-Widget-Key header."""
+    try:
+        company, err = _get_company_by_widget_key(request)
+        if err:
+            return err
+        data = json.loads(request.body) if request.body else {}
+        question = (data.get('question') or '').strip()
+        if not question:
+            return Response(
+                {'status': 'error', 'message': 'question is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        scope_document_type = data.get('scope_document_type')
+        if scope_document_type is not None:
+            scope_document_type = [scope_document_type] if isinstance(scope_document_type, str) else list(scope_document_type)
+        scope_document_ids = data.get('scope_document_ids')
+        if scope_document_ids is not None:
+            scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
+        agent = FrontlineAgent(company_id=company.id)
+        result = agent.answer_question(
+            question,
+            company_id=company.id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+        )
+        return Response({
+            'status': 'success',
+            'data': result
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("public_qa failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to process question', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@permission_classes([])
+@authentication_classes([])
+def public_submit(request):
+    """Public web form submit (contact/support). Creates a ticket for the company. No auth. Body: widget_key, name, email, message."""
+    try:
+        company, err = _get_company_by_widget_key(request)
+        if err:
+            return err
+        data = json.loads(request.body) if request.body else {}
+        name = (data.get('name') or data.get('full_name') or '').strip()
+        email = (data.get('email') or '').strip()
+        message = (data.get('message') or data.get('question') or data.get('description') or '').strip()
+        if not message:
+            return Response(
+                {'status': 'error', 'message': 'message is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Assign ticket to first company user
+        company_user = CompanyUser.objects.filter(company=company, is_active=True).order_by('id').first()
+        if not company_user:
+            return Response(
+                {'status': 'error', 'message': 'Company has no users configured'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        user = _get_or_create_user_for_company_user(company_user)
+        title = f"Web form: {(name or email or 'Contact')[:50]}"
+        description = f"From: {name or 'N/A'}\nEmail: {email or 'N/A'}\n\n{message}"
+        ticket = Ticket.objects.create(
+            title=title,
+            description=description,
+            status='new',
+            priority='medium',
+            category='other',
+            company=company,
+            created_by=user,
+            assigned_to=user,
+            auto_resolved=False,
+        )
+        _run_notification_triggers(company.id, 'ticket_created', ticket)
+        _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
+        return Response({
+            'status': 'success',
+            'message': 'Submitted successfully. We will get back to you soon.',
+            'data': {'ticket_id': ticket.id}
+        }, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception("public_submit failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to submit', 'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(["POST"])
@@ -1694,6 +1844,85 @@ def list_workflow_executions(request):
 
 # ---------- Advanced Analytics & Export ----------
 
+def _compute_frontline_analytics_data(company_user, date_from_str=None, date_to_str=None):
+    """Compute analytics data for the company user's tickets (same logic as frontline_analytics). Returns dict."""
+    user = _get_or_create_user_for_company_user(company_user)
+    qs = Ticket.objects.filter(created_by=user)
+    if date_from_str:
+        try:
+            qs = qs.filter(created_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    if date_to_str:
+        try:
+            qs = qs.filter(created_at__date__lte=datetime.strptime(date_to_str, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    tickets = list(qs)
+    by_date = {}
+    by_status = {}
+    by_category = {}
+    resolution_times = []
+    for t in tickets:
+        d = t.created_at.date().isoformat()
+        by_date[d] = by_date.get(d, 0) + 1
+        by_status[t.status] = by_status.get(t.status, 0) + 1
+        by_category[t.category] = by_category.get(t.category, 0) + 1
+        if t.resolved_at and t.created_at:
+            delta = (t.resolved_at - t.created_at).total_seconds() / 3600
+            resolution_times.append(delta)
+    avg_resolution_hours = sum(resolution_times) / len(resolution_times) if resolution_times else None
+    return {
+        'tickets_by_date': [{'date': k, 'count': v} for k, v in sorted(by_date.items())],
+        'tickets_by_status': [{'status': k, 'count': v} for k, v in by_status.items()],
+        'tickets_by_category': [{'category': k, 'count': v} for k, v in by_category.items()],
+        'total_tickets': len(tickets),
+        'avg_resolution_hours': round(avg_resolution_hours, 2) if avg_resolution_hours is not None else None,
+        'auto_resolved_count': sum(1 for t in tickets if t.auto_resolved),
+    }
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_nl_analytics(request):
+    """Natural language analytics: ask a question in plain language, get an answer + optional chart. Controlled (only precomputed data)."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        data = json.loads(request.body) if request.body else {}
+        question = (data.get('question') or '').strip()
+        if not question:
+            return Response(
+                {'status': 'error', 'message': 'question is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        date_from_str = data.get('date_from') or request.GET.get('date_from')
+        date_to_str = data.get('date_to') or request.GET.get('date_to')
+        analytics_data = _compute_frontline_analytics_data(company_user, date_from_str, date_to_str)
+        agent = FrontlineAgent(company_id=company.id)
+        result = agent.answer_analytics_question(question, analytics_data)
+        if not result.get('success'):
+            return Response(
+                {'status': 'error', 'message': result.get('error', 'Failed to answer')},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        return Response({
+            'status': 'success',
+            'data': {
+                'answer': result.get('answer'),
+                'chart_type': result.get('chart_type'),
+                'analytics_data': analytics_data,
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("frontline_nl_analytics failed")
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1702,44 +1931,9 @@ def frontline_analytics(request):
     try:
         company_user = request.user
         company = company_user.company
-        user = _get_or_create_user_for_company_user(company_user)
         date_from_str = request.GET.get('date_from')
         date_to_str = request.GET.get('date_to')
-        from django.db.models.functions import TruncDate
-        from django.db.models import Count
-        qs = Ticket.objects.filter(created_by=user)
-        if date_from_str:
-            try:
-                qs = qs.filter(created_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
-            except ValueError:
-                pass
-        if date_to_str:
-            try:
-                qs = qs.filter(created_at__date__lte=datetime.strptime(date_to_str, '%Y-%m-%d').date())
-            except ValueError:
-                pass
-        tickets = list(qs)
-        by_date = {}
-        by_status = {}
-        by_category = {}
-        resolution_times = []
-        for t in tickets:
-            d = t.created_at.date().isoformat()
-            by_date[d] = by_date.get(d, 0) + 1
-            by_status[t.status] = by_status.get(t.status, 0) + 1
-            by_category[t.category] = by_category.get(t.category, 0) + 1
-            if t.resolved_at and t.created_at:
-                delta = (t.resolved_at - t.created_at).total_seconds() / 3600
-                resolution_times.append(delta)
-        avg_resolution_hours = sum(resolution_times) / len(resolution_times) if resolution_times else None
-        data = {
-            'tickets_by_date': [{'date': k, 'count': v} for k, v in sorted(by_date.items())],
-            'tickets_by_status': [{'status': k, 'count': v} for k, v in by_status.items()],
-            'tickets_by_category': [{'category': k, 'count': v} for k, v in by_category.items()],
-            'total_tickets': len(tickets),
-            'avg_resolution_hours': round(avg_resolution_hours, 2) if avg_resolution_hours is not None else None,
-            'auto_resolved_count': sum(1 for t in tickets if t.auto_resolved),
-        }
+        data = _compute_frontline_analytics_data(company_user, date_from_str, date_to_str)
         if request.GET.get('narrative') == '1':
             try:
                 agent = FrontlineAgent(company_id=company.id)

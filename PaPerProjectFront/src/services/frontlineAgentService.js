@@ -20,6 +20,19 @@ export const getFrontlineDashboard = async () => {
 };
 
 /**
+ * Get widget key and build embed snippet (frontend builds URLs from window.location.origin)
+ */
+export const getFrontlineWidgetConfig = async () => {
+  try {
+    const response = await companyApi.get('/frontline/widget-config');
+    return response;
+  } catch (error) {
+    console.error('Get frontline widget config error:', error);
+    throw error;
+  }
+};
+
+/**
  * List documents
  */
 export const listDocuments = async (params = {}) => {
@@ -326,6 +339,15 @@ export const getFrontlineAnalytics = async (dateFrom, dateTo, options = {}) => {
   const response = await companyApi.get(`/frontline/analytics?${params.toString()}`);
   return response;
 };
+/** Ask analytics in natural language (e.g. "How many tickets were resolved last week?"). Returns answer + optional chart_type + analytics_data. */
+export const askFrontlineAnalytics = async (question, dateFrom, dateTo) => {
+  const response = await companyApi.post('/frontline/analytics/ask', {
+    question: question.trim(),
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+  return response;
+};
 /** Download analytics export as CSV (uses auth token from localStorage). */
 export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
   const params = new URLSearchParams();
@@ -346,6 +368,7 @@ export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
 
 export default {
   getFrontlineDashboard,
+  getFrontlineWidgetConfig,
   listDocuments,
   getDocument,
   uploadDocument,
@@ -376,6 +399,7 @@ export default {
   executeWorkflow,
   listWorkflowExecutions,
   getFrontlineAnalytics,
+  askFrontlineAnalytics,
   downloadFrontlineAnalyticsExport,
 };
 

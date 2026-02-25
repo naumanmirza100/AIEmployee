@@ -52,6 +52,8 @@ import {
   Menu,
   Check,
   LayoutDashboard,
+  Monitor,
+  Copy,
 } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import {
@@ -846,6 +848,7 @@ const FRONTLINE_TAB_ITEMS = [
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
   { value: 'documents', label: 'Documents', icon: FileText },
   { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare },
+  { value: 'widget', label: 'Chat widget', icon: Monitor },
   { value: 'tickets', label: 'Tickets', icon: Ticket },
   { value: 'notifications', label: 'Notifications', icon: Bell },
   { value: 'workflows', label: 'Workflows', icon: GitBranch },
@@ -859,6 +862,9 @@ function FrontlineAnalyticsTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [nlQuestion, setNlQuestion] = useState('');
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlResult, setNlResult] = useState(null);
   const load = async () => {
     setLoading(true);
     try {
@@ -882,13 +888,117 @@ function FrontlineAnalyticsTab() {
       setExporting(false);
     }
   };
+  const handleAskAnalytics = async (e) => {
+    e?.preventDefault?.();
+    const q = nlQuestion.trim();
+    if (!q) {
+      toast({ title: 'Error', description: 'Enter a question', variant: 'destructive' });
+      return;
+    }
+    setNlLoading(true);
+    setNlResult(null);
+    try {
+      const res = await frontlineAgentService.askFrontlineAnalytics(q, dateFrom || undefined, dateTo || undefined);
+      if (res.status === 'success' && res.data) {
+        setNlResult(res.data);
+      } else {
+        throw new Error(res.message || 'Failed to get answer');
+      }
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Ask failed', variant: 'destructive' });
+    } finally {
+      setNlLoading(false);
+    }
+  };
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Analytics</CardTitle>
-        <CardDescription>Tickets trends and export. Set date range and load.</CardDescription>
+        <CardDescription>Tickets trends and export. Ask in plain language or set date range and load.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* NL analytics - ask in plain language */}
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+          <Label className="text-sm font-medium">Ask in plain language</Label>
+          <p className="text-xs text-muted-foreground">e.g. &quot;How many tickets were resolved?&quot; or &quot;Breakdown by status&quot;</p>
+          <form onSubmit={handleAskAnalytics} className="flex flex-wrap gap-2">
+            <Input
+              placeholder="Ask a question about your tickets..."
+              value={nlQuestion}
+              onChange={(e) => setNlQuestion(e.target.value)}
+              disabled={nlLoading}
+              className="max-w-md"
+            />
+            <Button type="submit" disabled={nlLoading}>
+              {nlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {nlLoading ? 'Asking...' : 'Ask'}
+            </Button>
+          </form>
+          {nlResult && (
+            <div className="mt-3 space-y-3">
+              <div className="p-3 rounded-lg bg-background border text-sm whitespace-pre-wrap">{nlResult.answer}</div>
+              {nlResult.chart_type && nlResult.analytics_data && (
+                <div className="mt-2">
+                  {nlResult.chart_type === 'by_date' && (nlResult.analytics_data.tickets_by_date || []).length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Tickets over time</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={nlResult.analytics_data.tickets_by_date} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                            <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                            <Tooltip contentStyle={{ borderRadius: 8 }} />
+                            <Bar dataKey="count" name="Tickets" fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+                  )}
+                  {nlResult.chart_type === 'by_status' && (nlResult.analytics_data.tickets_by_status || []).length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">By status</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={nlResult.analytics_data.tickets_by_status} layout="vertical" margin={{ top: 8, right: 8, left: 60, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                            <YAxis type="category" dataKey="status" width={56} tick={{ fontSize: 11 }} />
+                            <Tooltip contentStyle={{ borderRadius: 8 }} />
+                            <Bar dataKey="count" name="Tickets" fill={CHART_COLORS[1]} radius={[0, 4, 4, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+                  )}
+                  {nlResult.chart_type === 'by_category' && (nlResult.analytics_data.tickets_by_category || []).length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">By category</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={nlResult.analytics_data.tickets_by_category} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                            <XAxis dataKey="category" tick={{ fontSize: 11 }} />
+                            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                            <Tooltip contentStyle={{ borderRadius: 8 }} />
+                            <Bar dataKey="count" name="Tickets" fill={CHART_COLORS[2]} radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
             <Label>From</Label>
@@ -1040,6 +1150,9 @@ const FrontlineDashboard = () => {
   const [qaScopeDocumentIds, setQaScopeDocumentIds] = useState([]);
   const [qaDocumentsList, setQaDocumentsList] = useState([]); // full list for "Specific documents" selector
   const [qaDocumentsLoading, setQaDocumentsLoading] = useState(false);
+  // Chat widget tab
+  const [widgetKey, setWidgetKey] = useState('');
+  const [widgetConfigLoading, setWidgetConfigLoading] = useState(false);
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
@@ -1084,6 +1197,20 @@ const FrontlineDashboard = () => {
       mediaQuery.removeEventListener('change', checkDarkMode);
     };
   }, []);
+
+  // Load widget config when Chat widget tab is selected
+  useEffect(() => {
+    if (activeTab !== 'widget') return;
+    let cancelled = false;
+    setWidgetConfigLoading(true);
+    frontlineAgentService.getFrontlineWidgetConfig()
+      .then((res) => {
+        if (!cancelled && res?.status === 'success' && res?.data?.widget_key) setWidgetKey(res.data.widget_key);
+      })
+      .catch(() => { if (!cancelled) setWidgetKey(''); })
+      .finally(() => { if (!cancelled) setWidgetConfigLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab]);
 
   // Load document list for Q&A scope when user selects "Specific documents"
   useEffect(() => {
@@ -1858,6 +1985,82 @@ const FrontlineDashboard = () => {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Chat widget & web form Tab */}
+        <TabsContent value="widget" className="space-y-4 mt-4">
+          <Card className="w-full min-w-0">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Monitor className="h-5 w-5" />
+                Chat widget &amp; web form
+              </CardTitle>
+              <CardDescription>
+                Embed a chat widget or contact form on your website so visitors get support where they are. No login required.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {widgetConfigLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Loading...
+                </div>
+              ) : widgetKey ? (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-muted-foreground">Your widget key</Label>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono break-all">{widgetKey}</code>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => {
+                          navigator.clipboard.writeText(widgetKey);
+                          toast({ title: 'Copied', description: 'Widget key copied to clipboard' });
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-muted-foreground">Embed on your site (floating chat button)</Label>
+                    <p className="text-xs text-muted-foreground mb-1">Add this script before &lt;/body&gt;. Replace the origin with your app URL if different.</p>
+                    <pre className="rounded bg-muted p-3 text-xs overflow-x-auto relative">
+                      <code>{`<script src="${typeof window !== 'undefined' ? window.location.origin : ''}/frontline-widget.js" data-key="${widgetKey}" data-base="${typeof window !== 'undefined' ? window.location.origin : ''}`}{'"></script>'}</code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-2 right-2 h-8 w-8"
+                        onClick={() => {
+                          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                          const snippet = `<script src="${origin}/frontline-widget.js" data-key="${widgetKey}" data-base="${origin}"></script>`;
+                          navigator.clipboard.writeText(snippet);
+                          toast({ title: 'Copied', description: 'Embed code copied to clipboard' });
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </pre>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`${typeof window !== 'undefined' ? window.location.origin : ''}/embed/chat?key=${widgetKey}`} target="_blank" rel="noopener noreferrer">
+                        Open chat page
+                      </a>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`${typeof window !== 'undefined' ? window.location.origin : ''}/embed/form?key=${widgetKey}`} target="_blank" rel="noopener noreferrer">
+                        Open web form
+                      </a>
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Could not load widget key. Try again later.</p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Tickets Tab */}

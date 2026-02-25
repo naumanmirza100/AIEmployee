@@ -500,6 +500,8 @@ class Company(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Public key for embedding chat widget / web form on company's site (no login required)
+    frontline_widget_key = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
     
     class Meta:
         verbose_name_plural = 'Companies'
