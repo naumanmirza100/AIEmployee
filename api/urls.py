@@ -297,6 +297,12 @@ urlpatterns = [
     re_path(r'^marketing/notifications/monitor/?$', marketing_agent.proactive_notification_monitor, name='marketing_notifications_monitor'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/read/?$', marketing_agent.mark_notification_read, name='marketing_notification_read'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/delete/?$', marketing_agent.delete_notification, name='marketing_notification_delete'),  # POST
+    re_path(r'^marketing/ai/generate-graph/?$', marketing_agent.api_marketing_generate_graph, name='marketing_generate_graph'),  # POST
+    re_path(r'^marketing/ai/graph-prompts/?$', marketing_agent.api_marketing_get_saved_prompts, name='marketing_get_saved_prompts'),  # GET
+    re_path(r'^marketing/ai/graph-prompts/save/?$', marketing_agent.api_marketing_save_prompt, name='marketing_save_prompt'),  # POST
+    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/delete/?$', marketing_agent.api_marketing_delete_prompt, name='marketing_delete_prompt'),  # DELETE
+    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', marketing_agent.api_marketing_toggle_prompt_favorite, name='marketing_toggle_prompt_favorite'),  # PATCH
+    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/toggle-dashboard/?$', marketing_agent.api_marketing_toggle_prompt_dashboard, name='marketing_toggle_prompt_dashboard'),  # PATCH
 
     # Frontline Agent endpoints (Company User)
     re_path(r'^frontline/dashboard/?$', frontline_agent.frontline_dashboard, name='frontline_dashboard'),  # GET
