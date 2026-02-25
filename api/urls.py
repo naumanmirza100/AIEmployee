@@ -253,7 +253,8 @@ urlpatterns = [
     re_path(r'^recruitment/ai/graph-prompts/save/?$', recruitment_agent.api_save_prompt, name='recruitment_save_prompt'),  # POST
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/delete/?$', recruitment_agent.api_delete_prompt, name='recruitment_delete_prompt'),  # DELETE
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', recruitment_agent.api_toggle_prompt_favorite, name='recruitment_toggle_prompt_favorite'),  # PATCH
-    
+    re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/toggle-dashboard/?$', recruitment_agent.api_toggle_prompt_dashboard, name='recruitment_toggle_prompt_dashboard'),  # PATCH
+
     # Marketing Agent endpoints (Company User)
     re_path(r'^marketing/dashboard/?$', marketing_agent.marketing_dashboard, name='marketing_dashboard'),  # GET
     re_path(r'^marketing/campaigns/?$', marketing_agent.list_campaigns, name='marketing_list_campaigns'),  # GET

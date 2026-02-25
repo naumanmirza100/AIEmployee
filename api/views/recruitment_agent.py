@@ -3115,3 +3115,53 @@ def api_toggle_prompt_favorite(request, prompt_id):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+DASHBOARD_TAG = 'dashboard'
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_toggle_prompt_dashboard(request, prompt_id):
+    """
+    Toggle dashboard visibility for a saved prompt (add/remove 'dashboard' tag).
+    PATCH: No body required. Toggles whether prompt appears on recruitment dashboard.
+    """
+    try:
+        from recruitment_agent.models import SavedGraphPrompt
+        company_user = request.user
+
+        try:
+            prompt = SavedGraphPrompt.objects.get(id=prompt_id, company_user=company_user)
+        except SavedGraphPrompt.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        tags = list(prompt.tags) if isinstance(prompt.tags, list) else []
+        if DASHBOARD_TAG in tags:
+            tags = [t for t in tags if t != DASHBOARD_TAG]
+            on_dashboard = False
+        else:
+            tags = tags + [DASHBOARD_TAG]
+            on_dashboard = True
+        prompt.tags = tags
+        prompt.save(update_fields=['tags', 'updated_at'])
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': prompt.id,
+                'tags': prompt.tags,
+                'on_dashboard': on_dashboard,
+            }
+        })
+
+    except Exception as e:
+        logger.exception("api_toggle_prompt_dashboard error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
