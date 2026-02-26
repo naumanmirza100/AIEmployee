@@ -456,12 +456,14 @@ You must respond with ONLY a valid JSON object (no markdown, no explanation) wit
     "title": "Chart title",
     "data": {{ "label1": value1, "label2": value2 }} for bar/pie OR [{{ "label": "x", "value": y }}] for line/area,
     "insights": "Brief insight about the data (1-2 sentences)",
-    "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+    "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"],
+    "orientation": "horizontal" | "vertical"  (only for bar charts; omit for other types)
 }}
 
 Rules:
 1. For pie charts: use object format {{ "Category": count }}
 2. For bar charts: use object format {{ "Category": count }}
+2a. For bar chart orientation: use "vertical" when user asks for "vertical bar", "vertical histogram", "column chart", or "histogram" (without "horizontal"); use "horizontal" when user asks for "horizontal bar" or for generic "bar chart" without specifying vertical
 3. For line/area charts: use array format [{{ "label": "date/period", "value": count }}]
 4. Only include categories with count > 0
 5. Use the actual data values from the database
@@ -571,15 +573,18 @@ INTERVIEW SETTINGS (Time Slots Configuration):
                 chart_config['data'] = {}
             if 'colors' not in chart_config:
                 chart_config['colors'] = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
-            
+            # Bar orientation: respect user request (vertical/horizontal)
+            chart_out = {
+                'type': chart_config['chart_type'],
+                'title': chart_config['title'],
+                'data': chart_config['data'],
+                'colors': chart_config.get('colors', ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']),
+                'color': chart_config.get('colors', ['#3b82f6'])[0],
+            }
+            if chart_config['chart_type'] == 'bar':
+                chart_out['orientation'] = chart_config.get('orientation', 'horizontal')
             return {
-                'chart': {
-                    'type': chart_config['chart_type'],
-                    'title': chart_config['title'],
-                    'data': chart_config['data'],
-                    'colors': chart_config.get('colors', ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']),
-                    'color': chart_config.get('colors', ['#3b82f6'])[0],
-                },
+                'chart': chart_out,
                 'insights': chart_config.get('insights', ''),
                 'raw_data': recruitment_data,  # Include raw data for debugging
             }
@@ -643,16 +648,19 @@ INTERVIEW SETTINGS (Time Slots Configuration):
         
         # Active vs Inactive jobs
         if 'active' in prompt_lower and 'inactive' in prompt_lower and 'job' in prompt_lower:
+            # Use vertical bar when user asks for vertical/histogram/column
+            want_vertical = any(w in prompt_lower for w in ['vertical', 'histogram', 'column chart', 'column'])
             return {
                 'chart': {
-                    'type': 'pie',
+                    'type': 'bar',
                     'title': 'Active vs Inactive Jobs',
                     'data': {
-                        'Active Jobs': data['jobs']['active'],
-                        'Inactive Jobs': data['jobs']['inactive'],
+                        'Active': data['jobs']['active'],
+                        'Inactive': data['jobs']['inactive'],
                     },
                     'colors': ['#10b981', '#ef4444'],
                     'color': '#10b981',
+                    'orientation': 'vertical' if want_vertical else 'horizontal',
                 },
                 'insights': f"You have {data['jobs']['active']} active and {data['jobs']['inactive']} inactive job positions.",
             }
