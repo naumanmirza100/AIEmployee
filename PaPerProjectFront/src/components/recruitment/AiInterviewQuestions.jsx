@@ -696,18 +696,20 @@ const AiInterviewQuestions = () => {
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-                <span className="text-sm text-muted-foreground font-medium shrink-0">Try:</span>
-                {(inputMode === 'graph' ? SUGGESTED_GRAPH_QUESTIONS : SUGGESTED_SEARCH_QUESTIONS).map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setQuestion(q)}
-                    className="text-sm text-muted-foreground hover:text-foreground text-left border border-transparent hover:border-border rounded-md px-2.5 py-1 transition-colors"
-                  >
-                    {q.length > 40 ? q.slice(0, 40) + '…' : q}
-                  </button>
-                ))}
+              <div className="space-y-2">
+                <span className="text-xs text-muted-foreground font-medium">Try these examples</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(inputMode === 'graph' ? SUGGESTED_GRAPH_QUESTIONS : SUGGESTED_SEARCH_QUESTIONS).map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => setQuestion(q)}
+                      className="text-xs text-foreground bg-muted/80 hover:bg-muted border border-border hover:border-border rounded-md px-2 py-1 text-left transition-colors"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </form>
