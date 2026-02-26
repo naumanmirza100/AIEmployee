@@ -20,6 +20,19 @@ export const getFrontlineDashboard = async () => {
 };
 
 /**
+ * Get widget key and build embed snippet (frontend builds URLs from window.location.origin)
+ */
+export const getFrontlineWidgetConfig = async () => {
+  try {
+    const response = await companyApi.get('/frontline/widget-config');
+    return response;
+  } catch (error) {
+    console.error('Get frontline widget config error:', error);
+    throw error;
+  }
+};
+
+/**
  * List documents
  */
 export const listDocuments = async (params = {}) => {
@@ -326,6 +339,49 @@ export const getFrontlineAnalytics = async (dateFrom, dateTo, options = {}) => {
   const response = await companyApi.get(`/frontline/analytics?${params.toString()}`);
   return response;
 };
+/** Ask analytics in natural language (e.g. "How many tickets were resolved last week?"). Returns answer + optional chart_type + analytics_data. */
+export const askFrontlineAnalytics = async (question, dateFrom, dateTo) => {
+  const response = await companyApi.post('/frontline/analytics/ask', {
+    question: question.trim(),
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+  return response;
+};
+
+/** AI Graph Maker: generate a chart from a natural language prompt. Returns { chart: { type, title, data, colors, color }, insights }. */
+export const generateFrontlineGraph = async (prompt, dateFrom, dateTo) => {
+  const response = await companyApi.post('/frontline/analytics/generate-graph', {
+    prompt: prompt.trim(),
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+  return response;
+};
+
+/** Get saved graph prompts */
+export const getFrontlineSavedGraphPrompts = async () => {
+  const response = await companyApi.get('/frontline/analytics/graph-prompts');
+  return response;
+};
+
+/** Save a graph prompt. Body: { title, prompt, tags?, chart_type? } */
+export const saveFrontlineGraphPrompt = async (payload) => {
+  const response = await companyApi.post('/frontline/analytics/graph-prompts/save', payload);
+  return response;
+};
+
+/** Delete a saved graph prompt */
+export const deleteFrontlineGraphPrompt = async (promptId) => {
+  const response = await companyApi.delete(`/frontline/analytics/graph-prompts/${promptId}/delete`);
+  return response;
+};
+
+/** Toggle favorite on a saved graph prompt. Body: { is_favorite: boolean } */
+export const toggleFrontlineGraphPromptFavorite = async (promptId, isFavorite) => {
+  const response = await companyApi.patch(`/frontline/analytics/graph-prompts/${promptId}/favorite`, { is_favorite: isFavorite });
+  return response;
+};
 /** Download analytics export as CSV (uses auth token from localStorage). */
 export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
   const params = new URLSearchParams();
@@ -346,6 +402,7 @@ export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
 
 export default {
   getFrontlineDashboard,
+  getFrontlineWidgetConfig,
   listDocuments,
   getDocument,
   uploadDocument,
@@ -376,6 +433,12 @@ export default {
   executeWorkflow,
   listWorkflowExecutions,
   getFrontlineAnalytics,
+  askFrontlineAnalytics,
+  generateFrontlineGraph,
+  getFrontlineSavedGraphPrompts,
+  saveFrontlineGraphPrompt,
+  deleteFrontlineGraphPrompt,
+  toggleFrontlineGraphPromptFavorite,
   downloadFrontlineAnalyticsExport,
 };
 
