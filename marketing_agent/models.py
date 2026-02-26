@@ -876,6 +876,69 @@ def create_campaign_contact(sender, instance, action, pk_set, **kwargs):
                 )
 
 
+class SavedGraphPrompt(models.Model):
+    """
+    Model to store saved AI graph generation prompts for the marketing dashboard.
+    Users can save, favorite, and reuse prompts for generating visualizations.
+    """
+    CHART_TYPE_CHOICES = [
+        ('bar', 'Bar Chart'),
+        ('pie', 'Pie Chart'),
+        ('line', 'Line Chart'),
+        ('area', 'Area Chart'),
+        ('scatter', 'Scatter Plot'),
+        ('heatmap', 'Heat Map'),
+    ]
+
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='marketing_saved_graph_prompts',
+        help_text='User who saved this prompt (company user mapped to User)',
+    )
+    title = models.CharField(max_length=255, help_text='User-friendly title for the prompt')
+    prompt = models.TextField(help_text='The natural language prompt for graph generation')
+    chart_type = models.CharField(
+        max_length=20,
+        choices=CHART_TYPE_CHOICES,
+        default='bar',
+        help_text='Type of chart this prompt generates'
+    )
+    tags = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Tags for categorizing and searching prompts (e.g. dashboard)'
+    )
+    is_favorite = models.BooleanField(
+        default=False,
+        help_text='Whether this prompt is marked as favorite'
+    )
+    run_count = models.IntegerField(
+        default=0,
+        help_text='Number of times this prompt has been run'
+    )
+    last_run_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Last time this prompt was executed'
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_marketing_agent_savedgraphprompt'
+        ordering = ['-is_favorite', '-updated_at']
+        verbose_name = 'Marketing Saved Graph Prompt'
+        verbose_name_plural = 'Marketing Saved Graph Prompts'
+        indexes = [
+            models.Index(fields=['created_by', 'is_favorite']),
+            models.Index(fields=['created_by', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.chart_type})"
+
+
 @receiver(pre_save, sender=Campaign)
 def sync_sequence_status_with_campaign(sender, instance, **kwargs):
     """Sync email sequence status with campaign status"""

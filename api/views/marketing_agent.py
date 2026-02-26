@@ -2718,3 +2718,258 @@ def test_email_account(request, account_id):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
+
+# ============================================================================
+# AI Graph Generator APIs (Marketing)
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_marketing_generate_graph(request):
+    """
+    Generate a graph/chart from a natural language prompt using AI.
+    POST: {"prompt": "Show campaigns by status as a pie chart"}
+    Returns: {"status": "success", "data": {"chart": {...}, "insights": "..."}}
+    """
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        data = request.data if isinstance(request.data, dict) else {}
+        prompt = data.get('prompt', '').strip()
+
+        if not prompt:
+            return Response({
+                'status': 'error',
+                'message': 'Please provide a prompt describing the graph you want to generate.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from marketing_agent.agents.graph_generator_agent import GraphGeneratorAgent
+
+        graph_agent = GraphGeneratorAgent(user=user)
+        result = graph_agent.generate_graph(prompt)
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'chart': result['chart'],
+                'insights': result.get('insights', ''),
+            }
+        })
+    except Exception as e:
+        logger.exception("api_marketing_generate_graph error")
+        return Response({
+            'status': 'error',
+            'message': _normalize_error_message(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_marketing_get_saved_prompts(request):
+    """Get all saved graph prompts for the current company user (mapped to User)."""
+    try:
+        from marketing_agent.models import SavedGraphPrompt
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+
+        prompts = SavedGraphPrompt.objects.filter(created_by=user)
+
+        data = [{
+            'id': p.id,
+            'title': p.title,
+            'prompt': p.prompt,
+            'chart_type': p.chart_type,
+            'tags': p.tags or [],
+            'is_favorite': p.is_favorite,
+            'run_count': p.run_count,
+            'last_run_at': p.last_run_at.isoformat() if p.last_run_at else None,
+            'created_at': p.created_at.isoformat(),
+            'updated_at': p.updated_at.isoformat(),
+        } for p in prompts]
+
+        return Response({
+            'status': 'success',
+            'data': data,
+        })
+    except Exception as e:
+        logger.exception("api_marketing_get_saved_prompts error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_marketing_save_prompt(request):
+    """Save a graph prompt. POST: {"title": "...", "prompt": "...", "tags": [...], "chart_type": "..."}"""
+    try:
+        from marketing_agent.models import SavedGraphPrompt
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        data = request.data if isinstance(request.data, dict) else {}
+
+        title = data.get('title', '').strip()
+        prompt = data.get('prompt', '').strip()
+        tags = data.get('tags', [])
+        chart_type = data.get('chart_type', 'bar')
+
+        if not title:
+            return Response({
+                'status': 'error',
+                'message': 'Title is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not prompt:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        saved_prompt = SavedGraphPrompt.objects.create(
+            created_by=user,
+            title=title,
+            prompt=prompt,
+            tags=tags if isinstance(tags, list) else [],
+            chart_type=chart_type,
+        )
+
+        return Response({
+            'status': 'success',
+            'message': 'Prompt saved successfully.',
+            'data': {
+                'id': saved_prompt.id,
+                'title': saved_prompt.title,
+                'prompt': saved_prompt.prompt,
+                'chart_type': saved_prompt.chart_type,
+                'tags': saved_prompt.tags,
+                'is_favorite': saved_prompt.is_favorite,
+                'created_at': saved_prompt.created_at.isoformat(),
+            }
+        })
+    except Exception as e:
+        logger.exception("api_marketing_save_prompt error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_marketing_delete_prompt(request, prompt_id):
+    """Delete a saved graph prompt."""
+    try:
+        from marketing_agent.models import SavedGraphPrompt
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+
+        try:
+            prompt = SavedGraphPrompt.objects.get(id=prompt_id, created_by=user)
+        except SavedGraphPrompt.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        prompt.delete()
+        return Response({
+            'status': 'success',
+            'message': 'Prompt deleted successfully.'
+        })
+    except Exception as e:
+        logger.exception("api_marketing_delete_prompt error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_marketing_toggle_prompt_favorite(request, prompt_id):
+    """Toggle favorite status. PATCH: {"is_favorite": true/false}"""
+    try:
+        from marketing_agent.models import SavedGraphPrompt
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        data = request.data if isinstance(request.data, dict) else {}
+
+        try:
+            prompt = SavedGraphPrompt.objects.get(id=prompt_id, created_by=user)
+        except SavedGraphPrompt.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        is_favorite = data.get('is_favorite')
+        if is_favorite is not None:
+            prompt.is_favorite = bool(is_favorite)
+            prompt.save(update_fields=['is_favorite', 'updated_at'])
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': prompt.id,
+                'is_favorite': prompt.is_favorite,
+            }
+        })
+    except Exception as e:
+        logger.exception("api_marketing_toggle_prompt_favorite error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+DASHBOARD_TAG_MARKETING = 'dashboard'
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def api_marketing_toggle_prompt_dashboard(request, prompt_id):
+    """Toggle dashboard visibility for a saved prompt (add/remove 'dashboard' tag)."""
+    try:
+        from marketing_agent.models import SavedGraphPrompt
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+
+        try:
+            prompt = SavedGraphPrompt.objects.get(id=prompt_id, created_by=user)
+        except SavedGraphPrompt.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Prompt not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        tags = list(prompt.tags) if isinstance(prompt.tags, list) else []
+        if DASHBOARD_TAG_MARKETING in tags:
+            tags = [t for t in tags if t != DASHBOARD_TAG_MARKETING]
+            on_dashboard = False
+        else:
+            tags = tags + [DASHBOARD_TAG_MARKETING]
+            on_dashboard = True
+        prompt.tags = tags
+        prompt.save(update_fields=['tags', 'updated_at'])
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': prompt.id,
+                'tags': prompt.tags,
+                'on_dashboard': on_dashboard,
+            }
+        })
+    except Exception as e:
+        logger.exception("api_marketing_toggle_prompt_dashboard error")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

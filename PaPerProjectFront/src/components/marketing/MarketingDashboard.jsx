@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -39,14 +39,19 @@ import {
   Send,
   X,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  BarChart3 as BarChartIcon,
 } from 'lucide-react';
-import marketingAgentService from '@/services/marketingAgentService';
+import marketingAgentService, {
+  getSavedGraphPrompts,
+  isGraphPromptOnDashboard,
+} from '@/services/marketingAgentService';
 import MarketingQA from './MarketingQA';
 import MarketResearch from './MarketResearch';
 import Campaigns from './Campaigns';
 import Documents from './Documents';
 import Notifications from './Notifications';
+import AIGraphGenerator from './AIGraphGenerator';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -149,6 +154,8 @@ const MarketingDashboard = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [dashboardGraphPrompts, setDashboardGraphPrompts] = useState([]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     fetchStats();
@@ -180,6 +187,13 @@ const MarketingDashboard = () => {
   useEffect(() => {
     if (activeTab === 'dashboard') {
       fetchCampaigns(campaignsPage);
+      getSavedGraphPrompts()
+        .then((res) => {
+          if (res?.status === 'success' && Array.isArray(res.data)) {
+            setDashboardGraphPrompts(res.data.filter(isGraphPromptOnDashboard));
+          }
+        })
+        .catch(() => setDashboardGraphPrompts([]));
     } else if (activeTab === 'email') {
       fetchEmailAccounts();
     }
@@ -478,6 +492,10 @@ const MarketingDashboard = () => {
               </span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="graphs" className="flex-1 min-w-[100px]">
+            <BarChartIcon className="h-4 w-4 mr-2" />
+            AI Graphs
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-4">
@@ -618,6 +636,35 @@ const MarketingDashboard = () => {
                       </>
                     )}
                   </div>
+
+                  {/* Dashboard Graphs: saved AI graph prompts pinned to dashboard */}
+                  {dashboardGraphPrompts.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Dashboard Graphs</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {dashboardGraphPrompts.map((p) => (
+                          <Card
+                            key={p.id}
+                            className="cursor-pointer hover:bg-muted/50 transition-colors"
+                            onClick={() => {
+                              setSearchParams({ runPromptId: String(p.id) });
+                              setActiveTab('graphs');
+                            }}
+                          >
+                            <CardContent className="p-3 flex items-center gap-3">
+                              <div className="rounded-lg bg-primary/10 p-2">
+                                <BarChartIcon className="h-5 w-5 text-primary" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-sm truncate">{p.title}</p>
+                                <p className="text-xs text-muted-foreground truncate">{p.prompt}</p>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -1024,6 +1071,10 @@ const MarketingDashboard = () => {
 
         <TabsContent value="notifications">
           <Notifications onUnreadCountChange={fetchNotificationUnreadCount} />
+        </TabsContent>
+
+        <TabsContent value="graphs" className="!mt-2">
+          <AIGraphGenerator />
         </TabsContent>
       </Tabs>
     </div>
