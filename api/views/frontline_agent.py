@@ -22,6 +22,8 @@ import os
 import hashlib
 import uuid
 from pathlib import Path
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
@@ -29,7 +31,7 @@ from core.models import CompanyUser, Company
 from Frontline_agent.models import (
     Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
-    SavedGraphPrompt,
+    SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences,
 )
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
@@ -52,6 +54,10 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
             cfg = t.trigger_config or {}
             if cfg.get('on') != event_type:
                 continue
+            recipient_email = getattr(ticket.created_by, 'email', '') or ''
+            if not _should_send_notification_to_recipient(company_id, recipient_email, t.channel, event_type):
+                logger.info(f"Notification trigger: skipped template {t.id} for {recipient_email} (user preferences)")
+                continue
             delay_minutes = int(cfg.get('delay_minutes', 0))
             scheduled_at = timezone.now() + timedelta(minutes=delay_minutes)
             context = {
@@ -60,7 +66,6 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
                 'resolution': ticket.resolution or '',
                 'customer_name': getattr(ticket.created_by, 'email', '') or '',
             }
-            recipient_email = getattr(ticket.created_by, 'email', '') or ''
             ScheduledNotification.objects.create(
                 company_id=company_id,
                 template=t,
@@ -148,6 +153,47 @@ def _get_or_create_user_for_company_user(company_user):
             last_name=' '.join(company_user.full_name.split()[1:]) if company_user.full_name and len(company_user.full_name.split()) > 1 else ''
         )
         return user
+
+
+def _sla_due_at_for_priority(priority):
+    """Return SLA due datetime for a ticket priority (urgent=4h, high=8h, medium=24h, low=48h)."""
+    from datetime import timedelta
+    hours = {'urgent': 4, 'high': 8, 'medium': 24, 'low': 48}.get((priority or 'medium').lower(), 24)
+    return timezone.now() + timedelta(hours=hours)
+
+
+def _should_send_notification_to_recipient(company_id, recipient_email, channel, event_type=None):
+    """
+    Check if the recipient (by email, same company) has notification preferences that allow this send.
+    event_type: 'ticket_created' | 'ticket_updated' | 'ticket_assigned' | None (manual/workflow -> use workflow_email_enabled).
+    Returns True if we should send, False if user opted out.
+    """
+    if not recipient_email or not company_id:
+        return True
+    try:
+        cu = CompanyUser.objects.filter(company_id=company_id, email=recipient_email.strip(), is_active=True).first()
+        if not cu:
+            return True
+        prefs = getattr(cu, 'frontline_notification_preferences', None)
+        if not prefs:
+            return True
+        if channel == 'email':
+            if not prefs.email_enabled:
+                return False
+            if event_type == 'ticket_created':
+                return prefs.ticket_created_email
+            if event_type == 'ticket_updated':
+                return prefs.ticket_updated_email
+            if event_type == 'ticket_assigned':
+                return prefs.ticket_assigned_email
+            # manual send or workflow send_email step
+            return prefs.workflow_email_enabled
+        if channel == 'in_app':
+            return prefs.in_app_enabled
+        return True
+    except Exception as e:
+        logger.warning("_should_send_notification_to_recipient check failed: %s", e)
+        return True
 
 
 @api_view(["GET"])
@@ -900,6 +946,7 @@ def public_submit(request):
             created_by=user,
             assigned_to=user,
             auto_resolved=False,
+            sla_due_at=_sla_due_at_for_priority('medium'),
         )
         _run_notification_triggers(company.id, 'ticket_created', ticket)
         _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
@@ -973,6 +1020,7 @@ def knowledge_qa(request):
                     created_by=user,
                     assigned_to=user,
                     auto_resolved=False,
+                    sla_due_at=_sla_due_at_for_priority('medium'),
                 )
                 ticket_task_created = True
                 ticket_task_id = ticket.id
@@ -1004,6 +1052,36 @@ def knowledge_qa(request):
             {'status': 'error', 'message': 'Failed to process question', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def knowledge_feedback(request):
+    """Submit helpful/not helpful feedback for a knowledge-base answer. Improves docs and RAG."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        question = (data.get('question') or '').strip()
+        helpful = data.get('helpful')
+        document_id = data.get('document_id')
+        if not question:
+            return Response({'status': 'error', 'message': 'question is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if helpful is None:
+            return Response({'status': 'error', 'message': 'helpful (true/false) is required'}, status=status.HTTP_400_BAD_REQUEST)
+        doc = None
+        if document_id is not None:
+            doc = Document.objects.filter(id=document_id, company=company_user.company).first()
+        KBFeedback.objects.create(
+            company_user=company_user,
+            question=question,
+            helpful=bool(helpful),
+            document=doc,
+        )
+        return Response({'status': 'success', 'message': 'Feedback recorded'})
+    except Exception as e:
+        logger.exception("knowledge_feedback failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
@@ -1128,9 +1206,12 @@ def list_tickets(request):
         total_pages = (total + limit - 1) // limit if limit else 1
         offset = (page - 1) * limit
         tickets = list(qs[offset:offset + limit])
+        now = timezone.now()
+        at_risk_threshold = now + timedelta(hours=2)  # due within 2 hours = at risk
+        resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
 
-        data = [
-            {
+        def _ticket_row(t):
+            row = {
                 'id': t.id,
                 'title': t.title,
                 'description': t.description,
@@ -1142,9 +1223,17 @@ def list_tickets(request):
                 'created_at': t.created_at.isoformat(),
                 'updated_at': t.updated_at.isoformat(),
                 'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
+                'sla_due_at': t.sla_due_at.isoformat() if t.sla_due_at else None,
             }
-            for t in tickets
-        ]
+            if t.sla_due_at and t.status not in resolved_statuses:
+                row['sla_breached'] = t.sla_due_at < now
+                row['sla_at_risk'] = t.sla_due_at <= at_risk_threshold and t.sla_due_at >= now
+            else:
+                row['sla_breached'] = False
+                row['sla_at_risk'] = False
+            return row
+
+        data = [_ticket_row(t) for t in tickets]
         return Response({
             'status': 'success',
             'data': data,
@@ -1161,6 +1250,35 @@ def list_tickets(request):
             {'status': 'error', 'message': 'Failed to list tickets', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_tickets_aging(request):
+    """List tickets that are SLA breached or at risk (due within 2 hours). Same scope as list_tickets."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        now = timezone.now()
+        at_risk_threshold = now + timedelta(hours=2)
+        resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
+        qs = Ticket.objects.filter(
+            created_by=user,
+            sla_due_at__isnull=False,
+        ).exclude(status__in=resolved_statuses).order_by('sla_due_at')
+        breached = [t for t in qs if t.sla_due_at < now]
+        at_risk = [t for t in qs if t.sla_due_at >= now and t.sla_due_at <= at_risk_threshold]
+        data = {
+            'breached': [{'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority, 'sla_due_at': t.sla_due_at.isoformat()} for t in breached],
+            'at_risk': [{'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority, 'sla_due_at': t.sla_due_at.isoformat()} for t in at_risk],
+            'count_breached': len(breached),
+            'count_at_risk': len(at_risk),
+        }
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_tickets_aging failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["PATCH", "PUT"])
@@ -1543,6 +1661,88 @@ def delete_notification_template(request, template_id):
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def get_notification_preferences(request):
+    """Get current user's notification preferences. Creates default if missing."""
+    try:
+        company_user = request.user
+        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(
+            company_user=company_user,
+            defaults={
+                'email_enabled': True,
+                'in_app_enabled': True,
+                'ticket_created_email': True,
+                'ticket_updated_email': True,
+                'ticket_assigned_email': True,
+                'workflow_email_enabled': True,
+            },
+        )
+        data = {
+            'email_enabled': prefs.email_enabled,
+            'in_app_enabled': prefs.in_app_enabled,
+            'ticket_created_email': prefs.ticket_created_email,
+            'ticket_updated_email': prefs.ticket_updated_email,
+            'ticket_assigned_email': prefs.ticket_assigned_email,
+            'workflow_email_enabled': prefs.workflow_email_enabled,
+            'updated_at': prefs.updated_at.isoformat(),
+        }
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("get_notification_preferences failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_notification_preferences(request):
+    """Update current user's notification preferences."""
+    try:
+        company_user = request.user
+        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(
+            company_user=company_user,
+            defaults={
+                'email_enabled': True,
+                'in_app_enabled': True,
+                'ticket_created_email': True,
+                'ticket_updated_email': True,
+                'ticket_assigned_email': True,
+                'workflow_email_enabled': True,
+            },
+        )
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        if 'email_enabled' in data:
+            prefs.email_enabled = bool(data['email_enabled'])
+        if 'in_app_enabled' in data:
+            prefs.in_app_enabled = bool(data['in_app_enabled'])
+        if 'ticket_created_email' in data:
+            prefs.ticket_created_email = bool(data['ticket_created_email'])
+        if 'ticket_updated_email' in data:
+            prefs.ticket_updated_email = bool(data['ticket_updated_email'])
+        if 'ticket_assigned_email' in data:
+            prefs.ticket_assigned_email = bool(data['ticket_assigned_email'])
+        if 'workflow_email_enabled' in data:
+            prefs.workflow_email_enabled = bool(data['workflow_email_enabled'])
+        prefs.save()
+        return Response({
+            'status': 'success',
+            'data': {
+                'email_enabled': prefs.email_enabled,
+                'in_app_enabled': prefs.in_app_enabled,
+                'ticket_created_email': prefs.ticket_created_email,
+                'ticket_updated_email': prefs.ticket_updated_email,
+                'ticket_assigned_email': prefs.ticket_assigned_email,
+                'workflow_email_enabled': prefs.workflow_email_enabled,
+                'updated_at': prefs.updated_at.isoformat(),
+            },
+        })
+    except Exception as e:
+        logger.exception("update_notification_preferences failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def list_scheduled_notifications(request):
     """List scheduled/sent notifications for the company with optional filters."""
     try:
@@ -1628,6 +1828,8 @@ def send_notification_now(request):
             return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
         if not recipient_email:
             return Response({'status': 'error', 'message': 'recipient_email is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not _should_send_notification_to_recipient(company.id, recipient_email, template.channel, None):
+            return Response({'status': 'skipped', 'message': 'Recipient has disabled notification emails.'}, status=status.HTTP_200_OK)
         related_ticket = None
         if ticket_id:
             user = _get_or_create_user_for_company_user(request.user)
@@ -1676,7 +1878,7 @@ def _execute_workflow_steps(workflow, context_data, user):
             recipient = _render_template_body(raw_recipient, context_data).strip()
             if template_id and recipient:
                 template = NotificationTemplate.objects.filter(id=template_id).first()
-                if template:
+                if template and _should_send_notification_to_recipient(workflow.company_id, recipient, 'email', None):
                     merged = {**context_data, **step.get('context', {})}
                     body = _render_template_body(template.body, merged)
                     personalized_body = _generate_llm_notification_body(template, merged, workflow.company_id)
@@ -1696,6 +1898,61 @@ def _execute_workflow_steps(workflow, context_data, user):
                         ticket.resolution = step['resolution']
                     ticket.save()
             result_data['results'].append({'step': i, 'type': step_type, 'done': True})
+        elif step_type == 'webhook':
+            url = (step.get('url') or '').strip()
+            if url:
+                merged = {**context_data, **step.get('context', {})}
+                body_raw = step.get('body') or '{}'
+                try:
+                    body_str = _render_template_body(body_raw, merged) if isinstance(body_raw, str) else json.dumps(body_raw)
+                    payload = body_str.encode('utf-8') if body_str else b''
+                except Exception:
+                    payload = b'{}'
+                method = (step.get('method') or 'POST').upper()
+                headers = dict(step.get('headers') or {})
+                if payload and 'Content-Type' not in {h.lower() for h in headers}:
+                    headers['Content-Type'] = 'application/json'
+                req = Request(url, data=payload if method != 'GET' else None, method=method, headers=headers)
+                try:
+                    with urlopen(req, timeout=30) as resp:
+                        result_data['results'].append({'step': i, 'type': step_type, 'done': True, 'status_code': resp.status})
+                except (URLError, HTTPError, OSError) as e:
+                    logger.warning("Workflow webhook step failed: %s", e)
+                    result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': str(e)})
+            else:
+                result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': 'Missing url'})
+        elif step_type == 'slack':
+            webhook_url = (step.get('webhook_url') or '').strip()
+            if webhook_url:
+                merged = {**context_data, **step.get('context', {})}
+                text = _render_template_body(step.get('text') or 'Workflow step executed.', merged)
+                payload = json.dumps({'text': text}).encode('utf-8')
+                req = Request(webhook_url, data=payload, method='POST', headers={'Content-Type': 'application/json'})
+                try:
+                    with urlopen(req, timeout=15) as resp:
+                        result_data['results'].append({'step': i, 'type': step_type, 'done': True})
+                except (URLError, HTTPError, OSError) as e:
+                    logger.warning("Workflow Slack step failed: %s", e)
+                    result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': str(e)})
+            else:
+                result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': 'Missing webhook_url'})
+        elif step_type == 'assign':
+            ticket_id = context_data.get('ticket_id') or step.get('ticket_id')
+            assign_to_company_user_id = step.get('assign_to_company_user_id')
+            if ticket_id and assign_to_company_user_id is not None:
+                ticket = Ticket.objects.filter(id=ticket_id).first()
+                company_user = CompanyUser.objects.filter(
+                    id=assign_to_company_user_id,
+                    company=workflow.company,
+                    is_active=True,
+                ).first()
+                if ticket and company_user:
+                    assign_user = _get_or_create_user_for_company_user(company_user)
+                    ticket.assigned_to = assign_user
+                    ticket.save()
+                result_data['results'].append({'step': i, 'type': step_type, 'done': True})
+            else:
+                result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': 'Missing ticket_id or assign_to_company_user_id'})
         else:
             result_data['results'].append({'step': i, 'type': step_type, 'done': True})
         result_data['steps_completed'] = i + 1
@@ -1840,6 +2097,21 @@ def list_workflow_executions(request):
         return Response({'status': 'success', 'data': data})
     except Exception as e:
         logger.exception("list_workflow_executions failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_workflow_company_users(request):
+    """List company users for the current company (for workflow assign step dropdown)."""
+    try:
+        company = request.user.company
+        qs = CompanyUser.objects.filter(company=company, is_active=True).order_by('full_name', 'email')
+        data = [{'id': cu.id, 'full_name': cu.full_name or '', 'email': cu.email or ''} for cu in qs]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception("list_workflow_company_users failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

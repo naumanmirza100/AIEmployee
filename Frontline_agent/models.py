@@ -45,13 +45,15 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
-    
+    sla_due_at = models.DateTimeField(null=True, blank=True, help_text='Target response time for SLA; used for aging alerts')
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['sla_due_at']),
         ]
     
     def __str__(self):
@@ -438,4 +440,62 @@ class SavedGraphPrompt(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.chart_type})"
+
+
+class KBFeedback(models.Model):
+    """User feedback on knowledge-base answers (helpful / not helpful) to improve docs and RAG."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='frontline_kb_feedbacks',
+    )
+    question = models.TextField(help_text='Question that was answered')
+    helpful = models.BooleanField(help_text='True = helpful, False = not helpful')
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kb_feedbacks',
+        help_text='Document that was used for the answer (if any)',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company_user', 'created_at']),
+            models.Index(fields=['document', 'helpful']),
+        ]
+
+    def __str__(self):
+        return f"KB feedback: {'helpful' if self.helpful else 'not helpful'} ({self.question[:40]}...)"
+
+
+class FrontlineNotificationPreferences(models.Model):
+    """Per-company-user notification preferences. Respect user choice, less spam."""
+    company_user = models.OneToOneField(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='frontline_notification_preferences',
+    )
+    # Master toggles
+    email_enabled = models.BooleanField(default=True, help_text='Receive notification emails')
+    in_app_enabled = models.BooleanField(default=True, help_text='Show in-app notifications')
+    # Per-event email toggles (only apply when email_enabled is True)
+    ticket_created_email = models.BooleanField(default=True, help_text='Email when a ticket is created (e.g. trigger or workflow)')
+    ticket_updated_email = models.BooleanField(default=True, help_text='Email when a ticket is updated')
+    ticket_assigned_email = models.BooleanField(default=True, help_text='Email when a ticket is assigned to you')
+    # Workflow / template emails (e.g. send_email step or template trigger)
+    workflow_email_enabled = models.BooleanField(default=True, help_text='Receive emails from workflow steps and template triggers')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        verbose_name = 'Frontline notification preferences'
+        verbose_name_plural = 'Frontline notification preferences'
+
+    def __str__(self):
+        return f"Preferences for {self.company_user.email}"
 

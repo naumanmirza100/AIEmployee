@@ -253,7 +253,15 @@ urlpatterns = [
     re_path(r'^recruitment/ai/graph-prompts/save/?$', recruitment_agent.api_save_prompt, name='recruitment_save_prompt'),  # POST
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/delete/?$', recruitment_agent.api_delete_prompt, name='recruitment_delete_prompt'),  # DELETE
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', recruitment_agent.api_toggle_prompt_favorite, name='recruitment_toggle_prompt_favorite'),  # PATCH
-    re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/toggle-dashboard/?$', recruitment_agent.api_toggle_prompt_dashboard, name='recruitment_toggle_prompt_dashboard'),  # PATCH
+    re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/dashboard/?$', recruitment_agent.api_toggle_prompt_dashboard, name='recruitment_toggle_prompt_dashboard'),  # PATCH
+
+    # Marketing AI Graph endpoints (Company User)
+    re_path(r'^marketing/ai/generate-graph/?$', marketing_agent.api_marketing_generate_graph, name='marketing_generate_graph'),  # POST
+    re_path(r'^marketing/ai/graph-prompts/?$', marketing_agent.api_marketing_get_saved_prompts, name='marketing_get_saved_prompts'),  # GET
+    re_path(r'^marketing/ai/graph-prompts/save/?$', marketing_agent.api_marketing_save_prompt, name='marketing_save_prompt'),  # POST
+    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/delete/?$', marketing_agent.api_marketing_delete_prompt, name='marketing_delete_prompt'),  # DELETE
+    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', marketing_agent.api_marketing_toggle_prompt_favorite, name='marketing_toggle_prompt_favorite'),  # PATCH
+    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/dashboard/?$', marketing_agent.api_marketing_toggle_prompt_dashboard, name='marketing_toggle_prompt_dashboard'),  # PATCH
 
     # Marketing Agent endpoints (Company User)
     re_path(r'^marketing/dashboard/?$', marketing_agent.marketing_dashboard, name='marketing_dashboard'),  # GET
@@ -297,12 +305,6 @@ urlpatterns = [
     re_path(r'^marketing/notifications/monitor/?$', marketing_agent.proactive_notification_monitor, name='marketing_notifications_monitor'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/read/?$', marketing_agent.mark_notification_read, name='marketing_notification_read'),  # POST
     re_path(r'^marketing/notifications/(?P<notification_id>\d+)/delete/?$', marketing_agent.delete_notification, name='marketing_notification_delete'),  # POST
-    re_path(r'^marketing/ai/generate-graph/?$', marketing_agent.api_marketing_generate_graph, name='marketing_generate_graph'),  # POST
-    re_path(r'^marketing/ai/graph-prompts/?$', marketing_agent.api_marketing_get_saved_prompts, name='marketing_get_saved_prompts'),  # GET
-    re_path(r'^marketing/ai/graph-prompts/save/?$', marketing_agent.api_marketing_save_prompt, name='marketing_save_prompt'),  # POST
-    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/delete/?$', marketing_agent.api_marketing_delete_prompt, name='marketing_delete_prompt'),  # DELETE
-    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', marketing_agent.api_marketing_toggle_prompt_favorite, name='marketing_toggle_prompt_favorite'),  # PATCH
-    re_path(r'^marketing/ai/graph-prompts/(?P<prompt_id>\d+)/toggle-dashboard/?$', marketing_agent.api_marketing_toggle_prompt_dashboard, name='marketing_toggle_prompt_dashboard'),  # PATCH
 
     # Frontline Agent endpoints (Company User)
     # Public widget/form (no auth – use widget_key to identify company)
@@ -317,12 +319,14 @@ urlpatterns = [
     re_path(r'^frontline/documents/(?P<document_id>\d+)/summarize/?$', frontline_agent.summarize_document, name='frontline_summarize_document'),  # POST
     re_path(r'^frontline/documents/(?P<document_id>\d+)/extract/?$', frontline_agent.extract_document, name='frontline_extract_document'),  # POST
     re_path(r'^frontline/knowledge/qa/?$', frontline_agent.knowledge_qa, name='frontline_knowledge_qa'),  # POST
+    re_path(r'^frontline/knowledge/feedback/?$', frontline_agent.knowledge_feedback, name='frontline_knowledge_feedback'),  # POST
     re_path(r'^frontline/knowledge/search/?$', frontline_agent.search_knowledge, name='frontline_search_knowledge'),  # GET
     re_path(r'^frontline/qa/chats/?$', frontline_agent.list_qa_chats, name='frontline_qa_chats_list'),  # GET
     re_path(r'^frontline/qa/chats/create/?$', frontline_agent.create_qa_chat, name='frontline_qa_chats_create'),  # POST
     re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/update/?$', frontline_agent.update_qa_chat, name='frontline_qa_chats_update'),  # PATCH/PUT
     re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/delete/?$', frontline_agent.delete_qa_chat, name='frontline_qa_chats_delete'),  # DELETE
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
+    re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET
     re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
     re_path(r'^frontline/ticket-tasks/?$', frontline_agent.list_ticket_tasks, name='frontline_list_ticket_tasks'),  # GET
     re_path(r'^frontline/ticket-tasks/(?P<ticket_id>\d+)/?$', frontline_agent.update_ticket_task, name='frontline_update_ticket_task'),  # PATCH/PUT
@@ -335,6 +339,8 @@ urlpatterns = [
     re_path(r'^frontline/notifications/scheduled/?$', frontline_agent.list_scheduled_notifications, name='frontline_list_scheduled_notifications'),  # GET
     re_path(r'^frontline/notifications/schedule/?$', frontline_agent.schedule_notification, name='frontline_schedule_notification'),  # POST
     re_path(r'^frontline/notifications/send/?$', frontline_agent.send_notification_now, name='frontline_send_notification_now'),  # POST
+    re_path(r'^frontline/notifications/preferences/?$', frontline_agent.get_notification_preferences, name='frontline_get_notification_preferences'),  # GET
+    re_path(r'^frontline/notifications/preferences/update/?$', frontline_agent.update_notification_preferences, name='frontline_update_notification_preferences'),  # PATCH/PUT
     # Workflows
     re_path(r'^frontline/workflows/?$', frontline_agent.list_workflows, name='frontline_list_workflows'),  # GET
     re_path(r'^frontline/workflows/create/?$', frontline_agent.create_workflow, name='frontline_create_workflow'),  # POST
@@ -343,6 +349,7 @@ urlpatterns = [
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/delete/?$', frontline_agent.delete_workflow, name='frontline_delete_workflow'),  # DELETE
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/execute/?$', frontline_agent.execute_workflow, name='frontline_execute_workflow'),  # POST
     re_path(r'^frontline/workflows/executions/?$', frontline_agent.list_workflow_executions, name='frontline_list_workflow_executions'),  # GET
+    re_path(r'^frontline/workflows/company-users/?$', frontline_agent.list_workflow_company_users, name='frontline_list_workflow_company_users'),  # GET
     # Analytics
     re_path(r'^frontline/analytics/?$', frontline_agent.frontline_analytics, name='frontline_analytics'),  # GET
     re_path(r'^frontline/analytics/ask/?$', frontline_agent.frontline_nl_analytics, name='frontline_nl_analytics'),  # POST

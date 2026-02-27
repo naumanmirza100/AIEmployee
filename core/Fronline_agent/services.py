@@ -3,6 +3,7 @@ Frontline Agent Services
 Enterprise-level service layer for knowledge retrieval and ticket automation
 """
 import logging
+from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 from django.utils import timezone
 from django.db import transaction
@@ -691,19 +692,23 @@ class TicketAutomationService:
             
             user = User.objects.get(id=user_id)
             
+            priority = classification.get('priority', 'medium')
+            sla_hours = {'urgent': 4, 'high': 8, 'medium': 24, 'low': 48}.get((priority or 'medium').lower(), 24)
+            sla_due_at = timezone.now() + timedelta(hours=sla_hours) if not can_auto_resolve else None
             with transaction.atomic():
                 ticket = Ticket.objects.create(
                     title=title,
                     description=description,
                     category=classification.get('category', 'other'),
-                    priority=classification.get('priority', 'medium'),
+                    priority=priority,
                     created_by=user,
                     company_id=company_id,
                     status='auto_resolved' if can_auto_resolve else 'open',
                     auto_resolved=can_auto_resolve,
                     resolution=resolution_text if can_auto_resolve else None,
                     resolution_confidence=classification.get('confidence', 0.0) if can_auto_resolve else None,
-                    resolved_at=timezone.now() if can_auto_resolve else None
+                    resolved_at=timezone.now() if can_auto_resolve else None,
+                    sla_due_at=sla_due_at,
                 )
                 
                 logger.info(f"Ticket created: ID {ticket.id}, Status: {ticket.status}")

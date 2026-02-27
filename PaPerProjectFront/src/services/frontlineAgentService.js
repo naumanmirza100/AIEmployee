@@ -149,6 +149,20 @@ export const knowledgeQA = async (question, options = {}) => {
 };
 
 /**
+ * Submit helpful/not helpful feedback for a KB answer (improves docs and RAG).
+ * @param {{ question: string, helpful: boolean, document_id?: number }} data
+ */
+export const submitKnowledgeFeedback = async (data) => {
+  try {
+    const response = await companyApi.post('/frontline/knowledge/feedback', data);
+    return response;
+  } catch (error) {
+    console.error('Submit knowledge feedback error:', error);
+    throw error;
+  }
+};
+
+/**
  * List all QA chats (stored in DB)
  */
 export const listQAChats = async () => {
@@ -218,6 +232,17 @@ export const listTickets = async (params = {}) => {
     return response;
   } catch (error) {
     console.error('List tickets error:', error);
+    throw error;
+  }
+};
+
+/** List tickets that are SLA breached or at risk (for aging alerts). */
+export const listTicketsAging = async () => {
+  try {
+    const response = await companyApi.get('/frontline/tickets/aging');
+    return response;
+  } catch (error) {
+    console.error('List tickets aging error:', error);
     throw error;
   }
 };
@@ -299,6 +324,18 @@ export const sendNotificationNow = async (data) => {
   return response;
 };
 
+/** Get current user's notification preferences (email, in-app, per-event toggles). */
+export const getNotificationPreferences = async () => {
+  const response = await companyApi.get('/frontline/notifications/preferences');
+  return response;
+};
+
+/** Update current user's notification preferences. */
+export const updateNotificationPreferences = async (data) => {
+  const response = await companyApi.patch('/frontline/notifications/preferences/update', data);
+  return response;
+};
+
 // ---------- Workflows ----------
 export const listWorkflows = async () => {
   const response = await companyApi.get('/frontline/workflows');
@@ -327,6 +364,12 @@ export const executeWorkflow = async (workflowId, context) => {
 export const listWorkflowExecutions = async (workflowId = null) => {
   const url = workflowId ? `/frontline/workflows/executions?workflow_id=${workflowId}` : '/frontline/workflows/executions';
   const response = await companyApi.get(url);
+  return response;
+};
+
+/** List company users for workflow assign step (same company). */
+export const listWorkflowCompanyUsers = async () => {
+  const response = await companyApi.get('/frontline/workflows/company-users');
   return response;
 };
 

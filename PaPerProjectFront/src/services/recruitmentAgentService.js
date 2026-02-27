@@ -624,13 +624,12 @@ export const toggleFavorite = async (promptId, isFavorite) => {
 };
 
 /**
- * Toggle dashboard visibility for a saved prompt (add/remove from recruitment dashboard cards).
+ * Toggle dashboard visibility for a saved prompt (add/remove 'dashboard' tag).
  * @param {number} promptId - Prompt ID
- * @returns {Promise<{ status, data: { on_dashboard } }>}
  */
 export const toggleDashboardPrompt = async (promptId) => {
   try {
-    const response = await companyApi.patch(`/recruitment/ai/graph-prompts/${promptId}/toggle-dashboard`);
+    const response = await companyApi.patch(`/recruitment/ai/graph-prompts/${promptId}/dashboard`, {});
     return response;
   } catch (error) {
     console.error('Toggle dashboard prompt error:', error);
@@ -638,9 +637,14 @@ export const toggleDashboardPrompt = async (promptId) => {
   }
 };
 
-/** Helper: true if prompt has dashboard tag (shown on recruitment dashboard) */
-export const isPromptOnDashboard = (prompt) =>
-  Array.isArray(prompt?.tags) && prompt.tags.includes('dashboard');
+/**
+ * @param {object} prompt - Saved prompt with tags array. Returns true if prompt is on dashboard.
+ */
+export const isPromptOnDashboard = (prompt) => {
+  if (!prompt || !prompt.tags) return false;
+  const tags = Array.isArray(prompt.tags) ? prompt.tags : [];
+  return tags.includes('dashboard');
+};
 
 export default {
   processCVs,

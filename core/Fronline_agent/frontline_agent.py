@@ -125,6 +125,7 @@ class FrontlineAgent(BaseAgent):
                 'source': knowledge_result.get('source', 'PayPerProject Database'),
                 'type': knowledge_result.get('type', 'unknown'),
                 'document_title': knowledge_result.get('document_title'),
+                'document_id': knowledge_result.get('document_id'),
                 'citations': knowledge_result.get('citations', []),
             }
         except Exception as e:
@@ -137,6 +138,7 @@ class FrontlineAgent(BaseAgent):
                 'source': knowledge_result.get('source', 'PayPerProject Database'),
                 'type': knowledge_result.get('type', 'unknown'),
                 'document_title': knowledge_result.get('document_title'),
+                'document_id': knowledge_result.get('document_id'),
                 'citations': knowledge_result.get('citations', []),
             }
     
