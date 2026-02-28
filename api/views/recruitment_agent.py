@@ -3010,11 +3010,35 @@ def api_save_prompt(request):
                 'message': 'Prompt is required.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Prevent duplicate dashboard prompts (same prompt text with 'dashboard' tag)
+        clean_tags = tags if isinstance(tags, list) else []
+        if 'dashboard' in clean_tags:
+            # MSSQL doesn't support JSON contains lookup, so filter in Python
+            existing_prompts = SavedGraphPrompt.objects.filter(
+                company_user=company_user,
+                prompt=prompt,
+            )
+            for ep in existing_prompts:
+                if isinstance(ep.tags, list) and 'dashboard' in ep.tags:
+                    return Response({
+                        'status': 'already_exists',
+                        'message': 'This graph is already on your dashboard.',
+                        'data': {
+                            'id': ep.id,
+                            'title': ep.title,
+                            'prompt': ep.prompt,
+                            'chart_type': ep.chart_type,
+                            'tags': ep.tags,
+                            'is_favorite': ep.is_favorite,
+                            'created_at': ep.created_at.isoformat(),
+                        }
+                    })
+        
         saved_prompt = SavedGraphPrompt.objects.create(
             company_user=company_user,
             title=title,
             prompt=prompt,
-            tags=tags if isinstance(tags, list) else [],
+            tags=clean_tags,
             chart_type=chart_type,
         )
         
