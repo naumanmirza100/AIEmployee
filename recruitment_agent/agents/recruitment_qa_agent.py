@@ -316,7 +316,7 @@ STRICT RULES:
 3. For simple questions (e.g. "how many jobs?"): give a short direct answer with the exact number. Add nothing else unless the user asked for more.
 4. Use ONLY numbers and names from the data. No invented data.
 5. If the user asked only about jobs – answer only jobs. If only about candidates – answer only candidates. If only about settings – answer only settings.
-6. NEVER include deleted jobs (soft-deleted, is_deleted=True) in any answer, analytics, or graph. Always exclude deleted jobs from all counts, lists, and summaries.
+6. NEVER include inactive jobs unless the user explicitly asks about inactive/all jobs. Focus on active jobs by default unless asked otherwise.
 
 FORMATTING (when your answer has multiple parts or a list):
 - Use markdown: ## for main heading, ### for subheading, #### for sub-subheading.
@@ -343,6 +343,8 @@ FORMATTING (when your answer has multiple parts or a list):
             Dict with keys: answer (markdown string), insights (list of {title, value}).
         """
         logger.info("Recruitment QA processing question: %s", question[:100])
+        # Reset token tracking for this request
+        self.groq_client.last_token_usage = None
         try:
             if _is_greeting(question):
                 return self._get_friendly_non_data_response()
@@ -358,7 +360,7 @@ FORMATTING (when your answer has multiple parts or a list):
             elif is_general:
                 # General knowledge: stacks, interview questions, recruitment tips (no DB)
                 answer = self._generate_general_knowledge_answer(question)
-                return {"answer": answer, "insights": []}
+                return self._wrap_response(answer, [])
             elif not is_recruitment:
                 return self._get_friendly_non_data_response()
             data = self._get_recruitment_data(company_user)
@@ -366,13 +368,10 @@ FORMATTING (when your answer has multiple parts or a list):
             insights = self._extract_insights(data, question)
             # For simple count/list questions, direct answer is enough – no LLM, no extra sections
             if direct and _is_simple_count_question(question):
-                return {"answer": direct, "insights": insights}
+                return self._wrap_response(direct, insights)
             context = self._build_context(data)
             answer = self._generate_answer(question, context, direct)
-            return {
-                "answer": answer,
-                "insights": insights,
-            }
+            return self._wrap_response(answer, insights)
         except GroqClientError as e:
             logger.exception("Recruitment QA Groq error")
             return {
@@ -385,6 +384,21 @@ FORMATTING (when your answer has multiple parts or a list):
                 "answer": f"An error occurred while processing your question: {str(e)}.",
                 "insights": [],
             }
+
+    def _wrap_response(self, answer: str, insights: List[Dict]) -> Dict[str, Any]:
+        """Wrap answer + insights, appending token usage info if an LLM call was made."""
+        token_usage = getattr(self.groq_client, 'last_token_usage', None) or {}
+        if token_usage:
+            pt = token_usage.get('prompt_tokens', 0)
+            ct = token_usage.get('completion_tokens', 0)
+            tt = token_usage.get('total_tokens', 0)
+            token_line = (
+                f"\n\n---\n"
+                f"<small>🔢 **Tokens used:** {tt} &nbsp;|&nbsp; "
+                f"Prompt: {pt} &nbsp;|&nbsp; Completion: {ct}</small>"
+            )
+            answer = (answer or "") + token_line
+        return {"answer": answer, "insights": insights, "token_usage": token_usage}
 
     def _get_friendly_non_data_response(self) -> Dict[str, Any]:
         """Short reply for greetings/casual/off-topic."""
@@ -440,7 +454,7 @@ Be practical and specific. Give actionable lists of questions recruiters can use
     def _get_recruitment_data(self, company_user: Any) -> Dict[str, Any]:
         """Load comprehensive recruitment data: jobs, CVs, interviews, settings, time slots, applications."""
         jobs_qs = (
-            JobDescription.objects.filter(company_user=company_user, is_deleted=False)
+            JobDescription.objects.filter(company_user=company_user)
             .order_by("-created_at")
         )
         jobs_list = []
