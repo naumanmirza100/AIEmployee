@@ -31,7 +31,7 @@ from core.models import CompanyUser, Company
 from Frontline_agent.models import (
     Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
-    SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences,
+    SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences, DocumentChunk,
 )
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
@@ -429,49 +429,11 @@ def upload_document(request):
         extracted_text = processing_result.get('extracted_text', '')
         logger.info(f"Document extracted: {len(extracted_text)} characters from {title}")
         
-        # Generate embedding for semantic search
-        # NOTE: Embedding generation may truncate text for API limits, but full content is stored in document_content
-        embedding = None
-        embedding_model = None
+        # Generate embedding for semantic search via chunks
+        embedding_service = EmbeddingService()
+        embedding_model = embedding_service.embedding_model if embedding_service.is_available() else None
         
-        if extracted_text:
-            try:
-                embedding_service = EmbeddingService()
-                if embedding_service.is_available():
-                    # For embedding, use a representative sample if document is very large
-                    # This ensures embedding captures key information while staying within API limits
-                    # But we still store the FULL document_content in the database
-                    searchable_text = f"{title}\n{description}\n{extracted_text}".strip()
-                    
-                    # If text is very long, use first part + last part for embedding (better representation)
-                    # But always store FULL content
-                    if len(searchable_text) > 50000:
-                        # Use first 25000 chars + last 25000 chars for embedding (better coverage)
-                        embedding_text = searchable_text[:25000] + "\n\n[... middle content ...]\n\n" + searchable_text[-25000:]
-                        logger.info(f"Document is large ({len(searchable_text)} chars), using optimized text for embedding ({len(embedding_text)} chars)")
-                    else:
-                        embedding_text = searchable_text
-                    
-                    logger.info(f"Generating embedding for document: {title} (embedding text length: {len(embedding_text)} chars, full content: {len(extracted_text)} chars)")
-                    embedding = embedding_service.generate_embedding(embedding_text)
-                    embedding_model = embedding_service.embedding_model if embedding else None
-                    
-                    if embedding:
-                        logger.info(f"✓ Embedding generated and will be stored in database (dimension: {len(embedding)}, model: {embedding_model})")
-                        logger.info(f"✓ Full document content ({len(extracted_text)} chars) will be stored in document_content field")
-                    else:
-                        logger.warning(f"✗ Embedding generation failed for document: {title}. Will use keyword search only.")
-                else:
-                    logger.warning("Embedding service not available (OPENAI_API_KEY not set or invalid). Document will use keyword search only.")
-            except Exception as e:
-                # Only log unexpected errors (quota errors are handled in embedding_service)
-                error_str = str(e)
-                if '429' not in error_str and 'quota' not in error_str.lower():
-                    logger.error(f"Unexpected error generating embedding: {e}", exc_info=True)
-                # Continue without embedding - keyword search will still work
-                logger.info(f"Continuing without embedding - full document content ({len(extracted_text)} chars) will still be stored")
-        
-        # Create document record
+        # Create document record first
         document_data = {
             'title': title,
             'description': description,
@@ -483,177 +445,66 @@ def upload_document(request):
             'uploaded_by': user,
             'company': company,
             'document_content': extracted_text,
-            'is_indexed': True,  # Auto-index if processing succeeded
+            'is_indexed': True,
             'file_hash': processing_result.get('file_hash', ''),
             'processed': True,
+            'embedding_model': embedding_model,
             'processed_data': {
                 'extraction_success': True,
                 'file_format': file_format,
-                'embedding_generated': embedding is not None,
+                'embedding_generated': embedding_service.is_available(),
             }
         }
         
-        # Store embedding in database for semantic search
-        # Embeddings are stored as TextField (JSON string) to support large embeddings (>65KB)
-        if embedding is not None:
-            import json
-            embedding_dimension = len(embedding)
-            # Serialize embedding to JSON string for storage in TextField
-            embedding_json = json.dumps(embedding)
-            embedding_json_length = len(embedding_json)
-            
-            logger.info(f"EMBEDDING DETAILS:")
-            logger.info(f"  - Dimension (number of floats): {embedding_dimension}")
-            logger.info(f"  - JSON serialized length: {embedding_json_length:,} characters")
-            logger.info(f"  - Model: {embedding_model}")
-            logger.info(f"  - Storing as NVARCHAR(MAX) (supports up to 2GB, current: {embedding_json_length:,} chars)")
-            
-            # Store as JSON string in TextField (no size limit issues)
-            document_data['embedding'] = embedding_json
-            logger.info(f"Embedding will be stored in database as JSON string for document: {title}")
-        else:
-            # Explicitly set to None if embedding generation failed
-            document_data['embedding'] = None
-            logger.info(f"No embedding stored for document: {title} (will use keyword search)")
-        
-        if embedding_model:
-            document_data['embedding_model'] = embedding_model
-        else:
-            # Explicitly set to None if no model was used
-            document_data['embedding_model'] = None
-        
-        # Log what's being stored BEFORE saving to database
-        logger.info("=" * 80)
-        logger.info("PREPARING TO STORE DOCUMENT IN DATABASE")
-        logger.info("=" * 80)
-        logger.info(f"Document Data to be stored:")
-        logger.info(f"  - title: {document_data['title']}")
-        logger.info(f"  - description: {len(document_data.get('description', ''))} chars")
-        logger.info(f"  - document_type: {document_data['document_type']}")
-        logger.info(f"  - file_format: {document_data['file_format']}")
-        logger.info(f"  - file_size: {document_data['file_size']:,} bytes")
-        logger.info(f"  - document_content length: {len(document_data['document_content']):,} characters")
-        logger.info(f"  - embedding: {'Present' if document_data.get('embedding') else 'None'}")
-        if document_data.get('embedding'):
-            import json
-            emb = document_data['embedding']
-            emb_dimension = len(emb)
-            emb_json = json.dumps(emb)
-            emb_json_length = len(emb_json)
-            logger.info(f"    - Embedding dimension: {emb_dimension} floats")
-            logger.info(f"    - Embedding JSON length: {emb_json_length:,} characters")
-            logger.info(f"    - Embedding size: {emb_json_length / 1024:.2f} KB")
-        logger.info(f"  - embedding_model: {document_data.get('embedding_model') or 'None'}")
-        logger.info(f"  - is_indexed: {document_data['is_indexed']}")
-        logger.info(f"  - processed: {document_data['processed']}")
-        logger.info(f"  - file_hash: {document_data.get('file_hash', '')[:16]}..." if document_data.get('file_hash') else "  - file_hash: None")
-        logger.info("")
-        logger.info(f"Content preview (first 300 chars of what will be stored):")
-        logger.info("-" * 80)
-        content_preview = document_data['document_content'][:300] if document_data['document_content'] else "(empty)"
-        logger.info(content_preview)
-        if len(document_data['document_content']) > 300:
-            logger.info(f"... (showing first 300 of {len(document_data['document_content']):,} characters)")
-        logger.info("-" * 80)
-        logger.info("=" * 80)
-        
         document = Document.objects.create(**document_data)
         
-        # Verify full content was stored and log details
-        stored_content_length = len(document.document_content) if document.document_content else 0
-        logger.info("=" * 80)
-        logger.info(f"DOCUMENT UPLOADED AND STORED IN DATABASE")
-        logger.info("=" * 80)
-        logger.info(f"Document ID: {document.id}")
-        logger.info(f"Title: {document.title}")
-        logger.info(f"Company ID: {company.id}")
-        logger.info(f"File Format: {document.file_format}")
-        logger.info(f"File Size: {uploaded_file.size:,} bytes ({uploaded_file.size / 1024 / 1024:.2f} MB)")
-        logger.info(f"")
-        logger.info(f"CONTENT STORAGE:")
-        logger.info(f"  - Extracted Text Length: {len(extracted_text):,} characters")
-        logger.info(f"  - Stored Content Length: {stored_content_length:,} characters")
-        logger.info(f"  - Content Match: {'✓ YES' if stored_content_length == len(extracted_text) else '✗ NO - MISMATCH!'}")
-        logger.info(f"")
-        logger.info(f"CONTENT PREVIEW (first 500 chars):")
-        logger.info("-" * 80)
-        if document.document_content:
-            preview = document.document_content[:500]
-            logger.info(preview)
-            if len(document.document_content) > 500:
-                logger.info(f"... (showing first 500 of {stored_content_length:,} characters)")
-        else:
-            logger.info("(No content stored)")
-        logger.info("-" * 80)
-        logger.info(f"")
-        logger.info(f"EMBEDDING:")
-        logger.info(f"  - Embedding Generated: {'✓ YES' if embedding else '✗ NO'}")
-        if embedding:
-            import json
-            emb_dimension = len(embedding)
-            emb_json = json.dumps(embedding)
-            emb_json_length = len(emb_json)
-            logger.info(f"  - Embedding Dimension: {emb_dimension} floats")
-            logger.info(f"  - Embedding JSON Length: {emb_json_length:,} characters")
-            logger.info(f"  - Embedding Size: {emb_json_length / 1024:.2f} KB")
-            logger.info(f"  - Embedding Model: {embedding_model}")
-            logger.info(f"  - Storage: NVARCHAR(MAX) (supports up to 2GB)")
-        logger.info(f"")
-        logger.info(f"DATABASE FIELDS:")
-        logger.info(f"  - document_content: {stored_content_length:,} chars")
-        logger.info(f"  - embedding: {'Stored' if embedding else 'None'}")
-        
-        # Verify embedding was stored correctly
-        if document.embedding:
-            import json
-            # Embedding is stored as JSON string in TextField, need to parse it
-            try:
-                if isinstance(document.embedding, str):
-                    stored_emb = json.loads(document.embedding)
-                    stored_emb_json = document.embedding
-                else:
-                    # Fallback for old format (list from JSONField)
-                    stored_emb = document.embedding
-                    stored_emb_json = json.dumps(stored_emb)
+        # Chunk text and generate embeddings
+        if extracted_text:
+            text_to_chunk = f"{title}\n{description}\n{extracted_text}".strip()
+            # Intelligent Chunking: ~4000 characters, 200 character overlap
+            chunk_size = 4000
+            overlap = 200
+            chunks = []
+            start = 0
+            while start < len(text_to_chunk):
+                end = start + chunk_size
+                chunks.append(text_to_chunk[start:end])
+                start += chunk_size - overlap
                 
-                stored_emb_dimension = len(stored_emb) if isinstance(stored_emb, list) else 0
-                stored_emb_json_length = len(stored_emb_json)
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.error(f"  - embedding (stored): Error parsing - {e}")
-                stored_emb = None
-                stored_emb_json = ""
-                stored_emb_json_length = 0
-                stored_emb_dimension = 0
+            logger.info(f"Split document {title} into {len(chunks)} chunks.")
             
-            logger.info(f"  - embedding (stored):")
-            logger.info(f"    - Dimension: {stored_emb_dimension} floats")
-            logger.info(f"    - JSON length: {stored_emb_json_length:,} characters")
-            logger.info(f"    - Size: {stored_emb_json_length / 1024:.2f} KB")
-            
-            # Compare with what we tried to store
-            if embedding:
-                original_emb_json = json.dumps(embedding)
-                original_emb_json_length = len(original_emb_json)
-                if stored_emb_json_length != original_emb_json_length:
-                    logger.warning(f"    ⚠ MISMATCH: Stored ({stored_emb_json_length:,}) != Original ({original_emb_json_length:,}) chars!")
-                    logger.warning(f"    ⚠ Embedding may have been truncated by database!")
-                else:
-                    logger.info(f"    ✓ Embedding stored correctly ({stored_emb_json_length:,} chars)")
-        else:
-            logger.info(f"  - embedding (stored): None")
-        
-        logger.info(f"  - embedding_model: {embedding_model or 'None'}")
-        logger.info(f"  - is_indexed: {document.is_indexed}")
-        logger.info(f"  - processed: {document.processed}")
-        logger.info(f"  - file_hash: {document.file_hash[:16]}..." if document.file_hash else "  - file_hash: None")
-        logger.info("=" * 80)
-        
-        if stored_content_length < len(extracted_text):
-            logger.warning(f"⚠ WARNING: Stored content ({stored_content_length:,} chars) is less than extracted text ({len(extracted_text):,} chars)!")
-            logger.warning(f"⚠ This indicates content was truncated during storage!")
-        
-        if stored_content_length == 0:
-            logger.error(f"✗ ERROR: No content was stored in database! Document may be empty or extraction failed.")
+            if embedding_service.is_available():
+                # Process chunks in batches to avoid overwhelming the API
+                batch_size = 20
+                for i in range(0, len(chunks), batch_size):
+                    batch_chunks = chunks[i:i+batch_size]
+                    embeddings = embedding_service.generate_embeddings_batch(batch_chunks)
+                    
+                    for j, (chunk_text, embedding) in enumerate(zip(batch_chunks, embeddings)):
+                        if embedding:
+                            DocumentChunk.objects.create(
+                                document=document,
+                                chunk_index=i+j,
+                                chunk_text=chunk_text,
+                                embedding=json.dumps(embedding)
+                            )
+                        else:
+                            DocumentChunk.objects.create(
+                                document=document,
+                                chunk_index=i+j,
+                                chunk_text=chunk_text,
+                                embedding=None
+                            )
+                logger.info(f"Successfully generated and stored embeddings for chunks.")
+            else:
+                for j, chunk_text in enumerate(chunks):
+                    DocumentChunk.objects.create(
+                        document=document,
+                        chunk_index=j,
+                        chunk_text=chunk_text,
+                        embedding=None
+                    )
+                logger.info("Embedding service unavailable, stored chunks without embeddings.")
         
         return Response({
             'status': 'success',

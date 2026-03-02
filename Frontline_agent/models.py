@@ -499,3 +499,27 @@ class FrontlineNotificationPreferences(models.Model):
     def __str__(self):
         return f"Preferences for {self.company_user.email}"
 
+
+class DocumentChunk(models.Model):
+    """Chunked document content and embedding for intelligent retrieval (RAG)"""
+    document = models.ForeignKey(
+        Document, 
+        on_delete=models.CASCADE, 
+        related_name='chunks',
+        help_text='Parent document this chunk belongs to'
+    )
+    chunk_index = models.IntegerField(help_text='Sequential index of this chunk within the document')
+    chunk_text = models.TextField(help_text='Text content of this specific chunk')
+    embedding = models.TextField(null=True, blank=True, help_text='Vector embedding for this chunk (JSON string)')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['document', 'chunk_index']
+        indexes = [
+            models.Index(fields=['document', 'chunk_index']),
+        ]
+        
+    def __str__(self):
+        return f"Chunk {self.chunk_index} of {self.document.title}"
+
