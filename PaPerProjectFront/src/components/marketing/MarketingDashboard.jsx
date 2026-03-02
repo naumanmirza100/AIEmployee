@@ -22,10 +22,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { 
-  Loader2, 
-  TrendingUp, 
-  Target, 
+import {
+  Loader2,
+  TrendingUp,
+  Target,
   BarChart3,
   MessageSquare,
   FileText,
@@ -203,7 +203,7 @@ const MarketingDashboard = () => {
     try {
       setLoading(true);
       const response = await marketingAgentService.getMarketingDashboard();
-      
+
       if (response.status === 'success' && response.data) {
         setStats({
           totalCampaigns: response.data.stats?.total_campaigns || 0,
@@ -427,32 +427,82 @@ const MarketingDashboard = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-1">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Campaigns</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Total Campaigns */}
+        <Card className="bg-black/40 backdrop-blur-xl border-purple-500/20 hover:border-purple-500/40 transition-all duration-300 group relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+
+          <CardHeader className="pb-0 pt-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-300">Total Campaigns</CardTitle>
+              <div className="p-2.5 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl">
+                <Target className="h-5 w-5 text-purple-400" />
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalCampaigns}</div>
-            <p className="text-xs text-muted-foreground">All campaigns</p>
+
+          <CardContent className="pt-0 pb-3">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="text-3xl font-bold text-white">{stats.totalCampaigns}</div>
+                <p className="text-xs text-gray-400 mt-1">All time campaigns</p>
+              </div>
+              <div className="text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
+                +{stats.campaignGrowth || '12%'}
+              </div>
+            </div>
+
+            {/* Progress bar
+      <div className="mt-3 h-1.5 w-full bg-purple-900/30 rounded-full overflow-hidden">
+        <div 
+          className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+          style={{ width: '75%' }}
+        ></div>
+      </div> */}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Campaigns</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+        {/* Active Campaigns */}
+        <Card className="bg-black/40 backdrop-blur-xl border-purple-500/20 hover:border-purple-500/40 transition-all duration-300 group relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+
+          <CardHeader className="pb-0 pt-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-300">Active Campaigns</CardTitle>
+              <div className="p-2.5 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl">
+                <TrendingUp className="h-5 w-5 text-blue-400" />
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.activeCampaigns}</div>
-            <p className="text-xs text-muted-foreground">Currently running</p>
+
+          <CardContent className="pt-0 pb-5">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="text-3xl font-bold text-white">{stats.activeCampaigns}</div>
+                <p className="text-xs text-gray-400 mt-1">Currently running</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span className="text-xs text-green-400">Live</span>
+              </div>
+            </div>
+
+            {/* Active indicator
+      <div className="mt-3 flex items-center gap-2">
+        <div className="text-xs text-gray-400">Budget used:</div>
+        <div className="flex-1 h-1.5 bg-blue-900/30 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
+            style={{ width: '45%' }}
+          ></div>
+        </div>
+        <div className="text-xs text-gray-300">$2.4k</div>
+      </div> */}
           </CardContent>
         </Card>
       </div>
-
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex flex-wrap gap-1 w-full">
@@ -508,27 +558,27 @@ const MarketingDashboard = () => {
               <Card>
                 <CardHeader>
                   <div className="flex flex-row items-center justify-between">
-                  <CardTitle>Marketing Overview</CardTitle>
-                   {/* Main action buttons */}
-                   <div className="flex flex-wrap gap-3">
-                    <Button
-                      size="sm"
-                      className="gap-2"
-                      onClick={() => setActiveTab('campaigns')}
-                    >
-                      <Plus className="h-5 w-5" />
-                      Create campaign
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                      onClick={() => setActiveTab('email')}
-                    >
-                      <Mail className="h-5 w-5" />
-                      Email accounts
-                    </Button>
-                  </div>
+                    <CardTitle>Marketing Overview</CardTitle>
+                    {/* Main action buttons */}
+                    <div className="flex flex-wrap gap-3">
+                      <Button
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => setActiveTab('campaigns')}
+                      >
+                        <Plus className="h-5 w-5" />
+                        Create campaign
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => setActiveTab('email')}
+                      >
+                        <Mail className="h-5 w-5" />
+                        Email accounts
+                      </Button>
+                    </div>
                   </div>
                   <CardDescription>
                     Your marketing campaigns and performance metrics
@@ -539,7 +589,7 @@ const MarketingDashboard = () => {
                     Use the Campaigns tab to create and manage email campaigns. Use the Email tab to manage accounts and see sending stats.
                   </p>
 
-                 
+
 
                   {/* Campaigns list (like backend campaigns_list.html) */}
                   <div>
