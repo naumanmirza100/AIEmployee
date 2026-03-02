@@ -7,10 +7,14 @@ Recruitment Knowledge Q&A Agent
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
+
+from django.db.models import Count, Avg, Max, Min, Q
 
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.models import (
+    CareerApplication,
     CVRecord,
     JobDescription,
     Interview,
@@ -57,6 +61,7 @@ _RECRUITMENT_KEYWORDS = (
     "interviews",
     "hire",
     "hiring",
+    "hired",
     "recruitment",
     "recruit",
     "position",
@@ -65,7 +70,11 @@ _RECRUITMENT_KEYWORDS = (
     "roles",
     "application",
     "applications",
+    "applicant",
+    "applicants",
+    "applied",
     "active",
+    "inactive",
     "vacancy",
     "vacancies",
     "setting",
@@ -76,28 +85,69 @@ _RECRUITMENT_KEYWORDS = (
     "which job",
     "who is best",
     "best for",
+    "best candidate",
+    "top candidate",
+    "highest score",
+    "lowest score",
     "kitne",
     "konsi",
     "list ",
     "overview",
     "summary",
+    "rejected",
+    "reject",
+    "hold",
+    "scheduled",
+    "pending",
+    "completed",
+    "cancelled",
+    "decision",
+    "time slot",
+    "time slots",
+    "slot",
+    "slots",
+    "score",
+    "rank",
+    "ranking",
+    "location",
+    "department",
+    "full-time",
+    "part-time",
+    "contract",
+    "internship",
+    "online",
+    "onsite",
+    "outcome",
+    "passed",
+    "detail",
+    "details",
+    "description",
+    "email",
+    "schedule",
+    "date",
+    "when",
+    "who",
+    "show",
+    "tell",
+    "give",
+    "specific",
 )
 
 # Keywords for stack / tech / interview questions (general knowledge, no DB needed)
 # Excludes terms like "candidate" alone - use "questions for" or stack names to avoid DB questions
 _STACK_AND_INTERVIEW_KEYWORDS = (
-    "stack", "react", "angular", "vue", "node", "mern", "mean", "django", "flask", "python",
+    "stack", "react", "angular", "vue", "node", "mern", "mean", "django", "flask",
     "javascript", "typescript", "java", "spring", "sql", "mongodb", "database", "api",
     "frontend", "backend", "fullstack", "full stack", "basic question", "advanced question",
     "ask from", "ask to", "question for", "questions for", "interview question",
-    "student", " fresher", "experienced", "junior", "senior",
+    " fresher", "experienced",
     "technical question", "coding question", "screening question", "phone screen",
-    "hire for", "assess", "evaluate", "skill", "skills", "proficiency",
+    "assess", "evaluate", "proficiency",
     "best practice", "best practices", "recruitment tip", "recruitment advice",
     "how to interview", "what to ask", "questions to ask", "common question",
     "top question", "popular question", "must ask", "should ask",
     "html", "css", "redux", "graphql", "aws", "docker", "kubernetes", "devops",
-    "machine learning", "data science", "ai ", " artificial intelligence",
+    "machine learning", "data science",
 )
 
 
@@ -126,10 +176,13 @@ def _is_general_knowledge_question(question: str) -> bool:
     q = question.lower().strip()
     if not q or _is_greeting(question):
         return False
+    # If it looks like a DB question (has recruitment keywords), prefer DB path
+    if _is_recruitment_data_question(question):
+        return False
     if any(kw in q for kw in _STACK_AND_INTERVIEW_KEYWORDS):
         return True
     # Longer substantive questions about hiring, interviewing, tech (even without keyword match)
-    if len(q) > 30 and any(x in q for x in ("question", "ask", "hire", "interview", "recruit")):
+    if len(q) > 30 and any(x in q for x in ("question", "ask")):
         return True
     return False
 
@@ -141,11 +194,87 @@ def _is_simple_count_question(question: str) -> bool:
         return True
     if "active job" in q and ("how many" in q or "which" in q or "list" in q or "konsi" in q):
         return True
+    if "inactive job" in q and ("how many" in q or "which" in q or "list" in q or "konsi" in q):
+        return True
     if "how many candidate" in q or "how many cv" in q or "total candidate" in q or "kitne candidate" in q:
         return True
     if "how many interview" in q or "total interview" in q or "kitne interview" in q:
         return True
+    # Qualification decision counts
+    if any(x in q for x in ("reject", "rejected", "hold", "interview decision", "qualified", "pending", "completed", "scheduled", "cancelled")):
+        if any(x in q for x in ("how many", "kitne", "total", "number of", "count")):
+            return True
+    # Career applications
+    if "application" in q and any(x in q for x in ("how many", "pending", "total", "kitne")):
+        return True
+    # Job-specific patterns (candidates for X, interviews for X)
+    if re.search(r'(candidate|cv|interview|application|slot|time slot).*for\b', q):
+        if any(x in q for x in ("how many", "list", "show", "which", "what", "kitne", "konsi", "tell", "give")):
+            return True
+    # Time slots / interview schedule
+    if "time slot" in q or "time slots" in q or "interview slot" in q:
+        return True
+    # Top/best candidate
+    if ("best" in q or "top" in q or "highest" in q) and ("candidate" in q or "cv" in q):
+        return True
+    # Job details / description
+    if ("detail" in q or "description" in q or "info" in q) and ("job" in q or "position" in q or "role" in q):
+        return True
+    # Active/inactive job list
+    if ("active" in q or "inactive" in q) and ("job" in q or "which" in q):
+        return True
+    # List all jobs
+    if ("list" in q or "show" in q or "all" in q) and "job" in q:
+        return True
+    # Qualification settings / email settings
+    if "setting" in q or "threshold" in q:
+        return True
+    # List all candidates / interviews
+    if ("list" in q or "show" in q or "all" in q) and ("candidate" in q or "interview" in q):
+        return True
+    # Job type, location, department
+    if ("full-time" in q or "part-time" in q or "contract" in q or "internship" in q) and "job" in q:
+        return True
+    if ("location" in q or "department" in q) and "job" in q:
+        return True
+    # Outcomes
+    if "outcome" in q or "hired" in q or "passed" in q:
+        return True
     return False
+
+
+def _find_matching_job(jobs: List[Dict], question: str) -> Optional[Dict]:
+    """Find the best matching job from the question text by fuzzy-matching job titles."""
+    q = question.lower().strip()
+    best_match = None
+    best_score = 0
+
+    for job in jobs:
+        title = (job.get("title") or "").lower().strip()
+        if not title:
+            continue
+        # Exact title match
+        if title in q:
+            score = len(title) * 3  # prefer longer exact matches
+            if score > best_score:
+                best_score = score
+                best_match = job
+            continue
+        # Check individual words from the title (at least 2 word overlap for titles with 2+ words)
+        title_words = set(title.split())
+        q_words = set(q.split())
+        overlap = title_words & q_words
+        # Remove generic words from overlap count
+        generic = {"the", "a", "an", "for", "and", "of", "in", "at", "to", "is", "job", "role", "position", "developer", "engineer"}
+        meaningful_overlap = overlap - generic
+        meaningful_title = title_words - generic
+        if meaningful_title and meaningful_overlap:
+            score = len(meaningful_overlap) / len(meaningful_title) * len(meaningful_overlap)
+            if score > best_score and (len(meaningful_overlap) >= 1 or len(meaningful_title) <= 2):
+                best_score = score
+                best_match = job
+
+    return best_match
 
 
 def _is_boilerplate(text: str) -> bool:
@@ -187,6 +316,7 @@ STRICT RULES:
 3. For simple questions (e.g. "how many jobs?"): give a short direct answer with the exact number. Add nothing else unless the user asked for more.
 4. Use ONLY numbers and names from the data. No invented data.
 5. If the user asked only about jobs – answer only jobs. If only about candidates – answer only candidates. If only about settings – answer only settings.
+6. NEVER include deleted jobs (soft-deleted, is_deleted=True) in any answer, analytics, or graph. Always exclude deleted jobs from all counts, lists, and summaries.
 
 FORMATTING (when your answer has multiple parts or a list):
 - Use markdown: ## for main heading, ### for subheading, #### for sub-subheading.
@@ -216,12 +346,20 @@ FORMATTING (when your answer has multiple parts or a list):
         try:
             if _is_greeting(question):
                 return self._get_friendly_non_data_response()
-            # General knowledge: stacks, interview questions, recruitment tips (no DB)
-            if _is_general_knowledge_question(question):
+            # IMPORTANT: Check recruitment data FIRST (DB queries take priority)
+            # This prevents questions like "how many interviews scheduled?" from being
+            # treated as general knowledge instead of DB queries.
+            is_recruitment = _is_recruitment_data_question(question)
+            is_general = _is_general_knowledge_question(question)
+            
+            if is_recruitment:
+                # Recruitment data: jobs, candidates, CVs, settings (DB + LLM)
+                pass  # fall through to DB query below
+            elif is_general:
+                # General knowledge: stacks, interview questions, recruitment tips (no DB)
                 answer = self._generate_general_knowledge_answer(question)
                 return {"answer": answer, "insights": []}
-            # Recruitment data: jobs, candidates, CVs, settings (DB + LLM)
-            if not _is_recruitment_data_question(question):
+            elif not is_recruitment:
                 return self._get_friendly_non_data_response()
             data = self._get_recruitment_data(company_user)
             direct = self._get_direct_answer(data, question)
@@ -300,9 +438,9 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             raise
 
     def _get_recruitment_data(self, company_user: Any) -> Dict[str, Any]:
-        """Load jobs, CVs per job, interviews, and settings for this company user."""
+        """Load comprehensive recruitment data: jobs, CVs, interviews, settings, time slots, applications."""
         jobs_qs = (
-            JobDescription.objects.filter(company_user=company_user)
+            JobDescription.objects.filter(company_user=company_user, is_deleted=False)
             .order_by("-created_at")
         )
         jobs_list = []
@@ -317,6 +455,11 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                 parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
                 insights_json = json.loads(cv.insights_json) if cv.insights_json else {}
                 name = _get_parsed_name(parsed)
+                email = ""
+                phone = ""
+                if isinstance(parsed, dict):
+                    email = parsed.get("email") or parsed.get("Email") or ""
+                    phone = parsed.get("phone") or parsed.get("Phone") or parsed.get("contact") or ""
                 summary = ""
                 if isinstance(insights_json, dict):
                     summary = insights_json.get("summary") or insights_json.get("executive_summary") or ""
@@ -325,6 +468,8 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                 candidates.append({
                     "id": cv.id,
                     "name": name,
+                    "email": email,
+                    "phone": phone,
                     "file_name": cv.file_name,
                     "rank": cv.rank,
                     "role_fit_score": cv.role_fit_score,
@@ -332,21 +477,128 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                     "qualification_confidence": cv.qualification_confidence,
                     "summary": (summary or "")[:500],
                 })
-            interview_count = Interview.objects.filter(
+
+            # Per-job qualification decision breakdown
+            job_qual_qs = CVRecord.objects.filter(job_description=job).order_by().values(
+                'qualification_decision'
+            ).annotate(cnt=Count('id'))
+            job_qual_counts = {}
+            for row in job_qual_qs:
+                decision = row['qualification_decision'] or 'NONE'
+                job_qual_counts[decision] = row['cnt']
+
+            # Per-job interviews with details
+            job_interviews_qs = Interview.objects.filter(
                 company_user=company_user,
                 cv_record__job_description_id=job.id,
-            ).count()
+            ).order_by('-created_at')
+            interview_count = job_interviews_qs.count()
+
+            # Per-job interview status breakdown
+            job_interview_status_qs = job_interviews_qs.order_by().values('status').annotate(cnt=Count('id'))
+            job_interview_status = {}
+            for row in job_interview_status_qs:
+                job_interview_status[row['status']] = row['cnt']
+
+            # Per-job interview outcome breakdown
+            job_interview_outcome_qs = job_interviews_qs.filter(
+                outcome__isnull=False
+            ).exclude(outcome='').order_by().values('outcome').annotate(cnt=Count('id'))
+            job_interview_outcomes = {}
+            for row in job_interview_outcome_qs:
+                job_interview_outcomes[row['outcome']] = row['cnt']
+
+            # Per-job interview details (names, dates, statuses)
+            job_interview_details = []
+            for intv in job_interviews_qs[:20]:
+                job_interview_details.append({
+                    "id": intv.id,
+                    "candidate_name": intv.candidate_name,
+                    "candidate_email": intv.candidate_email,
+                    "status": intv.status,
+                    "outcome": intv.outcome or "",
+                    "interview_type": intv.interview_type,
+                    "scheduled_datetime": str(intv.scheduled_datetime) if intv.scheduled_datetime else "",
+                    "selected_slot": intv.selected_slot or "",
+                })
+
+            # Per-job career applications
+            job_apps_qs = CareerApplication.objects.filter(position=job).order_by().values(
+                'status'
+            ).annotate(cnt=Count('id'))
+            job_app_counts = {}
+            for row in job_apps_qs:
+                job_app_counts[row['status']] = row['cnt']
+
+            # Per-job career application details
+            job_app_details = []
+            for app in CareerApplication.objects.filter(position=job).order_by('-created_at')[:20]:
+                job_app_details.append({
+                    "applicant_name": app.applicant_name,
+                    "email": app.email,
+                    "phone": app.phone or "",
+                    "status": app.status,
+                    "created_at": str(app.created_at.date()) if app.created_at else "",
+                })
+
+            # Per-job time slots from interview settings
+            job_time_slots = []
+            job_interview_setting = None
+            try:
+                job_interview_setting = RecruiterInterviewSettings.objects.filter(
+                    company_user=company_user, job=job
+                ).first()
+                if job_interview_setting and job_interview_setting.time_slots_json:
+                    slots = job_interview_setting.time_slots_json
+                    if isinstance(slots, str):
+                        slots = json.loads(slots)
+                    if isinstance(slots, list):
+                        job_time_slots = slots
+            except Exception:
+                pass
+
+            # Per-job score statistics
+            score_stats = CVRecord.objects.filter(
+                job_description=job, role_fit_score__isnull=False
+            ).aggregate(
+                avg_score=Avg('role_fit_score'),
+                max_score=Max('role_fit_score'),
+                min_score=Min('role_fit_score'),
+            )
+
             jobs_list.append({
                 "id": job.id,
                 "title": job.title,
                 "description": (job.description or "")[:800],
                 "is_active": job.is_active,
-                "location": job.location,
-                "department": job.department,
-                "type": job.type,
+                "location": job.location or "",
+                "department": job.department or "",
+                "type": job.type or "Full-time",
+                "requirements": (job.requirements or "")[:500],
                 "candidates": candidates,
                 "candidate_count": len(candidates),
                 "interview_count": interview_count,
+                "qualification_counts": job_qual_counts,
+                "interview_status_counts": job_interview_status,
+                "interview_outcomes": job_interview_outcomes,
+                "interview_details": job_interview_details,
+                "career_app_counts": job_app_counts,
+                "career_app_details": job_app_details,
+                "time_slots": job_time_slots,
+                "interview_setting": {
+                    "start_time": str(job_interview_setting.start_time) if job_interview_setting else "",
+                    "end_time": str(job_interview_setting.end_time) if job_interview_setting else "",
+                    "gap_minutes": job_interview_setting.interview_time_gap if job_interview_setting else "",
+                    "schedule_from": str(job_interview_setting.schedule_from_date) if job_interview_setting and job_interview_setting.schedule_from_date else "",
+                    "schedule_to": str(job_interview_setting.schedule_to_date) if job_interview_setting and job_interview_setting.schedule_to_date else "",
+                    "default_type": job_interview_setting.default_interview_type if job_interview_setting else "",
+                    "total_slots": len(job_time_slots),
+                } if job_interview_setting else {},
+                "score_stats": {
+                    "avg": round(score_stats['avg_score'], 1) if score_stats['avg_score'] else 0,
+                    "max": score_stats['max_score'] or 0,
+                    "min": score_stats['min_score'] or 0,
+                },
             })
 
         # Global CV count (all jobs)
@@ -355,6 +607,37 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         )
         total_cvs = all_cvs.count()
         interview_total = Interview.objects.filter(company_user=company_user).count()
+
+        # Qualification decision breakdown (global)
+        qual_qs = all_cvs.order_by().values('qualification_decision').annotate(cnt=Count('id'))
+        qualification_counts = {}
+        for row in qual_qs:
+            decision = row['qualification_decision'] or 'NONE'
+            qualification_counts[decision] = row['cnt']
+
+        # Interview status breakdown (global)
+        interview_status_qs = Interview.objects.filter(
+            company_user=company_user
+        ).order_by().values('status').annotate(cnt=Count('id'))
+        interview_status_counts = {}
+        for row in interview_status_qs:
+            interview_status_counts[row['status']] = row['cnt']
+
+        # Interview outcome breakdown (global)
+        interview_outcome_qs = Interview.objects.filter(
+            company_user=company_user, outcome__isnull=False
+        ).exclude(outcome='').order_by().values('outcome').annotate(cnt=Count('id'))
+        interview_outcome_counts = {}
+        for row in interview_outcome_qs:
+            interview_outcome_counts[row['outcome']] = row['cnt']
+
+        # Career application counts (global)
+        app_qs = CareerApplication.objects.filter(
+            position__company_user=company_user
+        ).order_by().values('status').annotate(cnt=Count('id'))
+        career_application_counts = {}
+        for row in app_qs:
+            career_application_counts[row['status']] = row['cnt']
 
         # Settings
         email_settings = RecruiterEmailSettings.objects.filter(
@@ -373,13 +656,17 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             "jobs": jobs_list,
             "total_cvs": total_cvs,
             "total_interviews": interview_total,
+            "qualification_counts": qualification_counts,
+            "interview_status_counts": interview_status_counts,
+            "interview_outcome_counts": interview_outcome_counts,
+            "career_application_counts": career_application_counts,
             "email_settings": email_settings,
             "interview_settings": interview_settings,
             "qualification_settings": qual_settings,
         }
 
     def _build_context(self, data: Dict[str, Any]) -> str:
-        """Build a text context for the LLM from recruitment data. DIRECT FACTS first for exact answers."""
+        """Build comprehensive context for LLM with DIRECT FACTS + per-job data."""
         jobs = data.get("jobs", [])
         total_jobs = len(jobs)
         active_jobs = sum(1 for j in jobs if j.get("is_active"))
@@ -387,81 +674,157 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         total_cvs = data.get("total_cvs", 0)
         total_interviews = data.get("total_interviews", 0)
 
+        qual_counts = data.get("qualification_counts", {})
+        interview_status = data.get("interview_status_counts", {})
+        interview_outcomes = data.get("interview_outcome_counts", {})
+        app_counts = data.get("career_application_counts", {})
+
         lines = [
-            "=== DIRECT FACTS (use these EXACT numbers in your first sentence) ===",
+            "=== DIRECT FACTS (use these EXACT numbers when answering) ===",
             f"TOTAL_JOBS: {total_jobs}",
             f"ACTIVE_JOBS: {active_jobs}",
             f"INACTIVE_JOBS: {inactive_jobs}",
             f"TOTAL_CANDIDATES_CVS: {total_cvs}",
-            f"TOTAL_INTERVIEWS_SCHEDULED: {total_interviews}",
-            "",
+            f"TOTAL_INTERVIEWS: {total_interviews}",
+            f"INTERVIEWS_SCHEDULED: {interview_status.get('SCHEDULED', 0)}",
+            f"INTERVIEWS_PENDING: {interview_status.get('PENDING', 0)}",
+            f"INTERVIEWS_COMPLETED: {interview_status.get('COMPLETED', 0)}",
+            f"INTERVIEWS_CANCELLED: {interview_status.get('CANCELLED', 0)}",
+            f"CANDIDATES_INTERVIEW_DECISION: {qual_counts.get('INTERVIEW', 0)}",
+            f"CANDIDATES_HOLD: {qual_counts.get('HOLD', 0)}",
+            f"CANDIDATES_REJECT: {qual_counts.get('REJECT', 0)}",
+            f"CAREER_APPLICATIONS_TOTAL: {sum(app_counts.values())}",
         ]
+        # Application status breakdown
+        for status, count in app_counts.items():
+            lines.append(f"CAREER_APPLICATIONS_{status.upper()}: {count}")
+        # Interview outcome breakdown
+        for outcome, count in interview_outcomes.items():
+            lines.append(f"INTERVIEW_OUTCOME_{outcome}: {count}")
+        lines.append("")
+
+        # Per-job summary line
         for j in jobs:
             aid = j["id"]
             title = (j.get("title") or "").replace("\n", " ")
             active = "yes" if j.get("is_active") else "no"
             cand = j.get("candidate_count", 0)
             interv = j.get("interview_count", 0)
-            lines.append(f"JOB_ID_{aid}: title=\"{title}\" active={active} candidates={cand} interviews={interv}")
+            loc = j.get("location", "")
+            dept = j.get("department", "")
+            jtype = j.get("type", "")
+            jqc = j.get("qualification_counts", {})
+            lines.append(
+                f"JOB_ID_{aid}: title=\"{title}\" active={active} type={jtype} "
+                f"location=\"{loc}\" department=\"{dept}\" "
+                f"candidates={cand} interviews={interv} "
+                f"interview_decision={jqc.get('INTERVIEW', 0)} hold={jqc.get('HOLD', 0)} rejected={jqc.get('REJECT', 0)}"
+            )
         lines.append("")
-        lines.append("=== DETAILED DATA (for lists and tables) ===\n")
 
-        lines.append("OVERVIEW:")
-        lines.append(f"- Total jobs: {total_jobs} (active: {active_jobs}, inactive: {inactive_jobs})")
-        lines.append(f"- Total CVs/candidates across all jobs: {total_cvs}")
-        lines.append(f"- Total interviews scheduled: {total_interviews}\n")
+        lines.append("=== DETAILED DATA (per-job breakdown) ===\n")
 
         for j in jobs:
-            lines.append(f"--- JOB ID {j['id']}: {j['title']} ---")
-            lines.append(f"  Active: {j['is_active']}")
+            lines.append(f"--- JOB: {j['title']} (ID: {j['id']}) ---")
+            lines.append(f"  Active: {'Yes' if j['is_active'] else 'No'}")
+            lines.append(f"  Type: {j.get('type', 'N/A')}")
             if j.get("location"):
                 lines.append(f"  Location: {j['location']}")
             if j.get("department"):
                 lines.append(f"  Department: {j['department']}")
-            lines.append(f"  Candidates who applied (CVs): {j['candidate_count']}")
-            lines.append(f"  Interviews for this job: {j.get('interview_count', 0)}")
+            if j.get("requirements"):
+                lines.append(f"  Requirements: {j['requirements'][:300]}")
+            lines.append(f"  Total Candidates/CVs: {j['candidate_count']}")
+
+            # Per-job qualification breakdown
+            jqc = j.get("qualification_counts", {})
+            if jqc:
+                parts = ", ".join(f"{k}: {v}" for k, v in jqc.items())
+                lines.append(f"  Qualification Decisions: {parts}")
+
+            # Per-job score stats
+            ss = j.get("score_stats", {})
+            if ss.get("max"):
+                lines.append(f"  Score Stats: Avg={ss.get('avg', 0)}, Max={ss.get('max', 0)}, Min={ss.get('min', 0)}")
+
+            # Per-job candidates
             if j.get("candidates"):
-                lines.append("  Top candidates (by rank / role_fit_score):")
-                for i, c in enumerate(j["candidates"][:15], 1):
+                lines.append(f"  Candidates ({len(j['candidates'])} total):")
+                for i, c in enumerate(j["candidates"][:8], 1):
                     score = c.get("role_fit_score")
-                    score_str = f", role_fit_score={score}" if score is not None else ""
+                    score_str = f", score={score}" if score is not None else ""
                     lines.append(
-                        f"    {i}. {c['name']} (ID={c['id']}, rank={c.get('rank')}{score_str}, "
+                        f"    {i}. {c['name']} (rank={c.get('rank')}{score_str}, "
                         f"decision={c.get('qualification_decision', 'N/A')})"
                     )
-                    if c.get("summary"):
-                        lines.append(f"       Summary: {c['summary'][:200]}...")
+                if len(j["candidates"]) > 8:
+                    lines.append(f"    ... and {len(j['candidates']) - 8} more")
+
+            # Per-job interviews (summary only)
+            lines.append(f"  Interviews: {j.get('interview_count', 0)}")
+            jis = j.get("interview_status_counts", {})
+            if jis:
+                parts = ", ".join(f"{k}: {v}" for k, v in jis.items())
+                lines.append(f"  Interview Status: {parts}")
+            jio = j.get("interview_outcomes", {})
+            if jio:
+                parts = ", ".join(f"{k}: {v}" for k, v in jio.items())
+                lines.append(f"  Interview Outcomes: {parts}")
+            if j.get("interview_details"):
+                lines.append(f"  Interview Names: " + ", ".join(
+                    intv['candidate_name'] for intv in j['interview_details'][:5]
+                ))
+
+            # Per-job career applications (summary only)
+            jac = j.get("career_app_counts", {})
+            total_apps = sum(jac.values())
+            if total_apps > 0:
+                parts = ", ".join(f"{k}: {v}" for k, v in jac.items())
+                lines.append(f"  Career Applications: {total_apps} ({parts})")
+
+            # Per-job time slots (count only in context to save space)
+            jts = j.get("time_slots", [])
+            js = j.get("interview_setting", {})
+            if js:
+                lines.append(f"  Interview Schedule: "
+                             f"time={js.get('start_time', '')} to {js.get('end_time', '')}, "
+                             f"gap={js.get('gap_minutes', '')}min, "
+                             f"type={js.get('default_type', '')}")
+            if jts:
+                lines.append(f"  Time Slots: {len(jts)} available")
             lines.append("")
 
         # Settings summary
         es = data.get("email_settings")
         if es:
-            lines.append("EMAIL SETTINGS (recruiter):")
+            lines.append("EMAIL SETTINGS:")
             lines.append(f"  From email: {getattr(es, 'from_email', 'N/A')}")
+            lines.append(f"  Auto follow-ups: {getattr(es, 'auto_send_followups', 'N/A')}")
+            lines.append(f"  Auto reminders: {getattr(es, 'auto_send_reminders', 'N/A')}")
+            lines.append(f"  Follow-up delay: {getattr(es, 'followup_delay_hours', 'N/A')} hours")
+            lines.append(f"  Max follow-ups: {getattr(es, 'max_followup_emails', 'N/A')}")
+            lines.append(f"  Reminder before: {getattr(es, 'reminder_hours_before', 'N/A')} hours")
             lines.append("")
-        iss = data.get("interview_settings") or []
-        if iss:
-            lines.append("INTERVIEW SETTINGS (per job or default):")
-            for s in iss[:10]:
-                job_title = s.job.title if s.job else "Default (all jobs)"
-                lines.append(
-                    f"  {job_title}: gap={getattr(s, 'interview_time_gap', 'N/A')} min, "
-                    f"start={getattr(s, 'start_time', 'N/A')}, end={getattr(s, 'end_time', 'N/A')}"
-                )
-            lines.append("")
+
         qs = data.get("qualification_settings")
         if qs:
             lines.append("QUALIFICATION SETTINGS:")
             lines.append(
                 f"  Interview threshold: {getattr(qs, 'interview_threshold', 'N/A')}, "
-                f"Hold threshold: {getattr(qs, 'hold_threshold', 'N/A')}"
+                f"Hold threshold: {getattr(qs, 'hold_threshold', 'N/A')}, "
+                f"Custom: {getattr(qs, 'use_custom_thresholds', 'N/A')}"
             )
             lines.append("")
 
-        return "\n".join(lines)
+        # Truncate context to avoid API payload errors
+        context_str = "\n".join(lines)
+        MAX_CONTEXT_CHARS = 12000
+        if len(context_str) > MAX_CONTEXT_CHARS:
+            context_str = context_str[:MAX_CONTEXT_CHARS] + "\n... [truncated]"
+        return context_str
 
     def _get_direct_answer(self, data: Dict[str, Any], question: str) -> str:
-        """Build a one-sentence direct answer from DB for count-style questions."""
+        """Build a direct answer from DB for count/list/detail questions. Handles global AND per-job queries."""
         q = question.lower().strip()
         jobs = data.get("jobs", [])
         total_jobs = len(jobs)
@@ -470,19 +833,430 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         total_cvs = data.get("total_cvs", 0)
         total_interviews = data.get("total_interviews", 0)
 
+        # Qualification decision counts (global)
+        qual_counts = data.get("qualification_counts", {})
+        interview_decision = qual_counts.get("INTERVIEW", 0)
+        hold_decision = qual_counts.get("HOLD", 0)
+        reject_decision = qual_counts.get("REJECT", 0)
+
+        # Interview status counts (global)
+        interview_status = data.get("interview_status_counts", {})
+        scheduled_count = interview_status.get("SCHEDULED", 0)
+        pending_count = interview_status.get("PENDING", 0)
+        completed_count = interview_status.get("COMPLETED", 0)
+        cancelled_count = interview_status.get("CANCELLED", 0)
+
+        # Career application counts (global)
+        app_counts = data.get("career_application_counts", {})
+        
+        # Interview outcome counts (global)
+        outcome_counts = data.get("interview_outcome_counts", {})
+
+        # ────────────────────────────────────────────────────────────
+        # Try to find a matching job for job-specific questions
+        # ────────────────────────────────────────────────────────────
+        matched_job = _find_matching_job(jobs, question)
+
+        # ════════════════════════════════════════════════════════════
+        # JOB-SPECIFIC: Time slots
+        # ════════════════════════════════════════════════════════════
+        if "time slot" in q or "time slots" in q or "interview slot" in q or "slot" in q:
+            if matched_job:
+                jts = matched_job.get("time_slots", [])
+                js = matched_job.get("interview_setting", {})
+                title = matched_job["title"]
+                if not jts and not js:
+                    return f"No interview time slots configured for **{title}**."
+                answer = f"**Time Slots for {title}** ({len(jts)} slots):\n\n"
+                if js:
+                    answer += f"- Schedule: {js.get('start_time', 'N/A')} to {js.get('end_time', 'N/A')}, Gap: {js.get('gap_minutes', 'N/A')} min\n"
+                    if js.get('schedule_from'):
+                        answer += f"- Date range: {js['schedule_from']} to {js.get('schedule_to', 'N/A')}\n"
+                    answer += f"- Type: {js.get('default_type', 'N/A')}\n\n"
+                if jts:
+                    for slot in jts[:25]:
+                        if isinstance(slot, dict):
+                            answer += f"- {slot.get('date', '')} at {slot.get('time', '')}\n"
+                        else:
+                            answer += f"- {slot}\n"
+                    if len(jts) > 25:
+                        answer += f"\n... and {len(jts) - 25} more slots"
+                return answer.strip()
+            else:
+                # Global: list time slots for all jobs
+                all_slots = []
+                for j in jobs:
+                    jts = j.get("time_slots", [])
+                    if jts:
+                        all_slots.append(f"**{j['title']}**: {len(jts)} slots")
+                if not all_slots:
+                    return "No interview time slots configured for any job."
+                return "**Time Slots by Job:**\n\n" + "\n".join(f"- {s}" for s in all_slots)
+
+        # ════════════════════════════════════════════════════════════
+        # JOB-SPECIFIC: Candidates for a specific job
+        # ════════════════════════════════════════════════════════════
+        if matched_job and ("candidate" in q or "cv" in q or "applied" in q or "applicant" in q):
+            title = matched_job["title"]
+            cands = matched_job.get("candidates", [])
+            jqc = matched_job.get("qualification_counts", {})
+
+            # ── Specific decision filters FIRST (before generic count) ──
+            if "reject" in q or "rejected" in q:
+                cnt = jqc.get("REJECT", 0)
+                names = [c["name"] for c in cands if c.get("qualification_decision") == "REJECT"]
+                if names:
+                    return f"**{title}** has **{cnt}** rejected candidate(s): " + ", ".join(f"**{n}**" for n in names[:10]) + "."
+                return f"**{title}** has **{cnt}** rejected candidate(s)."
+            if "hold" in q:
+                cnt = jqc.get("HOLD", 0)
+                names = [c["name"] for c in cands if c.get("qualification_decision") == "HOLD"]
+                if names:
+                    return f"**{title}** has **{cnt}** candidate(s) on HOLD: " + ", ".join(f"**{n}**" for n in names[:10]) + "."
+                return f"**{title}** has **{cnt}** candidate(s) on HOLD."
+
+            # ── Generic count (after specific filters) ──
+            if any(x in q for x in ("how many", "total", "count", "kitne", "number")):
+                parts = []
+                if jqc:
+                    parts = [f"{k}: {v}" for k, v in jqc.items() if v > 0]
+                detail = f" ({', '.join(parts)})" if parts else ""
+                return f"**{title}** has **{len(cands)}** candidate(s){detail}."
+
+            # "best/top candidate for X"
+            if "best" in q or "top" in q or "highest" in q or "rank" in q:
+                if cands:
+                    top = cands[0]  # already sorted by rank
+                    score = top.get("role_fit_score", "N/A")
+                    decision = top.get("qualification_decision", "N/A")
+                    return (
+                        f"The **best candidate** for **{title}** is **{top['name']}** "
+                        f"(Rank: {top.get('rank', 'N/A')}, Score: {score}, Decision: {decision})."
+                    )
+                return f"No candidates found for **{title}**."
+
+            # "list/show candidates for X"
+            if any(x in q for x in ("list", "show", "who", "which", "tell", "give", "all")):
+                if not cands:
+                    return f"No candidates found for **{title}**."
+                answer = f"**Candidates for {title}** ({len(cands)} total):\n\n"
+                for i, c in enumerate(cands[:15], 1):
+                    score = c.get("role_fit_score", "N/A")
+                    decision = c.get("qualification_decision", "N/A")
+                    answer += f"{i}. **{c['name']}** — Score: {score}, Decision: {decision}\n"
+                if len(cands) > 15:
+                    answer += f"\n... and {len(cands) - 15} more candidates"
+                return answer.strip()
+
+            # General "candidates for X" — list them
+            if cands:
+                answer = f"**{title}** has **{len(cands)}** candidate(s):\n\n"
+                for i, c in enumerate(cands[:10], 1):
+                    score = c.get("role_fit_score", "N/A")
+                    decision = c.get("qualification_decision", "N/A")
+                    answer += f"{i}. **{c['name']}** — Score: {score}, Decision: {decision}\n"
+                if len(cands) > 10:
+                    answer += f"\n... and {len(cands) - 10} more"
+                return answer.strip()
+            return f"No candidates found for **{title}**."
+
+        # ════════════════════════════════════════════════════════════
+        # JOB-SPECIFIC: Interviews for a specific job
+        # ════════════════════════════════════════════════════════════
+        if matched_job and "interview" in q:
+            title = matched_job["title"]
+            intv_count = matched_job.get("interview_count", 0)
+            jis = matched_job.get("interview_status_counts", {})
+            jio = matched_job.get("interview_outcomes", {})
+            details = matched_job.get("interview_details", [])
+
+            # "how many interviews for X"
+            if any(x in q for x in ("how many", "total", "count", "kitne", "number")):
+                parts = [f"{k}: {v}" for k, v in jis.items() if v > 0]
+                detail = f" ({', '.join(parts)})" if parts else ""
+                return f"**{title}** has **{intv_count}** interview(s){detail}."
+
+            # Specific status for this job
+            if "scheduled" in q:
+                cnt = jis.get("SCHEDULED", 0)
+                return f"**{title}** has **{cnt}** scheduled interview(s)."
+            if "pending" in q:
+                cnt = jis.get("PENDING", 0)
+                return f"**{title}** has **{cnt}** pending interview(s)."
+            if "completed" in q:
+                cnt = jis.get("COMPLETED", 0)
+                return f"**{title}** has **{cnt}** completed interview(s)."
+            if "cancelled" in q:
+                cnt = jis.get("CANCELLED", 0)
+                return f"**{title}** has **{cnt}** cancelled interview(s)."
+
+            # "interview details/list for X"
+            if any(x in q for x in ("detail", "list", "show", "who", "tell", "give")):
+                if not details:
+                    return f"No interview details found for **{title}**."
+                answer = f"**Interviews for {title}** ({intv_count} total):\n\n"
+                for intv in details[:15]:
+                    dt = intv.get("scheduled_datetime", "N/A")
+                    answer += (
+                        f"- **{intv['candidate_name']}** ({intv['candidate_email']}): "
+                        f"Status={intv['status']}, Type={intv['interview_type']}, "
+                        f"Date={dt}"
+                    )
+                    if intv.get("outcome"):
+                        answer += f", Outcome={intv['outcome']}"
+                    answer += "\n"
+                return answer.strip()
+
+            # General "interviews for X"
+            parts = [f"{k}: {v}" for k, v in jis.items() if v > 0]
+            detail = f" ({', '.join(parts)})" if parts else ""
+            return f"**{title}** has **{intv_count}** interview(s){detail}."
+
+        # ════════════════════════════════════════════════════════════
+        # JOB-SPECIFIC: Career applications for a specific job
+        # ════════════════════════════════════════════════════════════
+        if matched_job and ("application" in q or "applied" in q or "applicant" in q):
+            title = matched_job["title"]
+            jac = matched_job.get("career_app_counts", {})
+            jad = matched_job.get("career_app_details", [])
+            total_apps = sum(jac.values())
+
+            if any(x in q for x in ("how many", "total", "count", "kitne", "number")):
+                parts = [f"{k}: {v}" for k, v in jac.items() if v > 0]
+                detail = f" ({', '.join(parts)})" if parts else ""
+                return f"**{title}** has **{total_apps}** career application(s){detail}."
+
+            if any(x in q for x in ("list", "show", "who", "which", "tell", "give", "detail")):
+                if not jad:
+                    return f"No career applications found for **{title}**."
+                answer = f"**Applications for {title}** ({total_apps} total):\n\n"
+                for app in jad[:15]:
+                    answer += f"- **{app['applicant_name']}** ({app['email']}): Status={app['status']}, Applied={app.get('created_at', 'N/A')}\n"
+                return answer.strip()
+
+            parts = [f"{k}: {v}" for k, v in jac.items() if v > 0]
+            detail = f" ({', '.join(parts)})" if parts else ""
+            return f"**{title}** has **{total_apps}** career application(s){detail}."
+
+        # ════════════════════════════════════════════════════════════
+        # JOB-SPECIFIC: Job details/info/description
+        # ════════════════════════════════════════════════════════════
+        if matched_job and ("detail" in q or "description" in q or "info" in q or "about" in q):
+            j = matched_job
+            title = j["title"]
+            answer = f"# {title}\n\n"
+            answer += f"**Job ID:** `{j['id']}`  \n"
+            answer += f"**Status:** <span style='color:{'green' if j['is_active'] else 'red'}'>{'Active' if j['is_active'] else 'Inactive'}</span>  \n"
+            answer += f"**Type:** {j.get('type', 'N/A')}  \n"
+            if j.get("location"):
+                answer += f"**Location:** {j['location']}  \n"
+            if j.get("department"):
+                answer += f"**Department:** {j['department']}  \n"
+            answer += f"**Candidates:** {j['candidate_count']}  \n"
+            answer += f"**Interviews:** {j.get('interview_count', 0)}  \n"
+            jqc = j.get("qualification_counts", {})
+            if jqc:
+                answer += "**Decisions:** " + ", ".join(f"{k}: {v}" for k, v in jqc.items()) + "  \n"
+            ss = j.get("score_stats", {})
+            if ss.get("max"):
+                answer += f"**Score Stats:** Avg={ss['avg']}, Max={ss['max']}, Min={ss['min']}  \n"
+            if j.get("description"):
+                answer += f"\n## Description\n{j['description'][:500]}\n"
+            if j.get("requirements"):
+                answer += f"\n## Requirements & Skills\n{j['requirements'][:500]}\n"
+            return answer.strip()
+
+        # ════════════════════════════════════════════════════════════
+        # JOB-SPECIFIC: Best/top candidate globally or for job
+        # ════════════════════════════════════════════════════════════
+        if ("best" in q or "top" in q or "highest" in q) and ("candidate" in q or "cv" in q):
+            if matched_job:
+                cands = matched_job.get("candidates", [])
+                title = matched_job["title"]
+                if cands:
+                    top = cands[0]
+                    return (
+                        f"The **best candidate** for **{title}** is **{top['name']}** "
+                        f"(Rank: {top.get('rank', 'N/A')}, Score: {top.get('role_fit_score', 'N/A')}, "
+                        f"Decision: {top.get('qualification_decision', 'N/A')})."
+                    )
+                return f"No candidates found for **{title}**."
+            # Global best: find across all jobs
+            all_cands = []
+            for j in jobs:
+                for c in j.get("candidates", []):
+                    c["_job_title"] = j["title"]
+                    all_cands.append(c)
+            if all_cands:
+                all_cands.sort(key=lambda c: (c.get("role_fit_score") or 0), reverse=True)
+                top = all_cands[0]
+                return (
+                    f"The **best candidate** overall is **{top['name']}** "
+                    f"for **{top['_job_title']}** (Score: {top.get('role_fit_score', 'N/A')}, "
+                    f"Decision: {top.get('qualification_decision', 'N/A')})."
+                )
+            return "No candidates found in the system."
+
+        # ════════════════════════════════════════════════════════════
+        # GLOBAL: Job counts
+        # ════════════════════════════════════════════════════════════
         if "how many job" in q or "number of job" in q or "total job" in q or "kitne job" in q:
             if total_jobs == 0:
-                return "You have **0 jobs** in the database."
-            return f"You have **{total_jobs}** job(s) in total: **{active}** active and **{inactive}** inactive."
+                return "You have **0 jobs** in the database. (Note: Deleted jobs are not included in analytics or graphs.)"
+            return f"You have **{total_jobs}** job(s) in total: **{active}** active and **{inactive}** inactive. (Note: Deleted jobs are not included in analytics or graphs.)"
+        if "inactive job" in q and ("how many" in q or "which" in q or "list" in q or "konsi" in q):
+            if inactive == 0:
+                return "You have **0 inactive jobs**. (Note: Deleted jobs are not included in analytics or graphs.)"
+            titles = [j["title"] for j in jobs if not j.get("is_active")]
+            return f"You have **{inactive}** inactive job(s): " + ", ".join(f"**{t}**" for t in titles[:10]) + ("." if len(titles) <= 10 else f" (and {len(titles) - 10} more).") + " (Note: Deleted jobs are not included in analytics or graphs.)"
         if "active job" in q and ("how many" in q or "which" in q or "list" in q or "konsi" in q):
             if active == 0:
-                return "You have **0 active jobs**."
+                return "You have **0 active jobs**. (Note: Deleted jobs are not included in analytics or graphs.)"
             titles = [j["title"] for j in jobs if j.get("is_active")]
-            return f"You have **{active}** active job(s): " + ", ".join(f"**{t}**" for t in titles[:10]) + ("." if len(titles) <= 10 else f" (and {len(titles) - 10} more).")
+            return f"You have **{active}** active job(s): " + ", ".join(f"**{t}**" for t in titles[:10]) + ("." if len(titles) <= 10 else f" (and {len(titles) - 10} more).") + " (Note: Deleted jobs are not included in analytics or graphs.)"
+
+        # ── List all jobs ──
+        if ("list" in q or "show" in q or "all" in q or "which" in q) and "job" in q and "candidate" not in q and "interview" not in q:
+            if not jobs:
+                return "No jobs found."
+            answer = f"**All Jobs** ({total_jobs} total, {active} active, {inactive} inactive):\n\n"
+            for j in jobs:
+                status = "Active" if j["is_active"] else "Inactive"
+                answer += f"- **{j['title']}** — {status}, {j['candidate_count']} candidates, {j.get('interview_count', 0)} interviews\n"
+            return answer.strip()
+
+        # ── Qualification decision questions (BEFORE generic candidate count) ──
+        if ("reject" in q or "rejected" in q) and ("candidate" in q or "cv" in q or "how many" in q):
+            return f"You have **{reject_decision}** rejected candidate(s) (qualification decision = REJECT)."
+        if "hold" in q and ("candidate" in q or "cv" in q or "how many" in q):
+            return f"You have **{hold_decision}** candidate(s) on HOLD."
+        if "interview decision" in q or ("interview" in q and "decision" in q) or ("candidate" in q and "interview" in q and "decision" in q):
+            return f"You have **{interview_decision}** candidate(s) with INTERVIEW decision."
+        if "qualified" in q and ("candidate" in q or "how many" in q):
+            return f"You have **{interview_decision}** qualified candidate(s) (INTERVIEW decision), **{hold_decision}** on HOLD, and **{reject_decision}** rejected."
+
+        # ── Generic candidate / CV total ──
         if "how many candidate" in q or "how many cv" in q or "total candidate" in q or "kitne candidate" in q:
             return f"You have **{total_cvs}** candidate(s) / CV(s) in total across all jobs."
+
+        # ── List all candidates ──
+        if ("list" in q or "show" in q or "all" in q) and ("candidate" in q or "cv" in q):
+            all_cands = []
+            for j in jobs:
+                for c in j.get("candidates", []):
+                    all_cands.append((j["title"], c))
+            if not all_cands:
+                return "No candidates found."
+            answer = f"**All Candidates** ({len(all_cands)} total):\n\n"
+            for jt, c in all_cands[:20]:
+                score = c.get("role_fit_score", "N/A")
+                decision = c.get("qualification_decision", "N/A")
+                answer += f"- **{c['name']}** (Job: {jt}, Score: {score}, Decision: {decision})\n"
+            if len(all_cands) > 20:
+                answer += f"\n... and {len(all_cands) - 20} more"
+            return answer.strip()
+
+        # ── Interview status questions (global) ──
+        if ("interview" in q and "completed" in q) and any(x in q for x in ("how many", "total", "kitne", "number")):
+            return f"You have **{completed_count}** completed interview(s)."
+        if ("interview" in q and "scheduled" in q) and any(x in q for x in ("how many", "total", "kitne", "number")):
+            return f"You have **{scheduled_count}** scheduled interview(s) and **{pending_count}** pending."
+        if ("interview" in q and "cancelled" in q) and any(x in q for x in ("how many", "total", "kitne", "number")):
+            return f"You have **{cancelled_count}** cancelled interview(s)."
+        if ("interview" in q and "pending" in q) and any(x in q for x in ("how many", "total", "kitne", "number")):
+            return f"You have **{pending_count}** pending interview(s)."
         if "how many interview" in q or "total interview" in q or "kitne interview" in q:
-            return f"You have **{total_interviews}** scheduled interview(s)."
+            return f"You have **{total_interviews}** interview(s) in total (Scheduled: **{scheduled_count}**, Pending: **{pending_count}**, Completed: **{completed_count}**, Cancelled: **{cancelled_count}**)."
+
+        # ── Interview outcomes ──
+        if "outcome" in q and "interview" in q:
+            if not outcome_counts:
+                return "No interview outcomes recorded yet."
+            parts = ", ".join(f"{k}: **{v}**" for k, v in outcome_counts.items())
+            return f"Interview outcomes: {parts}."
+        if "hired" in q:
+            cnt = outcome_counts.get("HIRED", 0)
+            return f"You have **{cnt}** candidate(s) hired."
+        if "passed" in q and "interview" in q:
+            cnt = outcome_counts.get("PASSED", 0)
+            return f"**{cnt}** candidate(s) passed interview."
+
+        # ── List all interviews ──
+        if ("list" in q or "show" in q or "all" in q) and "interview" in q:
+            all_intv = []
+            for j in jobs:
+                for intv in j.get("interview_details", []):
+                    intv["_job_title"] = j["title"]
+                    all_intv.append(intv)
+            if not all_intv:
+                return "No interviews found."
+            answer = f"**All Interviews** ({total_interviews} total):\n\n"
+            for intv in all_intv[:20]:
+                dt = intv.get("scheduled_datetime", "N/A")
+                answer += (
+                    f"- **{intv['candidate_name']}** for {intv['_job_title']}: "
+                    f"Status={intv['status']}, Type={intv['interview_type']}, Date={dt}\n"
+                )
+            if len(all_intv) > 20:
+                answer += f"\n... and {len(all_intv) - 20} more"
+            return answer.strip()
+
+        # ── Career application questions (global) ──
+        if "application" in q and "pending" in q:
+            pending_apps = app_counts.get("pending", 0)
+            return f"You have **{pending_apps}** pending career application(s)."
+        if "application" in q and any(x in q for x in ("how many", "total", "kitne")):
+            total_apps = sum(app_counts.values())
+            parts = ", ".join(f"{status}: **{count}**" for status, count in app_counts.items() if count > 0)
+            return f"You have **{total_apps}** career application(s) in total" + (f" ({parts})." if parts else ".")
+
+        # ── Qualification / interview settings ──
+        if "qualification setting" in q or "threshold" in q:
+            qs = data.get("qualification_settings")
+            if qs:
+                return (
+                    f"**Qualification Settings:** Interview threshold: **{getattr(qs, 'interview_threshold', 'N/A')}**, "
+                    f"Hold threshold: **{getattr(qs, 'hold_threshold', 'N/A')}**, "
+                    f"Custom thresholds: {getattr(qs, 'use_custom_thresholds', 'N/A')}."
+                )
+            return "No qualification settings configured."
+
+        if "email setting" in q:
+            es = data.get("email_settings")
+            if es:
+                return (
+                    f"**Email Settings:** Follow-up delay: {getattr(es, 'followup_delay_hours', 'N/A')}h, "
+                    f"Max follow-ups: {getattr(es, 'max_followup_emails', 'N/A')}, "
+                    f"Reminder before: {getattr(es, 'reminder_hours_before', 'N/A')}h."
+                )
+            return "No email settings configured."
+
+        # ── Job type/location/department queries ──
+        if "location" in q and "job" in q:
+            locs = [(j["title"], j.get("location", "N/A")) for j in jobs if j.get("location")]
+            if not locs:
+                return "No job locations configured."
+            answer = "**Job Locations:**\n\n"
+            for title, loc in locs:
+                answer += f"- **{title}**: {loc}\n"
+            return answer.strip()
+        if "department" in q and "job" in q:
+            depts = [(j["title"], j.get("department", "N/A")) for j in jobs if j.get("department")]
+            if not depts:
+                return "No job departments configured."
+            answer = "**Job Departments:**\n\n"
+            for title, dept in depts:
+                answer += f"- **{title}**: {dept}\n"
+            return answer.strip()
+        if ("full-time" in q or "part-time" in q or "contract" in q or "internship" in q) and ("job" in q or "how many" in q):
+            for jtype in ("Full-time", "Part-time", "Contract", "Internship"):
+                if jtype.lower() in q:
+                    matched = [j for j in jobs if (j.get("type") or "").lower() == jtype.lower()]
+                    if not matched:
+                        return f"You have **0** {jtype} job(s)."
+                    titles = [j["title"] for j in matched]
+                    return f"You have **{len(matched)}** {jtype} job(s): " + ", ".join(f"**{t}**" for t in titles) + "."
+
         return ""
 
     def _generate_answer(self, question: str, context: str, direct_answer: str = "") -> str:
