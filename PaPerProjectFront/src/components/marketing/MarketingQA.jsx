@@ -525,6 +525,20 @@ const MarketingQA = () => {
     scrollToBottom();
   }, [currentMessages]);
 
+  // Load prompt from dashboard when clicking saved graph
+  useEffect(() => {
+    if (window.marketingQALoadPrompt) {
+      const { prompt, chartType } = window.marketingQALoadPrompt;
+      if (prompt) {
+        setQuestion(prompt);
+        setInputMode('graph');
+        textareaRef.current?.focus();
+        // Clear the flag
+        window.marketingQALoadPrompt = null;
+      }
+    }
+  }, []);
+
   const fillFromSuggestion = (value) => {
     const v = value || '__none__';
     setSuggestedValue(v);
@@ -791,8 +805,15 @@ const MarketingQA = () => {
 
     try {
       setSaving(true);
-      // Here you would call the API to save the prompt
-      // For now, we'll just show a success message
+      const promptData = {
+        title: saveTitle,
+        prompt: currentPromptData.prompt,
+        tags: saveTags.split(',').map(t => t.trim()).filter(t => t),
+        chart_type: currentPromptData.chartType
+      };
+      
+      await marketingAgentService.saveGraphPrompt(promptData);
+      
       toast({
         title: 'Success',
         description: 'Prompt saved successfully'
@@ -800,10 +821,12 @@ const MarketingQA = () => {
       setSaveModalOpen(false);
       setSaveTitle('');
       setSaveTags('');
+      setCurrentPromptData(null);
     } catch (error) {
+      console.error('Save prompt error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save prompt',
+        description: error?.response?.data?.message || 'Failed to save prompt',
         variant: 'destructive'
       });
     } finally {
@@ -811,12 +834,30 @@ const MarketingQA = () => {
     }
   };
 
-  const handleAddToDashboard = (prompt, chartTitle, chartType) => {
-    // Here you would call the API to add to dashboard
-    toast({
-      title: 'Success',
-      description: 'Chart added to dashboard'
-    });
+  const handleAddToDashboard = async (prompt, chartTitle, chartType) => {
+    try {
+      // First save the prompt
+      const promptData = {
+        title: chartTitle || 'Untitled Chart',
+        prompt: prompt,
+        tags: ['dashboard'],
+        chart_type: chartType
+      };
+      
+      await marketingAgentService.saveGraphPrompt(promptData);
+      
+      toast({
+        title: 'Success',
+        description: 'Chart added to dashboard'
+      });
+    } catch (error) {
+      console.error('Add to dashboard error:', error);
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to add to dashboard',
+        variant: 'destructive'
+      });
+    }
   };
 
   // Expose comparison results to window for debugging

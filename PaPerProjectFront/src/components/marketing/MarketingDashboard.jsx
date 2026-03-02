@@ -51,7 +51,6 @@ import MarketResearch from './MarketResearch';
 import Campaigns from './Campaigns';
 import Documents from './Documents';
 import Notifications from './Notifications';
-import AIGraphGenerator from './AIGraphGenerator';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -155,11 +154,33 @@ const MarketingDashboard = () => {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [dashboardGraphPrompts, setDashboardGraphPrompts] = useState([]);
+  const [savedGraphPrompts, setSavedGraphPrompts] = useState([]);
+  const [savedGraphsLoading, setSavedGraphsLoading] = useState(false);
+  const [viewingGraphId, setViewingGraphId] = useState(null);
+  const [viewingGraphResult, setViewingGraphResult] = useState(null);
+  const [generatingGraph, setGeneratingGraph] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     fetchStats();
   }, []);
+
+  const fetchSavedGraphPrompts = async () => {
+    try {
+      setSavedGraphsLoading(true);
+      const response = await getSavedGraphPrompts();
+      if (response?.status === 'success' && Array.isArray(response.data)) {
+        setSavedGraphPrompts(response.data);
+      } else {
+        setSavedGraphPrompts([]);
+      }
+    } catch (error) {
+      console.error('Fetch saved graphs error:', error);
+      setSavedGraphPrompts([]);
+    } finally {
+      setSavedGraphsLoading(false);
+    }
+  };
 
   const fetchNotificationUnreadCount = useCallback(async () => {
     try {
@@ -196,6 +217,8 @@ const MarketingDashboard = () => {
         .catch(() => setDashboardGraphPrompts([]));
     } else if (activeTab === 'email') {
       fetchEmailAccounts();
+    } else if (activeTab === 'saved-graphs') {
+      fetchSavedGraphPrompts();
     }
   }, [activeTab, campaignsPage]);
 
@@ -393,6 +416,44 @@ const MarketingDashboard = () => {
     }
   };
 
+  const handleDeleteGraphPrompt = async (promptId) => {
+    try {
+      const res = await marketingAgentService.deleteGraphPrompt(promptId);
+      if (res?.status === 'success') {
+        toast({ title: 'Success', description: 'Graph prompt deleted.' });
+        fetchSavedGraphPrompts();
+        // Clear viewing if deleted prompt
+        if (viewingGraphId === promptId) {
+          setViewingGraphId(null);
+          setViewingGraphResult(null);
+        }
+      } else {
+        toast({ title: 'Error', description: res?.message || 'Delete failed.', variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('Delete graph prompt error:', error);
+      toast({ title: 'Error', description: 'Failed to delete graph prompt.', variant: 'destructive' });
+    }
+  };
+
+  const handleViewGraph = async (prompt) => {
+    try {
+      setViewingGraphId(prompt.id);
+      setGeneratingGraph(true);
+      const res = await marketingAgentService.generateGraph(prompt.prompt);
+      if (res?.status === 'success') {
+        setViewingGraphResult(res.data);
+      } else {
+        toast({ title: 'Error', description: res?.message || 'Failed to generate graph.', variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('View graph error:', error);
+      toast({ title: 'Error', description: 'Failed to generate graph.', variant: 'destructive' });
+    } finally {
+      setGeneratingGraph(false);
+    }
+  };
+
   const openTestEmailAccount = (account) => {
     setTestAccountId(account.id);
     setTestEmailTo(account.email || '');
@@ -427,7 +488,145 @@ const MarketingDashboard = () => {
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-3">
+      {/* Chart rendering helper */}
+      {(() => {
+        // Define renderChart as an IIFE to use in JSX
+        window.renderChart = (chartData) => {
+          if (!chartData) return null;
+          const { type, data, title, color = '#3b82f6', colors } = chartData;
+          
+          // SimpleBarChart
+          const SimpleBarChart = ({ data, colors, height = 250, title }) => {
+            if (!data || Object.keys(data).length === 0) return null;
+            const maxValue = Math.max(...Object.values(data), 1);
+            const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+            const chartColors = colors || defaultColors;
+            return (
+              <div className="space-y-3" style={{ minHeight: `${height}px` }}>
+                {title && <h4 className="font-medium text-sm text-muted-foreground mb-4">{title}</h4>}
+                {Object.entries(data).map(([key, value], index) => (
+                  <div key={key}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-sm">{key}</span>
+                      <span className="font-semibold">{value}</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full transition-all"
+                        style={{
+                          width: `${(value / maxValue) * 100}%`,
+                          backgroundColor: chartColors[index % chartColors.length],
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          };
+          
+          // SimplePieChart
+          const SimplePieChart = ({ data, colors, title }) => {
+            if (!data || Object.keys(data).length === 0) return null;
+            const total = Object.values(data).reduce((sum, val) => sum + val, 0);
+            if (total === 0) return null;
+            const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+            const chartColors = colors || defaultColors;
+            let currentAngle = 0;
+            const segments = Object.entries(data).map(([key, value], index) => {
+              const percentage = (value / total) * 100;
+              const sliceAngle = (value / total) * 360;
+              const startAngle = currentAngle;
+              currentAngle += sliceAngle;
+              return { key, value, percentage, startAngle, sliceAngle, color: chartColors[index % chartColors.length] };
+            });
+            return (
+              <div className="flex flex-col items-center gap-4">
+                {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
+                <div className="relative w-48 h-48 sm:w-56 sm:h-56">
+                  <svg width="100%" height="100%" viewBox="0 0 200 200" className="transform -rotate-90">
+                    {segments.map((segment, index) => {
+                      const startRad = (segment.startAngle * Math.PI) / 180;
+                      const endRad = ((segment.startAngle + segment.sliceAngle) * Math.PI) / 180;
+                      const x1 = 100 + 100 * Math.cos(startRad);
+                      const y1 = 100 + 100 * Math.sin(startRad);
+                      const x2 = 100 + 100 * Math.cos(endRad);
+                      const y2 = 100 + 100 * Math.sin(endRad);
+                      const largeArc = segment.sliceAngle > 180 ? 1 : 0;
+                      const pathData = `M 100 100 L ${x1} ${y1} A 100 100 0 ${largeArc} 1 ${x2} ${y2} Z`;
+                      return <path key={index} d={pathData} fill={segment.color} stroke="white" strokeWidth="2" />;
+                    })}
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold">{total}</div>
+                      <div className="text-xs text-muted-foreground">Total</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
+                  {segments.map((segment, index) => (
+                    <div key={index} className="flex items-center gap-2 text-xs sm:text-sm">
+                      <div className="w-3 h-3 rounded shrink-0" style={{ backgroundColor: segment.color }} />
+                      <span className="truncate flex-1">{segment.key}</span>
+                      <span className="font-medium shrink-0">{segment.percentage.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          };
+          
+          // SimpleLineChart
+          const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
+            if (!data || data.length === 0) return null;
+            const values = data.map(d => d.value ?? d.count ?? 0);
+            const maxValue = Math.max(...values, 1);
+            const labels = data.map(d => d.label ?? d.date ?? d.month ?? '');
+            const points = values.map((value, index) => {
+              const x = (index / (values.length - 1 || 1)) * 100;
+              const y = 100 - (value / maxValue) * 100;
+              return `${x},${y}`;
+            }).join(' ');
+            const areaPoints = `0,100 ${points} 100,100`;
+            return (
+              <div className="space-y-2">
+                {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
+                <div className="relative w-full" style={{ height: `${height}px` }}>
+                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <polygon points={areaPoints} fill={`${color}20`} />
+                    <polyline points={points} fill="none" stroke={color} strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round" />
+                    {values.map((value, index) => (
+                      <circle key={index} cx={(index / (values.length - 1 || 1)) * 100} cy={100 - (value / maxValue) * 100} r="1" fill={color} />
+                    ))}
+                  </svg>
+                  <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[10px] text-muted-foreground px-1">
+                    {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate">{label}</span>) : (
+                      <><span>{labels[0]}</span><span>{labels[Math.floor(labels.length / 2)]}</span><span>{labels[labels.length - 1]}</span></>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          };
+          
+          switch (type) {
+            case 'bar': return <SimpleBarChart data={data} colors={colors} title={title} />;
+            case 'pie': return <SimplePieChart data={data} colors={colors} title={title} />;
+            case 'line':
+            case 'area': return <SimpleLineChart data={data} color={color} title={title} />;
+            default: return null;
+          }
+        };
+        return null;
+      })()}
+
+      {(() => {
+        // Make renderChart globally available
+        const renderChart = window.renderChart;
+        return null; 
+      })()}
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Total Campaigns */}
@@ -542,9 +741,9 @@ const MarketingDashboard = () => {
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="graphs" className="flex-1 min-w-[100px]">
-            <BarChartIcon className="h-4 w-4 mr-2" />
-            AI Graphs
+          <TabsTrigger value="saved-graphs" className="flex-1 min-w-[100px]">
+            <Sparkles className="h-4 w-4 mr-2" />
+            Saved Graphs
           </TabsTrigger>
         </TabsList>
 
@@ -1123,8 +1322,161 @@ const MarketingDashboard = () => {
           <Notifications onUnreadCountChange={fetchNotificationUnreadCount} />
         </TabsContent>
 
-        <TabsContent value="graphs" className="!mt-2">
-          <AIGraphGenerator />
+        <TabsContent value="saved-graphs" className="!mt-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-amber-500" />
+                Saved Graph Prompts
+              </CardTitle>
+              <CardDescription>
+                Manage your saved graph generation prompts. Click View to generate and preview the graph.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {savedGraphsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : savedGraphPrompts.length === 0 ? (
+                <div className="text-center py-12">
+                  <Sparkles className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+                  <p className="text-muted-foreground">No saved graphs yet</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Go to the Q&A tab and save your graph prompts
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {savedGraphPrompts.map((prompt) => (
+                      <Card 
+                        key={prompt.id} 
+                        className={`flex flex-col cursor-pointer transition-all ${
+                          viewingGraphId === prompt.id 
+                            ? 'ring-2 ring-primary/50 bg-primary/5' 
+                            : 'hover:border-primary/20'
+                        }`}
+                      >
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <CardTitle className="text-sm line-clamp-2">{prompt.title}</CardTitle>
+                              {prompt.tags && prompt.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {prompt.tags.map((tag) => (
+                                    <Badge key={tag} variant="secondary" className="text-xs">
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="flex-1 pb-3">
+                          <p className="text-xs text-muted-foreground line-clamp-3">{prompt.prompt}</p>
+                          {prompt.chart_type && (
+                            <p className="text-xs mt-2 text-primary font-medium">
+                              Chart Type: {prompt.chart_type}
+                            </p>
+                          )}
+                        </CardContent>
+                        <div className="flex gap-2 pt-3 border-t flex-wrap">
+                          <Button
+                            size="sm"
+                            variant={viewingGraphId === prompt.id ? "default" : "outline"}
+                            className="flex-1 text-xs h-8"
+                            onClick={() => handleViewGraph(prompt)}
+                            disabled={generatingGraph}
+                          >
+                            {generatingGraph && viewingGraphId === prompt.id ? (
+                              <>
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                Generating...
+                              </>
+                            ) : (
+                              <>
+                                <BarChart3 className="h-3 w-3 mr-1" />
+                                View
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-8 px-2"
+                            onClick={() => handleDeleteGraphPrompt(prompt.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Show generated graph preview */}
+                  {viewingGraphResult && (
+                    <Card className="border-primary/30 bg-primary/5">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle className="flex items-center gap-2">
+                              <BarChart3 className="h-5 w-5 text-primary" />
+                              {viewingGraphResult.title || 'Generated Graph'}
+                            </CardTitle>
+                            {viewingGraphResult.insights && (
+                              <CardDescription className="mt-2">
+                                {Array.isArray(viewingGraphResult.insights) 
+                                  ? viewingGraphResult.insights.join(' • ')
+                                  : viewingGraphResult.insights
+                                }
+                              </CardDescription>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setViewingGraphId(null);
+                              setViewingGraphResult(null);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <div className="bg-card rounded-lg p-6 border">
+                          {viewingGraphResult.chart ? (
+                            <div className="w-full overflow-x-auto">
+                              {viewingGraphResult.chart.type === 'pie' && (
+                                <div className="flex justify-center">
+                                  {renderChart(viewingGraphResult.chart)}
+                                </div>
+                              )}
+                              {['bar', 'line', 'area'].includes(viewingGraphResult.chart.type) && (
+                                <div className="w-full">
+                                  {renderChart(viewingGraphResult.chart)}
+                                </div>
+                              )}
+                              {!['pie', 'bar', 'line', 'area'].includes(viewingGraphResult.chart.type) && (
+                                <div className="text-center text-muted-foreground py-4">
+                                  Chart type '{viewingGraphResult.chart.type}' not supported
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-center text-muted-foreground py-8">No chart data available</div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
