@@ -786,8 +786,8 @@ const MarketingQA = () => {
     });
   };
 
-  const openSaveModal = (prompt, chartTitle, chartType) => {
-    setCurrentPromptData({ prompt, chartTitle, chartType });
+  const openSaveModal = (prompt, chartTitle, chartType, chart = null, insights = []) => {
+    setCurrentPromptData({ prompt, chartTitle, chartType, chart, insights });
     setSaveTitle(chartTitle || '');
     setSaveTags('');
     setSaveModalOpen(true);
@@ -809,10 +809,27 @@ const MarketingQA = () => {
         title: saveTitle,
         prompt: currentPromptData.prompt,
         tags: saveTags.split(',').map(t => t.trim()).filter(t => t),
-        chart_type: currentPromptData.chartType
+        chart_type: currentPromptData.chartType,
+        chart_data: currentPromptData.chart || null,
+        insights: currentPromptData.insights || []
       };
       
-      await marketingAgentService.saveGraphPrompt(promptData);
+      const saved = await marketingAgentService.saveGraphPrompt(promptData);
+
+      try {
+        const savedId = saved?.data?.id;
+        if (savedId && currentPromptData?.chart) {
+          const cacheKey = 'marketing_saved_graph_payloads';
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+          cached[String(savedId)] = {
+            chart: currentPromptData.chart,
+            title: saveTitle || currentPromptData.chartTitle || 'Saved Graph',
+            insights: currentPromptData.insights || [],
+            prompt: currentPromptData.prompt,
+          };
+          localStorage.setItem(cacheKey, JSON.stringify(cached));
+        }
+      } catch {}
       
       toast({
         title: 'Success',
@@ -834,14 +851,16 @@ const MarketingQA = () => {
     }
   };
 
-  const handleAddToDashboard = async (prompt, chartTitle, chartType) => {
+  const handleAddToDashboard = async (prompt, chartTitle, chartType, chart = null, insights = []) => {
     try {
       // First save the prompt
       const promptData = {
         title: chartTitle || 'Untitled Chart',
         prompt: prompt,
         tags: ['dashboard'],
-        chart_type: chartType
+        chart_type: chartType,
+        chart_data: chart,
+        insights: insights || []
       };
       
       await marketingAgentService.saveGraphPrompt(promptData);
@@ -1247,7 +1266,9 @@ const MarketingQA = () => {
                                         onClick={() => openSaveModal(
                                           currentMessages[currentMessages.indexOf(msg) - 1]?.content,
                                           msg.responseData.chartTitle,
-                                          msg.responseData.chartType
+                                          msg.responseData.chartType,
+                                          msg.responseData.chart,
+                                          msg.responseData.insights
                                         )}
                                       >
                                         <Save className="h-4 w-4 mr-2" />
@@ -1259,7 +1280,9 @@ const MarketingQA = () => {
                                         onClick={() => handleAddToDashboard(
                                           currentMessages[currentMessages.indexOf(msg) - 1]?.content,
                                           msg.responseData.chartTitle,
-                                          msg.responseData.chartType
+                                          msg.responseData.chartType,
+                                          msg.responseData.chart,
+                                          msg.responseData.insights
                                         )}
                                         className="rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
                                       >

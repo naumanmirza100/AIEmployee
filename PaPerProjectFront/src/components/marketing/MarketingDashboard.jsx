@@ -158,7 +158,6 @@ const MarketingDashboard = () => {
   const [savedGraphsLoading, setSavedGraphsLoading] = useState(false);
   const [viewingGraphId, setViewingGraphId] = useState(null);
   const [viewingGraphResult, setViewingGraphResult] = useState(null);
-  const [generatingGraph, setGeneratingGraph] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -436,22 +435,106 @@ const MarketingDashboard = () => {
     }
   };
 
-  const handleViewGraph = async (prompt) => {
+  const normalizePromptText = (text) =>
+    String(text || '')
+      .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+  const getPayloadFromLocalCache = (prompt) => {
     try {
-      setViewingGraphId(prompt.id);
-      setGeneratingGraph(true);
-      const res = await marketingAgentService.generateGraph(prompt.prompt);
-      if (res?.status === 'success') {
-        setViewingGraphResult(res.data);
-      } else {
-        toast({ title: 'Error', description: res?.message || 'Failed to generate graph.', variant: 'destructive' });
+      const cache = JSON.parse(localStorage.getItem('marketing_saved_graph_payloads') || '{}');
+      const byId = cache[String(prompt?.id)];
+      if (byId?.chart) {
+        return {
+          chart: byId.chart,
+          title: byId.title || prompt?.title || 'Saved Graph',
+          insights: byId.insights || [],
+        };
       }
-    } catch (error) {
-      console.error('View graph error:', error);
-      toast({ title: 'Error', description: 'Failed to generate graph.', variant: 'destructive' });
-    } finally {
-      setGeneratingGraph(false);
+    } catch {}
+    return null;
+  };
+
+  const getPayloadFromChatHistory = (prompt) => {
+    try {
+      const chats = JSON.parse(localStorage.getItem('marketing_qa_chats') || '[]');
+      const target = normalizePromptText(prompt?.prompt);
+      if (!target) return null;
+
+      for (const chat of chats) {
+        const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+        for (let i = 0; i < messages.length - 1; i++) {
+          const userMsg = messages[i];
+          const assistantMsg = messages[i + 1];
+          if (
+            userMsg?.role === 'user' &&
+            assistantMsg?.role === 'assistant' &&
+            assistantMsg?.responseData?.isGraph &&
+            normalizePromptText(userMsg?.content) === target &&
+            assistantMsg?.responseData?.chart
+          ) {
+            return {
+              chart: assistantMsg.responseData.chart,
+              title: assistantMsg.responseData.chartTitle || prompt?.title || 'Saved Graph',
+              insights: assistantMsg.responseData.insights || [],
+            };
+          }
+        }
+      }
+    } catch {}
+    return null;
+  };
+
+  const getSavedGraphPayload = (prompt) => {
+    const chart =
+      prompt?.chart ||
+      prompt?.chart_data ||
+      prompt?.graph_data ||
+      prompt?.generated_chart ||
+      prompt?.result?.chart ||
+      prompt?.data?.chart ||
+      null;
+
+    const title =
+      prompt?.graph_title ||
+      prompt?.generated_title ||
+      prompt?.result?.title ||
+      prompt?.data?.title ||
+      prompt?.title ||
+      'Saved Graph';
+
+    const insights =
+      prompt?.insights ||
+      prompt?.result?.insights ||
+      prompt?.data?.insights ||
+      null;
+
+    if (chart) return { chart, title, insights };
+
+    const cached = getPayloadFromLocalCache(prompt);
+    if (cached) return cached;
+
+    const fromChat = getPayloadFromChatHistory(prompt);
+    if (fromChat) return fromChat;
+
+    return null;
+  };
+
+  const handleViewGraph = (prompt) => {
+    setViewingGraphId(prompt.id);
+    const savedPayload = getSavedGraphPayload(prompt);
+    if (!savedPayload) {
+      setViewingGraphResult(null);
+      toast({
+        title: 'No saved chart found',
+        description: 'No cached chart data is available for this prompt in this browser yet.',
+        variant: 'default',
+      });
+      return;
     }
+    setViewingGraphResult(savedPayload);
   };
 
   const openTestEmailAccount = (account) => {
@@ -1330,7 +1413,7 @@ const MarketingDashboard = () => {
                 Saved Graph Prompts
               </CardTitle>
               <CardDescription>
-                Manage your saved graph generation prompts. Click View to generate and preview the graph.
+                Manage your saved graph prompts. Click View to preview saved chart data without regenerating.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -1388,19 +1471,11 @@ const MarketingDashboard = () => {
                             variant={viewingGraphId === prompt.id ? "default" : "outline"}
                             className="flex-1 text-xs h-8"
                             onClick={() => handleViewGraph(prompt)}
-                            disabled={generatingGraph}
                           >
-                            {generatingGraph && viewingGraphId === prompt.id ? (
-                              <>
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                Generating...
-                              </>
-                            ) : (
-                              <>
-                                <BarChart3 className="h-3 w-3 mr-1" />
-                                View
-                              </>
-                            )}
+                            <>
+                              <BarChart3 className="h-3 w-3 mr-1" />
+                              View
+                            </>
                           </Button>
                           <Button
                             size="sm"
@@ -1415,7 +1490,7 @@ const MarketingDashboard = () => {
                     ))}
                   </div>
 
-                  {/* Show generated graph preview */}
+                  {/* Show saved graph preview */}
                   {viewingGraphResult && (
                     <Card className="border-primary/30 bg-primary/5">
                       <CardHeader>
@@ -1423,7 +1498,7 @@ const MarketingDashboard = () => {
                           <div>
                             <CardTitle className="flex items-center gap-2">
                               <BarChart3 className="h-5 w-5 text-primary" />
-                              {viewingGraphResult.title || 'Generated Graph'}
+                              {viewingGraphResult.title || 'Saved Graph'}
                             </CardTitle>
                             {viewingGraphResult.insights && (
                               <CardDescription className="mt-2">
