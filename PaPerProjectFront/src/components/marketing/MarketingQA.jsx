@@ -499,7 +499,7 @@ const MarketingQA = () => {
   const [suggestedValue, setSuggestedValue] = useState('__none__');
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showSuggestions, setShowSuggestions] = useState(true);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [inputMode, setInputMode] = useState('search');
   const [expandedGraph, setExpandedGraph] = useState(null);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -507,6 +507,7 @@ const MarketingQA = () => {
   const [saveTags, setSaveTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [currentPromptData, setCurrentPromptData] = useState(null);
+  const [comparisonResults, setComparisonResults] = useState([]);
   
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -530,6 +531,64 @@ const MarketingQA = () => {
     if (v !== '__none__') {
       setQuestion(v);
       textareaRef.current?.focus();
+    }
+  };
+
+  // Compare manual query with AI response
+  const compareResponses = async (query, inputMode) => {
+    try {
+      console.log('🔍 Starting comparison for query:', query);
+      
+      // Manual API call
+      let manualResponse;
+      if (inputMode === 'graph') {
+        manualResponse = await marketingAgentService.generateGraph(query);
+      } else {
+        manualResponse = await marketingAgentService.marketingQA(query, []);
+      }
+      
+      console.log('📊 Manual API Response:', manualResponse);
+
+      // Store comparison result
+      const comparisonData = {
+        query,
+        mode: inputMode,
+        timestamp: new Date().toISOString(),
+        manualResponse,
+        status: manualResponse?.status,
+        success: manualResponse?.status === 'success'
+      };
+
+      if (inputMode === 'graph') {
+        comparisonData.manualChart = manualResponse?.data?.chart;
+        comparisonData.manualTitle = manualResponse?.data?.title;
+        comparisonData.manualInsights = manualResponse?.data?.insights;
+      } else {
+        comparisonData.manualAnswer = manualResponse?.data?.answer;
+        comparisonData.manualInsights = manualResponse?.data?.insights;
+      }
+
+      // Add to comparison results
+      setComparisonResults(prev => [comparisonData, ...prev].slice(0, 20)); // Keep last 20
+      
+      console.log('✅ Comparison Result:', comparisonData);
+      console.log('📈 All Comparisons:', [comparisonData, ...comparisonResults]);
+      
+      return comparisonData;
+    } catch (error) {
+      const errorData = {
+        query,
+        mode: inputMode,
+        timestamp: new Date().toISOString(),
+        error: error?.message,
+        status: 'error',
+        success: false
+      };
+      
+      console.error('❌ Comparison Error:', errorData);
+      setComparisonResults(prev => [errorData, ...prev].slice(0, 20));
+      
+      return errorData;
     }
   };
 
@@ -636,6 +695,9 @@ const MarketingQA = () => {
       } else {
         throw new Error(result.message || 'Failed to get response');
       }
+      
+      // Run comparison in background (no await - non-blocking)
+      compareResponses(q, inputMode).catch(err => console.error('Comparison failed:', err));
     } catch (error) {
       const errMsg = error?.response?.data?.error ?? error?.response?.data?.message ?? error?.message ?? '';
       const isRateLimit = /429|rate limit/i.test(errMsg);
@@ -756,6 +818,31 @@ const MarketingQA = () => {
       description: 'Chart added to dashboard'
     });
   };
+
+  // Expose comparison results to window for debugging
+  useEffect(() => {
+    window.marketingQAComparison = {
+      getComparisons: () => comparisonResults,
+      getLatestComparison: () => comparisonResults[0],
+      compareNow: (query, mode = 'search') => compareResponses(query, mode),
+      getAllComparisonStatus: () => ({
+        total: comparisonResults.length,
+        successful: comparisonResults.filter(c => c.success).length,
+        failed: comparisonResults.filter(c => !c.success).length,
+        byMode: {
+          search: comparisonResults.filter(c => c.mode === 'search').length,
+          graph: comparisonResults.filter(c => c.mode === 'graph').length
+        }
+      })
+    };
+    
+    console.log('🎯 Marketing QA Comparison Tool Available');
+    console.log('Usage: window.marketingQAComparison.getComparisons()');
+    
+    return () => {
+      delete window.marketingQAComparison;
+    };
+  }, [comparisonResults]);
 
   const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
   
