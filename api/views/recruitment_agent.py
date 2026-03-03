@@ -2001,11 +2001,11 @@ def recruitment_analytics(request):
         total_interviews = Interview.objects.filter(interview_base_filter).count()
         # When filtering by job: show 1 job (that job's active state). Otherwise all jobs.
         if job_filter:
-            total_jobs = 1
-            active_jobs = 1 if job_filter.is_active else 0
+            total_jobs = 1 if not job_filter.is_deleted else 0
+            active_jobs = 1 if job_filter.is_active and not job_filter.is_deleted else 0
         else:
-            total_jobs = JobDescription.objects.filter(company_user=company_user).count()
-            active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True).count()
+            total_jobs = JobDescription.objects.filter(company_user=company_user, is_deleted=False).count()
+            active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True, is_deleted=False).count()
         
         # ========== CV STATISTICS ==========
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -2134,7 +2134,7 @@ def recruitment_analytics(request):
         
         # ========== JOB STATISTICS ==========
         # When filtering by job: show only that job's status. Otherwise all jobs.
-        jobs_q = JobDescription.objects.filter(company_user=company_user)
+        jobs_q = JobDescription.objects.filter(company_user=company_user, is_deleted=False)
         if job_filter:
             jobs_q = jobs_q.filter(pk=job_filter.id)
         jobs_by_status = list(jobs_q.order_by().values('is_active').annotate(
@@ -2154,6 +2154,7 @@ def recruitment_analytics(request):
         # Jobs created over time (monthly for last 6 months). When job filter: that job only.
         jobs_over_time_q = JobDescription.objects.filter(
             company_user=company_user,
+            is_deleted=False,
             created_at__gte=months_ago
         )
         if job_filter:
@@ -2166,7 +2167,7 @@ def recruitment_analytics(request):
         jobs_over_time.sort(key=lambda x: x['month'] if x['month'] else datetime.min)
         
         # Top jobs by CV count. When job filter: that job only.
-        top_jobs_q = JobDescription.objects.filter(company_user=company_user)
+        top_jobs_q = JobDescription.objects.filter(company_user=company_user, is_deleted=False)
         if job_filter:
             top_jobs_q = top_jobs_q.filter(pk=job_filter.id)
         top_jobs_by_cvs = list(top_jobs_q.order_by().annotate(
@@ -3010,11 +3011,35 @@ def api_save_prompt(request):
                 'message': 'Prompt is required.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Prevent duplicate dashboard prompts (same prompt text with 'dashboard' tag)
+        clean_tags = tags if isinstance(tags, list) else []
+        if 'dashboard' in clean_tags:
+            # MSSQL doesn't support JSON contains lookup, so filter in Python
+            existing_prompts = SavedGraphPrompt.objects.filter(
+                company_user=company_user,
+                prompt=prompt,
+            )
+            for ep in existing_prompts:
+                if isinstance(ep.tags, list) and 'dashboard' in ep.tags:
+                    return Response({
+                        'status': 'already_exists',
+                        'message': 'This graph is already on your dashboard.',
+                        'data': {
+                            'id': ep.id,
+                            'title': ep.title,
+                            'prompt': ep.prompt,
+                            'chart_type': ep.chart_type,
+                            'tags': ep.tags,
+                            'is_favorite': ep.is_favorite,
+                            'created_at': ep.created_at.isoformat(),
+                        }
+                    })
+        
         saved_prompt = SavedGraphPrompt.objects.create(
             company_user=company_user,
             title=title,
             prompt=prompt,
-            tags=tags if isinstance(tags, list) else [],
+            tags=clean_tags,
             chart_type=chart_type,
         )
         

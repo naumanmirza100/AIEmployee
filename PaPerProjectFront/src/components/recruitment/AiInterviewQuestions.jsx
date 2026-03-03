@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+// ...existing code...
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,9 +14,12 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, Search, BarChart2, Save, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Maximize2 } from 'lucide-react';
-import { recruitmentQA, listQAChats, createQAChat, updateQAChat, deleteQAChat, generateGraph, savePrompt } from '@/services/recruitmentAgentService';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, Search, BarChart2, Save, LayoutDashboard, Maximize2, Check, History, ChevronsLeft, ChevronsRight, Bot, Sparkles, Activity, Users, TrendingUp } from 'lucide-react';
+import { recruitmentQA, listQAChats, createQAChat, updateQAChat, deleteQAChat, generateGraph, savePrompt, getSavedPrompts, isPromptOnDashboard } from '@/services/recruitmentAgentService';
 import { renderChart } from './ChartRenderer';
+
+// ...existing code...
 
 /** Markdown to HTML for Q&A answers - proper heading, subheading, lists, tables */
 function markdownToHtml(markdown) {
@@ -149,6 +153,28 @@ const SUGGESTED_SEARCH_QUESTIONS = [
   'What are basic React interview questions?',
 ];
 
+const INPUT_MODE_OPTIONS = [
+  {
+    value: 'search',
+    label: 'Search',
+    placeholder: 'Ask about jobs, candidates, interview plans, or hiring recommendations…',
+    icon: Search,
+  },
+  {
+    value: 'graph',
+    label: 'Graph',
+    placeholder: 'Describe the recruitment graph you want to generate…',
+    icon: BarChart2,
+  },
+];
+
+const HERO_TOPICS = [
+  { label: 'General', icon: Sparkles, prompt: 'Give me a quick recruitment pipeline summary for this month.' },
+  { label: 'Hiring Trends', icon: TrendingUp, prompt: 'Show hiring trends by role and month in a graph.' },
+  { label: 'Candidates', icon: Users, prompt: 'Which candidates are strongest for our open positions?' },
+  { label: 'Performance', icon: Activity, prompt: 'What are key recruitment performance insights right now?' },
+];
+
 /** Normalize chat from API shape to component shape */
 function normalizeChat(chat) {
   if (!chat) return chat;
@@ -163,6 +189,9 @@ function normalizeChat(chat) {
 }
 
 const AiInterviewQuestions = () => {
+    // Sidebar search toggle state (must be inside component)
+    const [showSidebarSearch, setShowSidebarSearch] = useState(false);
+    const [sidebarSearch, setSidebarSearch] = useState("");
   const { toast } = useToast();
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
@@ -178,6 +207,7 @@ const AiInterviewQuestions = () => {
   const [saveContext, setSaveContext] = useState(null); // { prompt, chartTitle, chartType }
   const [showChatHistory, setShowChatHistory] = useState(true);
   const [expandedGraph, setExpandedGraph] = useState(null); // { chart, chartTitle } when modal open
+  const [addedToDashboard, setAddedToDashboard] = useState(new Set()); // track prompts already added to dashboard
   const messagesEndRef = useRef(null);
 
   const loadChatsFromApi = async () => {
@@ -197,8 +227,24 @@ const AiInterviewQuestions = () => {
     }
   };
 
+  // Load existing dashboard prompts from API to pre-populate "Already Added" state
+  const loadDashboardState = async () => {
+    try {
+      const res = await getSavedPrompts();
+      const list = res?.data || [];
+      const dashboardPrompts = list.filter(isPromptOnDashboard);
+      if (dashboardPrompts.length > 0) {
+        const keys = new Set(dashboardPrompts.map(p => `${p.prompt}__${p.chart_type || 'bar'}`));
+        setAddedToDashboard(keys);
+      }
+    } catch (err) {
+      console.error('Load dashboard state error:', err);
+    }
+  };
+
   useEffect(() => {
     loadChatsFromApi();
+    loadDashboardState();
   }, []);
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
@@ -387,6 +433,12 @@ const AiInterviewQuestions = () => {
   };
 
   const handleAddToDashboard = async (promptText, chartTitle, chartType) => {
+    // Prevent duplicate additions (client-side check)
+    const key = `${promptText}__${chartType || 'bar'}`;
+    if (addedToDashboard.has(key)) {
+      toast({ title: 'Already Added', description: 'This graph is already on your dashboard.' });
+      return;
+    }
     try {
       const title = (chartTitle || promptText?.slice(0, 40) || 'Graph').trim();
       const res = await savePrompt({
@@ -395,8 +447,14 @@ const AiInterviewQuestions = () => {
         tags: ['dashboard'],
         chart_type: chartType || 'bar',
       });
-      if (res.status === 'success') {
-        toast({ title: 'Added to dashboard', description: 'Card will appear on recruitment dashboard.' });
+      // Backend returns 'already_exists' if duplicate dashboard prompt
+      if (res.status === 'success' || res.status === 'already_exists') {
+        setAddedToDashboard(prev => new Set(prev).add(key));
+        if (res.status === 'already_exists') {
+          toast({ title: 'Already Added', description: 'This graph is already on your dashboard.' });
+        } else {
+          toast({ title: 'Added to dashboard', description: 'Card will appear on recruitment dashboard.' });
+        }
       } else throw new Error(res.message || 'Failed');
     } catch (err) {
       toast({ title: 'Error', description: err.message || 'Could not add to dashboard', variant: 'destructive' });
@@ -413,28 +471,100 @@ const AiInterviewQuestions = () => {
     }
   };
 
+  const selectedMode = INPUT_MODE_OPTIONS.find((mode) => mode.value === inputMode) || INPUT_MODE_OPTIONS[0];
+  const SelectedModeIcon = selectedMode.icon;
+
   return (
-    <div className="flex gap-4 w-full max-w-full">
-      {/* Sidebar - Previous chats (toggleable) */}
-      {showChatHistory && (
-        <div className="w-64 shrink-0 rounded-lg border bg-card">
-          <div className="p-3 border-b flex items-center justify-between">
-            <span className="text-sm font-semibold">Previous conversations</span>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
-                <Plus className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
+    <div
+      className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
+      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+    >
+      {/* Scoped dark-bar placeholder color */}
+      <style>{`.recruit-dark-input::placeholder { color: rgba(255,255,255,0.3) !important; }`}</style>
+      <div className="flex w-full max-w-full relative">
+      {/* Sidebar - Previous chats with smooth transition */}
+      <div
+        className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+          showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
+        }`}
+        style={{
+          minWidth: showChatHistory ? '16rem' : '0',
+          background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
+          borderRight: '1.5px solid rgba(255,255,255,0.10)',
+          boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+          borderTopLeftRadius: 16,
+          borderBottomLeftRadius: 16,
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          overflow: 'hidden',
+        }}
+      >
+        <div className="w-64">
+          <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)', borderTopLeftRadius: 16 }}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
+              <button
                 onClick={() => setShowChatHistory(false)}
-                title="Hide chat history"
+                title="Close sidebar"
+                className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150"
+                style={{ boxShadow: '0 0 0 2px rgba(139,92,246,0.10) inset' }}
               >
-                <PanelLeftClose className="h-4 w-4" />
-              </Button>
+                <ChevronsLeft className="h-4 w-4 text-white/80" />
+              </button>
             </div>
+            {showSidebarSearch ? (
+              <div
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
+                style={{
+                  border: '1.5px solid rgba(139,92,246,0.22)',
+                  background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                  boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
+                  backdropFilter: 'blur(4px)',
+                  WebkitBackdropFilter: 'blur(4px)',
+                }}
+              >
+                <input
+                  autoFocus
+                  value={sidebarSearch}
+                  onChange={e => setSidebarSearch(e.target.value)}
+                  placeholder="Search conversations..."
+                  className="flex-1 bg-transparent outline-none border-0 text-white/90 text-sm px-2 py-1.5 placeholder-white/40"
+                  style={{ minWidth: 0 }}
+                />
+                <button
+                  title="Close search"
+                  onClick={() => setShowSidebarSearch(false)}
+                  className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
+                >
+                  <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/70"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>
+                </button>
+              </div>
+            ) : (
+              <div
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
+                style={{
+                  border: '1.5px solid rgba(139,92,246,0.22)',
+                  background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                  boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
+                  backdropFilter: 'blur(4px)',
+                  WebkitBackdropFilter: 'blur(4px)',
+                }}
+              >
+                <span className="text-sm font-medium text-white/80 flex-1">Conversation</span>
+                <button
+                  title="Search"
+                  onClick={() => setShowSidebarSearch(true)}
+                  className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
+                >
+                  <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/70"><circle cx="7" cy="7" r="5"/><line x1="15" y1="15" x2="11" y2="11"/></svg>
+                </button>
+                <button onClick={newChat} title="New chat" className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150">
+                  <Plus className="h-4 w-4 text-white/80" />
+                </button>
+              </div>
+            )}
           </div>
-          <div>
+          <div >
             {loadingChats ? (
               <div className="p-4 flex justify-center">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -442,21 +572,29 @@ const AiInterviewQuestions = () => {
             ) : chats.length === 0 ? (
               <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
             ) : (
-              <div className="p-2 space-y-1">
+              <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
                 {chats.map((c) => (
                   <div
                     key={c.id}
-                    className={`flex items-center gap-1 rounded-lg border text-sm transition-colors ${
-                      selectedChatId === c.id ? 'border-primary/20 bg-primary/10' : 'border-border hover:bg-muted'
+                    className={`flex items-center gap-1 rounded-lg border text-sm transition-all duration-200 ${
+                      selectedChatId === c.id
+                        ? 'border-violet-500/60 bg-gradient-to-r from-violet-900/40 to-violet-700/20 shadow-[0_0_12px_rgba(139,92,246,0.18)]'
+                        : 'border-white/10 bg-white/2 hover:bg-white/5 hover:border-violet-400/20'
                     }`}
+                    style={{
+                      boxShadow: selectedChatId === c.id
+                        ? '0 0 12px 0 rgba(139,92,246,0.18), 0 1.5px 0 0 rgba(120,80,255,0.10) inset'
+                        : '0 1px 2px 0 rgba(36,18,54,0.08) inset',
+                      borderWidth: 1.5,
+                    }}
                   >
                     <button
                       type="button"
                       onClick={() => setSelectedChatId(c.id)}
                       className="flex-1 min-w-0 text-left p-3 rounded-lg"
                     >
-                      <div className="font-medium truncate">{truncate(c.title || (c.messages?.[0]?.content) || c.question || 'Chat', 40)}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.updatedAt || c.timestamp)}</div>
+                      <div className={`font-medium truncate ${selectedChatId === c.id ? 'text-violet-300' : ''}`}>{truncate(c.title || (c.messages?.[0]?.content) || c.question || 'Chat', 40)}</div>
+                      <div className={`text-xs mt-0.5 ${selectedChatId === c.id ? 'text-violet-400/70' : 'text-muted-foreground'}`}>{formatDate(c.updatedAt || c.timestamp)}</div>
                     </button>
                     <Button
                       type="button"
@@ -474,7 +612,7 @@ const AiInterviewQuestions = () => {
             )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Delete chat confirmation modal */}
       <Dialog open={!!deleteConfirmChatId} onOpenChange={(open) => !open && setDeleteConfirmChatId(null)}>
@@ -500,41 +638,83 @@ const AiInterviewQuestions = () => {
       </Dialog>
 
       {/* Main chat area - full width when sidebar hidden */}
-      <Card className="flex-1 min-w-0 flex flex-col max-h-[calc(100vh-40px)]">
-        <CardHeader className="shrink-0 flex flex-row items-start justify-between gap-2">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
-              Knowledge Q&A
-            </CardTitle>
-            <CardDescription>
-              Ask about your jobs & candidates, or get tech stack interview questions (React, Node, MERN, etc.) and recruitment tips.
-            </CardDescription>
+      <Card
+      className="flex-1 min-w-0 flex flex-col max-h-[calc(100vh-40px)] border-0 shadow-none"
+      style={{ background: 'transparent' }}>
+        <CardHeader className="shrink-0 flex flex-row items-start justify-between gap-3 border-b border-white/[0.07] px-0 py-4" style={{ background: 'transparent' }}>
+          <div className="flex items-center gap-3 min-w-0 w-full">
+            {/* Vertical purple gradient bar */}
+            <div style={{
+              width: '7px',
+              height: '48px',
+              borderRadius: '8px',
+              background: 'linear-gradient(to bottom, #a259ff 0%, #6a1b9a 60%, #18122B 100%)',
+              marginLeft: '24px',
+              marginRight: '18px',
+              boxShadow: '0 0 8px 2px #a259ff44',
+            }} />
+            <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(124, 58, 237, 0.15)' }}>
+              <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
+                Recruitment Research Assistance
+                <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'rgba(124, 58, 237, 0.15)', color: '#a78bfa' }}>AI-Powered</span>
+              </CardTitle>
+              <CardDescription className="text-white/50 text-sm mt-0.5">
+                Ask anything about candidates, jobs, interview plans, and recruitment performance.
+              </CardDescription>
+            </div>
           </div>
           <Button
-            variant="ghost"
-            size="icon"
+            variant={showChatHistory ? 'ghost' : 'outline'}
+            size="sm"
             onClick={() => setShowChatHistory((v) => !v)}
             title={showChatHistory ? 'Hide chat history' : 'Show chat history'}
+            className={`gap-1.5 transition-all duration-200 ${
+              !showChatHistory
+                ? 'bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary'
+                : 'hover:bg-muted'
+            }`}
+            style={{ marginRight: '24px' }}
           >
-            {showChatHistory ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+            {showChatHistory
+              ? <><ChevronsLeft className="h-4 w-4" /><span className="text-xs hidden sm:inline">Hide</span></>
+              : <><ChevronsRight className="h-4 w-4" /><span className="text-xs hidden sm:inline">History</span></>
+            }
           </Button>
         </CardHeader>
-        <CardContent className="p-0 flex flex-col flex-1 min-h-0">
+        <CardContent className="p-0 flex flex-col flex-1 min-h-0 ">
           {/* Messages area - scrollable when content is long */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pb-4 space-y-4">
-            {!selectedChatId && chats.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
-                <p className="font-medium">Ask your first question</p>
-                <p className="text-sm">Select from suggested questions or type your own.</p>
-              </div>
-            )}
-            {!selectedChatId && chats.length > 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
-                <p className="font-medium">Select a conversation or ask a new question</p>
-                <p className="text-sm">Click a previous chat in the sidebar to view it.</p>
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+            {currentMessages.length === 0 && !loading && (
+              <div className="flex flex-col items-center justify-center min-h-[420px] text-center px-4">
+                <div className="h-20 w-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(124, 58, 237, 0.12)' }}>
+                  <Bot className="h-10 w-10" style={{ color: '#a78bfa' }} />
+                </div>
+                <h2 className="text-3xl font-semibold tracking-tight text-white">Ready to Research?</h2>
+                <p className="mt-3 max-w-lg" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                  Ask about hiring trends, candidate insights, role fit, and recruitment optimization.
+                </p>
+                <div className="grid grid-cols-2 gap-3 mt-8 w-full max-w-md">
+                  {HERO_TOPICS.map((topic) => {
+                    const TopicIcon = topic.icon;
+                    return (
+                      <button
+                        key={topic.label}
+                        type="button"
+                        onClick={() => setQuestion(topic.prompt)}
+                        className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-left transition-all duration-200 text-white/90 hover:text-white"
+                        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.borderColor = 'rgba(139,92,246,0.3)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
+                      >
+                        <TopicIcon className="h-5 w-5 shrink-0" style={{ color: '#a78bfa' }} />
+                        {topic.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {currentMessages.map((msg, i) => (
@@ -602,19 +782,31 @@ const AiInterviewQuestions = () => {
                             <Save className="h-4 w-4 mr-2" />
                             Save Prompt
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => handleAddToDashboard(
-                              currentMessages[i - 1]?.content,
-                              msg.responseData.chartTitle,
-                              msg.responseData.chartType
-                            )}
-                            className="rounded-xl bg-[#16162a] hover:bg-[#1e1e38] text-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_3px_10px_rgba(0,0,0,0.4)] px-4 py-2 h-9"
-                          >
-                            <LayoutDashboard className="h-4 w-4 mr-2 shrink-0" />
-                            Add to dashboard
-                          </Button>
+                          {(() => {
+                            const _key = `${currentMessages[i - 1]?.content}__${msg.responseData.chartType || 'bar'}`;
+                            const _isAdded = addedToDashboard.has(_key);
+                            return (
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={_isAdded}
+                                onClick={() => handleAddToDashboard(
+                                  currentMessages[i - 1]?.content,
+                                  msg.responseData.chartTitle,
+                                  msg.responseData.chartType
+                                )}
+                                className={_isAdded
+                                  ? "rounded-xl bg-green-700 text-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] px-4 py-2 h-9 cursor-not-allowed opacity-80"
+                                  : "rounded-xl bg-[#16162a] hover:bg-[#1e1e38] text-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_3px_10px_rgba(0,0,0,0.4)] px-4 py-2 h-9"
+                                }
+                              >
+                                {_isAdded
+                                  ? <><Check className="h-4 w-4 mr-2 shrink-0" /> Already Added</>
+                                  : <><LayoutDashboard className="h-4 w-4 mr-2 shrink-0" /> Add to dashboard</>
+                                }
+                              </Button>
+                            );
+                          })()}
                         </div>
                       </div>
                     </>
@@ -657,62 +849,109 @@ const AiInterviewQuestions = () => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input area — one row aligned, Try row aligned with bar */}
-          <form onSubmit={handleSubmit} className="shrink-0 border-t border-border bg-muted/20">
-            <div className="p-4 space-y-3">
-              <div className="flex gap-3 items-center min-h-[48px]">
-                <div className="flex h-11 rounded-lg border border-border bg-background overflow-hidden shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setInputMode('search')}
-                    className={`flex items-center justify-center gap-2 min-w-[88px] h-full px-3 text-sm transition-colors ${
-                      inputMode === 'search' ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Search className="h-4 w-4 shrink-0" />
-                    Search
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInputMode('graph')}
-                    className={`flex items-center justify-center gap-2 min-w-[88px] h-full px-3 text-sm transition-colors border-l border-border ${
-                      inputMode === 'graph' ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <BarChart2 className="h-4 w-4 shrink-0" />
-                    Graph
-                  </button>
-                </div>
+          {/* Input area — dark pill bar matching figma design */}
+          <div style={{ position: 'relative', width: '100%' }}>
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                top: 0,
+                zIndex: 1,
+                pointerEvents: 'none',
+                background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+              }}
+            />
+            <form onSubmit={handleSubmit} className="shrink-0" style={{ position: 'relative', zIndex: 2 }}>
+              <div
+                className="mx-4 mb-4 flex items-center gap-2.5 rounded-[28px] px-2.5 py-2.5"
+                style={{
+                  background: '#0a0a0f',
+                  border: '1.5px solid rgba(255,255,255,0.08)',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+                }}
+              >
+              {/* Dropdown selector – pill with violet glow border */}
+              <Select value={inputMode} onValueChange={setInputMode}>
+                <SelectTrigger
+                  className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
+                  style={{
+                    background: '#111118',
+                    border: '1.5px solid rgba(139, 92, 246, 0.55)',
+                    boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
+                    color: '#e2e2f0',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <SelectedModeIcon className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                    <SelectValue placeholder="Search" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent
+                  style={{
+                    background: '#161630',
+                    border: '1px solid rgba(139, 92, 246, 0.25)',
+                    color: '#e2e2f0',
+                  }}
+                >
+                  {INPUT_MODE_OPTIONS.map((mode) => {
+                    const ModeIcon = mode.icon;
+                    return (
+                      <SelectItem
+                        key={mode.value}
+                        value={mode.value}
+                        className="focus:bg-violet-600/20 focus:text-white"
+                      >
+                        <div className="flex items-center gap-2">
+                          <ModeIcon className="h-4 w-4" />
+                          <span>{mode.label}</span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+
+              {/* Input field – dark capsule with purple border on left fading out */}
+              <div
+                className="flex-1 min-w-0 rounded-full flex items-center overflow-hidden"
+                style={{
+                  background: '#0e0e14',
+                  boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderLeftColor: 'rgba(139, 92, 246, 0.45)',
+                }}
+              >
                 <Textarea
-                  placeholder={inputMode === 'search' ? 'Ask about jobs, candidates, or interview questions…' : 'Describe the chart you want…'}
+                  placeholder={selectedMode.placeholder}
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
                   rows={1}
                   disabled={loading}
-                  className="flex-1 min-h-[44px] h-11 max-h-32 resize-none rounded-lg border border-border bg-background text-sm py-2.5 text-left"
+                  className="recruit-dark-input flex-1 w-full min-h-[44px] h-11 max-h-32 resize-none border-0 bg-transparent text-sm py-3 px-4 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  style={{ color: 'rgba(255,255,255,0.85)', }}
                 />
-                <Button type="submit" disabled={loading} size="icon" className="h-11 w-11 shrink-0 rounded-lg">
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </Button>
               </div>
-              <div className="space-y-2">
-                <span className="text-xs text-muted-foreground font-medium">Try these examples</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {(inputMode === 'graph' ? SUGGESTED_GRAPH_QUESTIONS : SUGGESTED_SEARCH_QUESTIONS).map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => setQuestion(q)}
-                      className="text-xs text-foreground bg-muted/80 hover:bg-muted border border-border hover:border-border rounded-md px-2 py-1 text-left transition-colors"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
+
+              {/* Send button – purple circle */}
+              <Button
+                type="submit"
+                disabled={loading}
+                size="icon"
+                className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
+                style={{
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                  boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                  color: '#ffffff',
+                }}
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
               </div>
-            </div>
-          </form>
+            </form>
+          </div>
 
       {/* Expand graph modal - full width */}
       <Dialog open={!!expandedGraph} onOpenChange={(open) => !open && setExpandedGraph(null)}>
@@ -763,6 +1002,7 @@ const AiInterviewQuestions = () => {
       </Dialog>
         </CardContent>
       </Card>
+    </div>
     </div>
   );
 };
