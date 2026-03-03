@@ -533,7 +533,7 @@ const AiInterviewQuestions = () => {
                 />
                 <button
                   title="Close search"
-                  onClick={() => setShowSidebarSearch(false)}
+                  onClick={() => { setSidebarSearch(''); setShowSidebarSearch(false); }}
                   className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
                 >
                   <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/70"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>
@@ -573,7 +573,19 @@ const AiInterviewQuestions = () => {
               <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
             ) : (
               <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
-                {chats.map((c) => (
+                {(() => {
+                  const searchTerm = sidebarSearch.trim().toLowerCase();
+                  const filteredChats = searchTerm
+                    ? chats.filter((c) => {
+                        const title = (c.title || c.messages?.[0]?.content || c.question || '').toLowerCase();
+                        const messagesMatch = (c.messages || []).some(m => (m.content || '').toLowerCase().includes(searchTerm));
+                        return title.includes(searchTerm) || messagesMatch;
+                      })
+                    : chats;
+                  if (searchTerm && filteredChats.length === 0) {
+                    return <div className="p-4 text-center text-sm text-muted-foreground">No matching conversations found.</div>;
+                  }
+                  return filteredChats.map((c) => (
                   <div
                     key={c.id}
                     className={`flex items-center gap-1 rounded-lg border text-sm transition-all duration-200 ${
@@ -607,7 +619,8 @@ const AiInterviewQuestions = () => {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                ))}
+                  ));
+                })()}
               </div>
             )}
           </div>

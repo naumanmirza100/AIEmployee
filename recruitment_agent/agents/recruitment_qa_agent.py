@@ -218,7 +218,12 @@ def _is_simple_count_question(question: str) -> bool:
     if ("best" in q or "top" in q or "highest" in q) and ("candidate" in q or "cv" in q):
         return True
     # Job details / description
-    if ("detail" in q or "description" in q or "info" in q) and ("job" in q or "position" in q or "role" in q):
+    if ("detail" in q or "description" in q or "info" in q or "about" in q) and (
+        "job" in q or "position" in q or "role" in q
+        or "developer" in q or "engineer" in q or "designer" in q
+        or "manager" in q or "analyst" in q or "architect" in q
+        or "consultant" in q or "specialist" in q or "intern" in q
+    ):
         return True
     # Active/inactive job list
     if ("active" in q or "inactive" in q) and ("job" in q or "which" in q):
@@ -264,8 +269,16 @@ def _find_matching_job(jobs: List[Dict], question: str) -> Optional[Dict]:
         title_words = set(title.split())
         q_words = set(q.split())
         overlap = title_words & q_words
-        # Remove generic words from overlap count
-        generic = {"the", "a", "an", "for", "and", "of", "in", "at", "to", "is", "job", "role", "position", "developer", "engineer"}
+        # Remove generic words from overlap count — includes common English words,
+        # prepositions, question words, and generic job terms to prevent false matches
+        # e.g. "on" in "candidates are on hold" should NOT match "Ruby on Rails"
+        generic = {
+            "the", "a", "an", "for", "and", "of", "in", "at", "to", "is", "are",
+            "on", "with", "by", "or", "not", "no", "my", "i", "do", "has", "have",
+            "how", "many", "what", "which", "who", "that", "this", "from", "all",
+            "any", "can", "will", "be", "was", "were", "been", "about", "their",
+            "job", "role", "position", "developer", "engineer",
+        }
         meaningful_overlap = overlap - generic
         meaningful_title = title_words - generic
         if meaningful_title and meaningful_overlap:
@@ -275,6 +288,19 @@ def _find_matching_job(jobs: List[Dict], question: str) -> Optional[Dict]:
                 best_match = job
 
     return best_match
+
+
+def _is_comprehensive_answer(text: str) -> bool:
+    """True if the direct answer is already comprehensive (has headings/sections) and doesn't need LLM."""
+    if not text:
+        return False
+    # If it contains markdown headings (## or #), it's a detailed structured answer
+    if "## " in text or text.startswith("# "):
+        return True
+    # If it's long and has multiple bold sections, it's comprehensive
+    if len(text) > 500 and text.count("**") >= 6:
+        return True
+    return False
 
 
 def _is_boilerplate(text: str) -> bool:
@@ -367,7 +393,8 @@ FORMATTING (when your answer has multiple parts or a list):
             direct = self._get_direct_answer(data, question)
             insights = self._extract_insights(data, question)
             # For simple count/list questions, direct answer is enough – no LLM, no extra sections
-            if direct and _is_simple_count_question(question):
+            # Also skip LLM if direct answer is already comprehensive (contains ## headings)
+            if direct and (_is_simple_count_question(question) or _is_comprehensive_answer(direct)):
                 return self._wrap_response(direct, insights)
             context = self._build_context(data)
             answer = self._generate_answer(question, context, direct)
