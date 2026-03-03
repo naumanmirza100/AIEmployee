@@ -612,6 +612,8 @@ class TicketAutomationService:
                     resolution_confidence=classification.get('confidence', 0.0) if can_auto_resolve else None,
                     resolved_at=timezone.now() if can_auto_resolve else None,
                     sla_due_at=sla_due_at,
+                    intent=classification.get('intent'),
+                    entities=classification.get('entities') or {}
                 )
                 
                 logger.info(f"Ticket created: ID {ticket.id}, Status: {ticket.status}")

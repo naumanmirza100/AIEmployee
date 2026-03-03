@@ -46,6 +46,10 @@ class Ticket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     sla_due_at = models.DateTimeField(null=True, blank=True, help_text='Target response time for SLA; used for aging alerts')
+    
+    # Internal entities for analytics/workflow
+    intent = models.CharField(max_length=100, blank=True, null=True, help_text='Extracted intention of the user')
+    entities = models.JSONField(default=dict, blank=True, help_text='Extracted entities like user_id, product, etc.')
 
     class Meta:
         app_label = 'Frontline_agent'
@@ -203,6 +207,7 @@ class FrontlineWorkflow(models.Model):
     description = models.TextField(blank=True)
     trigger_conditions = models.JSONField(default=dict, blank=True, help_text='e.g. {"on": "ticket_created", "category": "billing"}')
     steps = models.JSONField(default=list, help_text='List of steps: [{"type": "send_email", "template_id": 1}, {"type": "update_ticket", "status": "open"}]')
+    requires_approval = models.BooleanField(default=False, help_text='If True, execution halts until approved by admin')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -223,6 +228,8 @@ class FrontlineWorkflowExecution(models.Model):
         ('completed', 'Completed'),
         ('failed', 'Failed'),
         ('cancelled', 'Cancelled'),
+        ('awaiting_approval', 'Awaiting Approval'),
+        ('rejected', 'Rejected'),
     ]
     workflow = models.ForeignKey(FrontlineWorkflow, on_delete=models.SET_NULL, null=True, blank=True, related_name='executions')
     workflow_name = models.CharField(max_length=200)
