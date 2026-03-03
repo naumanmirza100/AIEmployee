@@ -1,18 +1,19 @@
 """
-Management command to generate embeddings for existing documents
+Management command to generate embeddings for existing documents via RAG chunks
 Usage: python manage.py generate_embeddings [--company-id COMPANY_ID] [--all]
 """
 from django.core.management.base import BaseCommand
 from django.db.models import Q
-from Frontline_agent.models import Document
+from Frontline_agent.models import Document, DocumentChunk
 from core.Fronline_agent.embedding_service import EmbeddingService
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = 'Generate embeddings for documents that don\'t have them yet'
+    help = 'Generate overlapping chunk embeddings for documents'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -23,7 +24,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--all',
             action='store_true',
-            help='Process all documents, even those that already have embeddings',
+            help='Process all documents, even those that already have chunks',
         )
         parser.add_argument(
             '--limit',
@@ -41,7 +42,7 @@ class Command(BaseCommand):
         
         if not embedding_service.is_available():
             self.stdout.write(
-                self.style.ERROR('Embedding service is not available. Please check OPENAI_API_KEY.')
+                self.style.ERROR('Embedding service is not available. Please check API keys.')
             )
             return
         
@@ -55,8 +56,9 @@ class Command(BaseCommand):
             query = query.filter(company_id=company_id)
         
         if not process_all:
-            # Only process documents without embeddings
-            query = query.filter(Q(embedding__isnull=True) | Q(embedding=[]))
+            # Only process documents that have NO chunks
+            doc_ids_with_chunks = DocumentChunk.objects.values_list('document_id', flat=True).distinct()
+            query = query.exclude(id__in=doc_ids_with_chunks)
         
         if limit:
             query = query[:limit]
@@ -83,23 +85,42 @@ class Command(BaseCommand):
                         self.style.WARNING(f'[{i}/{total}] Skipping document {doc.id} (empty content)')
                     )
                     continue
+                    
+                # Delete existing chunks if processing all
+                if process_all:
+                    doc.chunks.all().delete()
                 
-                # Generate embedding
-                embedding = embedding_service.generate_embedding(searchable_text)
+                # Chunking logic
+                chunk_size = 4000
+                overlap = 200
+                chunks = []
+                start = 0
+                while start < len(searchable_text):
+                    end = start + chunk_size
+                    chunks.append(searchable_text[start:end])
+                    start += chunk_size - overlap
                 
-                if embedding:
-                    doc.embedding = embedding
-                    doc.embedding_model = embedding_service.embedding_model
-                    doc.save(update_fields=['embedding', 'embedding_model'])
-                    success_count += 1
-                    self.stdout.write(
-                        self.style.SUCCESS(f'[{i}/{total}] Generated embedding for document {doc.id}: "{doc.title}"')
-                    )
-                else:
-                    error_count += 1
-                    self.stdout.write(
-                        self.style.ERROR(f'[{i}/{total}] Failed to generate embedding for document {doc.id}')
-                    )
+                # Batch process
+                batch_size = 20
+                for j in range(0, len(chunks), batch_size):
+                    batch_chunks = chunks[j:j+batch_size]
+                    embeddings = embedding_service.generate_embeddings_batch(batch_chunks)
+                    
+                    for k, (chunk_text, embedding) in enumerate(zip(batch_chunks, embeddings)):
+                        DocumentChunk.objects.create(
+                            document=doc,
+                            chunk_index=j+k,
+                            chunk_text=chunk_text,
+                            embedding=json.dumps(embedding) if embedding else None
+                        )
+                
+                doc.embedding_model = embedding_service.embedding_model
+                doc.save(update_fields=['embedding_model'])
+
+                success_count += 1
+                self.stdout.write(
+                    self.style.SUCCESS(f'[{i}/{total}] Generated {len(chunks)} chunks for document {doc.id}: "{doc.title}"')
+                )
                     
             except Exception as e:
                 error_count += 1

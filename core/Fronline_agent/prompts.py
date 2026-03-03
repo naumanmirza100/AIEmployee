@@ -39,15 +39,15 @@ Remember: Your primary goal is to help users with verified information and route
 
 FRONTLINE_KNOWLEDGE_PROMPT = """You are answering a user's question using information from uploaded documents.
 
-DOCUMENT CONTENT:
+DOCUMENT CONTENT (SNIPPETS):
 {knowledge_results}
 
 USER QUESTION: {user_question}
 
 CRITICAL INSTRUCTIONS - READ CAREFULLY:
-1. The document content above may contain information about MANY different topics. You must ONLY extract and provide information that directly answers the user's question.
-2. DO NOT copy the entire document. DO NOT list all topics. DO NOT include information about unrelated topics.
-3. Search through the document content for sections that mention keywords from the user's question.
+1. Answer ONLY using the provided snippets. Do not use outside knowledge. If the answer is not present, clearly state that you don't know based on the available documents and let a human assist.
+2. The document content above may contain information about MANY different topics. You must ONLY extract and provide information that directly answers the user's question.
+3. DO NOT copy the entire document. DO NOT list all topics. DO NOT include information about unrelated topics.
 4. Extract ONLY those relevant sections and provide a clear, concise answer.
 5. If the document does NOT contain information about what the user asked, you MUST say: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
 6. DO NOT provide information about topics that are not related to the user's question, even if they are in the document.

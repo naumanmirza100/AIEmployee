@@ -3,6 +3,7 @@ Frontline Agent Services
 Enterprise-level service layer for knowledge retrieval and ticket automation
 """
 import logging
+from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 from django.utils import timezone
 from django.db import transaction
@@ -132,243 +133,182 @@ class KnowledgeService:
         scope_document_ids: Optional[List[int]] = None,
     ) -> List[Dict]:
         """
-        Search uploaded documents for company using semantic search (embeddings) with keyword fallback.
-        scope_document_type: optional list of document_type values to restrict search (e.g. ['policy', 'knowledge_base']).
-        scope_document_ids: optional list of document IDs to restrict search to specific documents.
+        Search uploaded documents for company using hybrid search (chunk embeddings + keyword) and RRF.
+        Returns the top_k chunks re-ranked by language model.
         """
         try:
-            from Frontline_agent.models import Document
+            from Frontline_agent.models import Document, DocumentChunk
             from django.db.models import Q
+            import json
             
-            # Get all indexed documents for the company
+            # Base document filter
             all_documents = Document.objects.filter(
                 company_id=company_id,
                 is_indexed=True,
                 processed=True
             )
-            if scope_document_type is not None and len(scope_document_type) > 0:
+            if scope_document_type:
                 all_documents = all_documents.filter(document_type__in=scope_document_type)
-            if scope_document_ids is not None and len(scope_document_ids) > 0:
+            if scope_document_ids:
                 all_documents = all_documents.filter(id__in=scope_document_ids)
-            
-            # Try semantic search first if embeddings are available
+                
+            doc_ids = list(all_documents.values_list('id', flat=True))
+            if not doc_ids:
+                return []
+                
+            all_chunks = DocumentChunk.objects.filter(document_id__in=doc_ids).select_related('document')
+
+            # 1. Semantic Search
+            semantic_results = []
             if self.embedding_service.is_available():
                 try:
-                    # Generate query embedding for semantic search
-                    logger.info(f"Generating query embedding for semantic search: {query[:100]}")
+                    logger.info("Generating query embedding for hybrid search")
                     query_embedding = self.embedding_service.generate_embedding(query)
-                    
-                    # If embedding generation failed (e.g., quota exceeded), fall back to keyword search
-                    if not query_embedding:
-                        logger.info("Query embedding generation failed, falling back to keyword search")
-                        raise ValueError("Embedding generation failed")
-                    
-                    logger.info(f"Query embedding generated successfully (dimension: {len(query_embedding)})")
-                    
                     if query_embedding:
-                        # Get documents with embeddings
-                        documents_with_embeddings = all_documents.exclude(embedding__isnull=True).exclude(embedding=[])
-                        
-                        logger.info(f"Found {documents_with_embeddings.count()} documents with embeddings for company {company_id}")
-                        
-                        if documents_with_embeddings.exists():
-                            # Prepare document embeddings for similarity search
-                            doc_embeddings = []
-                            for doc in documents_with_embeddings:
-                                if doc.embedding:  # Ensure embedding exists
-                                    doc_embeddings.append({
-                                        'document_id': doc.id,
-                                        'embedding': doc.embedding,
-                                        'metadata': {
-                                            'title': doc.title,
-                                            'description': doc.description,
-                                            'document_type': doc.document_type,
-                                            'file_format': doc.file_format,
-                                        }
-                                    })
-                            
-                            if doc_embeddings:
-                                logger.info(f"Processing {len(doc_embeddings)} documents with embeddings for similarity search")
-                                
-                                # Calculate all similarities first for debugging
-                                all_scores = []
-                                for doc_data in doc_embeddings:
-                                    try:
-                                        doc_embedding = doc_data['embedding']
-                                        # Ensure embedding is a list (not JSON string)
-                                        if isinstance(doc_embedding, str):
-                                            import json
-                                            doc_embedding = json.loads(doc_embedding)
-                                        
-                                        similarity = self.embedding_service.cosine_similarity(query_embedding, doc_embedding)
-                                        all_scores.append({
-                                            'id': doc_data['document_id'],
-                                            'score': similarity,
-                                            'title': doc_data['metadata'].get('title', 'Unknown')
-                                        })
-                                    except Exception as e:
-                                        logger.error(f"Error calculating similarity for doc {doc_data['document_id']}: {e}")
-                                
-                                # Sort by similarity
-                                all_scores.sort(key=lambda x: x['score'], reverse=True)
-                                
-                                # Log top 5 scores for debugging
-                                top_5 = all_scores[:5] if len(all_scores) >= 5 else all_scores
-                                logger.warning(f"Top 5 similarity scores: {[(d['id'], round(d['score'], 3), d['title'][:50]) for d in top_5]}")
-                                
-                                # Log ALL scores for debugging (to see if document 8 is included)
-                                logger.info(f"All similarity scores (total: {len(all_scores)}): {[(d['id'], round(d['score'], 3), d['title'][:30]) for d in all_scores]}")
-                                
-                                # Use top results regardless of threshold
-                                # Some embedding models produce lower similarity scores, so we'll take the top N
-                                # and let the user see the results even if scores seem low
-                                if all_scores:
-                                    # Take top max_results documents (always return something if we have documents)
-                                    similar_docs = all_scores[:max_results]
-                                    scores = [round(d['score'], 3) for d in similar_docs]
-                                    logger.warning(f"Returning top {len(similar_docs)} documents (max_results={max_results}) with similarity scores: {scores}")
-                                    logger.info(f"Document IDs being returned: {[d['id'] for d in similar_docs]}")
-                                    
-                                    # Check if document 8 is in the results
-                                    doc_8_in_results = any(d['id'] == 8 for d in similar_docs)
-                                    logger.info(f"Document 8 (nlp) in results: {doc_8_in_results}")
-                                else:
-                                    similar_docs = []
-                                    logger.warning(f"No documents with embeddings found. Total documents processed: {len(all_scores)}")
-                                
-                                if similar_docs:
-                                    # Get full document objects
-                                    doc_ids = [d['id'] for d in similar_docs]
-                                    documents = Document.objects.filter(id__in=doc_ids)
-                                    
-                                    # Create a map for similarity scores
-                                    similarity_map = {d['id']: d['score'] for d in similar_docs}
-                                    
-                                    # Sort by similarity
-                                    documents = sorted(documents, key=lambda d: similarity_map.get(d.id, 0), reverse=True)
-                                    
-                                    results = []
-                                    for doc in documents:
-                                        content = doc.document_content or ''
-                                        similarity = similarity_map.get(doc.id, 0)
-                                        
-                                        # Extract snippet - try to find the most relevant section
-                                        query_lower = query.lower()
-                                        content_lower = content.lower()
-                                        
-                                        # Extract keywords from query (remove common words)
-                                        import re
-                                        query_words = re.findall(r'\b\w+\b', query_lower)
-                                        stop_words = {'what', 'is', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'how', 'do', 'does', 'can', 'will'}
-                                        keywords = [w for w in query_words if w not in stop_words and len(w) > 2]
-                                        
-                                        # Try to find the most relevant section by searching for keywords
-                                        best_snippet = None
-                                        best_start = 0
-                                        
-                                        if keywords:
-                                            # Search for each keyword and find the best match
-                                            for keyword in keywords:
-                                                idx = content_lower.find(keyword)
-                                                if idx >= 0:
-                                                    # Extract large context around keyword (3000 chars)
-                                                    start = max(0, idx - 1000)
-                                                    end = min(len(content), idx + len(keyword) + 2000)
-                                                    snippet = content[start:end]
-                                                    if start > 0:
-                                                        snippet = '...' + snippet
-                                                    if end < len(content):
-                                                        snippet = snippet + '...'
-                                                    
-                                                    # Use this snippet if it's better (contains more keywords or is longer)
-                                                    if best_snippet is None or len(snippet) > len(best_snippet):
-                                                        best_snippet = snippet
-                                                        best_start = start
-                                            
-                                            if best_snippet:
-                                                snippet = best_snippet
-                                            else:
-                                                # No keywords found, use first 3000 chars
-                                                snippet = content[:3000] + '...' if len(content) > 3000 else content
-                                        else:
-                                            # No keywords, use first 3000 chars
-                                            snippet = content[:3000] + '...' if len(content) > 3000 else content
-                                        
-                                        # For semantic search results, we want more content since we know it's relevant
-                                        # Use up to 5000 chars to give LLM enough context
-                                        if len(snippet) < 5000 and len(content) > len(snippet):
-                                            # Try to expand the snippet if there's more content
-                                            remaining = min(5000 - len(snippet), len(content) - len(snippet))
-                                            if best_start > 0:
-                                                # Add content before
-                                                add_before = min(remaining // 2, best_start)
-                                                snippet = content[best_start - add_before:best_start] + snippet
-                                            if len(snippet) < 5000:
-                                                # Add content after
-                                                add_after = min(5000 - len(snippet), len(content) - (best_start + len(snippet)))
-                                                if add_after > 0:
-                                                    snippet = snippet + content[best_start + len(snippet):best_start + len(snippet) + add_after]
-                                        
-                                        results.append({
-                                            'id': doc.id,
-                                            'title': doc.title,
-                                            'content': snippet,
-                                            'file_format': doc.file_format,
-                                            'document_type': doc.document_type,
-                                            'similarity_score': round(similarity, 3),  # Add similarity score
-                                            'search_method': 'semantic'
-                                        })
-                                    
-                                    logger.info(f"Semantic search found {len(results)} documents")
-                                    return results
-                                
-                                logger.info("Semantic search found no similar documents, falling back to keyword search")
+                        chunks_with_embeddings = all_chunks.exclude(embedding__isnull=True).exclude(embedding='')
+                        for chunk in chunks_with_embeddings:
+                            try:
+                                chunk_emb = json.loads(chunk.embedding) if isinstance(chunk.embedding, str) else chunk.embedding
+                                similarity = self.embedding_service.cosine_similarity(query_embedding, chunk_emb)
+                                semantic_results.append({
+                                    'chunk_id': chunk.id,
+                                    'document_id': chunk.document_id,
+                                    'score': similarity,
+                                    'content': chunk.chunk_text,
+                                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                                    'file_format': chunk.document.file_format,
+                                    'document_type': chunk.document.document_type
+                                })
+                            except Exception as e:
+                                pass
+                        semantic_results.sort(key=lambda x: x['score'], reverse=True)
+                        semantic_results = semantic_results[:50] # Top 50 semantic
                 except Exception as e:
-                    logger.warning(f"Semantic search failed, falling back to keyword search: {e}")
+                    logger.warning(f"Semantic search failed: {e}")
             
-            # Fallback to keyword search
-            logger.info("Using keyword-based search")
-            documents = all_documents.filter(
-                Q(title__icontains=query) |
-                Q(description__icontains=query) |
-                Q(document_content__icontains=query)
-            )[:max_results]
+            # 2. Keyword Search
+            keyword_results = []
+            matching_chunks = all_chunks.filter(chunk_text__icontains=query)[:50]
+            for chunk in matching_chunks:
+                keyword_results.append({
+                    'chunk_id': chunk.id,
+                    'document_id': chunk.document_id,
+                    'score': 1.0, # Base keyword score
+                    'content': chunk.chunk_text,
+                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                    'file_format': chunk.document.file_format,
+                    'document_type': chunk.document.document_type
+                })
+                
+            # 3. Reciprocal Rank Fusion (RRF)
+            # RRF Score = sum(1 / (k + rank))
+            k = 60
+            chunk_scores = {}
+            chunk_data = {}
+            
+            for rank, res in enumerate(semantic_results):
+                cid = res['chunk_id']
+                chunk_scores[cid] = chunk_scores.get(cid, 0) + (1.0 / (k + rank + 1))
+                chunk_data[cid] = res
+                
+            for rank, res in enumerate(keyword_results):
+                cid = res['chunk_id']
+                chunk_scores[cid] = chunk_scores.get(cid, 0) + (1.0 / (k + rank + 1))
+                if cid not in chunk_data:
+                    chunk_data[cid] = res
+                    
+            # 4. Sort and return top chunks
+            sorted_chunks = sorted(chunk_scores.items(), key=lambda x: x[1], reverse=True)[:max_results*2]
             
             results = []
-            for doc in documents:
-                # Extract relevant snippet from content
-                content = doc.document_content or ''
-                if query.lower() in content.lower():
-                    # Find snippet around query
-                    query_lower = query.lower()
-                    content_lower = content.lower()
-                    idx = content_lower.find(query_lower)
-                    if idx >= 0:
-                        start = max(0, idx - 100)
-                        end = min(len(content), idx + len(query) + 100)
-                        snippet = content[start:end]
-                        if start > 0:
-                            snippet = '...' + snippet
-                        if end < len(content):
-                            snippet = snippet + '...'
-                    else:
-                        snippet = content[:200] + '...' if len(content) > 200 else content
-                else:
-                    snippet = content[:200] + '...' if len(content) > 200 else content
-                
+            for cid, score in sorted_chunks:
+                data = chunk_data[cid]
                 results.append({
-                    'id': doc.id,
-                    'title': doc.title,
-                    'content': snippet,
-                    'file_format': doc.file_format,
-                    'document_type': doc.document_type,
-                    'search_method': 'keyword'
+                    'id': data['document_id'],
+                    'chunk_id': cid,
+                    'title': data['title'],
+                    'content': data['content'],
+                    'file_format': data['file_format'],
+                    'document_type': data['document_type'],
+                    'similarity_score': round(score, 3),
+                    'search_method': 'hybrid'
                 })
-            
-            return results
+                
+            # Fallback for monolithic documents that don't have chunks yet
+            if not results:
+                docs = all_documents.filter(document_content__icontains=query)[:max_results]
+                for doc in docs:
+                    results.append({
+                        'id': doc.id,
+                        'chunk_id': None,
+                        'title': doc.title,
+                        'content': (doc.document_content[:2000] + '...') if doc.document_content and len(doc.document_content) > 2000 else doc.document_content,
+                        'file_format': doc.file_format,
+                        'document_type': doc.document_type,
+                        'similarity_score': 0.5,
+                        'search_method': 'keyword_fallback'
+                    })
+
+            # 5. LLM Re-Ranking
+            if results and self.embedding_service.is_available():
+                results = self._llm_rerank(query, results, top_k=max_results)
+                
+            return results[:max_results]
         except Exception as e:
             logger.error(f"Document search failed: {e}", exc_info=True)
             return []
+
+    def _llm_rerank(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
+        """
+        Use LLM cross-encoding logic to re-rank retrieved candidate chunks.
+        """
+        try:
+            if not candidates:
+                return candidates
+                
+            chunks_text = ""
+            for i, cand in enumerate(candidates):
+                chunks_text += f"\n--- Chunk {i} ---\n{cand['content'][:1000]}\n"
+                
+            prompt = f"""Given the user query, evaluate the following document chunks.
+For each chunk, score it from 0 to 10 on how well it directly answers or contains information highly relevant to the query.
+Return ONLY a JSON list of integers representing the scores in the exact order of the chunks. E.g. [8, 0, 5, 2]
+
+Query: {query}
+
+Chunks:
+{chunks_text}
+"""
+            import openai
+            from django.conf import settings
+            client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a precise document retrieval evaluator. Output ONLY a valid JSON list of integers."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0
+            )
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            import json
+            scores = json.loads(raw.strip())
+            
+            # Apply rerank scores if the lists match in size
+            if len(scores) == len(candidates):
+                for cand, score in zip(candidates, scores):
+                    cand['rerank_score'] = cand['similarity_score'] + (score / 10.0)
+                candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
+                
+            return candidates[:top_k]
+        except Exception as e:
+            logger.warning(f"LLM reranking failed: {e}")
+            return candidates[:top_k]
+
     
     def get_answer(
         self,
@@ -432,65 +372,29 @@ class KnowledgeService:
             if best_match['type'] == 'faq':
                 answer = best_match.get('answer', '')
             elif best_match['type'] == 'document':
-                # For documents, fetch full content and let LLM extract the answer
-                content = best_match.get('content', '')
+                # For documents, we now use the context from the intelligent chunking
+                # Combine top 3 chunks to give LLM maximum context
+                content_chunks = []
+                for res in search_results['results'][:3]:
+                    if res.get('type', res.get('document_type', 'document')) == 'document' and res.get('content'):
+                        content_chunks.append(f"--- Document: {res.get('title', 'Unknown')} ---\n{res.get('content')}")
+                
+                content = "\n\n".join(content_chunks)
                 document_id = best_match.get('id') or best_match.get('document_id')
                 
-                # Always fetch full document content
-                if document_id:
-                    try:
-                        from Frontline_agent.models import Document
-                        doc = Document.objects.filter(id=document_id).first()
-                        if doc and doc.document_content:
-                            full_content = doc.document_content
-                            
-                            # Extract keywords from question to verify relevance
-                            import re
-                            query_lower = question.lower()
-                            query_words = re.findall(r'\b\w+\b', query_lower)
-                            stop_words = {'what', 'is', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'how', 'do', 'does', 'can', 'will', 'are', 'was', 'were'}
-                            keywords = [w for w in query_words if w not in stop_words and len(w) > 2]
-                            
-                            # Check if document contains any keywords (basic relevance check)
-                            content_lower = full_content.lower()
-                            has_keywords = any(kw in content_lower for kw in keywords) if keywords else True
-                            
-                            if not has_keywords and similarity_score < 0.3:
-                                # Document doesn't seem relevant, return None to trigger "no info" response
-                                logger.warning(f"Document {document_id} doesn't contain keywords {keywords} and similarity is low ({similarity_score})")
-                                return {
-                                    'success': True,
-                                    'answer': None,
-                                    'has_verified_info': False,
-                                    'message': 'No verified information found in knowledge base'
-                                }
-                            
-                            # SIMPLE APPROACH: Use reasonable amount of content
-                            # Semantic search already found this document as relevant
-                            # Pass enough content for LLM to find answer, but not so much it gets confused
-                            
-                            # For documents up to 15000 chars, use full content
-                            # For larger documents, use first 15000 chars (enough for LLM to find answer)
-                            if len(full_content) <= 15000:
-                                answer = full_content
-                                logger.info(f"Using full document content (length: {len(answer)}, doc_id: {document_id}, has_keywords: {has_keywords})")
-                            else:
-                                # Large document - use first 15000 chars
-                                # Semantic search found this doc, so relevant info is likely in the content
-                                answer = full_content[:15000]
-                                logger.info(f"Using first 15000 chars of document (total: {len(full_content)}, doc_id: {document_id}, has_keywords: {has_keywords})")
-                            
-                            # Log content preview for debugging
-                            logger.info(f"Document content preview: {answer[:500]}")
-                        else:
-                            answer = content
-                            logger.warning(f"Document {document_id} not found or has no content, using snippet")
-                    except Exception as e:
-                        logger.error(f"Error fetching full document content: {e}", exc_info=True)
-                        answer = content
-                else:
-                    answer = content
-                    logger.warning(f"No document_id in best_match, using snippet content")
+                # Check minimum similarity if semantic search is used
+                if similarity_score < 0.2 and not content:
+                    logger.warning(f"Document {document_id} has low similarity ({similarity_score}) and no content.")
+                    return {
+                        'success': True,
+                        'answer': None,
+                        'has_verified_info': False,
+                        'message': 'No verified information found in knowledge base'
+                    }
+
+                # Use the chunk content retrieved by _search_documents
+                answer = content
+                logger.info(f"Using document chunk content (length: {len(answer)}, doc_id: {document_id})")
             else:
                 answer = best_match.get('content', '')
             
@@ -691,19 +595,23 @@ class TicketAutomationService:
             
             user = User.objects.get(id=user_id)
             
+            priority = classification.get('priority', 'medium')
+            sla_hours = {'urgent': 4, 'high': 8, 'medium': 24, 'low': 48}.get((priority or 'medium').lower(), 24)
+            sla_due_at = timezone.now() + timedelta(hours=sla_hours) if not can_auto_resolve else None
             with transaction.atomic():
                 ticket = Ticket.objects.create(
                     title=title,
                     description=description,
                     category=classification.get('category', 'other'),
-                    priority=classification.get('priority', 'medium'),
+                    priority=priority,
                     created_by=user,
                     company_id=company_id,
                     status='auto_resolved' if can_auto_resolve else 'open',
                     auto_resolved=can_auto_resolve,
                     resolution=resolution_text if can_auto_resolve else None,
                     resolution_confidence=classification.get('confidence', 0.0) if can_auto_resolve else None,
-                    resolved_at=timezone.now() if can_auto_resolve else None
+                    resolved_at=timezone.now() if can_auto_resolve else None,
+                    sla_due_at=sla_due_at,
                 )
                 
                 logger.info(f"Ticket created: ID {ticket.id}, Status: {ticket.status}")
