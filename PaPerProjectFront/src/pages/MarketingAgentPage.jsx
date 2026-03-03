@@ -246,7 +246,8 @@ const MarketingAgentPage = () => {
           ]}
         />
 
-        <div className="container mx-auto px-4 py-8">
+        {/* <div className="w-full px-4 py-4"> */}
+        <div className="container mx-auto px-4 py-4">
           <Outlet />
         </div>
       </div>
