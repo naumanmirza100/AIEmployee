@@ -41,6 +41,7 @@ class GroqClient:
             "GROQ_BASE_URL", "https://api.groq.com/openai/v1/chat/completions"
         )
         self.timeout = timeout
+        self.last_token_usage: Optional[Dict] = None  # Tracks token usage of last API call
 
     def send_prompt(self, system_prompt: str, text: str) -> Dict[str, Any]:
         """
@@ -130,6 +131,7 @@ class GroqClient:
 
         try:
             content = response.json()
+            self.last_token_usage = content.get("usage", {})
             message = content["choices"][0]["message"]["content"]
             return json.loads(message)
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
@@ -186,6 +188,7 @@ class GroqClient:
             raise GroqClientError(f"Groq API request failed: {exc}") from exc
         try:
             content = response.json()
+            self.last_token_usage = content.get("usage", {})
             return content["choices"][0]["message"]["content"].strip() or ""
         except (KeyError, TypeError):
             raise GroqClientError("Unable to read Groq response") from None
