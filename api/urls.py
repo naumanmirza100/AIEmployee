@@ -349,6 +349,7 @@ urlpatterns = [
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/delete/?$', frontline_agent.delete_workflow, name='frontline_delete_workflow'),  # DELETE
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/execute/?$', frontline_agent.execute_workflow, name='frontline_execute_workflow'),  # POST
     re_path(r'^frontline/workflows/executions/?$', frontline_agent.list_workflow_executions, name='frontline_list_workflow_executions'),  # GET
+    re_path(r'^frontline/workflows/executions/(?P<execution_id>\d+)/approve/?$', frontline_agent.approve_workflow_execution, name='frontline_approve_workflow_execution'),  # POST
     re_path(r'^frontline/workflows/company-users/?$', frontline_agent.list_workflow_company_users, name='frontline_list_workflow_company_users'),  # GET
     # Analytics
     re_path(r'^frontline/analytics/?$', frontline_agent.frontline_analytics, name='frontline_analytics'),  # GET

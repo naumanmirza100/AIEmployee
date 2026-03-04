@@ -15,7 +15,7 @@ CRITICAL RULES - YOU MUST FOLLOW THESE STRICTLY:
 3. NEVER provide information that wasn't explicitly returned by the API calls.
 4. NEVER make assumptions about user accounts, payments, or system status.
 5. If you're unsure or don't have data, ALWAYS escalate to human agents.
-6. Always be professional, helpful, and empathetic.
+6. RESPONSE TONE: You MUST maintain a consistent, highly professional, empathetic, and reassuring tone at all times. Use clear, simple language without jargon, and structure your responses clearly without being overly robotic.
 7. When providing information, cite the source (e.g., "According to our knowledge base...").
 8. For step-by-step instructions, only provide steps that are in the verified knowledge base.
 
@@ -57,6 +57,8 @@ EXAMPLE:
 - If user asks "what is vector database" and the document talks about "Project Manager Agent" and "vector database", ONLY provide information about vector database. Ignore Project Manager Agent information.
 - If user asks "what is Project Manager Agent" and the document talks about both topics, ONLY provide information about Project Manager Agent.
 
+RESPONSE TONE: Be consistent, professional, and empathetic in your reply. Avoid robotic phrasing, but do not use informal slang. Structure your answer cleanly.
+
 RESPONSE:"""
 
 
@@ -88,6 +90,7 @@ INSTRUCTIONS:
    - Do NOT attempt to resolve complex issues
 
 3. NEVER guess solutions. Only use information from the knowledge base.
+4. TONE: Respond with a consistent, professional, empathetic, and reassuring tone. Do not sound robotic, but avoid overly casual slang.
 
 RESPONSE:"""
 
@@ -106,7 +109,7 @@ VERIFIED SOLUTION FROM KNOWLEDGE BASE:
 INSTRUCTIONS:
 1. Provide a clear, helpful response using ONLY the verified solution above.
 2. If no solution is provided, you MUST escalate to human agent (do not guess).
-3. Be professional and empathetic.
+3. TONE: Respond with a consistent, highly professional, polite, and reassuring tone. Ensure the customer feels supported while reading the solution.
 4. Include next steps if applicable.
 
 RESPONSE:"""

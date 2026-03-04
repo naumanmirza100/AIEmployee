@@ -117,16 +117,19 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
                     workflow_name=w.name,
                     workflow_description=w.description or '',
                     executed_by=executed_by_user,
-                    status='in_progress',
+                    status='awaiting_approval' if w.requires_approval else 'in_progress',
                     context_data=context_data,
                 )
-                success, result_data, err = _execute_workflow_steps(w, context_data, executed_by_user)
-                exec_obj.status = 'completed' if success else 'failed'
-                exec_obj.result_data = result_data or {}
-                exec_obj.error_message = err
-                exec_obj.completed_at = timezone.now()
-                exec_obj.save()
-                logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
+                if w.requires_approval:
+                    logger.info(f"Workflow trigger: workflow {w.id} requires approval. Status: awaiting_approval.")
+                else:
+                    success, result_data, err = _execute_workflow_steps(w, context_data, executed_by_user)
+                    exec_obj.status = 'completed' if success else 'failed'
+                    exec_obj.result_data = result_data or {}
+                    exec_obj.error_message = err
+                    exec_obj.completed_at = timezone.now()
+                    exec_obj.save()
+                    logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
             except Exception as e:
                 logger.exception("Workflow trigger: execution failed for workflow %s (ticket %s): %s", w.id, ticket.id, e)
     except Exception as e:
@@ -1075,6 +1078,8 @@ def list_tickets(request):
                 'updated_at': t.updated_at.isoformat(),
                 'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
                 'sla_due_at': t.sla_due_at.isoformat() if t.sla_due_at else None,
+                'intent': t.intent,
+                'entities': t.entities,
             }
             if t.sla_due_at and t.status not in resolved_statuses:
                 row['sla_breached'] = t.sla_due_at < now
@@ -1121,8 +1126,8 @@ def list_tickets_aging(request):
         breached = [t for t in qs if t.sla_due_at < now]
         at_risk = [t for t in qs if t.sla_due_at >= now and t.sla_due_at <= at_risk_threshold]
         data = {
-            'breached': [{'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority, 'sla_due_at': t.sla_due_at.isoformat()} for t in breached],
-            'at_risk': [{'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority, 'sla_due_at': t.sla_due_at.isoformat()} for t in at_risk],
+            'breached': [{'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority, 'sla_due_at': t.sla_due_at.isoformat(), 'intent': t.intent, 'entities': t.entities} for t in breached],
+            'at_risk': [{'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority, 'sla_due_at': t.sla_due_at.isoformat(), 'intent': t.intent, 'entities': t.entities} for t in at_risk],
             'count_breached': len(breached),
             'count_at_risk': len(at_risk),
         }
@@ -1948,6 +1953,49 @@ def list_workflow_executions(request):
         return Response({'status': 'success', 'data': data})
     except Exception as e:
         logger.exception("list_workflow_executions failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def approve_workflow_execution(request, execution_id):
+    """Approve or reject a paused workflow execution."""
+    try:
+        import json
+        company = request.user.company
+        user = _get_or_create_user_for_company_user(request.user)
+        exec_obj = get_object_or_404(FrontlineWorkflowExecution, id=execution_id, workflow__company=company)
+        
+        # Parse data safely
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        action = data.get('action', 'approve')
+        
+        if exec_obj.status != 'awaiting_approval':
+            return Response({'status': 'error', 'message': f"Execution is in {exec_obj.status} state, not awaiting_approval."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if action == 'approve':
+            exec_obj.status = 'in_progress'
+            exec_obj.save()
+            
+            success, result_data, err = _execute_workflow_steps(exec_obj.workflow, exec_obj.context_data, user)
+            exec_obj.status = 'completed' if success else 'failed'
+            exec_obj.result_data = result_data or {}
+            exec_obj.error_message = err
+            exec_obj.completed_at = timezone.now()
+            exec_obj.save()
+            return Response({'status': 'success', 'data': {'status': exec_obj.status, 'result': result_data}})
+            
+        elif action == 'reject':
+            exec_obj.status = 'rejected'
+            exec_obj.completed_at = timezone.now()
+            exec_obj.save()
+            return Response({'status': 'success', 'data': {'status': 'rejected'}})
+        else:
+            return Response({'status': 'error', 'message': 'Invalid action. Must be approve or reject'}, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        logger.exception("approve_workflow_execution failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
