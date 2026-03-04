@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -158,7 +158,6 @@ const MarketingDashboard = () => {
   const [savedGraphsLoading, setSavedGraphsLoading] = useState(false);
   const [viewingGraphId, setViewingGraphId] = useState(null);
   const [viewingGraphResult, setViewingGraphResult] = useState(null);
-  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     fetchStats();
@@ -526,11 +525,10 @@ const MarketingDashboard = () => {
     setViewingGraphId(prompt.id);
     const savedPayload = getSavedGraphPayload(prompt);
     if (!savedPayload) {
-      setViewingGraphResult(null);
-      toast({
-        title: 'No saved chart found',
-        description: 'No cached chart data is available for this prompt in this browser yet.',
-        variant: 'default',
+      setViewingGraphResult({
+        title: prompt?.title || 'Saved Graph',
+        insights: [],
+        chart: null,
       });
       return;
     }
@@ -979,8 +977,10 @@ const MarketingDashboard = () => {
                             key={p.id}
                             className="cursor-pointer hover:bg-muted/50 transition-colors"
                             onClick={() => {
-                              setSearchParams({ runPromptId: String(p.id) });
-                              setActiveTab('graphs');
+                              setActiveTab('saved-graphs');
+                              setViewingGraphId(p.id);
+                              const payload = getSavedGraphPayload(p);
+                              setViewingGraphResult(payload);
                             }}
                           >
                             <CardContent className="p-3 flex items-center gap-3">

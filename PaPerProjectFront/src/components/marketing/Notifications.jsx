@@ -385,8 +385,18 @@ const Notifications = ({ onUnreadCountChange }) => {
     try {
       const response = await marketingAgentService.markNotificationRead(id);
       if (response.status === 'success') {
-        await fetchNotifications(unreadPage);
-        await fetchHistory(historyPage);
+        // Optimistically update state locally (no refetch)
+        const readNotification = notifications.find(n => n.id === id);
+        if (readNotification) {
+          // Remove from unread
+          setNotifications(notifications.filter(n => n.id !== id));
+          // Add to history
+          setHistory([readNotification, ...history]);
+          // Update counts
+          setUnreadCount(prev => Math.max(0, prev - 1));
+          setUnreadTotal(prev => Math.max(0, prev - 1));
+          setHistoryTotal(prev => prev + 1);
+        }
         onUnreadCountChange?.();
         toast({ 
           title: 'Marked as read',
@@ -406,8 +416,42 @@ const Notifications = ({ onUnreadCountChange }) => {
 
   const handleMarkAllRead = async () => {
     const unreadIds = notifications.map(n => n.id);
-    for (const id of unreadIds) {
-      await handleMarkRead(id);
+    if (unreadIds.length === 0) {
+      toast({ 
+        title: 'Info', 
+        description: 'No unread notifications to mark as read.' 
+      });
+      return;
+    }
+
+    try {
+      let successCount = 0;
+      // Mark all as read silently (no toast per notification)
+      for (const id of unreadIds) {
+        try {
+          const response = await marketingAgentService.markNotificationRead(id);
+          if (response.status === 'success') {
+            successCount++;
+          }
+        } catch (err) {
+          // Silent fail for individual notifications
+        }
+      }
+
+      // Refetch once after all are marked
+      await fetchNotifications(1);
+      await fetchHistory(historyPage);
+      onUnreadCountChange?.();
+
+      // Show single success toast
+      toast({ 
+        title: 'Success',
+        description: `Marked ${successCount} notification${successCount !== 1 ? 's' : ''} as read.`
+      });
+    } catch (err) {
+      if (!isConnectionError(err)) {
+        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      }
     }
   };
 
@@ -417,8 +461,17 @@ const Notifications = ({ onUnreadCountChange }) => {
     try {
       const response = await marketingAgentService.deleteNotification(id);
       if (response.status === 'success') {
-        await fetchNotifications(unreadPage);
-        await fetchHistory(historyPage);
+        // Optimistically remove from both lists (no refetch)
+        setNotifications(notifications.filter(n => n.id !== id));
+        setHistory(history.filter(n => n.id !== id));
+        // Update counts
+        const deletedFromUnread = notifications.some(n => n.id === id && !n.is_read);
+        if (deletedFromUnread) {
+          setUnreadCount(prev => Math.max(0, prev - 1));
+          setUnreadTotal(prev => Math.max(0, prev - 1));
+        } else {
+          setHistoryTotal(prev => Math.max(0, prev - 1));
+        }
         onUnreadCountChange?.();
         toast({ 
           title: 'Notification deleted',
@@ -612,7 +665,7 @@ const Notifications = ({ onUnreadCountChange }) => {
     );
   };
 
-  const EmptyState = ({ icon: Icon, title, description, action }) => (
+  const EmptyState = ({ icon: Icon, title, description, action, actionLabel }) => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -628,7 +681,7 @@ const Notifications = ({ onUnreadCountChange }) => {
       <p className="mt-2 max-w-[280px] text-sm text-muted-foreground">{description}</p>
       {action && (
         <Button onClick={action} className="mt-6">
-          {action}
+          {actionLabel || 'Action'}
         </Button>
       )}
     </motion.div>
@@ -996,7 +1049,8 @@ const Notifications = ({ onUnreadCountChange }) => {
                 icon={Inbox}
                 title="No unread notifications"
                 description="Run a monitor above to check for new alerts, or you're all caught up."
-                action="Run Monitor"
+                action={runMonitor}
+                actionLabel="Run Monitor"
               />
             ) : (
               <>
@@ -1059,6 +1113,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                 icon={History}
                 title="No history yet"
                 description="Notifications you mark as read will appear here."
+                action={null}
               />
             ) : (
               <>

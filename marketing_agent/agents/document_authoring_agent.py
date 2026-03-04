@@ -44,7 +44,21 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         Always create well-structured, professional documents with clear sections, proper formatting, and actionable insights.
         Use the provided campaign data and context to create accurate, relevant documents.
         
-        CRITICAL - NO REPETITION: Never repeat the same sentences, bullet points, or paragraphs anywhere in the document. Each section must contain unique content. If you need to reach the required length, add NEW content only: different angles, implications, interpretations, recommendations, or analysis related to the campaign—never duplicate or rephrase the same points to fill space."""
+        ⚠️ CRITICAL ANTI-REPETITION RULES (HIGHEST PRIORITY):
+        
+        1. **NEVER REPEAT CONTENT**: Do not write the same sentence, paragraph, bullet point, table, or metric twice anywhere in the document. Each piece of information appears ONCE only.
+        
+        2. **NO DUPLICATE TABLES**: Each table (leads, metrics, timeline, etc.) appears in ONE section only. Do not show the same table data twice.
+        
+        3. **NO DUPLICATE SECTIONS**: After writing a "Key Achievements" section, do NOT write another "Key Achievements" section later. Same for Issues, Recommendations, Timeline, etc.
+        
+        4. **CONCLUSION RULE**: The Conclusion section should summarize in NEW words—never copy-paste the same bullet lists, tables, achievements, or challenges from earlier sections. Write a fresh summary paragraph.
+        
+        5. **DOCUMENT END RULE**: Documents have a designated FINAL section. After that section, STOP writing—do not add any more sections, tables, summaries, or content. End the document cleanly.
+        
+        6. **REACH LENGTH WITH NEW CONTENT ONLY**: If you need more words, add NEW analysis, implications, recommendations, or insights—never repeat or rephrase existing content.
+        
+        Focus on writing concise, unique, high-value content. Quality over quantity. No filler."""
     
     def process(self, action: str, user_id: int, document_type: str, document_data: Optional[Dict] = None, campaign_id: Optional[int] = None, document_id: Optional[int] = None, context: Optional[Dict] = None) -> Dict:
         """
@@ -152,39 +166,170 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
     def _generate_document_content(self, document_type: str, document_data: Dict, campaign: Optional[Campaign], context: Dict) -> str:
         """Generate document content using AI"""
         prompt = self._build_document_prompt(document_type, document_data, campaign, context)
-        
-        # Use LLM for writing (OpenAI GPT-4 for better quality)
-        # Lower temperature (0.35) for consistent output; higher max_tokens for long documents
-        # Performance Report: default and minimum 6 pages (more than 5); other docs default 5
-        default_pages = 6 if document_type == 'report' else 5
-        min_pages = 6 if document_type == 'report' else 1
-        target_pages = min(20, max(min_pages, int((document_data or {}).get('pages', default_pages))))
-        min_words = target_pages * 450  # ~450 words per page
-        max_tokens_needed = min(16384, (min_words * 2) // 3)  # ~1.35 tokens/word, with headroom
-        content = self._call_llm_for_writing(
-            prompt=prompt,
-            system_prompt=self.system_prompt,
-            temperature=0.35,  # Lower = more consistent, especially on retry
-            max_tokens=max(max_tokens_needed, 16384)  # Allow long documents so content is not truncated
-        )
-        
-        # Post-process: ensure Phase 2 is never missing in timeline sections (strategy and brief)
+
+        def generate_once(gen_prompt: str, temperature: float = 0.35) -> str:
+            raw = self._call_llm_for_writing(
+                prompt=gen_prompt,
+                system_prompt=self.system_prompt,
+                temperature=temperature,
+                max_tokens=16384
+            )
+            return self._post_process_document_content(raw, document_type, campaign)
+
+        content = generate_once(prompt, temperature=0.35)
+
+        # Guardrail: report/brief output can occasionally be malformed due to model variability.
+        # If structure is invalid, regenerate once with stricter corrective instructions.
+        if document_type in ('report', 'brief') and not self._is_document_structure_valid(content, document_type):
+            correction = (
+                "\n\nRETRY INSTRUCTION (MANDATORY): Re-write the entire document from scratch with strict section order and clean markdown headings only. "
+                "Do NOT include duplicate sections, do NOT place any content after the final section, and do NOT repeat metrics/tables."
+            )
+            content = generate_once(prompt + correction, temperature=0.2)
+
+        return content
+
+    def _post_process_document_content(self, content: str, document_type: str, campaign: Optional[Campaign]) -> str:
+        """Run all post-processing steps in a single place for consistency across retries."""
+        if not content:
+            return content
+
+        # Remove duplicate paragraphs and content blocks
+        content = self._remove_duplicate_paragraphs(content)
+
+        # Ensure Phase 2 is never missing in timeline sections (strategy and brief)
         if document_type == 'strategy':
             content = self._fix_timeline_phase2(content, document_type='strategy', campaign=None)
             content = self._strip_strategy_duplicate_sections(content)
         elif document_type == 'brief':
             content = self._fix_timeline_phase2(content, document_type='brief', campaign=campaign)
-        
-        # Post-process: remove duplicate sections that the model often adds after Conclusion (brief) or Future Outlook (report)
+
+        # Remove duplicate sections that the model often adds after ending sections
         if document_type in ('brief', 'report'):
             content = self._strip_duplicate_sections_after_end(content, document_type)
-        # Post-process: ensure [CHART] values are numbers only (no % sign) so chart renderer works
-        if document_type in ('report', 'brief'):
             content = self._fix_chart_values_numeric(content)
-        # Post-process: clean markdown so headings are neat (no **## or **Strategy Document**)
-        content = self._clean_markdown_headings(content)
+
+        # Clean markdown headings (no **## or **Strategy Document**)
+        return self._clean_markdown_headings(content)
+
+    def _is_document_structure_valid(self, content: str, document_type: str) -> bool:
+        """Validate required section order and ending for key document types."""
+        if not content or document_type not in ('report', 'brief'):
+            return True
+
+        normalized = content.lower()
+        required_sections = {
+            'report': [
+                'campaign overview',
+                'performance metrics',
+                'lead details',
+                'key achievements',
+                'challenges and issues',
+                'analysis and insights',
+                'recommendations',
+                'conclusion',
+                'future outlook',
+            ],
+            'brief': [
+                'campaign overview',
+                'objectives and goals',
+                'target audience',
+                'key messaging',
+                'campaign timeline',
+                'success criteria',
+                'email campaign performance',
+                'lead engagement data',
+                'issues / challenges',
+                'improvements / recommendations',
+                'conclusion',
+            ],
+        }
+
+        positions = []
+        for section in required_sections[document_type]:
+            pos = normalized.find(section)
+            if pos == -1:
+                return False
+            positions.append(pos)
+
+        # Required sections must appear in sequence
+        if positions != sorted(positions):
+            return False
+
+        # Enforce terminal section rule: no new section headings after the final section.
+        final_section = 'future outlook' if document_type == 'report' else 'conclusion'
+        final_pos = normalized.rfind(final_section)
+        if final_pos == -1:
+            return False
+
+        tail = normalized[final_pos:]
+        heading_count = len(re.findall(r'\n\s*(##\s+|\*\*[^*]+\*\*\s*$)', tail, flags=re.IGNORECASE | re.MULTILINE))
+        return heading_count <= 2
+    
+    def _remove_duplicate_paragraphs(self, content: str) -> str:
+        """Remove duplicate paragraphs, bullet points, and content blocks that appear multiple times."""
+        if not content or not content.strip():
+            return content
         
-        return content
+        lines = content.split('\n')
+        seen_content = set()
+        output_lines = []
+        current_block = []
+        
+        def normalize_text(text):
+            """Normalize text for comparison (lowercase, remove extra spaces, strip punctuation)."""
+            return re.sub(r'[^\w\s]', '', text.lower()).strip()
+        
+        def is_significant(text):
+            """Check if text block is significant enough to check for duplicates (> 20 chars)."""
+            return len(text.strip()) > 20
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Headers and empty lines always go through
+            if stripped.startswith('##') or stripped.startswith('[CHART') or not stripped:
+                # Process accumulated block
+                if current_block:
+                    block_text = ' '.join(current_block)
+                    if is_significant(block_text):
+                        normalized = normalize_text(block_text)
+                        if normalized not in seen_content:
+                            output_lines.extend(current_block)
+                            seen_content.add(normalized)
+                    else:
+                        output_lines.extend(current_block)
+                    current_block = []
+                output_lines.append(line)
+                continue
+            
+            # Accumulate content lines into blocks (paragraphs/bullets)
+            current_block.append(line)
+            
+            # If line ends a paragraph (not a bullet start and previous was content), process block
+            if not stripped.startswith(('*', '-', '•', '|')) and current_block:
+                block_text = ' '.join(current_block)
+                if is_significant(block_text):
+                    normalized = normalize_text(block_text)
+                    if normalized not in seen_content:
+                        output_lines.extend(current_block)
+                        seen_content.add(normalized)
+                    # If duplicate, skip it
+                else:
+                    output_lines.extend(current_block)
+                current_block = []
+        
+        # Process any remaining block
+        if current_block:
+            block_text = ' '.join(current_block)
+            if is_significant(block_text):
+                normalized = normalize_text(block_text)
+                if normalized not in seen_content:
+                    output_lines.extend(current_block)
+            else:
+                output_lines.extend(current_block)
+        
+        return '\n'.join(output_lines)
     
     def _clean_markdown_headings(self, content: str) -> str:
         """Remove bold around section headings and strip leading document-type title lines like **Strategy Document**."""
@@ -437,10 +582,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         # Frontend sends 'notes'; also support 'requirements' and 'key_points'
         requirements = document_data.get('requirements') or document_data.get('notes', '')
         key_points = document_data.get('key_points') or document_data.get('notes', '')
-        # Pages (1-20), tables, charts - user-controlled. Performance Report: default and minimum 6 pages. Brief: default 4 to avoid length-driven duplication.
-        default_pages = 6 if document_type == 'report' else (4 if document_type == 'brief' else 5)
-        min_pages = 6 if document_type == 'report' else 1
-        target_pages = min(20, max(min_pages, int(document_data.get('pages', default_pages))))
+        # Tables and charts - user-controlled (pages removed - AI decides natural length)
         target_tables = max(0, int(document_data.get('tables', 3)))
         target_charts = max(0, int(document_data.get('charts', 1))) if document_type == 'report' else 0
         chart_type = (document_data.get('chart_type') or 'bar').lower()
@@ -467,16 +609,18 @@ DOCUMENT REQUIREMENTS:
 ADDITIONAL KEY POINTS (what the user wants in this document - YOU MUST ADDRESS THESE):
 {key_points if key_points else 'None provided'}
 
-LENGTH AND FORMAT REQUIREMENTS (USER-SPECIFIED - MANDATORY, NO EXCEPTIONS):
+CONTENT QUALITY REQUIREMENTS:
 
-**PAGE COUNT (STRICT):** Target = {target_pages} page(s). One rendered page ≈ 450 words. Your output MUST be at least {target_pages * 450} words ({target_pages * 450} words minimum). Write detailed paragraphs—do NOT stop early. If you finish a section and are under the minimum, expand with NEW unique content only: additional analysis, implications, recommendations, or interpretations related to the campaign. NEVER fill space by repeating or rephrasing the same content—every paragraph and bullet must be unique.
+**WRITE THOROUGH, CONCISE CONTENT:** Cover all topics completely with unique insights, analysis, and recommendations. Write as much as needed to thoroughly address each section—no arbitrary length targets. Stop naturally when you've fully covered all key points. Quality and completeness over word count.
 
-**STRUCTURE OVERRIDES LENGTH (ALL DOCUMENT TYPES):** Every document has a fixed structure and MUST end at the designated final section. Even if you are below the word minimum, do NOT add any section, table, or list after that final section. To add length, expand ONLY within the allowed sections (longer paragraphs, more analysis)—never by adding repeat or summary sections at the end.
+**DOCUMENT STRUCTURE (ALL TYPES):** Every document has a fixed structure and MUST end at the designated final section. Do NOT add any section, table, or list after that final section.
 - **Strategy:** END at ## Conclusion and Next Steps. No content after that.
 - **Proposal:** END at ## Next Steps. No content after that.
 - **Report:** END at ## Future Outlook. No content after that. Charts go inside Performance Metrics and KPIs only.
 - **Brief:** END at ## Conclusion. No content after that.
 - **Presentation:** END at Conclusion/Next Steps slide. No repeat slides (objectives, metrics, recommendations appear on one slide only).
+
+**WRITING APPROACH:** Write comprehensive, detailed analysis for each section. Include all relevant insights, metrics, and recommendations. Continue writing until each topic is fully addressed, then move to the next section naturally. Do not pad or fill space—every sentence should add value.
 
 **TABLES:** {"User requested ZERO tables. You MUST NOT include any markdown tables (no | column | format). Present ALL metrics, lead data, timelines, and information using bullet lists (•) or numbered lists or paragraphs ONLY. Do NOT use pipe characters (|) to create tables. This overrides any other instruction." if target_tables == 0 else f"Include exactly {target_tables} markdown table(s). Table types: {table_types_str}. Create tables in | col | col | format."}
 {f'''- CHARTS (MANDATORY): Include exactly {target_charts} chart(s) using [CHART]...[/CHART] blocks. Chart type: {chart_type}. You MUST insert these chart blocks—do NOT skip them.
@@ -532,12 +676,12 @@ CAMPAIGN DATA (REAL DATA FROM DATABASE - USE ALL OF THIS):
 ═══════════════════════════════════════════════════════════════
 When a campaign is linked, you MUST include the campaign's current status (from the data above: e.g. Active, Paused, Draft, Scheduled) in the document—in Campaign Overview, Executive Summary, or the first section that describes the campaign. Use the exact status label from the data (e.g. "The campaign is currently Paused" or "Campaign status: Active").
 {"ANTI-DUPLICATION RULE (BRIEF/REPORT): (A) Lead list, email metrics table, and objectives/targets table each appear ONCE in their section. Do NOT add any repeat section or table after ## Conclusion (brief) or after ## Future Outlook (report). (B) Both Report and Brief use a markdown table for leads with header row | Email | Name | Company | Status | and one row per lead. (C) Every table MUST have a header row over the columns; do NOT use '1. Email: ... Name: ...' for lead details." if document_type in ('brief', 'report') else ''}
-{"CAMPAIGN BRIEF - PRIORITY RULE: This document has a FIXED structure and ENDS at ## Conclusion. Do NOT add any section, table, or list after ## Conclusion—not Lead Details, not Email Campaign Performance Metrics, not Timeline, not Success Criteria, not Target Audience, not Key Messaging, not Recommendations. Even if under word count, STOP after Conclusion. To reach length, write longer paragraphs only within the sections listed in the brief instructions below." if document_type == 'brief' else ''}
-{"PERFORMANCE REPORT - PRIORITY RULE: This document ENDS at ## Future Outlook. Do NOT add any section, table, or list after Future Outlook—no Lead Details table, no Performance Metrics table, no summary section. Even if under word count, STOP after Future Outlook. To reach length, expand only within the sections listed in the report instructions (e.g. more paragraphs in Key Achievements, Challenges and Issues, or Recommendations)." if document_type == 'report' else ''}
+{"CAMPAIGN BRIEF - PRIORITY RULE: This document has a FIXED structure and ENDS at ## Conclusion. Do NOT add any section, table, or list after ## Conclusion—not Lead Details, not Email Campaign Performance Metrics, not Timeline, not Success Criteria, not Target Audience, not Key Messaging, not Recommendations. STOP after Conclusion. Write thorough, detailed analysis within the allowed sections only." if document_type == 'brief' else ''}
+{"PERFORMANCE REPORT - PRIORITY RULE: This document ENDS at ## Future Outlook. Do NOT add any section, table, or list after Future Outlook—no Lead Details table, no Performance Metrics table, no summary section. STOP after Future Outlook. Write comprehensive analysis within the allowed sections only (e.g. detailed paragraphs in Key Achievements, Challenges and Issues, or Recommendations)." if document_type == 'report' else ''}
 {strategy_campaign_hint}
 {sparse_hint}
 CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
-0. NO DUPLICATION OF SECTIONS OR DATA: For ALL document types (strategy, proposal, report, brief, presentation): do NOT present the same information in paragraph (or prose) form and then repeat it in a table or bullet list elsewhere—each piece of data or topic appears in ONE place and ONE format only. For Campaign Brief and Performance Report ONLY: (a) Each piece of data must appear in exactly ONE place. Do NOT show Lead Details (email, name, company, status) in more than one section or table—include it ONCE only (e.g. in "Lead Details" or "Lead Engagement"). (b) Do NOT show Email Performance metrics (sent, open rate, click rate, reply rate, bounce rate) twice—include them ONCE (e.g. in "Email Campaign Performance" or "Performance Metrics"). (c) Do NOT add any extra section at the end such as "Lead Details Table", "Performance Metrics Table", "Summary Table", or similar—that would duplicate data already shown. The report must END after Future Outlook (and any chart that belongs in Performance Metrics). (d) Do NOT repeat Success Criteria, Objectives, or Timeline in another section or table. (e) For Campaign Brief specifically: do NOT present the same information twice—once in paragraph form and then again in a table or bullet list (e.g. do NOT write leads in "Lead Engagement Data" and then add a "Lead Details" table; do NOT write email metrics in prose and then add an "Email Campaign Performance Metrics" table; do NOT add a "Timeline" or "Success Criteria" or "Target Audience" section after Conclusion). (f) Conclusion: write 2–3 NEW paragraphs that summarize key takeaways in your own words—do NOT copy-paste or re-list the same metrics table, lead table, achievements list, or challenges list. Call to Action: only concrete next steps (who does what, when)—do NOT repeat the Recommendations section. Future Outlook: only forward-looking content (trends, risks, opportunities ahead)—do NOT repeat Conclusion, do NOT re-show the Lead Status table or metrics, do NOT re-list achievements/challenges/recommendations. (g) To meet page minimum, add NEW unique content only (e.g. deeper analysis, implications, examples)—never duplicate or rephrase the same section, table, list, or phrase. (h) Avoid repeating the same sentence template (e.g. "indicating that the campaign's content resonated with the target audience")—vary wording and say each point once.
+0. NO DUPLICATION OF SECTIONS OR DATA: For ALL document types (strategy, proposal, report, brief, presentation): do NOT present the same information in paragraph (or prose) form and then repeat it in a table or bullet list elsewhere—each piece of data or topic appears in ONE place and ONE format only. For Campaign Brief and Performance Report ONLY: (a) Each piece of data must appear in exactly ONE place. Do NOT show Lead Details (email, name, company, status) in more than one section or table—include it ONCE only (e.g. in "Lead Details" or "Lead Engagement"). (b) Do NOT show Email Performance metrics (sent, open rate, click rate, reply rate, bounce rate) twice—include them ONCE (e.g. in "Email Campaign Performance" or "Performance Metrics"). (c) Do NOT add any extra section at the end such as "Lead Details Table", "Performance Metrics Table", "Summary Table", or similar—that would duplicate data already shown. The report must END after Future Outlook (and any chart that belongs in Performance Metrics). (d) Do NOT repeat Success Criteria, Objectives, or Timeline in another section or table. (e) For Campaign Brief specifically: do NOT present the same information twice—once in paragraph form and then again in a table or bullet list (e.g. do NOT write leads in "Lead Engagement Data" and then add a "Lead Details" table; do NOT write email metrics in prose and then add an "Email Campaign Performance Metrics" table; do NOT add a "Timeline" or "Success Criteria" or "Target Audience" section after Conclusion). (f) Conclusion: write 2–3 NEW paragraphs that summarize key takeaways in your own words—do NOT copy-paste or re-list the same metrics table, lead table, achievements list, or challenges list. Call to Action: only concrete next steps (who does what, when)—do NOT repeat the Recommendations section. Future Outlook: only forward-looking content (trends, risks, opportunities ahead)—do NOT repeat Conclusion, do NOT re-show the Lead Status table or metrics, do NOT re-list achievements/challenges/recommendations. (g) If more detail is needed, add NEW unique content only (e.g. deeper analysis, implications, examples)—never duplicate or rephrase the same section, table, list, or phrase. (h) Avoid repeating the same sentence template (e.g. "indicating that the campaign's content resonated with the target audience")—vary wording and say each point once.
 1. For briefs/reports: address what the user asked for (e.g. issues, improvement, engagement). For strategy/proposal: produce a full, professional document with all sections; if the user gave a title or notes (or specific details like budget, timeline, audience), incorporate those in the relevant sections—budget in Resource Breakdown, timeline in Timeline, audience/industry in Target Audience, etc. Do not ignore or genericize user-provided details.
 2. ALL data above is REAL data fetched from the database for this specific campaign
 3. You MUST include ALL performance metrics, statistics, and data points provided above
@@ -559,7 +703,7 @@ CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
    - Lead details: in both Performance Report and Campaign Brief use a markdown table with header row | Email | Name | Company | Status | and one row per lead (do NOT use "1. Email: ... Name: ..." format).
    - Lead status breakdown and engagement analysis
 """ if document_type in ('report', 'brief') else "") + """
-11. For Performance Reports: (a) {"Campaign metrics and Lead Details (every lead) as bullet lists—NO tables (user requested 0 tables)." if target_tables == 0 else f"Campaign metrics table (with header row) and Lead Details table with columns Email | Name | Company | Status and one row per lead. Include {target_tables} tables total. Every table MUST have a header row over the columns."} (b) Use ## for main sections only—do NOT use ### (H3). (c) Charts: you MUST add the chart(s) requested in LENGTH AND FORMAT REQUIREMENTS using [CHART]...[/CHART] blocks—do NOT omit them. (d) Key Achievements and Challenges and Issues: each point must have a full paragraph. (e) Always include ## Call to Action and ## Future Outlook. (f) Output MUST be at least {target_pages * 450} words ({target_pages} pages).
+11. For Performance Reports: (a) {"Campaign metrics and Lead Details (every lead) as bullet lists—NO tables (user requested 0 tables)." if target_tables == 0 else f"Campaign metrics table (with header row) and Lead Details table with columns Email | Name | Company | Status and one row per lead. Include {target_tables} tables total. Every table MUST have a header row over the columns."} (b) Use ## for main sections only—do NOT use ### (H3). (c) Charts: you MUST add the chart(s) requested in CONTENT QUALITY REQUIREMENTS using [CHART]...[/CHART] blocks—do NOT omit them. (d) Key Achievements and Challenges and Issues: each point must have a full paragraph with detailed analysis. (e) Always include ## Call to Action and ## Future Outlook.
 12. Make the document VERY DETAILED and SPECIFIC to this campaign using ALL the real data above
 13. {"Do NOT use markdown tables. Use bullet lists and paragraphs for all data." if target_tables == 0 else f"Include {target_tables} markdown tables of the types specified."} Charts and detailed breakdowns where appropriate.
 14. Write in-depth analysis, not just surface-level information
@@ -598,7 +742,7 @@ DETAIL AND DEPTH REQUIREMENTS:
 4. Create dedicated sections for performance metrics with full breakdowns
 5. Include multiple paragraphs per section explaining the data
 6. Add context and interpretation for all metrics
-7. Output MUST be at least {target_pages * 450} words ({target_pages} pages). Do not stop until you reach this minimum. Expand with NEW unique content only (e.g. extra analysis, implications, recommendations)—never repeat or rephrase the same content to fill space.
+7. Write comprehensive, thorough content covering all relevant aspects. Expand with NEW unique insights, analysis, implications, and recommendations—never repeat or rephrase the same content to fill space.
 """ + ("""
 PERFORMANCE METRICS SECTION REQUIREMENTS (for Performance Report and Campaign Brief ONLY—do NOT use this section in Strategy or Proposal):
 If campaign data includes performance metrics, you MUST create a detailed section like:
@@ -635,9 +779,9 @@ The conclusion MUST be a proper, professional ending that:
 8. DO NOT end abruptly—but also DO NOT repeat the same content (tables, lists, phrases) that appeared earlier.
 
 **FINAL REMINDERS BEFORE YOU WRITE:**
-- Minimum length: {target_pages * 450} words ({target_pages} pages). Do not stop early.
-- Document MUST end at the designated final section—do NOT add any section, table, or list after it, even if under word count. Expand length only within the allowed sections. (Strategy: end at ## Conclusion and Next Steps. Proposal: end at ## Next Steps. Report: end at ## Future Outlook. Brief: end at ## Conclusion. Presentation: end at Conclusion/Next Steps slide.)
-- NO REPETITION: Every paragraph and bullet must be unique. To reach the minimum length, add NEW campaign-related content (e.g. more analysis, implications, recommendations)—never duplicate or rephrase existing content.
+- Write thorough, complete content that fully addresses each section. Cover all key points naturally without artificial length targets.
+- Document MUST end at the designated final section—do NOT add any section, table, or list after it. Expand length only within the allowed sections. (Strategy: end at ## Conclusion and Next Steps. Proposal: end at ## Next Steps. Report: end at ## Future Outlook. Brief: end at ## Conclusion. Presentation: end at Conclusion/Next Steps slide.)
+- NO REPETITION: Every paragraph and bullet must be unique. Add NEW campaign-related insights (e.g. analysis, implications, recommendations)—never duplicate or rephrase existing content.
 - Tables: {"ZERO. Use lists and paragraphs only—no | table | format." if target_tables == 0 else f"Exactly {target_tables} markdown tables."}
 - Use ALL REAL campaign data provided above
 - Write in DETAIL with comprehensive analysis
@@ -700,18 +844,24 @@ The conclusion MUST be a proper, professional ending that:
         return {k: v for k, v in data.items() if v is not None}
     
     def _get_campaign_performance_data(self, campaign: Campaign) -> Optional[Dict]:
-        """Get campaign performance metrics"""
+        """Get campaign performance metrics from CampaignPerformance model (metric_name/metric_value structure)"""
         try:
-            performance = CampaignPerformance.objects.filter(campaign=campaign).aggregate(
-                total_impressions=Sum('impressions'),
-                total_clicks=Sum('clicks'),
-                total_conversions=Sum('conversions'),
-                avg_ctr=Avg('ctr'),
-                avg_conversion_rate=Avg('conversion_rate')
-            )
+            # CampaignPerformance uses metric_name/metric_value structure, not separate columns
+            from django.db.models import Q
             
-            # Filter out None values
-            return {k: float(v) if v is not None else 0 for k, v in performance.items() if v is not None}
+            metrics = CampaignPerformance.objects.filter(campaign=campaign).values('metric_name', 'metric_value', 'actual_value')
+            if not metrics.exists():
+                return None
+            
+            # Build dict from metric_name -> metric_value or actual_value
+            result = {}
+            for m in metrics:
+                name = m.get('metric_name')
+                value = m.get('metric_value') or m.get('actual_value')
+                if name and value is not None:
+                    result[name] = float(value) if isinstance(value, (int, float, str)) else value
+            
+            return result if result else None
         except Exception as e:
             logger.warning(f"Error getting performance data: {e}")
             return None
@@ -841,7 +991,7 @@ The conclusion MUST be a proper, professional ending that:
         """Get document type specific instructions. target_tables=0 means no tables, use lists only."""
         instructions = {
             'strategy': """
-STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Conclusion and Next Steps. Even if under word count, do NOT add any section after that. To add length, expand only within the sections below. No Performance Metrics and Analysis, Lead Details, or Email Performance sections—those belong in reports only.
+STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Conclusion and Next Steps. Do NOT add any section after that. Expand only within the sections below when more depth is needed. No Performance Metrics and Analysis, Lead Details, or Email Performance sections—those belong in reports only.
 
 Create a LONG, comprehensive Marketing Strategy document—like a consultant's full deliverable (8–12+ pages when rendered). Use ## for main sections only; do NOT use ### or ####. Use **bold** subheads or bullet points followed by full paragraphs. Every section must have substantial content (multiple paragraphs or bullets with explanation).
 
@@ -896,7 +1046,7 @@ LENGTH AND QUALITY: Aim for a document that would be 8–12+ pages when rendered
 TIMELINE RULE: In ## Timeline and Milestones you MUST include Phase 2 (and every phase in order). Never write only Phase 1 and Phase 3—always Phase 1, then Phase 2, then Phase 3 (and more if needed). Skipping Phase 2 is forbidden.
 """,
             'proposal': """
-STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Next Steps. Even if under word count, do NOT add any section or table after that. To add length, expand only within the sections below. Do NOT add report-style sections (Performance Metrics, Lead Engagement, Appendices).
+STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Next Steps. Do NOT add any section or table after that. Expand only within the sections below when more depth is needed. Do NOT add report-style sections (Performance Metrics, Lead Engagement, Appendices).
 
 Create a LONG, comprehensive Campaign Proposal (full paragraphs and tables—like a professional client-ready document). Use ## for main sections only; NEVER use ### or ####. Use **bold** only for sub-sections (e.g. **Email Marketing** under Campaign Strategy)—never # or ## for those.
 
@@ -952,7 +1102,7 @@ Bullet list (e.g. Schedule meeting with marketing team; Monitor performance; mak
 End the proposal here. Do NOT add Performance Metrics and Analysis, Email Campaign Performance, Lead Engagement Metrics, Appendices, or any report-style sections. Do NOT add a separate "Tactics and Channels" section—channels are covered once under ## Campaign Strategy and Tactics. Always produce a LONG, detailed proposal with full paragraphs in Executive Summary, Campaign Overview, Objectives, Target Audience, Campaign Strategy and Tactics, and Conclusion. Use at most 3–4 compact tables. NEVER use ### or ####—only ## and **bold** for sub-heads.
 """,
             'report': """
-STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Future Outlook. Even if under word count, do NOT add any section, table, or list after Future Outlook. To add length, expand only within the sections below—more paragraphs, deeper analysis, more context in each heading. Never duplicate content across sections.
+STRUCTURE OVERRIDES LENGTH: This document ENDS at ## Future Outlook. Do NOT add any section, table, or list after Future Outlook. Expand only within the sections below—more paragraphs, deeper analysis, more context in each heading. Never duplicate content across sections.
 
 DETAIL REQUIRED—EVERY HEADING RICH IN CONTENT: Write a LONG, detailed Performance Report. Every section must have substantial content: multiple full paragraphs or multiple **bold** points each with a full paragraph (4–6 sentences). Do NOT write one-line bullets or single short paragraphs per section. To add depth: explain what the numbers mean, why they matter, how they compare to targets, what drives them, and what the implications are. Each piece of data (metrics, leads, achievements, challenges) appears in exactly ONE section—never repeat the same facts in another heading.
 

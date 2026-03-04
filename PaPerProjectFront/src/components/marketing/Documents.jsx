@@ -65,7 +65,7 @@ const DOCUMENT_TYPES = [
   { value: 'proposal', label: 'Campaign Proposal', icon: Briefcase, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
   { value: 'report', label: 'Performance Report', icon: TrendingUp, color: 'text-amber-500', bgColor: 'bg-amber-500/10' },
   { value: 'brief', label: 'Campaign Brief', icon: PenTool, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
-  { value: 'presentation', label: 'Presentation Outline', icon: Presentation, color: 'text-rose-500', bgColor: 'bg-rose-500/10' },
+  // { value: 'presentation', label: 'Presentation Outline', icon: Presentation, color: 'text-rose-500', bgColor: 'bg-rose-500/10' },
 ];
 
 const TYPE_BADGE_CLASS = {
@@ -906,12 +906,12 @@ const Documents = () => {
 
       {/* Document detail modal */}
       <Dialog open={!!selectedDocumentId} onOpenChange={(open) => !open && setSelectedDocumentId(null)}>
-        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-hidden flex flex-col gap-0 p-0 border-0 shadow-2xl">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] p-0 border-0 shadow-2xl flex flex-col gap-0 overflow-hidden">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.2 }}
-            className="flex flex-col h-full"
+            className="flex flex-col w-full h-full overflow-hidden"
           >
             {/* Header */}
             <div className="flex items-start justify-between gap-4 border-b bg-gradient-to-r from-primary/5 via-transparent to-transparent px-6 py-4 shrink-0">
@@ -1040,18 +1040,18 @@ const Documents = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="p-6"
                 >
-                  <div className="prose prose-sm dark:prose-invert max-w-none rounded-xl border bg-card p-8 shadow-sm">
-                    {detailDoc.content ? (
-                      <div className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed">
+                  {detailDoc.content ? (
+                    <div className="rounded-xl border bg-card p-6 space-y-4">
+                      <div className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
                         {detailDoc.content}
                       </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-12 text-center">
-                        <FileText className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                        <p className="text-muted-foreground">No content available for this document.</p>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <FileText className="h-12 w-12 text-muted-foreground/30 mb-4" />
+                      <p className="text-muted-foreground">No content available for this document.</p>
+                    </div>
+                  )}
                 </motion.div>
               ) : null}
             </div>

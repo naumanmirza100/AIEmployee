@@ -713,16 +713,10 @@ const MarketingQA = () => {
       // Run comparison in background (no await - non-blocking)
       compareResponses(q, inputMode).catch(err => console.error('Comparison failed:', err));
     } catch (error) {
-      const errMsg = error?.response?.data?.error ?? error?.response?.data?.message ?? error?.message ?? '';
-      const isRateLimit = /429|rate limit/i.test(errMsg);
-      const description = isRateLimit
-        ? 'Server is busy. Please try again in a few seconds.'
-        : 'Something went wrong. Please try again.';
-      
       toast({ 
-        title: 'Error', 
-        description, 
-        variant: 'destructive' 
+        title: 'Warning', 
+        description: 'Please try again.', 
+        variant: 'default' 
       });
     } finally {
       setLoading(false);
@@ -1262,6 +1256,7 @@ const MarketingQA = () => {
                                       <Button
                                         type="button"
                                         variant="outline"
+                                        className="rounded-lg text-[0.76rem]"
                                         size="sm"
                                         onClick={() => openSaveModal(
                                           currentMessages[currentMessages.indexOf(msg) - 1]?.content,
@@ -1284,9 +1279,9 @@ const MarketingQA = () => {
                                           msg.responseData.chart,
                                           msg.responseData.insights
                                         )}
-                                        className="rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+                                        className="rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs py-1"
                                       >
-                                        <LayoutDashboard className="h-4 w-4 mr-2 shrink-0" />
+                                        <LayoutDashboard className="h-4 w-4 mr-2 shrink-0 " />
                                         Add to dashboard
                                       </Button>
                                     </div>

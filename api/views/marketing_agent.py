@@ -40,9 +40,23 @@ RATE_LIMIT_MESSAGE = "The service is busy. Please try again in a moment."
 def _normalize_error_message(e):
     """Return a user-friendly message for rate limit (429) errors; otherwise return str(e)."""
     msg = str(e)
-    if "429" in msg or "rate limit" in msg.lower() or "rate_limit" in msg.lower():
+    msg_lower = msg.lower()
+    if (
+        "429" in msg
+        or "rate limit" in msg_lower
+        or "rate_limit" in msg_lower
+        or "service is busy" in msg_lower
+        or "try again in a moment" in msg_lower
+        or "temporarily unavailable" in msg_lower
+    ):
         return RATE_LIMIT_MESSAGE
     return msg
+
+
+def _is_busy_error(e):
+    """Return True when exception indicates temporary provider overload/busy state."""
+    normalized = _normalize_error_message(e)
+    return normalized == RATE_LIMIT_MESSAGE
 
 
 def _get_or_create_user_for_company_user(company_user):
@@ -2758,10 +2772,12 @@ def api_marketing_generate_graph(request):
         })
     except Exception as e:
         logger.exception("api_marketing_generate_graph error")
+        normalized_msg = _normalize_error_message(e)
+        http_status = status.HTTP_503_SERVICE_UNAVAILABLE if _is_busy_error(e) else status.HTTP_500_INTERNAL_SERVER_ERROR
         return Response({
             'status': 'error',
-            'message': _normalize_error_message(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            'message': normalized_msg
+        }, status=http_status)
 
 
 @api_view(['GET'])

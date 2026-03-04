@@ -12,6 +12,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from django.db.models import Sum, Avg, Count, Q
+from django.utils import timezone
 
 
 class MarketingQAAgent(MarketingBaseAgent):
@@ -189,6 +190,56 @@ class MarketingQAAgent(MarketingBaseAgent):
         )
         return any(p in q for p in count_status_phrases)
 
+    def _is_failed_campaigns_last_quarter_question(self, question: str) -> bool:
+        """Return True for questions like 'How many campaigns failed last quarter?'"""
+        if not question or not isinstance(question, str):
+            return False
+        q = question.strip().lower()
+        if len(q) > 140:
+            return False
+        has_campaign = 'campaign' in q
+        has_failed = 'failed' in q or 'failure' in q
+        has_time = 'last quarter' in q or 'quarter' in q or 'last 3 month' in q or 'last three month' in q
+        return has_campaign and has_failed and has_time
+
+    def _answer_failed_campaigns_last_quarter(self, user_id: Optional[int] = None) -> Dict:
+        """
+        Answer 'failed campaigns last quarter' with explicit logic.
+        Campaign model has no 'failed' status; use cancelled campaigns as the closest failed outcome.
+        """
+        quarter_start = timezone.now() - timedelta(days=90)
+        campaigns_query = Campaign.objects.filter(created_at__gte=quarter_start)
+        if user_id:
+            campaigns_query = campaigns_query.filter(owner_id=user_id)
+
+        cancelled_count = campaigns_query.filter(status='cancelled').count()
+        cancelled_names = list(
+            campaigns_query.filter(status='cancelled').values_list('name', flat=True)[:10]
+        )
+
+        if cancelled_count == 0:
+            answer = "**0** campaigns failed in the last quarter. (No campaigns are marked as cancelled in this period.)"
+        else:
+            names_part = f" Failed/cancelled campaigns: {', '.join(cancelled_names)}." if cancelled_names else ''
+            answer = f"**{cancelled_count}** campaigns failed in the last quarter (counted as cancelled status).{names_part}"
+
+        insights = [{
+            'type': 'campaigns',
+            'title': 'Failed campaigns (last quarter)',
+            'value': str(cancelled_count),
+            'status': 'warning' if cancelled_count > 0 else 'good'
+        }]
+
+        return {
+            'success': True,
+            'answer': answer,
+            'insights': insights,
+            'data_summary': {
+                'period': 'last_90_days',
+                'failed_campaigns_count': cancelled_count,
+            },
+        }
+
     def _answer_campaign_count_or_status(self, marketing_data: Dict) -> Optional[Dict]:
         """Answer campaign count/status directly from data. Returns None if not applicable."""
         stats = marketing_data.get('stats', {})
@@ -308,6 +359,12 @@ Give a brief, direct answer only (definition, full form, or general knowledge). 
         
         # Get marketing data from database
         marketing_data = self._get_marketing_data(user_id)
+
+        # Direct answer for failed campaigns in last quarter
+        if self._is_failed_campaigns_last_quarter_question(question):
+            direct_failed = self._answer_failed_campaigns_last_quarter(user_id)
+            direct_failed['question'] = question
+            return direct_failed
         
         # Direct answer for "how many campaigns" / "campaigns working" / "active campaigns" – use data only, no LLM
         if self._is_campaign_count_or_status_question(question):
