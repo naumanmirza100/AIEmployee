@@ -1389,11 +1389,11 @@ const MarketingDashboard = () => {
           <Campaigns onRefresh={fetchStats} />
         </TabsContent>
 
-        <TabsContent value="qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[400px] scrollbar-black">
+        <TabsContent value="qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
           <MarketingQA />
         </TabsContent>
 
-        <TabsContent value="research" className="!mt-2 h-[500px] overflow-y-auto min-h-[400px] scrollbar-black">
+        <TabsContent value="research" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
           <MarketResearch />
         </TabsContent>
 

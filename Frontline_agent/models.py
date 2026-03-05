@@ -45,13 +45,19 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
+    sla_due_at = models.DateTimeField(null=True, blank=True, help_text='Target response time for SLA; used for aging alerts')
     
+    # Internal entities for analytics/workflow
+    intent = models.CharField(max_length=100, blank=True, null=True, help_text='Extracted intention of the user')
+    entities = models.JSONField(default=dict, blank=True, help_text='Extracted entities like user_id, product, etc.')
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['sla_due_at']),
         ]
     
     def __str__(self):
@@ -201,6 +207,7 @@ class FrontlineWorkflow(models.Model):
     description = models.TextField(blank=True)
     trigger_conditions = models.JSONField(default=dict, blank=True, help_text='e.g. {"on": "ticket_created", "category": "billing"}')
     steps = models.JSONField(default=list, help_text='List of steps: [{"type": "send_email", "template_id": 1}, {"type": "update_ticket", "status": "open"}]')
+    requires_approval = models.BooleanField(default=False, help_text='If True, execution halts until approved by admin')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -221,6 +228,8 @@ class FrontlineWorkflowExecution(models.Model):
         ('completed', 'Completed'),
         ('failed', 'Failed'),
         ('cancelled', 'Cancelled'),
+        ('awaiting_approval', 'Awaiting Approval'),
+        ('rejected', 'Rejected'),
     ]
     workflow = models.ForeignKey(FrontlineWorkflow, on_delete=models.SET_NULL, null=True, blank=True, related_name='executions')
     workflow_name = models.CharField(max_length=200)
@@ -438,4 +447,86 @@ class SavedGraphPrompt(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.chart_type})"
+
+
+class KBFeedback(models.Model):
+    """User feedback on knowledge-base answers (helpful / not helpful) to improve docs and RAG."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='frontline_kb_feedbacks',
+    )
+    question = models.TextField(help_text='Question that was answered')
+    helpful = models.BooleanField(help_text='True = helpful, False = not helpful')
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kb_feedbacks',
+        help_text='Document that was used for the answer (if any)',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company_user', 'created_at']),
+            models.Index(fields=['document', 'helpful']),
+        ]
+
+    def __str__(self):
+        return f"KB feedback: {'helpful' if self.helpful else 'not helpful'} ({self.question[:40]}...)"
+
+
+class FrontlineNotificationPreferences(models.Model):
+    """Per-company-user notification preferences. Respect user choice, less spam."""
+    company_user = models.OneToOneField(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='frontline_notification_preferences',
+    )
+    # Master toggles
+    email_enabled = models.BooleanField(default=True, help_text='Receive notification emails')
+    in_app_enabled = models.BooleanField(default=True, help_text='Show in-app notifications')
+    # Per-event email toggles (only apply when email_enabled is True)
+    ticket_created_email = models.BooleanField(default=True, help_text='Email when a ticket is created (e.g. trigger or workflow)')
+    ticket_updated_email = models.BooleanField(default=True, help_text='Email when a ticket is updated')
+    ticket_assigned_email = models.BooleanField(default=True, help_text='Email when a ticket is assigned to you')
+    # Workflow / template emails (e.g. send_email step or template trigger)
+    workflow_email_enabled = models.BooleanField(default=True, help_text='Receive emails from workflow steps and template triggers')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        verbose_name = 'Frontline notification preferences'
+        verbose_name_plural = 'Frontline notification preferences'
+
+    def __str__(self):
+        return f"Preferences for {self.company_user.email}"
+
+
+class DocumentChunk(models.Model):
+    """Chunked document content and embedding for intelligent retrieval (RAG)"""
+    document = models.ForeignKey(
+        Document, 
+        on_delete=models.CASCADE, 
+        related_name='chunks',
+        help_text='Parent document this chunk belongs to'
+    )
+    chunk_index = models.IntegerField(help_text='Sequential index of this chunk within the document')
+    chunk_text = models.TextField(help_text='Text content of this specific chunk')
+    embedding = models.TextField(null=True, blank=True, help_text='Vector embedding for this chunk (JSON string)')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['document', 'chunk_index']
+        indexes = [
+            models.Index(fields=['document', 'chunk_index']),
+        ]
+        
+    def __str__(self):
+        return f"Chunk {self.chunk_index} of {self.document.title}"
 

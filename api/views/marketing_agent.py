@@ -948,6 +948,11 @@ def marketing_qa(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("marketing_qa")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+        except Exception:
+            pass
         question = request.data.get('question', '')
         conversation_history = request.data.get('conversation_history') or []
         
@@ -962,6 +967,49 @@ def marketing_qa(request):
             context={'conversation_history': conversation_history},
             user_id=user.id
         )
+
+        token_usage = getattr(agent, 'last_token_usage', None)
+        if isinstance(result, dict):
+            if not (token_usage and isinstance(token_usage, dict)):
+                llm_used = bool(getattr(agent, 'last_llm_used', False))
+                if not llm_used:
+                    # No model call happened (DB-only / rule-based answer)
+                    token_usage = {
+                        'provider': None,
+                        'model': None,
+                        'prompt_tokens': 0,
+                        'completion_tokens': 0,
+                        'total_tokens': 0,
+                        'estimated': False,
+                    }
+                else:
+                    # Model call happened, but provider didn't return usage -> estimate
+                    try:
+                        answer_text = result.get('answer') or ''
+                        prompt_text = (question or '')
+                        model_name = getattr(agent, 'model', None)
+                        # Fallback estimation: ~4 chars per token
+                        prompt_tokens = max(1, int(len(prompt_text) / 4)) if prompt_text else 0
+                        completion_tokens = max(1, int(len(answer_text) / 4)) if answer_text else 0
+                        token_usage = {
+                            'provider': 'groq' if model_name else None,
+                            'model': model_name,
+                            'prompt_tokens': prompt_tokens,
+                            'completion_tokens': completion_tokens,
+                            'total_tokens': prompt_tokens + completion_tokens,
+                            'estimated': True,
+                        }
+                    except Exception:
+                        token_usage = {
+                            'provider': None,
+                            'model': None,
+                            'prompt_tokens': None,
+                            'completion_tokens': None,
+                            'total_tokens': None,
+                            'estimated': False,
+                        }
+
+            result.setdefault('token_usage', token_usage)
         
         return Response({
             'status': 'success',

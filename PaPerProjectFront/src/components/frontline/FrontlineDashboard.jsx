@@ -55,6 +55,8 @@ import {
   Monitor,
   Copy,
   Sparkles,
+  ThumbsUp,
+  ThumbsDown,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
@@ -94,12 +96,24 @@ const WORKFLOW_STEPS_COMPLEX_EXAMPLE = `[
   { "type": "update_ticket", "status": "closed" }
 ]`;
 
+const PREFERENCES_DEFAULT = {
+  email_enabled: true,
+  in_app_enabled: true,
+  ticket_created_email: true,
+  ticket_updated_email: true,
+  ticket_assigned_email: true,
+  workflow_email_enabled: true,
+};
+
 function FrontlineNotificationsTab() {
   const { toast } = useToast();
   const [templates, setTemplates] = useState([]);
   const [scheduled, setScheduled] = useState([]);
   const [notificationTicketsList, setNotificationTicketsList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [preferences, setPreferences] = useState(PREFERENCES_DEFAULT);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [sendForm, setSendForm] = useState({ template_id: '', recipient_email: '', ticket_id: '' });
   const [sending, setSending] = useState(false);
   const [templateDialog, setTemplateDialog] = useState({ open: false, editingId: null, ...TEMPLATE_DEFAULT });
@@ -107,21 +121,39 @@ function FrontlineNotificationsTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const [tRes, sRes, tickRes] = await Promise.all([
+      const [tRes, sRes, tickRes, prefsRes] = await Promise.all([
         frontlineAgentService.listNotificationTemplates(),
         frontlineAgentService.listScheduledNotifications(),
         frontlineAgentService.listTickets({ limit: 100 }),
+        frontlineAgentService.getNotificationPreferences?.().catch(() => ({ status: 'success', data: PREFERENCES_DEFAULT })),
       ]);
       setTemplates((tRes.status === 'success' && tRes.data) ? tRes.data : []);
       setScheduled((sRes.status === 'success' && sRes.data) ? sRes.data : []);
       setNotificationTicketsList((tickRes.status === 'success' && tickRes.data) ? tickRes.data : []);
+      if (prefsRes?.status === 'success' && prefsRes.data) setPreferences(prefsRes.data);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to load', variant: 'destructive' });
     } finally {
       setLoading(false);
+      setPreferencesLoading(false);
     }
   };
   useEffect(() => { load(); }, []);
+  const updatePreference = async (key, value) => {
+    const next = { ...preferences, [key]: value };
+    setPreferences(next);
+    setPreferencesSaving(true);
+    try {
+      const res = await frontlineAgentService.updateNotificationPreferences({ [key]: value });
+      if (res.status === 'success' && res.data) setPreferences(res.data);
+      else toast({ title: 'Error', description: res.message || 'Failed to save preference', variant: 'destructive' });
+    } catch (e) {
+      setPreferences(preferences);
+      toast({ title: 'Error', description: e.message || 'Failed to save', variant: 'destructive' });
+    } finally {
+      setPreferencesSaving(false);
+    }
+  };
   const handleSendNow = async (e) => {
     e.preventDefault();
     if (!sendForm.template_id || !sendForm.recipient_email) {
@@ -139,6 +171,8 @@ function FrontlineNotificationsTab() {
         toast({ title: 'Sent', description: 'Notification sent.' });
         setSendForm({ template_id: '', recipient_email: '', ticket_id: '' });
         load();
+      } else if (res.status === 'skipped') {
+        toast({ title: 'Not sent', description: res.message || 'Recipient has disabled notification emails.', variant: 'secondary' });
       } else throw new Error(res.message);
     } catch (err) {
       toast({ title: 'Error', description: err.message || 'Send failed', variant: 'destructive' });
@@ -205,6 +239,80 @@ function FrontlineNotificationsTab() {
   };
   return (
   <>
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle className="text-base">Notification preferences</CardTitle>
+        <CardDescription>Control how and when you receive notifications. Turning these off reduces spam and respects your choice.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {preferencesLoading ? (
+          <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading preferences...</div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-muted-foreground">Master toggles</p>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="pref-email"
+                  checked={!!preferences.email_enabled}
+                  onCheckedChange={(checked) => updatePreference('email_enabled', !!checked)}
+                  disabled={preferencesSaving}
+                />
+                <Label htmlFor="pref-email" className="text-sm font-normal cursor-pointer">Receive notification emails</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="pref-inapp"
+                  checked={!!preferences.in_app_enabled}
+                  onCheckedChange={(checked) => updatePreference('in_app_enabled', !!checked)}
+                  disabled={preferencesSaving}
+                />
+                <Label htmlFor="pref-inapp" className="text-sm font-normal cursor-pointer">Show in-app notifications</Label>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-muted-foreground">Email by event (when emails are on)</p>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="pref-ticket-created"
+                  checked={!!preferences.ticket_created_email}
+                  onCheckedChange={(checked) => updatePreference('ticket_created_email', !!checked)}
+                  disabled={preferencesSaving}
+                />
+                <Label htmlFor="pref-ticket-created" className="text-sm font-normal cursor-pointer">Ticket created</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="pref-ticket-updated"
+                  checked={!!preferences.ticket_updated_email}
+                  onCheckedChange={(checked) => updatePreference('ticket_updated_email', !!checked)}
+                  disabled={preferencesSaving}
+                />
+                <Label htmlFor="pref-ticket-updated" className="text-sm font-normal cursor-pointer">Ticket updated</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="pref-ticket-assigned"
+                  checked={!!preferences.ticket_assigned_email}
+                  onCheckedChange={(checked) => updatePreference('ticket_assigned_email', !!checked)}
+                  disabled={preferencesSaving}
+                />
+                <Label htmlFor="pref-ticket-assigned" className="text-sm font-normal cursor-pointer">Ticket assigned to me</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="pref-workflow-email"
+                  checked={!!preferences.workflow_email_enabled}
+                  onCheckedChange={(checked) => updatePreference('workflow_email_enabled', !!checked)}
+                  disabled={preferencesSaving}
+                />
+                <Label htmlFor="pref-workflow-email" className="text-sm font-normal cursor-pointer">Workflow & template trigger emails</Label>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
@@ -358,6 +466,7 @@ function FrontlineWorkflowsTab() {
   const [stepBuilderSteps, setStepBuilderSteps] = useState([]);
   const [stepBuilderTemplates, setStepBuilderTemplates] = useState([]);
   const [stepBuilderTickets, setStepBuilderTickets] = useState([]);
+  const [stepBuilderCompanyUsers, setStepBuilderCompanyUsers] = useState([]);
   const [stepBuilderTemplatesLoading, setStepBuilderTemplatesLoading] = useState(false);
   const [stepForm, setStepForm] = useState(null);
   const [stepEditIndex, setStepEditIndex] = useState(null);
@@ -379,15 +488,18 @@ function FrontlineWorkflowsTab() {
     setStepBuilderOpen(true);
     setStepBuilderTemplatesLoading(true);
     try {
-      const [tRes, tickRes] = await Promise.all([
+      const [tRes, tickRes, cuRes] = await Promise.all([
         frontlineAgentService.listNotificationTemplates(),
         frontlineAgentService.listTickets({ limit: 100 }),
+        frontlineAgentService.listWorkflowCompanyUsers?.() ?? Promise.resolve({ status: 'success', data: [] }),
       ]);
       setStepBuilderTemplates((tRes.status === 'success' && tRes.data) ? tRes.data : []);
       setStepBuilderTickets((tickRes.status === 'success' && tickRes.data) ? tickRes.data : []);
+      setStepBuilderCompanyUsers((cuRes.status === 'success' && cuRes.data) ? cuRes.data : []);
     } catch (_) {
       setStepBuilderTemplates([]);
       setStepBuilderTickets([]);
+      setStepBuilderCompanyUsers([]);
     } finally {
       setStepBuilderTemplatesLoading(false);
     }
@@ -416,6 +528,26 @@ function FrontlineWorkflowsTab() {
       const tid = (step.ticket_id || '').trim();
       if (tid) normalized.ticket_id = parseInt(tid, 10) || undefined;
       if (normalized.ticket_id === undefined && !normalized.status && !normalized.resolution) return;
+    }
+    if (step.type === 'webhook') {
+      const url = (step.url || '').trim();
+      if (!url) return;
+      normalized.url = url;
+      normalized.method = (step.method || 'POST').toUpperCase();
+      if ((step.body || '').trim()) normalized.body = step.body.trim();
+    }
+    if (step.type === 'slack') {
+      const webhook_url = (step.webhook_url || '').trim();
+      if (!webhook_url) return;
+      normalized.webhook_url = webhook_url;
+      normalized.text = (step.text || 'Workflow step executed.').trim();
+    }
+    if (step.type === 'assign') {
+      const cuId = step.assign_to_company_user_id != null ? parseInt(step.assign_to_company_user_id, 10) : undefined;
+      if (cuId == null || isNaN(cuId)) return;
+      normalized.assign_to_company_user_id = cuId;
+      const tid = (step.ticket_id || '').trim();
+      if (tid) normalized.ticket_id = parseInt(tid, 10) || undefined;
     }
     if (stepEditIndex !== null) {
       setStepBuilderSteps((prev) => prev.map((s, i) => (i === stepEditIndex ? normalized : s)));
@@ -451,6 +583,12 @@ function FrontlineWorkflowsTab() {
       if (s.resolution) parts.push('resolution');
       if (s.ticket_id) parts.push(`ticket_id=${s.ticket_id}`);
       return `Update ticket: ${parts.length ? parts.join(', ') : '(no fields)'}`;
+    }
+    if (s.type === 'webhook') return `Webhook: ${(s.method || 'POST')} ${(s.url || '').slice(0, 40)}${(s.url || '').length > 40 ? '…' : ''}`;
+    if (s.type === 'slack') return `Slack: ${(s.text || '').slice(0, 35)}${(s.text || '').length > 35 ? '…' : ''}`;
+    if (s.type === 'assign') {
+      const cu = stepBuilderCompanyUsers.find((u) => u.id === s.assign_to_company_user_id);
+      return `Assign ticket → ${cu ? (cu.full_name || cu.email || `#${cu.id}`) : `user #${s.assign_to_company_user_id}`}`;
     }
     return `Step: ${s.type || 'unknown'}`;
   };
@@ -723,12 +861,12 @@ function FrontlineWorkflowsTab() {
                     const p = JSON.parse(workflowDialog.stepsJson || '[]');
                     n = Array.isArray(p) ? p.length : 0;
                   } catch (_) {}
-                  return n ? `${n} step(s) configured — Configure steps` : 'Configure steps (add send email / update ticket)';
+                  return n ? `${n} step(s) configured — Configure steps` : 'Configure steps (email, ticket, webhook, Slack, assign)';
                 })()}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Add steps in order: send email (template + recipient) or update ticket (status/resolution). Use {`{{recipient_email}}`} or {`{{ticket_id}}`} when triggered by a ticket.
+              Add steps: send email, update ticket, webhook (HTTP), Slack (message), or assign ticket to a user. Use {`{{recipient_email}}`}, {`{{ticket_id}}`}, {`{{ticket_title}}`} when triggered by a ticket.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -754,7 +892,7 @@ function FrontlineWorkflowsTab() {
         <div className="flex flex-col min-h-0 flex-1 overflow-hidden space-y-4">
           <div className="overflow-y-auto min-h-0 space-y-2">
             {stepBuilderSteps.length === 0 && !stepForm && (
-              <p className="text-sm text-muted-foreground">No steps yet. Click &quot;Add send email&quot; or &quot;Add update ticket&quot; below.</p>
+              <p className="text-sm text-muted-foreground">No steps yet. Add send email, update ticket, webhook, Slack, or assign below.</p>
             )}
             {stepBuilderSteps.map((s, i) => (
               <div key={i} className="flex items-center gap-2 p-2 border rounded bg-muted/30">
@@ -763,7 +901,15 @@ function FrontlineWorkflowsTab() {
                 <div className="flex items-center shrink-0">
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => moveStep(i, -1)} title="Move up"><ChevronUp className="h-4 w-4" /></Button>
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => moveStep(i, 1)} title="Move down"><ChevronDown className="h-4 w-4" /></Button>
-                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setStepForm(s.type === 'send_email' ? { type: 'send_email', template_id: String(s.template_id ?? ''), recipient_email: s.recipient_email ?? '' } : { type: 'update_ticket', status: s.status ?? '', resolution: s.resolution ?? '', ticket_id: s.ticket_id ? String(s.ticket_id) : '' }); setStepEditIndex(i); }} title="Edit"><Pencil className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                    if (s.type === 'send_email') setStepForm({ type: 'send_email', template_id: String(s.template_id ?? ''), recipient_email: s.recipient_email ?? '' });
+                    else if (s.type === 'update_ticket') setStepForm({ type: 'update_ticket', status: s.status ?? '', resolution: s.resolution ?? '', ticket_id: s.ticket_id ? String(s.ticket_id) : '' });
+                    else if (s.type === 'webhook') setStepForm({ type: 'webhook', url: s.url ?? '', method: s.method ?? 'POST', body: s.body ?? '' });
+                    else if (s.type === 'slack') setStepForm({ type: 'slack', webhook_url: s.webhook_url ?? '', text: s.text ?? 'Workflow step executed.' });
+                    else if (s.type === 'assign') setStepForm({ type: 'assign', assign_to_company_user_id: s.assign_to_company_user_id != null ? String(s.assign_to_company_user_id) : '', ticket_id: s.ticket_id ? String(s.ticket_id) : '' });
+                    else setStepForm(null);
+                    setStepEditIndex(i);
+                  }} title="Edit"><Pencil className="h-4 w-4" /></Button>
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeStepAt(i)} title="Remove"><Trash2 className="h-4 w-4" /></Button>
                 </div>
               </div>
@@ -771,14 +917,23 @@ function FrontlineWorkflowsTab() {
           </div>
 
           {!stepForm ? (
-            <div className="flex gap-2 shrink-0">
+            <div className="flex flex-wrap gap-2 shrink-0">
               <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'send_email', template_id: (stepBuilderTemplates[0] && stepBuilderTemplates[0].id) ? String(stepBuilderTemplates[0].id) : '', recipient_email: '{{recipient_email}}' })}>Add send email</Button>
               <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'update_ticket', status: '', resolution: '', ticket_id: '' })}>Add update ticket</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'webhook', url: '', method: 'POST', body: '{}' })}>Add webhook</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'slack', webhook_url: '', text: 'Workflow step executed.' })}>Add Slack</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setStepForm({ type: 'assign', assign_to_company_user_id: (stepBuilderCompanyUsers[0] && stepBuilderCompanyUsers[0].id) ? String(stepBuilderCompanyUsers[0].id) : '', ticket_id: '' })}>Add assign ticket</Button>
             </div>
           ) : (
             <div className="rounded-lg border p-4 space-y-3 bg-muted/20 shrink-0">
               <div className="flex justify-between items-center">
-                <span className="font-medium text-sm">{stepForm.type === 'send_email' ? 'Send email' : 'Update ticket'}</span>
+                <span className="font-medium text-sm">
+                  {stepForm.type === 'send_email' && 'Send email'}
+                  {stepForm.type === 'update_ticket' && 'Update ticket'}
+                  {stepForm.type === 'webhook' && 'Webhook'}
+                  {stepForm.type === 'slack' && 'Slack'}
+                  {stepForm.type === 'assign' && 'Assign ticket'}
+                </span>
                 <Button type="button" variant="ghost" size="sm" onClick={() => { setStepForm(null); setStepEditIndex(null); }}>Cancel</Button>
               </div>
               {stepForm.type === 'send_email' && (
@@ -813,6 +968,70 @@ function FrontlineWorkflowsTab() {
                   <div className="space-y-1">
                     <Label className="text-xs">Resolution (optional)</Label>
                     <Textarea value={stepForm.resolution || ''} onChange={(e) => setStepForm((f) => ({ ...f, resolution: e.target.value }))} rows={2} placeholder="Text to set on the ticket" className="resize-y" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Ticket (optional — use from context when triggered)</Label>
+                    <Select value={stepForm.ticket_id || '_context'} onValueChange={(v) => setStepForm((f) => ({ ...f, ticket_id: v === '_context' ? '' : v }))}>
+                      <SelectTrigger><SelectValue placeholder="Use from context" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_context">Use from context</SelectItem>
+                        {stepBuilderTickets.map((t) => (
+                          <SelectItem key={t.id} value={String(t.id)}>#{t.id}: {(t.title || '').slice(0, 35)}{(t.title || '').length > 35 ? '…' : ''}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+              {stepForm.type === 'webhook' && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">URL (required)</Label>
+                    <Input value={stepForm.url || ''} onChange={(e) => setStepForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://example.com/webhook" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Method</Label>
+                    <Select value={stepForm.method || 'POST'} onValueChange={(v) => setStepForm((f) => ({ ...f, method: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GET">GET</SelectItem>
+                        <SelectItem value="POST">POST</SelectItem>
+                        <SelectItem value="PUT">PUT</SelectItem>
+                        <SelectItem value="PATCH">PATCH</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Body (JSON, use {`{{ticket_id}}`}, {`{{recipient_email}}`} for context)</Label>
+                    <Textarea value={stepForm.body || ''} onChange={(e) => setStepForm((f) => ({ ...f, body: e.target.value }))} rows={3} placeholder='{"event": "ticket_created", "ticket_id": "{{ticket_id}}"}' className="font-mono text-xs resize-y" />
+                  </div>
+                </>
+              )}
+              {stepForm.type === 'slack' && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Slack webhook URL (required)</Label>
+                    <Input value={stepForm.webhook_url || ''} onChange={(e) => setStepForm((f) => ({ ...f, webhook_url: e.target.value }))} placeholder="https://hooks.slack.com/services/..." type="password" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Message (use {`{{ticket_id}}`}, {`{{ticket_title}}`} for context)</Label>
+                    <Textarea value={stepForm.text || ''} onChange={(e) => setStepForm((f) => ({ ...f, text: e.target.value }))} rows={2} placeholder="New ticket #{{ticket_id}}: {{ticket_title}}" className="resize-y" />
+                  </div>
+                </>
+              )}
+              {stepForm.type === 'assign' && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Assign to (company user)</Label>
+                    <Select value={stepForm.assign_to_company_user_id || ''} onValueChange={(v) => setStepForm((f) => ({ ...f, assign_to_company_user_id: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
+                      <SelectContent>
+                        {stepBuilderCompanyUsers.map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>{u.full_name || u.email || `#${u.id}`}</SelectItem>
+                        ))}
+                        {stepBuilderCompanyUsers.length === 0 && <SelectItem value="_none" disabled>No company users</SelectItem>}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">Ticket (optional — use from context when triggered)</Label>
@@ -1153,6 +1372,8 @@ const FrontlineDashboard = () => {
   const [qaScopeDocumentIds, setQaScopeDocumentIds] = useState([]);
   const [qaDocumentsList, setQaDocumentsList] = useState([]); // full list for "Specific documents" selector
   const [qaDocumentsLoading, setQaDocumentsLoading] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState({}); // { 'chatId-messageIndex': true } to avoid double submit
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   // Chat widget tab
   const [widgetKey, setWidgetKey] = useState('');
   const [widgetConfigLoading, setWidgetConfigLoading] = useState(false);
@@ -1171,6 +1392,7 @@ const FrontlineDashboard = () => {
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketFilters, setTicketFilters] = useState({ status: '', priority: '', category: '', date_from: '', date_to: '' });
   const [ticketsPagination, setTicketsPagination] = useState({ page: 1, limit: 20, total: 0, total_pages: 1 });
+  const [ticketsAging, setTicketsAging] = useState(null); // { breached: [], at_risk: [], count_breached, count_at_risk }
 
   useEffect(() => {
     fetchDashboard();
@@ -1395,6 +1617,16 @@ const FrontlineDashboard = () => {
     }
   };
 
+  const loadTicketsAging = async () => {
+    try {
+      const res = await frontlineAgentService.listTicketsAging();
+      if (res.status === 'success' && res.data) setTicketsAging(res.data);
+      else setTicketsAging(null);
+    } catch {
+      setTicketsAging(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'qa') {
       loadChatsFromApi();
@@ -1404,6 +1636,7 @@ const FrontlineDashboard = () => {
   useEffect(() => {
     if (activeTab === 'tickets') {
       loadTickets();
+      loadTicketsAging();
     }
   }, [activeTab, ticketFilters.status, ticketFilters.priority, ticketFilters.category, ticketFilters.date_from, ticketFilters.date_to, ticketsPagination.page]);
 
@@ -1459,6 +1692,7 @@ const FrontlineDashboard = () => {
             has_verified_info: data.has_verified_info || false,
             source: data.source || 'Knowledge Base',
             type: data.type || 'general',
+            document_id: data.document_id ?? null,
           },
         };
         const title = q.slice(0, 40);
@@ -1537,7 +1771,7 @@ const FrontlineDashboard = () => {
         setTicketTitle('');
         setTicketDescription('');
         fetchDashboard();
-        if (activeTab === 'tickets') loadTickets();
+        if (activeTab === 'tickets') { loadTickets(); loadTicketsAging(); }
       }
     } catch (error) {
       toast({
@@ -1873,10 +2107,73 @@ const FrontlineDashboard = () => {
                                       <p>Source: {msg.responseData.source}</p>
                                     )}
                                     {msg.responseData?.citations?.length > 1 && (
-                                      <p>References: {msg.responseData.citations.map((c, i) => c.document_title || c.source).filter(Boolean).join('; ')}</p>
+                                      <p>References: {msg.responseData.citations.map((c, idx) => c.document_title || c.source).filter(Boolean).join('; ')}</p>
                                     )}
                                   </div>
                                 ) : null}
+                                <div className="flex items-center gap-1 mt-2 pt-2 border-t border-border/50">
+                                  <span className="text-xs text-muted-foreground mr-1">Was this helpful?</span>
+                                  {feedbackSent[`${selectedChatId}-${i}`] ? (
+                                    <span className="text-xs text-muted-foreground">Thank you for feedback.</span>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        disabled={feedbackSubmitting}
+                                        onClick={async () => {
+                                          const questionText = currentMessages[i - 1]?.content || '';
+                                          if (!questionText) return;
+                                          setFeedbackSubmitting(true);
+                                          try {
+                                            await frontlineAgentService.submitKnowledgeFeedback({
+                                              question: questionText,
+                                              helpful: true,
+                                              document_id: msg.responseData?.document_id ?? undefined,
+                                            });
+                                            setFeedbackSent((prev) => ({ ...prev, [`${selectedChatId}-${i}`]: true }));
+                                          } catch {
+                                            toast({ title: 'Error', description: 'Could not send feedback', variant: 'destructive' });
+                                          } finally {
+                                            setFeedbackSubmitting(false);
+                                          }
+                                        }}
+                                        title="Yes, helpful"
+                                      >
+                                        <ThumbsUp className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        disabled={feedbackSubmitting}
+                                        onClick={async () => {
+                                          const questionText = currentMessages[i - 1]?.content || '';
+                                          if (!questionText) return;
+                                          setFeedbackSubmitting(true);
+                                          try {
+                                            await frontlineAgentService.submitKnowledgeFeedback({
+                                              question: questionText,
+                                              helpful: false,
+                                              document_id: msg.responseData?.document_id ?? undefined,
+                                            });
+                                            setFeedbackSent((prev) => ({ ...prev, [`${selectedChatId}-${i}`]: true }));
+                                          } catch {
+                                            toast({ title: 'Error', description: 'Could not send feedback', variant: 'destructive' });
+                                          } finally {
+                                            setFeedbackSubmitting(false);
+                                          }
+                                        }}
+                                        title="No, not helpful"
+                                      >
+                                        <ThumbsDown className="h-4 w-4" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </>
@@ -2080,6 +2377,18 @@ const FrontlineDashboard = () => {
               </Button>
             </CardHeader>
             <CardContent className="space-y-4 overflow-x-hidden">
+              {ticketsAging && (ticketsAging.count_breached > 0 || ticketsAging.count_at_risk > 0) && (
+                <div className="rounded-lg border bg-destructive/10 border-destructive/30 p-3 flex flex-wrap items-center gap-3">
+                  <span className="font-medium text-sm">SLA / aging alerts</span>
+                  {ticketsAging.count_breached > 0 && (
+                    <Badge variant="destructive">{ticketsAging.count_breached} breached</Badge>
+                  )}
+                  {ticketsAging.count_at_risk > 0 && (
+                    <Badge variant="secondary" className="bg-amber-500/20 text-amber-700 dark:text-amber-400">{ticketsAging.count_at_risk} at risk</Badge>
+                  )}
+                  <span className="text-xs text-muted-foreground">Tickets past due or due within 2 hours. Resolve or reassign to avoid missed SLAs.</span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={ticketFilters.status || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, status: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
                   <SelectTrigger className="w-[140px]">
@@ -2156,6 +2465,7 @@ const FrontlineDashboard = () => {
                         <TableHead>Status</TableHead>
                         <TableHead>Priority</TableHead>
                         <TableHead>Category</TableHead>
+                        <TableHead className="whitespace-nowrap">SLA</TableHead>
                         <TableHead>Auto-resolved</TableHead>
                         <TableHead>Created</TableHead>
                       </TableRow>
@@ -2172,6 +2482,15 @@ const FrontlineDashboard = () => {
                           <TableCell><Badge variant="outline">{t.status}</Badge></TableCell>
                           <TableCell><Badge variant="secondary">{t.priority}</Badge></TableCell>
                           <TableCell className="capitalize">{t.category?.replace('_', ' ')}</TableCell>
+                          <TableCell className="text-sm">
+                            {t.sla_due_at ? (
+                              <span className="flex items-center gap-1 flex-wrap">
+                                {t.sla_breached && <Badge variant="destructive" className="text-xs">Breached</Badge>}
+                                {t.sla_at_risk && !t.sla_breached && <Badge variant="secondary" className="text-xs bg-amber-500/20 text-amber-700 dark:text-amber-400">At risk</Badge>}
+                                <span className="text-muted-foreground">{new Date(t.sla_due_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</span>
+                              </span>
+                            ) : '—'}
+                          </TableCell>
                           <TableCell>{t.auto_resolved ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : '—'}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}</TableCell>
                         </TableRow>

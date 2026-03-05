@@ -347,6 +347,11 @@ const sidebarItemVariants = {
       stiffness: 100,
       damping: 12
     }
+  },
+  hover: {
+    scale: 1.02,
+    x: 5,
+    transition: { duration: 0.2 }
   }
 };
 
@@ -569,11 +574,11 @@ const MarketResearch = () => {
       <motion.div 
         variants={itemVariants}
         className={cn(
-          "shrink-0 flex flex-col rounded-xl border bg-card overflow-hidden transition-all duration-300",
+          "shrink-0 flex flex-col rounded-2xl border bg-gradient-to-b from-card to-muted/20 overflow-hidden transition-all duration-300 shadow-lg",
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
-        <div className="p-4 border-b flex items-center justify-between">
+        <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
           <AnimatePresence mode="wait">
             {sidebarOpen ? (
               <motion.span
@@ -581,8 +586,9 @@ const MarketResearch = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="text-sm font-semibold"
+                className="text-sm font-semibold flex items-center gap-2"
               >
+                <BookOpen className="h-4 w-4 text-primary" />
                 Research History
               </motion.span>
             ) : (
@@ -602,7 +608,7 @@ const MarketResearch = () => {
               variant="ghost" 
               size="icon" 
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="h-7 w-7"
+              className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary transition-all"
             >
               {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
@@ -611,14 +617,14 @@ const MarketResearch = () => {
               size="icon" 
               onClick={newChat} 
               title="New research"
-              className="h-7 w-7"
+              className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary transition-all"
             >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent">
           {chats.length === 0 ? (
             <motion.div 
               initial={{ opacity: 0 }}
@@ -627,7 +633,7 @@ const MarketResearch = () => {
             >
               {sidebarOpen ? (
                 <>
-                  <FileSearch className="h-12 w-12 mx-auto mb-3 text-muted-foreground/50" />
+                  <FileSearch className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
                   <p className="text-sm text-muted-foreground">No research yet</p>
                   <p className="text-xs text-muted-foreground/70 mt-1">Start a new conversation</p>
                 </>
@@ -653,18 +659,19 @@ const MarketResearch = () => {
                         initial="hidden"
                         animate="visible"
                         exit={{ x: -20, opacity: 0 }}
+                        whileHover="hover"
                         transition={{ delay: index * 0.05 }}
                         className={cn(
-                          "group relative flex items-start gap-2 w-full p-3 rounded-lg text-sm transition-all cursor-pointer",
+                          "group relative flex items-start gap-2 w-full p-3 rounded-xl text-sm transition-all cursor-pointer",
                           selectedChatId === c.id 
-                            ? 'bg-primary/10 border border-primary/20 shadow-sm' 
-                            : 'hover:bg-muted/80'
+                            ? 'bg-gradient-to-r from-primary/20 to-primary/5 border border-primary/30 shadow-md' 
+                            : 'hover:bg-gradient-to-r hover:from-muted/80 hover:to-muted/40'
                         )}
                         onClick={() => setSelectedChatId(c.id)}
                       >
                         <div className={cn(
-                          "shrink-0 rounded-lg p-1.5",
-                          selectedChatId === c.id ? 'bg-primary/20' : 'bg-muted'
+                          "shrink-0 rounded-lg p-1.5 transition-all",
+                          selectedChatId === c.id ? 'bg-primary/30' : 'bg-muted'
                         )}>
                           <Icon className={cn(
                             "h-3.5 w-3.5",
@@ -677,7 +684,7 @@ const MarketResearch = () => {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5">
                                 <span className="font-medium truncate">{truncate(topic, 25)}</span>
-                                <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                                <Badge variant="outline" className="h-4 px-1 text-[10px] rounded-full bg-primary/10 border-primary/20">
                                   {type === 'general' ? 'GEN' : type.slice(0, 2).toUpperCase()}
                                 </Badge>
                               </div>
@@ -690,7 +697,7 @@ const MarketResearch = () => {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive rounded-lg transition-all"
                               onClick={(e) => deleteChat(e, c.id)}
                             >
                               <X className="h-3 w-3" />
@@ -698,7 +705,7 @@ const MarketResearch = () => {
                           </>
                         ) : (
                           <div className="absolute -top-1 -right-1">
-                            <Badge variant="outline" className="h-3 px-1 text-[8px]">
+                            <Badge variant="outline" className="h-3 px-1 text-[8px] rounded-full bg-primary/10 border-primary/20">
                               {c.messages?.length || 0}
                             </Badge>
                           </div>
@@ -717,23 +724,23 @@ const MarketResearch = () => {
         variants={itemVariants}
         className="flex-1 min-w-0 min-h-0"
       >
-        <Card className="h-full flex flex-col overflow-hidden border-0 shadow-lg">
+        <Card className="h-full flex flex-col overflow-hidden border-0 shadow-xl rounded-2xl bg-gradient-to-b from-background to-muted/10">
           {/* Header */}
-          <CardHeader className="shrink-0 bg-gradient-to-r from-primary/5 via-transparent to-transparent border-b">
+          <CardHeader className="shrink-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-b pb-3 rounded-t-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <motion.div 
-                  whileHover={{ rotate: 360 }}
+                  whileHover={{ rotate: 360, scale: 1.1 }}
                   transition={{ duration: 0.5 }}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 shadow-md"
                 >
                   <Bot className="h-5 w-5 text-primary" />
                 </motion.div>
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     Market Research Assistant
-                    <Badge variant="outline" className="bg-primary/5">
-                      <Award className="h-3 w-3 mr-1 text-primary" />
+                    <Badge variant="outline" className="bg-gradient-to-r from-primary/20 to-primary/5 gap-1 rounded-full border-primary/30">
+                      <Award className="h-3 w-3 text-primary" />
                       AI-Powered
                     </Badge>
                   </CardTitle>
@@ -743,7 +750,7 @@ const MarketResearch = () => {
                 </div>
               </div>
               {selectedChat && (
-                <Badge variant="secondary" className="gap-1">
+                <Badge variant="secondary" className="gap-1 rounded-full bg-gradient-to-r from-muted to-muted/50">
                   <MessageSquare className="h-3 w-3" />
                   {currentMessages.length} messages
                 </Badge>
@@ -752,7 +759,7 @@ const MarketResearch = () => {
           </CardHeader>
 
           {/* Messages area */}
-          <CardContent className="flex-1 overflow-y-auto p-6 scrollbar-thin">
+          <CardContent className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent bg-gradient-to-b from-background via-background to-muted/10">
             <AnimatePresence mode="popLayout">
               {!selectedChatId ? (
                 <motion.div
@@ -774,18 +781,21 @@ const MarketResearch = () => {
                       repeatType: "reverse"
                     }}
                   >
-                    <Bot className="h-16 w-16 text-primary/30 mb-2" />
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
+                      <Bot className="h-20 w-20 text-primary/40 relative z-10" />
+                    </div>
                   </motion.div>
-                  <h3 className="text-xl font-semibold mb-1">Ready to Research?</h3>
-                  <p className="text-muted-foreground max-w-md mb-2">
+                  <h3 className="text-xl font-semibold mb-2 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">Ready to Research?</h3>
+                  <p className="text-muted-foreground max-w-md mb-6">
                     Ask about market trends, competitor analysis, customer behavior, or growth opportunities
                   </p>
                   <div className="grid grid-cols-2 gap-3 max-w-lg">
                     {RESEARCH_TYPES.slice(0, 4).map((type) => (
                       <motion.div
                         key={type.value}
-                        whileHover={{ scale: 1.02 }}
-                        className="flex items-center gap-2 p-3 rcursor-default"
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        className="flex items-center gap-2 p-3 rounded-xl bg-gradient-to-r border shadow-sm"
                       >
                         <div className={cn("rounded-lg p-1.5", type.bgColor)}>
                           <type.icon className={cn("h-4 w-4", type.color)} />
@@ -811,10 +821,10 @@ const MarketResearch = () => {
                         )}
                       >
                         <div className={cn(
-                          "max-w-[85%] rounded-2xl",
+                          "max-w-[85%] rounded-2xl overflow-hidden shadow-md",
                           msg.role === 'user' 
-                            ? 'bg-primary text-primary-foreground' 
-                            : 'bg-muted/50 border'
+                            ? 'bg-gradient-to-r from-primary to-primary/90 text-primary-foreground' 
+                            : 'bg-gradient-to-r from-muted/80 to-muted/40 border shadow-sm'
                         )}>
                           {msg.role === 'user' ? (
                             <div className="px-4 py-3">
@@ -822,7 +832,7 @@ const MarketResearch = () => {
                                 <User className="h-3 w-3 opacity-70" />
                                 <span className="text-xs opacity-70">You</span>
                                 {msg.researchType && (
-                                  <Badge variant="secondary" className="text-[10px] h-4 bg-primary-foreground/10">
+                                  <Badge variant="secondary" className="text-[10px] h-4 rounded-full bg-primary-foreground/15 border-0">
                                     {RESEARCH_TYPES.find(t => t.value === msg.researchType)?.label}
                                   </Badge>
                                 )}
@@ -845,12 +855,12 @@ const MarketResearch = () => {
                           ) : (
                             <div className="px-5 py-4">
                               <div className="flex items-center gap-2 mb-3">
-                                <div className="rounded-full bg-primary/10 p-1">
+                                <div className="rounded-full bg-primary/20 p-1">
                                   <Bot className="h-3 w-3 text-primary" />
                                 </div>
                                 <span className="text-xs font-medium">Research Assistant</span>
                                 {msg.response?.research_id != null && (
-                                  <Badge variant="outline" className="text-[10px] h-4">
+                                  <Badge variant="outline" className="text-[10px] h-4 rounded-full bg-primary/10 border-primary/20">
                                     ID: {String(msg.response.research_id).slice(0, 6)}
                                   </Badge>
                                 )}
@@ -858,7 +868,7 @@ const MarketResearch = () => {
                               
                               {msg.response?.insights && (
                                 <div
-                                  className="prose prose-sm max-w-none dark:prose-invert"
+                                  className="prose prose-base max-w-none dark:prose-invert [&_h2]:text-primary [&_strong]:font-semibold"
                                   dangerouslySetInnerHTML={{ 
                                     __html: markdownToHtml(msg.response.insights) 
                                   }}
@@ -870,7 +880,7 @@ const MarketResearch = () => {
                                   <motion.div 
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    className="rounded-lg border-l-4 border-l-emerald-500 bg-emerald-500/5 p-3"
+                                    className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 p-3 shadow-sm"
                                   >
                                     <h5 className="flex items-center gap-2 font-semibold text-sm mb-2">
                                       <Lightbulb className="h-4 w-4 text-emerald-500" />
@@ -889,7 +899,7 @@ const MarketResearch = () => {
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: 0.1 }}
-                                    className="rounded-lg border-l-4 border-l-rose-500 bg-rose-500/5 p-3"
+                                    className="rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-500/10 to-rose-500/5 p-3 shadow-sm"
                                   >
                                     <h5 className="flex items-center gap-2 font-semibold text-sm mb-2">
                                       <AlertCircle className="h-4 w-4 text-rose-500" />
@@ -908,7 +918,7 @@ const MarketResearch = () => {
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: 0.2 }}
-                                    className="rounded-lg border-l-4 border-l-blue-500 bg-blue-500/5 p-3"
+                                    className="rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-blue-500/5 p-3 shadow-sm"
                                   >
                                     <h5 className="flex items-center gap-2 font-semibold text-sm mb-2">
                                       <CheckCircle2 className="h-4 w-4 text-blue-500" />
@@ -928,6 +938,23 @@ const MarketResearch = () => {
                       </motion.div>
                     ))}
                   </AnimatePresence>
+                  {loading && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex justify-start"
+                    >
+                      <div className="bg-gradient-to-r from-muted to-muted/50 border rounded-2xl px-4 py-3 flex items-center gap-3 shadow-md">
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        >
+                          <Loader2 className="h-4 w-4 text-primary" />
+                        </motion.div>
+                        <span className="text-sm">Running market research...</span>
+                      </div>
+                    </motion.div>
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               )}
@@ -935,142 +962,216 @@ const MarketResearch = () => {
           </CardContent>
 
           {/* Input form */}
-          <div className="shrink-0 border-t bg-muted/30 p-4">
+          <div className="shrink-0 p-4 rounded-b-2xl">
             <form onSubmit={handleSubmit} className="space-y-3">
               {/* Main input row */}
-              <div className="flex gap-2">
-                <Select value={researchType} onValueChange={setResearchType}>
-                  <SelectTrigger className="w-40 h-10 bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RESEARCH_TYPES.map((t) => {
-                      const Icon = t.icon;
-                      return (
-                        <SelectItem key={t.value} value={t.value}>
-                          <div className="flex items-center gap-2">
-                            <Icon className={cn("h-4 w-4", t.color)} />
-                            <span>{t.label}</span>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
+              <div className="relative">
+                <div
+                  className="absolute inset-0 rounded-[28px] pointer-events-none"
+                  style={{
+                    background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+                  }}
+                />
+                <div
+                  className="relative z-[1] rounded-[28px] px-2.5 py-2.5 space-y-3"
+                  style={{
+                    background: '#0a0a0f',
+                    border: '1.5px solid rgba(255,255,255,0.08)',
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+                  }}
+                >
+                  <div className="flex gap-2.5 items-center">
+                    <Select value={researchType} onValueChange={setResearchType}>
+                      <SelectTrigger
+                        className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
+                        style={{
+                          background: '#111118',
+                          border: '1.5px solid rgba(139, 92, 246, 0.55)',
+                          boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
+                          color: '#e2e2f0',
+                        }}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent
+                        className="rounded-xl"
+                        style={{
+                          background: '#161630',
+                          border: '1px solid rgba(139, 92, 246, 0.25)',
+                          color: '#e2e2f0',
+                        }}
+                      >
+                        {RESEARCH_TYPES.map((t) => {
+                          const Icon = t.icon;
+                          return (
+                            <SelectItem key={t.value} value={t.value} className="rounded-lg focus:bg-violet-600/20 focus:text-white">
+                              <div className="flex items-center gap-2">
+                                <Icon className={cn("h-4 w-4", t.color)} />
+                                <span>{t.label}</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
 
-                <div className="flex-1 relative">
-                  <Input
-                    ref={inputRef}
-                    placeholder="Ask about market trends, competitors, opportunities..."
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    className="h-10 pr-10 bg-background"
-                  />
-                  {topic && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
-                      onClick={() => setTopic('')}
+                    <div
+                      className="flex-1 min-w-0 rounded-full flex items-center overflow-hidden"
+                      style={{
+                        background: '#0e0e14',
+                        boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderLeftColor: 'rgba(139, 92, 246, 0.45)',
+                      }}
                     >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-
-                <Button 
-                  type="submit" 
-                  disabled={loading || !topic.trim()}
-                  className="h-10 px-4 gap-2"
-                >
-                  {loading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                  <span className="hidden sm:inline">Research</span>
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10"
-                  onClick={() => setShowContext(!showContext)}
-                >
-                  <Filter className={cn("h-4 w-4", showContext && "text-primary")} />
-                </Button>
-              </div>
-
-              {/* Context inputs */}
-              <AnimatePresence>
-                {showContext && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="grid grid-cols-3 gap-2 pt-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Competitors</Label>
+                      <div className="flex-1 relative">
                         <Input
-                          placeholder="e.g., Competitor A, B"
-                          value={competitors}
-                          onChange={(e) => setCompetitors(e.target.value)}
-                          className="h-8 text-sm"
+                          ref={inputRef}
+                          placeholder="Ask about market trends, competitors, opportunities..."
+                          value={topic}
+                          onChange={(e) => setTopic(e.target.value)}
+                          className="h-11 pr-10 border-0 bg-transparent rounded-full text-sm text-white placeholder:text-white/30 focus-visible:ring-0 focus-visible:ring-offset-0"
                         />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Industry</Label>
-                        <Input
-                          placeholder="e.g., Technology"
-                          value={industry}
-                          onChange={(e) => setIndustry(e.target.value)}
-                          className="h-8 text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Region</Label>
-                        <Input
-                          placeholder="e.g., North America"
-                          value={geographicRegion}
-                          onChange={(e) => setGeographicRegion(e.target.value)}
-                          className="h-8 text-sm"
-                        />
+                        {topic && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg text-white/70 hover:text-white"
+                            onClick={() => setTopic('')}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </form>
 
-            {/* Quick prompts */}
-            {!selectedChatId && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex flex-wrap gap-2 mt-3"
-              >
-                {[
-                  "AI marketing trends 2024",
-                  "Competitor analysis Amazon",
-                  "Customer behavior e-commerce",
-                  "SaaS market opportunities"
-                ].map((prompt, i) => (
-                  <Button
-                    key={i}
-                    variant="outline"
-                    size="sm"
-                    className="text-xs h-7 bg-background/50"
-                    onClick={() => setTopic(prompt)}
-                  >
-                    {prompt}
-                  </Button>
-                ))}
-              </motion.div>
-            )}
+                    <Button 
+                      type="submit" 
+                      disabled={loading || !topic.trim()}
+                      className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
+                      style={{
+                        background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                        boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                        color: '#ffffff',
+                      }}
+                    >
+                      {loading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-11 w-11 rounded-full border-0 text-white/80 hover:text-white"
+                      style={{
+                        background: '#111118',
+                        border: '1.5px solid rgba(139, 92, 246, 0.30)',
+                        boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
+                      }}
+                      onClick={() => setShowContext(!showContext)}
+                    >
+                      <Filter className={cn("h-4 w-4", showContext ? "text-violet-300" : "text-white/80")} />
+                    </Button>
+                  </div>
+ {/* Context inputs */}
+                  <AnimatePresence>
+                    {showContext && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div
+                          className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 p-2"
+                          // style={{
+                          //   background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.22) 55%, rgba(12,12,18,0.95) 100%)',
+                          //   borderColor: 'rgba(139, 92, 246, 0.22)',
+                          // }}
+                        >
+                          <div className="space-y-1">
+                            <Label className="text-xs text-white/80">Competitors</Label>
+                            <Input
+                              placeholder="e.g., Competitor A, B"
+                              value={competitors}
+                              onChange={(e) => setCompetitors(e.target.value)}
+                              className="h-8 text-sm rounded-lg border-0 bg-[#111118] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              style={{ border: '1px solid rgba(139, 92, 246, 0.22)' }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-white/80">Industry</Label>
+                            <Input
+                              placeholder="e.g., Technology"
+                              value={industry}
+                              onChange={(e) => setIndustry(e.target.value)}
+                              className="h-8 text-sm rounded-lg border-0 bg-[#111118] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              style={{ border: '1px solid rgba(139, 92, 246, 0.22)' }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-white/80">Region</Label>
+                            <Input
+                              placeholder="e.g., North America"
+                              value={geographicRegion}
+                              onChange={(e) => setGeographicRegion(e.target.value)}
+                              className="h-8 text-sm rounded-lg border-0 bg-[#111118] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              style={{ border: '1px solid rgba(139, 92, 246, 0.22)' }}
+                            />
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  {/* Quick prompts */}
+                  {!selectedChatId && (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="pt-1"
+                    >
+                      <div className="w-full flex items-center gap-1 text-xs text-white/80 font-medium mb-2">
+                        <Sparkles className="h-3 w-3" style={{ color: '#a78bfa' }} />
+                        Try these research prompts
+                      </div>
+                      <div className="w-full flex flex-wrap gap-2">
+                      {[
+                        "AI marketing trends 2024",
+                        "Competitor analysis Amazon",
+                        "Customer behavior e-commerce",
+                        "SaaS market opportunities"
+                      ].map((prompt, i) => (
+                        <motion.button
+                          key={i}
+                          type="button"
+                          initial={{ scale: 0.95, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ delay: i * 0.05 }}
+                          whileHover={{ scale: 1.05, y: -2 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="text-xs h-7 rounded-xl px-3 text-left transition-all shadow-sm hover:shadow-md flex items-center text-white/90 border"
+                          style={{
+                            background: 'rgba(255,255,255,0.05)',
+                            borderColor: 'rgba(255,255,255,0.10)',
+                          }}
+                          onClick={() => setTopic(prompt)}
+                        >
+                          {prompt}
+                        </motion.button>
+                      ))}
+                      </div>
+                    </motion.div>
+                  )}
+
+                 
+                </div>
+              </div>
+            </form>
           </div>
         </Card>
       </motion.div>

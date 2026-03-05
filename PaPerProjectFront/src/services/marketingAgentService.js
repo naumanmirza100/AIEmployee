@@ -647,83 +647,75 @@ export const deleteNotification = async (notificationId) => {
   }
 };
 
-// ========== AI Graph Generator APIs ==========
-
-/**
- * Generate a graph/chart from a natural language prompt (marketing data).
- * @param {string} prompt - Natural language description of the desired chart
- */
+// ——— Marketing AI Graph (saved prompts, favorites, dashboard) ———
 export const generateGraph = async (prompt) => {
   try {
     const response = await companyApi.post('/marketing/ai/generate-graph', { prompt });
     return response;
   } catch (error) {
-    console.error('Generate graph error:', error);
+    console.error('Marketing generate graph error:', error);
     throw error;
   }
 };
 
-/** Get all saved graph prompts for the company user */
 export const getSavedGraphPrompts = async () => {
   try {
     const response = await companyApi.get('/marketing/ai/graph-prompts');
     return response;
   } catch (error) {
-    console.error('Get saved prompts error:', error);
+    console.error('Get saved graph prompts error:', error);
     throw error;
   }
 };
 
-/**
- * Save a graph prompt.
- * @param {object} promptData - { title, prompt, tags, chart_type }
- */
 export const saveGraphPrompt = async (promptData) => {
   try {
     const response = await companyApi.post('/marketing/ai/graph-prompts/save', promptData);
     return response;
   } catch (error) {
-    console.error('Save prompt error:', error);
+    console.error('Save graph prompt error:', error);
     throw error;
   }
 };
 
-/** Delete a saved graph prompt */
 export const deleteGraphPrompt = async (promptId) => {
   try {
     const response = await companyApi.delete(`/marketing/ai/graph-prompts/${promptId}/delete`);
     return response;
   } catch (error) {
-    console.error('Delete prompt error:', error);
+    console.error('Delete graph prompt error:', error);
     throw error;
   }
 };
 
-/** Toggle favorite status of a saved prompt */
-export const toggleGraphPromptFavorite = async (promptId, payload) => {
+export const toggleGraphPromptFavorite = async (promptId, isFavorite) => {
   try {
-    const response = await companyApi.patch(`/marketing/ai/graph-prompts/${promptId}/favorite`, payload);
+    const response = await companyApi.patch(`/marketing/ai/graph-prompts/${promptId}/favorite`, {
+      is_favorite: isFavorite,
+    });
     return response;
   } catch (error) {
-    console.error('Toggle favorite error:', error);
+    console.error('Toggle graph prompt favorite error:', error);
     throw error;
   }
 };
 
-/** Toggle dashboard visibility for a saved prompt (add/remove from marketing dashboard cards) */
 export const toggleGraphPromptDashboard = async (promptId) => {
   try {
-    const response = await companyApi.patch(`/marketing/ai/graph-prompts/${promptId}/toggle-dashboard`);
+    const response = await companyApi.patch(`/marketing/ai/graph-prompts/${promptId}/dashboard`, {});
     return response;
   } catch (error) {
-    console.error('Toggle dashboard prompt error:', error);
+    console.error('Toggle graph prompt dashboard error:', error);
     throw error;
   }
 };
 
-/** Helper: true if prompt has dashboard tag */
-export const isGraphPromptOnDashboard = (prompt) =>
-  Array.isArray(prompt?.tags) && prompt.tags.includes('dashboard');
+/** @param {object} prompt - Saved prompt with tags array. Returns true if prompt is on dashboard. */
+export const isGraphPromptOnDashboard = (prompt) => {
+  if (!prompt || !prompt.tags) return false;
+  const tags = Array.isArray(prompt.tags) ? prompt.tags : [];
+  return tags.includes('dashboard');
+};
 
 export default {
   getMarketingDashboard,
