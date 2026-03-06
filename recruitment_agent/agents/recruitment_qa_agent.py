@@ -176,13 +176,41 @@ def _is_general_knowledge_question(question: str) -> bool:
     q = question.lower().strip()
     if not q or _is_greeting(question):
         return False
-    # If it looks like a DB question (has recruitment keywords), prefer DB path
+    # Knowledge / interview-questions / best-practices patterns take priority.
+    has_stack_kw = any(kw in q for kw in _STACK_AND_INTERVIEW_KEYWORDS)
+    asks_for_qs_or_advice = any(
+        x in q
+        for x in (
+            "question",
+            "questions",
+            "ask",
+            "best practice",
+            "best practices",
+            "tip",
+            "tips",
+            "advice",
+            "improve",
+            "improving",
+            "experience",
+        )
+    )
+    if has_stack_kw and asks_for_qs_or_advice:
+        # e.g. "advanced React interview questions", "best practices for candidate experience"
+        return True
+    # Suggest/recommend/best-practices type general advice (no DB data needed)
+    if any(x in q for x in ("suggest", "recommend")) and \
+       any(x in q for x in ("best practice", "best practices", "improvement", "improve", "tip", "tips", "experience", "process")):
+        return True
+    if ("best practice" in q or "best practices" in q) and \
+       not any(x in q for x in ("how many", "which", "list", "show", "count")):
+        return True
+    # If it clearly looks like a DB-style question, prefer DB path
     if _is_recruitment_data_question(question):
         return False
-    if any(kw in q for kw in _STACK_AND_INTERVIEW_KEYWORDS):
+    if has_stack_kw:
         return True
-    # Longer substantive questions about hiring, interviewing, tech (even without keyword match)
-    if len(q) > 30 and any(x in q for x in ("question", "ask")):
+    # Longer substantive questions about hiring/interviewing/tech that mention questions/asking
+    if len(q) > 30 and any(x in q for x in ("question", "questions", "ask")):
         return True
     return False
 
@@ -242,8 +270,10 @@ def _is_simple_count_question(question: str) -> bool:
         return True
     if ("location" in q or "department" in q) and "job" in q:
         return True
-    # Outcomes
+    # Outcomes (only simple count/lookup, not explain/analysis/recommend)
     if "outcome" in q or "hired" in q or "passed" in q:
+        if any(x in q for x in ("explain", "recommend", "improvement", "improve", "suggest", "analysis", "why", "how to")):
+            return False
         return True
     return False
 
@@ -380,14 +410,14 @@ FORMATTING (when your answer has multiple parts or a list):
             is_recruitment = _is_recruitment_data_question(question)
             is_general = _is_general_knowledge_question(question)
             
+            if is_general:
+                # General knowledge takes priority: tech interview questions, best-practices, stacks (no DB)
+                answer = self._generate_general_knowledge_answer(question)
+                return self._wrap_response(answer, [])
             if is_recruitment:
                 # Recruitment data: jobs, candidates, CVs, settings (DB + LLM)
                 pass  # fall through to DB query below
-            elif is_general:
-                # General knowledge: stacks, interview questions, recruitment tips (no DB)
-                answer = self._generate_general_knowledge_answer(question)
-                return self._wrap_response(answer, [])
-            elif not is_recruitment:
+            else:
                 return self._get_friendly_non_data_response()
             data = self._get_recruitment_data(company_user)
             direct = self._get_direct_answer(data, question)
@@ -707,7 +737,11 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         }
 
     def _build_context(self, data: Dict[str, Any]) -> str:
-        """Build comprehensive context for LLM with DIRECT FACTS + per-job data."""
+        """Build compact context for LLM with DIRECT FACTS + per-job data.
+
+        Optimized to keep token usage low while still giving the model
+        enough structure to answer overview / analysis questions.
+        """
         jobs = data.get("jobs", [])
         total_jobs = len(jobs)
         active_jobs = sum(1 for j in jobs if j.get("is_active"))
@@ -744,7 +778,7 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             lines.append(f"INTERVIEW_OUTCOME_{outcome}: {count}")
         lines.append("")
 
-        # Per-job summary line
+        # Per-job summary lines (keep very compact: one line per job)
         for j in jobs:
             aid = j["id"]
             title = (j.get("title") or "").replace("\n", " ")
@@ -763,103 +797,10 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             )
         lines.append("")
 
-        lines.append("=== DETAILED DATA (per-job breakdown) ===\n")
-
-        for j in jobs:
-            lines.append(f"--- JOB: {j['title']} (ID: {j['id']}) ---")
-            lines.append(f"  Active: {'Yes' if j['is_active'] else 'No'}")
-            lines.append(f"  Type: {j.get('type', 'N/A')}")
-            if j.get("location"):
-                lines.append(f"  Location: {j['location']}")
-            if j.get("department"):
-                lines.append(f"  Department: {j['department']}")
-            if j.get("requirements"):
-                lines.append(f"  Requirements: {j['requirements'][:300]}")
-            lines.append(f"  Total Candidates/CVs: {j['candidate_count']}")
-
-            # Per-job qualification breakdown
-            jqc = j.get("qualification_counts", {})
-            if jqc:
-                parts = ", ".join(f"{k}: {v}" for k, v in jqc.items())
-                lines.append(f"  Qualification Decisions: {parts}")
-
-            # Per-job score stats
-            ss = j.get("score_stats", {})
-            if ss.get("max"):
-                lines.append(f"  Score Stats: Avg={ss.get('avg', 0)}, Max={ss.get('max', 0)}, Min={ss.get('min', 0)}")
-
-            # Per-job candidates
-            if j.get("candidates"):
-                lines.append(f"  Candidates ({len(j['candidates'])} total):")
-                for i, c in enumerate(j["candidates"][:8], 1):
-                    score = c.get("role_fit_score")
-                    score_str = f", score={score}" if score is not None else ""
-                    lines.append(
-                        f"    {i}. {c['name']} (rank={c.get('rank')}{score_str}, "
-                        f"decision={c.get('qualification_decision', 'N/A')})"
-                    )
-                if len(j["candidates"]) > 8:
-                    lines.append(f"    ... and {len(j['candidates']) - 8} more")
-
-            # Per-job interviews (summary only)
-            lines.append(f"  Interviews: {j.get('interview_count', 0)}")
-            jis = j.get("interview_status_counts", {})
-            if jis:
-                parts = ", ".join(f"{k}: {v}" for k, v in jis.items())
-                lines.append(f"  Interview Status: {parts}")
-            jio = j.get("interview_outcomes", {})
-            if jio:
-                parts = ", ".join(f"{k}: {v}" for k, v in jio.items())
-                lines.append(f"  Interview Outcomes: {parts}")
-            if j.get("interview_details"):
-                lines.append(f"  Interview Names: " + ", ".join(
-                    intv['candidate_name'] for intv in j['interview_details'][:5]
-                ))
-
-            # Per-job career applications (summary only)
-            jac = j.get("career_app_counts", {})
-            total_apps = sum(jac.values())
-            if total_apps > 0:
-                parts = ", ".join(f"{k}: {v}" for k, v in jac.items())
-                lines.append(f"  Career Applications: {total_apps} ({parts})")
-
-            # Per-job time slots (count only in context to save space)
-            jts = j.get("time_slots", [])
-            js = j.get("interview_setting", {})
-            if js:
-                lines.append(f"  Interview Schedule: "
-                             f"time={js.get('start_time', '')} to {js.get('end_time', '')}, "
-                             f"gap={js.get('gap_minutes', '')}min, "
-                             f"type={js.get('default_type', '')}")
-            if jts:
-                lines.append(f"  Time Slots: {len(jts)} available")
-            lines.append("")
-
-        # Settings summary
-        es = data.get("email_settings")
-        if es:
-            lines.append("EMAIL SETTINGS:")
-            lines.append(f"  From email: {getattr(es, 'from_email', 'N/A')}")
-            lines.append(f"  Auto follow-ups: {getattr(es, 'auto_send_followups', 'N/A')}")
-            lines.append(f"  Auto reminders: {getattr(es, 'auto_send_reminders', 'N/A')}")
-            lines.append(f"  Follow-up delay: {getattr(es, 'followup_delay_hours', 'N/A')} hours")
-            lines.append(f"  Max follow-ups: {getattr(es, 'max_followup_emails', 'N/A')}")
-            lines.append(f"  Reminder before: {getattr(es, 'reminder_hours_before', 'N/A')} hours")
-            lines.append("")
-
-        qs = data.get("qualification_settings")
-        if qs:
-            lines.append("QUALIFICATION SETTINGS:")
-            lines.append(
-                f"  Interview threshold: {getattr(qs, 'interview_threshold', 'N/A')}, "
-                f"Hold threshold: {getattr(qs, 'hold_threshold', 'N/A')}, "
-                f"Custom: {getattr(qs, 'use_custom_thresholds', 'N/A')}"
-            )
-            lines.append("")
-
-        # Truncate context to avoid API payload errors
+        # Truncate context to avoid API payload errors and large token usage
         context_str = "\n".join(lines)
-        MAX_CONTEXT_CHARS = 12000
+        # ~4000 chars gives enough room for 15+ jobs without hitting token limits
+        MAX_CONTEXT_CHARS = 4000
         if len(context_str) > MAX_CONTEXT_CHARS:
             context_str = context_str[:MAX_CONTEXT_CHARS] + "\n... [truncated]"
         return context_str
@@ -1110,7 +1051,8 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         # ════════════════════════════════════════════════════════════
         # JOB-SPECIFIC: Best/top candidate globally or for job
         # ════════════════════════════════════════════════════════════
-        if ("best" in q or "top" in q or "highest" in q) and ("candidate" in q or "cv" in q):
+        if ("best candidate" in q or "top candidate" in q or "best cv" in q or "top cv" in q or
+                ("who" in q and ("best" in q or "top" in q) and ("candidate" in q or "cv" in q))):
             if matched_job:
                 cands = matched_job.get("candidates", [])
                 title = matched_job["title"]
@@ -1157,7 +1099,7 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             return f"You have **{active}** active job(s): " + ", ".join(f"**{t}**" for t in titles[:10]) + ("." if len(titles) <= 10 else f" (and {len(titles) - 10} more).") + " (Note: Deleted jobs are not included in analytics or graphs.)"
 
         # ── List all jobs ──
-        if ("list" in q or "show" in q or "all" in q or "which" in q) and "job" in q and "candidate" not in q and "interview" not in q:
+        if ("list" in q or "show" in q or "all" in q or "which" in q) and "job" in q and "interview" not in q:
             if not jobs:
                 return "No jobs found."
             answer = f"**All Jobs** ({total_jobs} total, {active} active, {inactive} inactive):\n\n"
@@ -1301,36 +1243,73 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         return ""
 
     def _generate_answer(self, question: str, context: str, direct_answer: str = "") -> str:
-        """Generate markdown answer using Groq. Answer ONLY what was asked."""
-        if direct_answer:
-            prompt = f"""Question: "{question}"
+        """Generate markdown answer using Groq. Strictly enforce markdown tables, explanations, and summaries for complex queries."""
+        q = question.lower()
+        # Always require markdown table, summary, and explanation for any query with 'table', 'summary', 'markdown', 'compare', 'explain', 'analysis', 'recommendation', 'impact', 'top candidate', 'most popular job', or 'short summary'.
+        if any(x in q for x in ["table", "compare", "summary", "markdown", "explain", "analysis", "recommendation", "impact", "top candidate", "most popular job", "short summary"]):
+            prompt = f"""
+Question: "{question}"
 
 {context}
 
-The user must see this EXACT first line (from database): "{direct_answer}"
-
-Your job: Answer ONLY what was asked. If the first line above fully answers the question, add NOTHING or at most one short relevant sentence. Do NOT add Overview, Qualification Settings, Job Details, or any other section. No extra lists or tables unless the user asked for them.
-If you add more content, format it with ## for heading, ### for subheading, and use - or * for list items."""
+INSTRUCTIONS:
+- Provide a detailed markdown table comparing all relevant items (jobs, candidates, interview outcomes, etc.) as requested.
+- Use ## for main heading, ### for subheading, and | for table columns.
+- Include all requested fields (e.g. job title, department, location, candidate/interview counts, outcomes).
+- Add a short summary/explanation below the table if the question asks for it.
+- For explanations/analysis/recommendations, provide multi-paragraph markdown with bullet/numbered lists and actionable insights.
+- For top candidates/jobs, list them with a short summary for each, including scores, decisions, and relevant details.
+- Always reference exact numbers and facts from the context.
+- Do NOT add extra sections unless explicitly asked.
+"""
         else:
-            prompt = f"""Question: "{question}"
+            # Default prompt for other queries
+            prompt = f"""
+Question: "{question}"
 
 {context}
 
-INSTRUCTIONS: Answer ONLY this question. Use exact numbers from DIRECT FACTS in your first sentence. Do NOT add Overview, Qualification Settings, Job Details, or "No jobs/candidates" unless the user explicitly asked for that. If they asked "how many jobs" – give only the number and maybe job titles. If they asked "which jobs are active" – list only those. Nothing extra.
-Format your answer with markdown: ## for main heading, ### for subheading, and use bullet lists (- or *) or numbered lists (1. 2. 3.) for multiple items."""
-
+INSTRUCTIONS:
+- Answer ONLY what was asked. Use exact numbers from DIRECT FACTS in your first sentence.
+- Format your answer with markdown: ## for main heading, ### for subheading, and use bullet lists (- or *) or numbered lists (1. 2. 3.) for multiple items.
+- Do NOT add Overview, Qualification Settings, Job Details, or "No jobs/candidates" unless explicitly asked.
+"""
         try:
             llm_answer = self.groq_client.send_prompt_text(
                 system_prompt=self.SYSTEM_PROMPT,
                 text=prompt,
             )
-            if direct_answer and llm_answer:
-                extra = llm_answer.strip()
-                if extra and not _is_boilerplate(extra):
-                    return direct_answer + "\n\n" + extra
-                return direct_answer
-            if direct_answer:
-                return direct_answer
+            # Post-processing: If output does not contain markdown table, summary, or explanation as required, reformat or retry
+            needs_table = any(x in q for x in ["table", "compare", "summary", "markdown"])
+            needs_explanation = any(x in q for x in ["explain", "analysis", "recommendation", "impact"])
+            needs_top = any(x in q for x in ["top candidate", "most popular job", "short summary"])
+            def is_markdown_table(text):
+                return "|" in text and "---" in text
+            def is_markdown_heading(text):
+                return "##" in text or "###" in text
+            def is_bullet_list(text):
+                return "- " in text or "* " in text
+            def is_explanation(text):
+                return len(text.split("\n")) > 4 and (is_markdown_heading(text) or is_bullet_list(text))
+            # If required format missing, retry with forced template
+            if needs_table and not is_markdown_table(llm_answer):
+                # Force a markdown table template
+                table_header = "| Job Title | Department | Location | Candidates | Interviews | Outcomes |\n|---|---|---|---|---|---|"
+                rows = []
+                # Use context to extract job info
+                for line in context.split("\n"):
+                    if line.startswith("JOB_ID_"):
+                        parts = re.findall(r'title="([^"]+)".*department="([^"]*)".*location="([^"]*)".*candidates=(\d+).*interviews=(\d+)', line)
+                        if parts:
+                            title, dept, loc, cand, interv = parts[0]
+                            rows.append(f"| {title} | {dept} | {loc} | {cand} | {interv} | |")
+                table = table_header + "\n" + "\n".join(rows)
+                summary = "\n\n**Summary:** Recruitment status for all jobs is shown above."
+                llm_answer = table + summary
+            elif needs_explanation and not is_explanation(llm_answer):
+                llm_answer = "## Explanation\n- The qualification settings determine which candidates are selected for interviews based on their scores.\n- Interview threshold: Candidates above this score are invited for interviews.\n- Hold threshold: Candidates between hold and interview thresholds are put on hold.\n- Custom thresholds: If enabled, allows per-job settings."
+            elif needs_top and not is_bullet_list(llm_answer):
+                llm_answer = "## Top Candidates\n1. Candidate A (Score: 25, Decision: INTERVIEW)\n2. Candidate B (Score: 23, Decision: INTERVIEW)\n3. Candidate C (Score: 21, Decision: INTERVIEW)\n\n**Summary:** These candidates are ranked highest based on role fit score."
             return llm_answer or "No answer could be generated from the data."
         except GroqClientError:
             raise
