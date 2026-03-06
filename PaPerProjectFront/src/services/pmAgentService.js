@@ -118,6 +118,24 @@ export const deleteProjectPilotChat = async (chatId) => {
 };
 
 /**
+ * Generate a graph/chart from a natural language prompt (Project Manager)
+ * @param {string} prompt
+ * @param {number|null} projectId
+ */
+export const generateGraph = async (prompt, projectId = null) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/generate-graph', {
+      prompt: (prompt || '').trim(),
+      project_id: projectId || null,
+    });
+    return response;
+  } catch (error) {
+    console.error('PM generate graph error:', error);
+    throw error;
+  }
+};
+
+/**
  * Timeline/Gantt Agent
  * @param {string} action - 'create_timeline' | 'generate_gantt_chart' | 'check_deadlines' | 'suggest_adjustments' | 'calculate_duration' | 'manage_phases'
  * @param {number} projectId - Required project ID
@@ -206,6 +224,7 @@ export default {
   projectPilotFromFile,
   taskPrioritization,
   knowledgeQA,
+  generateGraph,
   listKnowledgeQAChats,
   createKnowledgeQAChat,
   updateKnowledgeQAChat,

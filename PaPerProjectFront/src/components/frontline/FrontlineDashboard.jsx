@@ -57,9 +57,12 @@ import {
   Sparkles,
   ThumbsUp,
   ThumbsDown,
+  Bot,
+  Maximize2,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
+import { renderChart } from '../recruitment/ChartRenderer';
 import {
   BarChart,
   Bar,
@@ -1365,6 +1368,30 @@ const FrontlineDashboard = () => {
   const [question, setQuestion] = useState('');
   const [answering, setAnswering] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
+
+  const INPUT_MODE_OPTIONS = [
+    {
+      value: 'search',
+      label: 'Search',
+      placeholder: 'Ask a question...',
+      icon: Search,
+    },
+    {
+      value: 'graph',
+      label: 'Graph',
+      placeholder: 'Describe the support graph you want to generate…',
+      icon: BarChart3,
+    },
+  ];
+
+  const [inputMode, setInputMode] = useState('search');
+  const [expandedGraph, setExpandedGraph] = useState(null); // { chart, chartTitle }
+  const selectedMode = INPUT_MODE_OPTIONS.find((m) => m.value === inputMode) || INPUT_MODE_OPTIONS[0];
+  const SelectedModeIcon = selectedMode.icon;
+
+  const [showSidebarSearch, setShowSidebarSearch] = useState(false);
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const [showChatHistory, setShowChatHistory] = useState(true);
   const messagesEndRef = useRef(null);
   // Q&A scope: restrict answers to document type(s) or specific documents
   const [qaScopeMode, setQaScopeMode] = useState('all'); // 'all' | 'type' | 'documents'
@@ -1679,42 +1706,60 @@ const FrontlineDashboard = () => {
     if (qaScopeMode === 'documents' && qaScopeDocumentIds.length > 0) scopeOptions.scope_document_ids = qaScopeDocumentIds;
     try {
       setAnswering(true);
-      const response = await frontlineAgentService.knowledgeQA(q, scopeOptions);
-      if (response.status === 'success' && response.data) {
-        const data = response.data;
-        const answerText = data.answer || 'No answer available.';
-        const userMsg = { role: 'user', content: q };
-        const assistantMsg = {
-          role: 'assistant',
-          content: answerText,
-          responseData: {
-            answer: answerText,
-            has_verified_info: data.has_verified_info || false,
-            source: data.source || 'Knowledge Base',
-            type: data.type || 'general',
-            document_id: data.document_id ?? null,
-          },
-        };
-        const title = q.slice(0, 40);
-        if (selectedChatId) {
-          const existing = chats.find((c) => c.id === selectedChatId);
-          if (existing) {
-            const updRes = await frontlineAgentService.updateQAChat(selectedChatId, {
-              messages: [userMsg, assistantMsg],
-              title: existing.title || title,
-            });
-            if (updRes.status === 'success' && updRes.data) {
-              const updatedChat = normalizeChat(updRes.data);
-              setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
-            } else throw new Error(updRes.message || 'Failed to save chat');
-          } else {
-            const createRes = await frontlineAgentService.createQAChat({ title, messages: [userMsg, assistantMsg] });
-            if (createRes.status === 'success' && createRes.data) {
-              const newChatData = normalizeChat(createRes.data);
-              setChats((prev) => [newChatData, ...prev]);
-              setSelectedChatId(newChatData.id);
-            } else throw new Error(createRes.message || 'Failed to create chat');
-          }
+      const userMsg = { role: 'user', content: q };
+      let assistantMsg;
+
+      if (inputMode === 'graph') {
+        const graphRes = await frontlineAgentService.generateFrontlineGraph(q);
+        if (graphRes.status === 'success' && graphRes.data) {
+          const { chart, insights } = graphRes.data;
+          assistantMsg = {
+            role: 'assistant',
+            content: chart?.title ? `**${chart.title}**` : 'Chart generated',
+            responseData: {
+              isGraph: true,
+              chart,
+              insights,
+              chartTitle: chart?.title,
+              chartType: chart?.type,
+            },
+          };
+        } else {
+          throw new Error(graphRes.message || 'Failed to generate graph');
+        }
+      } else {
+        const response = await frontlineAgentService.knowledgeQA(q, scopeOptions);
+        if (response.status === 'success' && response.data) {
+          const data = response.data;
+          const answerText = data.answer || 'No answer available.';
+          assistantMsg = {
+            role: 'assistant',
+            content: answerText,
+            responseData: {
+              answer: answerText,
+              has_verified_info: data.has_verified_info || false,
+              source: data.source || 'Knowledge Base',
+              type: data.type || 'general',
+              document_id: data.document_id ?? null,
+            },
+          };
+        } else {
+          throw new Error(response.message || 'Failed to get response');
+        }
+      }
+
+      const title = q.slice(0, 40);
+      if (selectedChatId) {
+        const existing = chats.find((c) => c.id === selectedChatId);
+        if (existing) {
+          const updRes = await frontlineAgentService.updateQAChat(selectedChatId, {
+            messages: [userMsg, assistantMsg],
+            title: existing.title || title,
+          });
+          if (updRes.status === 'success' && updRes.data) {
+            const updatedChat = normalizeChat(updRes.data);
+            setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
+          } else throw new Error(updRes.message || 'Failed to save chat');
         } else {
           const createRes = await frontlineAgentService.createQAChat({ title, messages: [userMsg, assistantMsg] });
           if (createRes.status === 'success' && createRes.data) {
@@ -1723,11 +1768,16 @@ const FrontlineDashboard = () => {
             setSelectedChatId(newChatData.id);
           } else throw new Error(createRes.message || 'Failed to create chat');
         }
-        setQuestion('');
-        setTimeout(scrollToBottom, 100);
       } else {
-        throw new Error(response.message || 'Failed to get response');
+        const createRes = await frontlineAgentService.createQAChat({ title, messages: [userMsg, assistantMsg] });
+        if (createRes.status === 'success' && createRes.data) {
+          const newChatData = normalizeChat(createRes.data);
+          setChats((prev) => [newChatData, ...prev]);
+          setSelectedChatId(newChatData.id);
+        } else throw new Error(createRes.message || 'Failed to create chat');
       }
+      setQuestion('');
+      setTimeout(scrollToBottom, 100);
     } catch (error) {
       toast({ title: 'Error', description: error.message || 'Failed to get answer', variant: 'destructive' });
     } finally {
@@ -1995,69 +2045,274 @@ const FrontlineDashboard = () => {
 
         {/* Knowledge Q&A Tab - Chat UI with sidebar */}
         <TabsContent value="qa" className="space-y-4 mt-4">
-          <div className="flex flex-col lg:flex-row gap-4 w-full max-w-full min-w-0">
-            {/* Sidebar - Previous chats (full width on mobile, sidebar on lg+) */}
-            <div className="w-full lg:w-64 shrink-0 rounded-lg border bg-card min-w-0">
-              <div className="p-3 border-b flex items-center justify-between shrink-0">
-                <span className="text-sm font-semibold">Previous conversations</span>
-                <Button variant="ghost" size="icon" onClick={newChat} title="New chat">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="overflow-y-auto overflow-x-hidden max-h-[min(60vh,420px)]">
-                {loadingChats ? (
-                  <div className="p-4 flex justify-center">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : chats.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
-                ) : (
-                  <div className="p-2 space-y-1">
-                    {chats.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`flex items-center gap-1 rounded-lg text-sm transition-colors ${
-                          selectedChatId === c.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
-                        }`}
+          <div
+            className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
+            style={{
+              background:
+                'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+            }}
+          >
+            <div className="flex w-full max-w-full relative">
+              <div
+                className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+                  showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
+                }`}
+                style={{
+                  minWidth: showChatHistory ? '16rem' : '0',
+                  background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
+                  borderRight: '1.5px solid rgba(255,255,255,0.10)',
+                  boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+                  borderTopLeftRadius: 16,
+                  borderBottomLeftRadius: 16,
+                  backdropFilter: 'blur(12px)',
+                  WebkitBackdropFilter: 'blur(12px)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div className="w-64">
+                  <div
+                    className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2"
+                    style={{
+                      background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)',
+                      borderTopLeftRadius: 16,
+                    }}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-base font-semibold text-white/90 tracking-wide">Frontline</span>
+                      <button
+                        onClick={() => setShowChatHistory(false)}
+                        title="Close sidebar"
+                        className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150"
+                        style={{ boxShadow: '0 0 0 2px rgba(139,92,246,0.10) inset' }}
                       >
-                        <button
-                          type="button"
-                          onClick={() => setSelectedChatId(c.id)}
-                          className="flex-1 min-w-0 text-left p-3 rounded-lg"
-                        >
-                          <div className="font-medium truncate">{truncate(c.title || (c.messages?.[0]?.content) || 'Chat', 40)}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">{formatDate(c.updatedAt || c.timestamp)}</div>
-                        </button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                          onClick={(e) => deleteChat(e, c.id)}
-                          title="Delete chat"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+                        <ChevronLeft className="h-4 w-4 text-white/80" />
+                      </button>
+                    </div>
 
-            {/* Main chat area */}
-            <Card className="flex-1 min-w-0">
-              <CardHeader className="shrink-0">
-                <CardTitle className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  Knowledge Q&A
-                </CardTitle>
-                <CardDescription>
-                  Ask questions and get answers from your knowledge base and uploaded documents. Previous conversations are shown in the sidebar.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0 flex flex-col min-h-0">
-                <div className="px-4 pb-4 space-y-4 overflow-y-auto overflow-x-hidden max-h-[min(55vh,480px)] min-h-0">
+                    {showSidebarSearch ? (
+                      <div
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
+                        style={{
+                          border: '1.5px solid rgba(139,92,246,0.22)',
+                          background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                          boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
+                          backdropFilter: 'blur(4px)',
+                          WebkitBackdropFilter: 'blur(4px)',
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={sidebarSearch}
+                          onChange={(e) => setSidebarSearch(e.target.value)}
+                          placeholder="Search conversations..."
+                          className="flex-1 bg-transparent outline-none border-0 text-white/90 text-sm px-2 py-1.5 placeholder-white/40"
+                          style={{ minWidth: 0 }}
+                        />
+                        <button
+                          title="Close search"
+                          onClick={() => {
+                            setSidebarSearch('');
+                            setShowSidebarSearch(false);
+                          }}
+                          className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="text-white/70"
+                          >
+                            <line x1="4" y1="4" x2="12" y2="12" />
+                            <line x1="12" y1="4" x2="4" y2="12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
+                        style={{
+                          border: '1.5px solid rgba(139,92,246,0.22)',
+                          background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                          boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
+                          backdropFilter: 'blur(4px)',
+                          WebkitBackdropFilter: 'blur(4px)',
+                        }}
+                      >
+                        <span className="text-sm font-medium text-white/80 flex-1">Conversation</span>
+                        <button
+                          title="Search"
+                          onClick={() => setShowSidebarSearch(true)}
+                          className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="text-white/70"
+                          >
+                            <circle cx="7" cy="7" r="5" />
+                            <line x1="15" y1="15" x2="11" y2="11" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={newChat}
+                          title="New chat"
+                          className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
+                        >
+                          <Plus className="h-4 w-4 text-white/80" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    {loadingChats ? (
+                      <div className="p-4 flex justify-center">
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : chats.length === 0 ? (
+                      <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
+                    ) : (
+                      <div
+                        className="p-2 space-y-1"
+                        style={{
+                          background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)',
+                          borderRadius: 12,
+                        }}
+                      >
+                        {(() => {
+                          const searchTerm = sidebarSearch.trim().toLowerCase();
+                          const filteredChats = searchTerm
+                            ? chats.filter((c) => {
+                                const title = (c.title || c.messages?.[0]?.content || '').toLowerCase();
+                                const messagesMatch = (c.messages || []).some((m) => (m.content || '').toLowerCase().includes(searchTerm));
+                                return title.includes(searchTerm) || messagesMatch;
+                              })
+                            : chats;
+
+                          if (searchTerm && filteredChats.length === 0) {
+                            return <div className="p-4 text-center text-sm text-muted-foreground">No matching conversations found.</div>;
+                          }
+
+                          return filteredChats.map((c) => (
+                            <div
+                              key={c.id}
+                              className={`flex items-center gap-1 rounded-lg border text-sm transition-all duration-200 ${
+                                selectedChatId === c.id
+                                  ? 'border-violet-500/60 bg-gradient-to-r from-violet-900/40 to-violet-700/20 shadow-[0_0_12px_rgba(139,92,246,0.18)]'
+                                  : 'border-white/10 bg-white/2 hover:bg-white/5 hover:border-violet-400/20'
+                              }`}
+                              style={{
+                                boxShadow:
+                                  selectedChatId === c.id
+                                    ? '0 0 12px 0 rgba(139,92,246,0.18), 0 1.5px 0 0 rgba(120,80,255,0.10) inset'
+                                    : '0 1px 2px 0 rgba(36,18,54,0.08) inset',
+                                borderWidth: 1.5,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setSelectedChatId(c.id)}
+                                className="flex-1 min-w-0 text-left p-3 rounded-lg"
+                              >
+                                <div className={`font-medium truncate ${selectedChatId === c.id ? 'text-violet-300' : ''}`}>
+                                  {truncate(c.title || c.messages?.[0]?.content || 'Chat', 40)}
+                                </div>
+                                <div className={`text-xs mt-0.5 ${selectedChatId === c.id ? 'text-violet-400/70' : 'text-muted-foreground'}`}>
+                                  {formatDate(c.updatedAt || c.timestamp)}
+                                </div>
+                              </button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                                onClick={(e) => deleteChat(e, c.id)}
+                                title="Delete chat"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <Card className="flex-1 min-w-0 flex flex-col max-h-[calc(100vh-40px)] border-0 shadow-none" style={{ background: 'transparent' }}>
+                <CardHeader
+                  className="shrink-0 flex flex-row items-start justify-between gap-3 border-b border-white/[0.07] px-0 py-4"
+                  style={{ background: 'transparent' }}
+                >
+                  <div className="flex items-center gap-3 min-w-0 w-full">
+                    <div
+                      style={{
+                        width: '7px',
+                        height: '48px',
+                        borderRadius: '8px',
+                        background: 'linear-gradient(to bottom, #a259ff 0%, #6a1b9a 60%, #18122B 100%)',
+                        marginLeft: '24px',
+                        marginRight: '18px',
+                        boxShadow: '0 0 8px 2px #a259ff44',
+                      }}
+                    />
+                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(124, 58, 237, 0.15)' }}>
+                      <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
+                        Knowledge Q&A
+                        <span
+                          className="text-[10px] rounded-full px-2.5 py-0.5 font-medium"
+                          style={{ background: 'rgba(124, 58, 237, 0.15)', color: '#a78bfa' }}
+                        >
+                          AI-Powered
+                        </span>
+                      </CardTitle>
+                      <CardDescription className="text-white/50 text-sm mt-0.5">
+                        Ask questions and get answers from your knowledge base and uploaded documents.
+                      </CardDescription>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant={showChatHistory ? 'ghost' : 'outline'}
+                    size="sm"
+                    onClick={() => setShowChatHistory((v) => !v)}
+                    title={showChatHistory ? 'Hide chat history' : 'Show chat history'}
+                    className={`gap-1.5 transition-all duration-200 ${
+                      !showChatHistory
+                        ? 'bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary'
+                        : 'hover:bg-muted'
+                    }`}
+                    style={{ marginRight: '24px' }}
+                  >
+                    {showChatHistory ? (
+                      <>
+                        <ChevronLeft className="h-4 w-4" />
+                        <span className="text-xs hidden sm:inline">Hide</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronRight className="h-4 w-4" />
+                        <span className="text-xs hidden sm:inline">History</span>
+                      </>
+                    )}
+                  </Button>
+                </CardHeader>
+
+                <CardContent className="p-0 flex flex-col flex-1 min-h-0">
+                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
                   {!selectedChatId && chats.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                       <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
@@ -2089,6 +2344,34 @@ const FrontlineDashboard = () => {
                       >
                         {msg.role === 'user' ? (
                           <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        ) : msg.responseData?.isGraph ? (
+                          <>
+                            <div className="space-y-3">
+                              {msg.responseData.chart && (
+                                <div className="relative w-full rounded-xl border border-border bg-card p-2 shadow-sm">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute top-1.5 right-1.5 h-7 w-7 rounded-md opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground"
+                                    onClick={() => setExpandedGraph({ chart: msg.responseData.chart, chartTitle: msg.responseData.chartTitle })}
+                                    title="Expand graph"
+                                  >
+                                    <Maximize2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <div className="pr-8 w-full min-w-0">
+                                    {renderChart(msg.responseData.chart)}
+                                  </div>
+                                </div>
+                              )}
+                              {msg.responseData?.insights && (
+                                <div className="pt-2 border-t border-border/50">
+                                  <p className="text-xs font-semibold mb-2">Insights</p>
+                                  <p className="text-xs text-muted-foreground whitespace-pre-wrap">{msg.responseData.insights}</p>
+                                </div>
+                              )}
+                            </div>
+                          </>
                         ) : (
                           <>
                             <div className="flex items-start gap-2">
@@ -2190,104 +2473,181 @@ const FrontlineDashboard = () => {
                     </div>
                   )}
                   <div ref={messagesEndRef} />
-                </div>
+                  </div>
 
-                <form onSubmit={handleAskQuestion} className="shrink-0 border-t p-4 space-y-3 bg-muted/30">
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm text-muted-foreground">Answer from:</span>
-                      <Select value={qaScopeMode} onValueChange={(v) => { setQaScopeMode(v); if (v !== 'type') setQaScopeDocumentTypes([]); if (v !== 'documents') setQaScopeDocumentIds([]); }}>
-                        <SelectTrigger className="w-[180px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All documents</SelectItem>
-                          <SelectItem value="type">By document type</SelectItem>
-                          <SelectItem value="documents">Specific documents</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {qaScopeMode === 'type' && (
+                  <form
+                    onSubmit={handleAskQuestion}
+                    className="shrink-0"
+                    style={{
+                      background: '#0a0a0f',
+                      borderTop: '1px solid rgba(255,255,255,0.08)',
+                    }}
+                  >
+                    <div className="mx-4 my-4 space-y-3 rounded-2xl px-4 py-4" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          {DOCUMENT_TYPE_OPTIONS.map((opt) => (
-                            <label key={opt.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                              <Checkbox
-                                checked={qaScopeDocumentTypes.includes(opt.value)}
-                                onCheckedChange={(checked) => {
-                                  setQaScopeDocumentTypes((prev) =>
-                                    checked ? [...prev, opt.value] : prev.filter((t) => t !== opt.value)
-                                  );
-                                }}
-                              />
-                              <span>{opt.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                      {qaScopeMode === 'documents' && (
-                        <Select
-                          value="_add"
-                          onValueChange={(v) => {
-                            if (v === '_add' || v === '_none') return;
-                            const id = Number(v);
-                            if (!qaScopeDocumentIds.includes(id)) setQaScopeDocumentIds((prev) => [...prev, id]);
-                          }}
-                        >
-                          <SelectTrigger className="w-[220px] h-8">
-                            <SelectValue placeholder={qaDocumentsLoading ? 'Loading...' : (qaScopeDocumentIds.length ? 'Add another document...' : 'Add document...')} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="_add">Add document...</SelectItem>
-                            {!qaDocumentsLoading && qaDocumentsList
-                              .filter((d) => !qaScopeDocumentIds.includes(d.id))
-                              .map((d) => (
-                                <SelectItem key={d.id} value={String(d.id)}>{d.title || `Document ${d.id}`}</SelectItem>
+                          <span className="text-sm text-muted-foreground">Answer from:</span>
+                          <Select
+                            value={qaScopeMode}
+                            onValueChange={(v) => {
+                              setQaScopeMode(v);
+                              if (v !== 'type') setQaScopeDocumentTypes([]);
+                              if (v !== 'documents') setQaScopeDocumentIds([]);
+                            }}
+                          >
+                            <SelectTrigger className="w-[180px] h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All documents</SelectItem>
+                              <SelectItem value="type">By document type</SelectItem>
+                              <SelectItem value="documents">Specific documents</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          {qaScopeMode === 'type' && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {DOCUMENT_TYPE_OPTIONS.map((opt) => (
+                                <label key={opt.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                                  <Checkbox
+                                    checked={qaScopeDocumentTypes.includes(opt.value)}
+                                    onCheckedChange={(checked) => {
+                                      setQaScopeDocumentTypes((prev) =>
+                                        checked ? [...prev, opt.value] : prev.filter((t) => t !== opt.value)
+                                      );
+                                    }}
+                                  />
+                                  <span>{opt.label}</span>
+                                </label>
                               ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                    {qaScopeMode === 'documents' && qaScopeDocumentIds.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {qaScopeDocumentIds.map((id) => {
-                          const doc = qaDocumentsList.find((d) => d.id === id);
-                          return (
-                            <Badge key={id} variant="secondary" className="gap-1 pr-1">
-                              {doc?.title || `Doc ${id}`}
-                              <button
-                                type="button"
-                                onClick={() => setQaScopeDocumentIds((prev) => prev.filter((x) => x !== id))}
-                                className="rounded-full hover:bg-muted-foreground/20 p-0.5"
-                                aria-label="Remove"
-                              >
-                                <XCircle className="h-3.5 w-3.5" />
-                              </button>
-                            </Badge>
-                          );
-                        })}
+                            </div>
+                          )}
+
+                          {qaScopeMode === 'documents' && (
+                            <Select
+                              value="_add"
+                              onValueChange={(v) => {
+                                if (v === '_add' || v === '_none') return;
+                                const id = Number(v);
+                                if (!qaScopeDocumentIds.includes(id)) setQaScopeDocumentIds((prev) => [...prev, id]);
+                              }}
+                            >
+                              <SelectTrigger className="w-[220px] h-8">
+                                <SelectValue
+                                  placeholder={qaDocumentsLoading
+                                    ? 'Loading...'
+                                    : qaScopeDocumentIds.length
+                                      ? 'Add another document...'
+                                      : 'Add document...'
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="_add">Add document...</SelectItem>
+                                {!qaDocumentsLoading &&
+                                  qaDocumentsList
+                                    .filter((d) => !qaScopeDocumentIds.includes(d.id))
+                                    .map((d) => (
+                                      <SelectItem key={d.id} value={String(d.id)}>
+                                        {d.title || `Document ${d.id}`}
+                                      </SelectItem>
+                                    ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm text-muted-foreground">Mode:</span>
+                          <Select value={inputMode} onValueChange={setInputMode}>
+                            <SelectTrigger className="w-[180px] h-8">
+                              <div className="flex items-center gap-2">
+                                <SelectedModeIcon className="h-4 w-4" />
+                                <SelectValue placeholder="Search" />
+                              </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {INPUT_MODE_OPTIONS.map((mode) => {
+                                const ModeIcon = mode.icon;
+                                return (
+                                  <SelectItem key={mode.value} value={mode.value}>
+                                    <div className="flex items-center gap-2">
+                                      <ModeIcon className="h-4 w-4" />
+                                      <span>{mode.label}</span>
+                                    </div>
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {qaScopeMode === 'documents' && qaScopeDocumentIds.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {qaScopeDocumentIds.map((id) => {
+                              const doc = qaDocumentsList.find((d) => d.id === id);
+                              return (
+                                <Badge key={id} variant="secondary" className="gap-2">
+                                  <span className="truncate max-w-[220px]">{doc?.title || `Document ${id}`}</span>
+                                  <button
+                                    type="button"
+                                    className="opacity-70 hover:opacity-100"
+                                    onClick={() => setQaScopeDocumentIds((prev) => prev.filter((x) => x !== id))}
+                                    title="Remove"
+                                  >
+                                    ×
+                                  </button>
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <Textarea
-                      placeholder="Ask a question from your knowledge base..."
-                      value={question}
-                      onChange={(e) => setQuestion(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAskQuestion(e); } }}
-                      rows={2}
-                      disabled={answering}
-                      className="min-h-[60px] resize-none min-w-0"
-                    />
-                    <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0 self-end sm:self-auto">
-                      {answering ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-                    </Button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
+
+                      <div className="flex gap-2">
+                        <Textarea
+                          placeholder={selectedMode.placeholder}
+                          value={question}
+                          onChange={(e) => setQuestion(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleAskQuestion(e);
+                            }
+                          }}
+                          rows={2}
+                          disabled={answering}
+                          className="min-h-[60px] resize-none flex-1"
+                          style={{
+                            background: '#0e0e14',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            color: '#e2e2f0',
+                          }}
+                        />
+                        <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0">
+                          {answering ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+                        </Button>
+                      </div>
+                    </div>
+                  </form>
+
+                  <Dialog open={!!expandedGraph} onOpenChange={(open) => !open && setExpandedGraph(null)}>
+                    <DialogContent className="max-w-[95vw] w-full max-h-[90vh] overflow-auto">
+                      <DialogHeader className="shrink-0">
+                        <DialogTitle>{expandedGraph?.chartTitle || 'Graph'}</DialogTitle>
+                      </DialogHeader>
+                      <div className="min-h-[400px] py-4">
+                        {expandedGraph?.chart && renderChart(expandedGraph.chart)}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </TabsContent>
 
-        {/* Chat widget & web form Tab */}
+        {/* Chat widget tab */}
         <TabsContent value="widget" className="space-y-4 mt-4">
           <Card className="w-full min-w-0">
             <CardHeader>

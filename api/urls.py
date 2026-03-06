@@ -185,6 +185,7 @@ urlpatterns = [
     re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),
     re_path(r'^project-manager/ai/timeline-gantt/?$', pm_agent.timeline_gantt, name='pm_timeline_gantt'),
     re_path(r'^project-manager/ai/knowledge-qa/?$', pm_agent.knowledge_qa, name='pm_knowledge_qa'),
+    re_path(r'^project-manager/ai/generate-graph/?$', pm_agent.pm_generate_graph, name='pm_generate_graph'),
     re_path(r'^project-manager/ai/knowledge-qa/chats/?$', pm_agent.list_knowledge_qa_chats, name='pm_knowledge_qa_chats_list'),
     re_path(r'^project-manager/ai/knowledge-qa/chats/create/?$', pm_agent.create_knowledge_qa_chat, name='pm_knowledge_qa_chats_create'),
     re_path(r'^project-manager/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_knowledge_qa_chat, name='pm_knowledge_qa_chats_update'),
