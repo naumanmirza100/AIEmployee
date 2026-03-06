@@ -486,75 +486,15 @@ class MarketingQAAgent(MarketingBaseAgent):
         if not campaigns:
             return self._ok("You have **0** campaigns.", question)
 
-        # Average emails sent per campaign
-        # Handles queries like:
-        # - "average emails sent"
-        # - "avg number of emails sent per campaign"
-        if ('average' in q or 'avg' in q) and ('email' in q and 'sent' in q):
-            sent_values = []
-            for c in campaigns:
-                try:
-                    sent_values.append(int(c.get('emails_sent') or 0))
-                except Exception:
-                    sent_values.append(0)
-            total_sent = sum(sent_values)
-            avg_sent = (total_sent / len(campaigns)) if campaigns else 0.0
-            answer = (
-                f"Average emails sent per campaign: **{avg_sent:.2f}** "
-                f"(total_sent={total_sent}, campaigns={len(campaigns)})."
-            )
-            return self._ok(answer, question, marketing_data)
-
-        # Average open rate per campaign
-        if ('average' in q or 'avg' in q) and ('open' in q and 'rate' in q):
-            rates = []
-            for c in campaigns:
-                try:
-                    val = float(c.get('open_rate') or 0)
-                    if val >= 0:
-                        rates.append(val)
-                except Exception:
-                    pass
-            avg_rate = (sum(rates) / len(rates)) if rates else 0.0
-            answer = (
-                f"Average open rate per campaign: **{avg_rate:.2f}%** "
-                f"(from {len(rates)} campaigns with data)."
-            )
-            return self._ok(answer, question, marketing_data)
-
-        # Average click rate per campaign
-        if ('average' in q or 'avg' in q) and ('click' in q and 'rate' in q):
-            rates = []
-            for c in campaigns:
-                try:
-                    val = float(c.get('click_rate') or 0)
-                    if val >= 0:
-                        rates.append(val)
-                except Exception:
-                    pass
-            avg_rate = (sum(rates) / len(rates)) if rates else 0.0
-            answer = (
-                f"Average click rate per campaign: **{avg_rate:.2f}%** "
-                f"(from {len(rates)} campaigns with data)."
-            )
-            return self._ok(answer, question, marketing_data)
-
-        # Average reply rate per campaign
-        if ('average' in q or 'avg' in q) and ('reply' in q and 'rate' in q):
-            rates = []
-            for c in campaigns:
-                try:
-                    val = float(c.get('reply_rate') or 0)
-                    if val >= 0:
-                        rates.append(val)
-                except Exception:
-                    pass
-            avg_rate = (sum(rates) / len(rates)) if rates else 0.0
-            answer = (
-                f"Average reply rate per campaign: **{avg_rate:.2f}%** "
-                f"(from {len(rates)} campaigns with data)."
-            )
-            return self._ok(answer, question, marketing_data)
+        # ── Generic average handler ───────────────────────────
+        # Works for ANY numeric field: open rate, click rate, reply rate,
+        # bounce rate, emails sent/opened/clicked/replied/bounced/failed,
+        # leads count, conversion progress, leads progress, etc.
+        # Only counts campaigns where the field has actual data (not None).
+        if 'average' in q or 'avg' in q:
+            result = self._compute_avg(q, campaigns)
+            if result:
+                return self._ok(result, question, marketing_data)
 
         # Best performing
         # Accept common variants like:
@@ -627,6 +567,59 @@ class MarketingQAAgent(MarketingBaseAgent):
             'question': question,
         }
 
+    # ── Generic average calculator ────────────────────────────
+    # Maps question keywords → campaign dict field key + display info.
+    # To support a new field, just add a row to _AVG_FIELD_MAP.
+    _AVG_FIELD_MAP = [
+        # (keywords_required,          field_key,             label,                        is_pct)
+        (('open', 'rate'),             'open_rate',           'open rate',                   True),
+        (('click', 'rate'),            'click_rate',          'click rate',                  True),
+        (('reply', 'rate'),            'reply_rate',          'reply rate',                  True),
+        (('bounce', 'rate'),           'bounce_rate',         'bounce rate',                 True),
+        (('conversion', 'progress'),   'conversion_progress', 'conversion progress',         True),
+        (('leads', 'progress'),        'leads_progress',      'leads progress',              True),
+        (('email', 'sent'),            'emails_sent',         'emails sent',                 False),
+        (('email', 'opened'),          'emails_opened',       'emails opened',               False),
+        (('email', 'clicked'),         'emails_clicked',      'emails clicked',              False),
+        (('email', 'replied'),         'emails_replied',      'emails replied',              False),
+        (('email', 'bounced'),         'emails_bounced',      'emails bounced',              False),
+        (('email', 'failed'),          'emails_failed',       'emails failed',               False),
+        (('lead',),                    'leads_count',         'leads',                       False),
+        (('conversion',),             'conversions',         'conversions',                 False),
+        (('positive', 'repl'),         'positive_replies',    'positive replies',            False),
+        (('negative', 'repl'),         'negative_replies',    'negative replies',            False),
+    ]
+
+    def _compute_avg(self, q: str, campaigns: List[Dict]) -> Optional[str]:
+        """
+        Generic average calculator.
+        Matches question keywords to a campaign field, collects values
+        only from campaigns that have actual data (not None), and returns
+        the formatted answer string — or None if no field matched.
+        """
+        for keywords, field_key, label, is_pct in self._AVG_FIELD_MAP:
+            if all(kw in q for kw in keywords):
+                values = []
+                for c in campaigns:
+                    val = c.get(field_key)
+                    if val is None:
+                        continue
+                    try:
+                        values.append(float(val))
+                    except (ValueError, TypeError):
+                        continue
+
+                total = sum(values)
+                count = len(values)
+                avg = (total / count) if count > 0 else 0.0
+                pct = '%' if is_pct else ''
+
+                return (
+                    f"Average {label} per campaign: **{avg:.2f}{pct}** "
+                    f"(total={total:.2f}, from {count}/{len(campaigns)} campaigns with data)."
+                )
+        return None
+
     def _normalize_question_typos(self, question: str) -> str:
         if not question or not isinstance(question, str):
             return question
@@ -664,6 +657,11 @@ class MarketingQAAgent(MarketingBaseAgent):
             s = re.sub(r'[^a-z0-9\s]+', ' ', s)
             return re.sub(r'\s+', ' ', s).strip()
 
+        def _word_boundary_match(name: str, text: str) -> bool:
+            """Check if name appears in text as whole words (not partial number/word overlap)."""
+            pattern = r'(?<![a-z0-9])' + re.escape(name) + r'(?![a-z0-9])'
+            return bool(re.search(pattern, text))
+
         def _word_similarity(word1: str, word2: str) -> float:
             """Simple character-level similarity (0-1). Handles typos."""
             if word1 == word2:
@@ -681,6 +679,10 @@ class MarketingQAAgent(MarketingBaseAgent):
         qn = _norm(q)
         qn_words = set(qn.split())
 
+        # Collect all substring matches and pick the longest (most specific) one
+        substring_match = None
+        substring_match_len = 0
+
         best_match = None
         best_score = 0.0
 
@@ -689,14 +691,21 @@ class MarketingQAAgent(MarketingBaseAgent):
             if not nn:
                 continue
 
-            # Exact substring match (best)
-            if nn in qn:
-                return c
+            # Exact substring match with word boundaries (avoids "sales 2" matching "sales 26")
+            if nn in qn and _word_boundary_match(nn, qn):
+                if len(nn) > substring_match_len:
+                    substring_match = c
+                    substring_match_len = len(nn)
+                continue
 
-            # All-words exact containment
+            # All-words exact containment (each word must appear as whole word)
             name_words = [w for w in nn.split() if w]
-            if len(name_words) >= 2 and all(w in qn for w in name_words):
-                return c
+            if len(name_words) >= 2 and all(w in qn_words for w in name_words):
+                name_len = len(nn)
+                if name_len > substring_match_len:
+                    substring_match = c
+                    substring_match_len = name_len
+                continue
 
             # Fuzzy: check if each campaign-name word has a close match in question words
             if len(name_words) >= 2:
@@ -714,7 +723,8 @@ class MarketingQAAgent(MarketingBaseAgent):
                     best_score = avg_score
                     best_match = c
 
-        return best_match
+        # Prefer exact substring matches over fuzzy matches
+        return substring_match or best_match
 
     # ══════════════════════════════════════════════════════════
     #  DB DATA FETCH (unchanged from original)
