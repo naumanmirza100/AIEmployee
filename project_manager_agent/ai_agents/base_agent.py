@@ -56,6 +56,9 @@ class BaseAgent:
         
         self.model = model or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
         self.agent_name = self.__class__.__name__
+        # Store last token usage from Groq API calls (if available)
+        # Shape: {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
+        self.last_llm_usage = None
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024):
         """
@@ -90,6 +93,30 @@ class BaseAgent:
                 temperature=temperature,
                 max_tokens=max_tokens
             )
+            
+            # Capture token usage information if the client provides it
+            usage_info = getattr(response, "usage", None)
+            usage_dict = None
+            if usage_info is not None:
+                try:
+                    # usage might be a dict-like or an object with attributes
+                    prompt_tokens = getattr(usage_info, "prompt_tokens", None)
+                    completion_tokens = getattr(usage_info, "completion_tokens", None)
+                    total_tokens = getattr(usage_info, "total_tokens", None)
+                    # If it's a plain dict, getattr will return None; fall back to dict access
+                    if isinstance(usage_info, dict):
+                        prompt_tokens = usage_info.get("prompt_tokens", prompt_tokens)
+                        completion_tokens = usage_info.get("completion_tokens", completion_tokens)
+                        total_tokens = usage_info.get("total_tokens", total_tokens)
+                    usage_dict = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    }
+                except Exception:
+                    usage_dict = None
+            
+            self.last_llm_usage = usage_dict
             
             return response.choices[0].message.content
             

@@ -377,12 +377,14 @@ FORMATTING (when your answer has multiple parts or a list):
             return {
                 "answer": f"I couldn't complete the analysis due to an API error: {str(e)}. Please check your API key and try again.",
                 "insights": [],
+                "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
             }
         except Exception as e:
             logger.exception("Recruitment QA failed")
             return {
                 "answer": f"An error occurred while processing your question: {str(e)}.",
                 "insights": [],
+                "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
             }
 
     def _wrap_response(self, answer: str, insights: List[Dict]) -> Dict[str, Any]:
@@ -414,7 +416,7 @@ FORMATTING (when your answer has multiple parts or a list):
             "• Python Django interview questions for seniors\n"
             "• Node.js questions to ask in technical round"
         )
-        return {"answer": answer, "insights": []}
+        return {"answer": answer, "insights": [], "token_usage": {}}
 
     def _generate_general_knowledge_answer(self, question: str) -> str:
         """Answer stack/interview/recruitment knowledge questions using LLM (no DB)."""
