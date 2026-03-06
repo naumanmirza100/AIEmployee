@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -43,7 +44,7 @@ class GroqClient:
         self.timeout = timeout
         self.last_token_usage: Optional[Dict] = None  # Tracks token usage of last API call
 
-    def send_prompt(self, system_prompt: str, text: str) -> Dict[str, Any]:
+    def send_prompt(self, system_prompt: str, text: str, max_retries: int = 3) -> Dict[str, Any]:
         """
         Send a prompt and text to Groq and return parsed JSON.
         Raises GroqClientError with is_auth_error=True if API key is expired/invalid.
@@ -55,6 +56,7 @@ class GroqClient:
                 {"role": "user", "content": text},
             ],
             "temperature": 0,
+            "max_tokens": 2048,
             "response_format": {"type": "json_object"},
         }
 
@@ -63,71 +65,56 @@ class GroqClient:
             "Content-Type": "application/json",
         }
 
-        try:
-            response = requests.post(
-                self.base_url, headers=headers, json=payload, timeout=self.timeout
-            )
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            # Check for authentication errors (401, 403)
-            if exc.response.status_code in (401, 403):
-                error_detail = ""
-                try:
-                    error_body = exc.response.json()
-                    error_detail = error_body.get("error", {}).get("message", "")
-                except:
-                    error_detail = exc.response.text
-                
-                raise GroqClientError(
-                    f"Groq API authentication failed (API key expired/invalid): {error_detail}",
-                    is_auth_error=True
-                ) from exc
-            
-            # Check for rate limit errors (429)
-            elif exc.response.status_code == 429:
-                # Try to extract Retry-After header
-                retry_after = None
-                try:
-                    retry_after_header = exc.response.headers.get("Retry-After")
-                    if retry_after_header:
-                        retry_after = int(retry_after_header)
-                except (ValueError, TypeError):
-                    pass
-                
-                error_msg = "Groq API rate limit exceeded. Please try again later."
-                if retry_after:
-                    error_msg += f" Retry after {retry_after} seconds."
-                
-                raise GroqClientError(
-                    error_msg,
-                    is_rate_limit=True
-                ) from exc
-            
-            # Check for request too large errors (413)
-            elif exc.response.status_code == 413:
-                error_detail = ""
-                try:
-                    error_body = exc.response.json()
-                    error_detail = error_body.get("error", {}).get("message", "")
-                except:
-                    error_detail = exc.response.text
-                
-                raise GroqClientError(
-                    f"Groq API request too large (exceeds token limit): {error_detail}",
-                    is_request_too_large=True
-                ) from exc
-            
-            # Other HTTP errors
-            detail = ""
+        last_exc = None
+        for attempt in range(max_retries):
             try:
-                error_body = exc.response.json()
-                detail = error_body.get("error", {}).get("message", exc.response.text)
-            except:
-                detail = exc.response.text
-            raise GroqClientError(f"Groq API request failed (HTTP {exc.response.status_code}): {detail}") from exc
-            
-        except requests.RequestException as exc:
-            raise GroqClientError(f"Groq API request failed: {exc}") from exc
+                response = requests.post(
+                    self.base_url, headers=headers, json=payload, timeout=self.timeout
+                )
+                response.raise_for_status()
+                last_exc = None
+                break
+            except requests.HTTPError as exc:
+                detail = ""
+                try:
+                    error_body = exc.response.json()
+                    detail = error_body.get("error", {}).get("message", exc.response.text)
+                except Exception:
+                    detail = exc.response.text
+                if exc.response.status_code in (401, 403):
+                    raise GroqClientError(
+                        f"Groq API authentication failed (API key expired/invalid): {detail}",
+                        is_auth_error=True,
+                    ) from exc
+                if exc.response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait = 30
+                        try:
+                            wait = int(exc.response.headers.get("Retry-After", 30))
+                        except (ValueError, TypeError):
+                            pass
+                        time.sleep(wait)
+                        last_exc = exc
+                        continue
+                    raise GroqClientError(
+                        "Groq API rate limit exceeded.",
+                        is_rate_limit=True,
+                    ) from exc
+                if exc.response.status_code == 413:
+                    raise GroqClientError(
+                        f"Groq API request too large (exceeds token limit): {detail}",
+                        is_request_too_large=True,
+                    ) from exc
+                raise GroqClientError(
+                    f"Groq API request failed (HTTP {exc.response.status_code}): {detail}"
+                ) from exc
+            except requests.RequestException as exc:
+                raise GroqClientError(f"Groq API request failed: {exc}") from exc
+        if last_exc is not None:
+            raise GroqClientError(
+                "Groq API rate limit exceeded after retries.",
+                is_rate_limit=True,
+            ) from last_exc
 
         try:
             content = response.json()
@@ -137,10 +124,11 @@ class GroqClient:
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             raise GroqClientError(f"Unable to parse Groq response: {exc}") from exc
 
-    def send_prompt_text(self, system_prompt: str, text: str) -> str:
+    def send_prompt_text(self, system_prompt: str, text: str, max_retries: int = 3) -> str:
         """
         Send a prompt and return raw text (no JSON mode). Use for long or free-form
         output where JSON would be fragile (e.g. multi-paragraph job descriptions).
+        Retries up to max_retries times on rate-limit (429) with backoff.
         """
         payload = {
             "model": self.model,
@@ -149,43 +137,62 @@ class GroqClient:
                 {"role": "user", "content": text},
             ],
             "temperature": 0,
+            "max_tokens": 2048,
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        try:
-            response = requests.post(
-                self.base_url, headers=headers, json=payload, timeout=self.timeout
-            )
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            detail = ""
+        last_exc = None
+        for attempt in range(max_retries):
             try:
-                error_body = exc.response.json()
-                detail = error_body.get("error", {}).get("message", exc.response.text)
-            except Exception:
-                detail = exc.response.text
-            if exc.response.status_code in (401, 403):
+                response = requests.post(
+                    self.base_url, headers=headers, json=payload, timeout=self.timeout
+                )
+                response.raise_for_status()
+                last_exc = None
+                break
+            except requests.HTTPError as exc:
+                detail = ""
+                try:
+                    error_body = exc.response.json()
+                    detail = error_body.get("error", {}).get("message", exc.response.text)
+                except Exception:
+                    detail = exc.response.text
+                if exc.response.status_code in (401, 403):
+                    raise GroqClientError(
+                        f"Groq API authentication failed: {detail}",
+                        is_auth_error=True,
+                    ) from exc
+                if exc.response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait = 30
+                        try:
+                            wait = int(exc.response.headers.get("Retry-After", 30))
+                        except (ValueError, TypeError):
+                            pass
+                        time.sleep(wait)
+                        last_exc = exc
+                        continue
+                    raise GroqClientError(
+                        "Groq API rate limit exceeded.",
+                        is_rate_limit=True,
+                    ) from exc
+                if exc.response.status_code == 413:
+                    raise GroqClientError(
+                        "Groq API request too large.",
+                        is_request_too_large=True,
+                    ) from exc
                 raise GroqClientError(
-                    f"Groq API authentication failed: {detail}",
-                    is_auth_error=True,
+                    f"Groq API request failed (HTTP {exc.response.status_code}): {detail}"
                 ) from exc
-            if exc.response.status_code == 429:
-                raise GroqClientError(
-                    "Groq API rate limit exceeded.",
-                    is_rate_limit=True,
-                ) from exc
-            if exc.response.status_code == 413:
-                raise GroqClientError(
-                    "Groq API request too large.",
-                    is_request_too_large=True,
-                ) from exc
+            except requests.RequestException as exc:
+                raise GroqClientError(f"Groq API request failed: {exc}") from exc
+        if last_exc is not None:
             raise GroqClientError(
-                f"Groq API request failed (HTTP {exc.response.status_code}): {detail}"
-            ) from exc
-        except requests.RequestException as exc:
-            raise GroqClientError(f"Groq API request failed: {exc}") from exc
+                "Groq API rate limit exceeded after retries.",
+                is_rate_limit=True,
+            ) from last_exc
         try:
             content = response.json()
             self.last_token_usage = content.get("usage", {})

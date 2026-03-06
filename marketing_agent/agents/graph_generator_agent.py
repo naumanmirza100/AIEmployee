@@ -447,8 +447,8 @@ Rules:
         if 'lead' in prompt_lower and 'campaign' in prompt_lower:
             by_leads = data.get('by_campaign_leads') or {}
             sorted_data = dict(
-                sorted(by_leads.items(), key=lambda x: x[1], reverse=True)
-            )[:10]
+                sorted(by_leads.items(), key=lambda x: x[1], reverse=True)[:10]
+            )
             if not sorted_data:
                 sorted_data = {'No Data': 0}
             return {
@@ -466,8 +466,8 @@ Rules:
         if 'repl' in prompt_lower and 'campaign' in prompt_lower:
             by_replies = data.get('by_campaign_replies') or {}
             sorted_data = dict(
-                sorted(by_replies.items(), key=lambda x: x[1], reverse=True)
-            )[:10]
+                sorted(by_replies.items(), key=lambda x: x[1], reverse=True)[:10]
+            )
             if not sorted_data:
                 sorted_data = {'No Data': 0}
             return {

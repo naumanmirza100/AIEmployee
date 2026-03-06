@@ -1,0 +1,809 @@
+RECRUITMENT AGENT - COMPREHENSIVE COMPARISON REPORT
+Generated : 2026-03-05 23:09:38
+Company   : Leskon1
+User      : abdullah (ID: 1)
+Test Job  : AI Developer (ID: 26)
+==========================================================================================
+
+Test #01 [PASS] - Global - Total Jobs
+  Question Asked        : How many jobs do I have?
+  Manual Query Code     : SELECT COUNT(*) FROM jobdescription WHERE company_user_id = <company_user.id>;
+  Manual Query Result   : {"count": 6}
+  AI Agent Response     : You have **6** job(s) in total: **5** active and **1** inactive. (Note: Deleted jobs are not included in analytics or graphs.)
+  AI Token Usage        : {}
+  Match Detail          : Number 6 matches
+
+Test #02 [PASS] - Global - Active Jobs
+  Question Asked        : Which jobs are active?
+  Manual Query Code     : SELECT title FROM jobdescription WHERE company_user_id = <company_user.id> AND is_active = TRUE; SELECT COUNT(*) FROM jobdescription WHERE company_user_id = <company_user.id> AND is_active = TRUE;
+  Manual Query Result   : {"count": 5, "items": ["AI Developer", "Python Flask Developer", "Ruby on Rails Developer with .NET Razor Pages Experience", "junior mern stack", "Mern Stack Developer"]}
+  AI Agent Response     : **All Jobs** (6 total, 5 active, 1 inactive):
+
+- **AI Developer** — Active, 3 candidates, 3 interviews
+- **Python Flask Developer** — Active, 3 candidates, 1 interviews
+- **Django Developer with LLM Integration Expertise** — Inactive, 1 candidates, 1 interviews
+- **Ruby on Rails Developer with .NET Razor Pages Experience** — Active, 8 candidates, 1 interviews
+- **junior mern stack** — Active, 20 candidates, 13 interviews
+- **Mern Stack Developer** — Active, 8 candidates, 8 interviews
+  AI Token Usage        : {}
+  Match Detail          : Number 5 matches
+
+Test #03 [PASS] - Global - Total CVs
+  Question Asked        : How many candidates/CVs do I have in total?
+  Manual Query Code     : SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id>;
+  Manual Query Result   : {"count": 43}
+  AI Agent Response     : You have **43** candidate(s) / CV(s) in total across all jobs.
+  AI Token Usage        : {}
+  Match Detail          : Number 43 matches
+
+Test #04 [PASS] - Global - Interviews
+  Question Asked        : How many interviews do I have?
+  Manual Query Code     : SELECT COUNT(*) FROM interview WHERE company_user_id = <company_user.id>;
+  Manual Query Result   : {"count": 29}
+  AI Agent Response     : You have **29** interview(s) in total (Scheduled: **0**, Pending: **18**, Completed: **11**, Cancelled: **0**).
+  AI Token Usage        : {}
+  Match Detail          : Number 29 matches
+
+Test #05 [PASS] - Global - Inactive Jobs
+  Question Asked        : How many inactive jobs do I have?
+  Manual Query Code     : SELECT title FROM jobdescription WHERE company_user_id = <company_user.id> AND is_active = FALSE; SELECT COUNT(*) FROM jobdescription WHERE company_user_id = <company_user.id> AND is_active = FALSE;
+  Manual Query Result   : {"count": 1, "items": ["Django Developer with LLM Integration Expertise"]}
+  AI Agent Response     : You have **1** inactive job(s): **Django Developer with LLM Integration Expertise**. (Note: Deleted jobs are not included in analytics or graphs.)
+  AI Token Usage        : {}
+  Match Detail          : Number 1 matches
+
+Test #06 [PASS] - Global - Rejected
+  Question Asked        : How many candidates are rejected?
+  Manual Query Code     : SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND cvrecord.qualification_decision = 'REJECT';
+  Manual Query Result   : {"count": 8}
+  AI Agent Response     : You have **8** rejected candidate(s) (qualification decision = REJECT).
+  AI Token Usage        : {}
+  Match Detail          : Number 8 matches
+
+Test #07 [PASS] - Global - Hold
+  Question Asked        : How many candidates are on hold?
+  Manual Query Code     : SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND cvrecord.qualification_decision = 'HOLD';
+  Manual Query Result   : {"count": 3}
+  AI Agent Response     : You have **3** candidate(s) on HOLD.
+  AI Token Usage        : {}
+  Match Detail          : Number 3 matches
+
+Test #08 [PASS] - Global - Interview Decision
+  Question Asked        : How many candidates have interview decision?
+  Manual Query Code     : SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND cvrecord.qualification_decision = 'INTERVIEW';
+  Manual Query Result   : {"count": 22}
+  AI Agent Response     : You have **22** candidate(s) with INTERVIEW decision.
+  AI Token Usage        : {}
+  Match Detail          : Number 22 matches
+
+Test #09 [PASS] - Global - Completed Interviews
+  Question Asked        : How many interviews are completed?
+  Manual Query Code     : SELECT COUNT(*) FROM interview WHERE company_user_id = <company_user.id> AND status = 'COMPLETED';
+  Manual Query Result   : {"count": 11}
+  AI Agent Response     : You have **11** completed interview(s).
+  AI Token Usage        : {}
+  Match Detail          : Number 11 matches
+
+Test #10 [PASS] - Global - Pending Interviews
+  Question Asked        : How many interviews are pending?
+  Manual Query Code     : SELECT COUNT(*) FROM interview WHERE company_user_id = <company_user.id> AND status = 'PENDING';
+  Manual Query Result   : {"count": 18}
+  AI Agent Response     : You have **18** pending interview(s).
+  AI Token Usage        : {}
+  Match Detail          : Number 18 matches
+
+Test #11 [PASS] - Global - Pending Apps
+  Question Asked        : How many pending career applications do I have?
+  Manual Query Code     : SELECT COUNT(*) FROM careerapplication INNER JOIN jobdescription ON careerapplication.position_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND careerapplication.status = 'pending';
+  Manual Query Result   : {"count": 0}
+  AI Agent Response     : You have **0** pending career application(s).
+  AI Token Usage        : {}
+  Match Detail          : Number 0 matches
+
+Test #12 [PASS] - Job-Specific - Candidates for AI Developer
+  Question Asked        : How many candidates applied for AI Developer?
+  Manual Query Code     : SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND jobdescription.title = 'AI Developer';
+  Manual Query Result   : {"count": 3}
+  AI Agent Response     : **AI Developer** has **3** candidate(s) (INTERVIEW: 3).
+  AI Token Usage        : {}
+  Match Detail          : Number 3 matches
+
+Test #13 [PASS] - Job-Specific - List Candidates
+  Question Asked        : Show candidates for AI Developer
+  Manual Query Code     : SELECT name FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND jobdescription.title = 'AI Developer' ORDER BY rank, role_fit_score DESC LIMIT 15; SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND jobdescription.title = 'AI Developer';
+  Manual Query Result   : {"count": 3, "items": ["Ameer Hamza", "Muhammad Abdullah", "Muhammad"]}
+  AI Agent Response     : **Candidates for AI Developer** (3 total):
+
+1. **Ameer Hamza** — Score: 17, Decision: INTERVIEW
+2. **Muhammad Abdullah** — Score: 13, Decision: INTERVIEW
+3. **Muhammad** — Score: 8, Decision: INTERVIEW
+  AI Token Usage        : {}
+  Match Detail          : Number 3 matches
+
+Test #14 [PASS] - Job-Specific - Best Candidate
+  Question Asked        : Who is the best candidate for AI Developer?
+  Manual Query Code     : SELECT name, role_fit_score, rank, qualification_decision FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND jobdescription.title = 'AI Developer' ORDER BY rank, role_fit_score DESC LIMIT 1;
+  Manual Query Result   : {"name": "Ameer Hamza", "score": 17, "rank": 1, "decision": "INTERVIEW"}
+  AI Agent Response     : The **best candidate** for **AI Developer** is **Ameer Hamza** (Rank: 1, Score: 17, Decision: INTERVIEW).
+  AI Token Usage        : {}
+  Match Detail          : Number 17 matches
+
+Test #15 [PASS] - Job-Specific - Interviews
+  Question Asked        : How many interviews for AI Developer?
+  Manual Query Code     : SELECT COUNT(*) FROM interview INNER JOIN cvrecord ON interview.cv_record_id = cvrecord.id INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE interview.company_user_id = <company_user.id> AND jobdescription.title = 'AI Developer';
+  Manual Query Result   : {"count": 3}
+  AI Agent Response     : **AI Developer** has **3** interview(s) (COMPLETED: 1, PENDING: 2).
+  AI Token Usage        : {}
+  Match Detail          : Number 3 matches
+
+Test #16 [PASS] - Job-Specific - Rejected
+  Question Asked        : How many rejected candidates for AI Developer?
+  Manual Query Code     : SELECT COUNT(*) FROM cvrecord INNER JOIN jobdescription ON cvrecord.job_description_id = jobdescription.id WHERE jobdescription.company_user_id = <company_user.id> AND jobdescription.title = 'AI Developer' AND cvrecord.qualification_decision = 'REJECT';
+  Manual Query Result   : {"count": 0}
+  AI Agent Response     : **AI Developer** has **0** rejected candidate(s).
+  AI Token Usage        : {}
+  Match Detail          : Number 0 matches
+
+Test #17 [PASS] - Job-Specific - Time Slots
+  Question Asked        : What are the time slots for AI Developer?
+  Manual Query Code     : SELECT time_slots_json FROM recruiterinterviewsettings WHERE company_user_id = <company_user.id> AND job_id = <first_job.id>;
+  Manual Query Result   : {"count": 35, "start_time": "09:00:00", "end_time": "15:00:00", "gap": 56}
+  AI Agent Response     : **Time Slots for AI Developer** (35 slots):
+
+- Schedule: 09:00:00 to 15:00:00, Gap: 56 min
+- Date range: 2026-02-24 to 2026-02-28
+- Type: ONLINE
+
+- 2026-02-24 at 09:00
+- 2026-02-24 at 09:56
+- 2026-02-24 at 10:52
+- 2026-02-24 at 11:48
+- 2026-02-24 at 12:44
+- 2026-02-24 at 13:40
+- 2026-02-24 at 14:36
+- 2026-02-25 at 09:00
+- 2026-02-25 at 09:56
+- 2026-02-25 at 10:52
+- 2026-02-25 at 11:48
+- 2026-02-25 at 12:44
+- 2026-02-25 at 13:40
+- 2026-02-25 at 14:36
+- 2026-02-26 at 09:00
+- 2026-02-26 at 09:56
+- 2026-02-26 at 10:52
+- 2026-02-26 at 11:48
+- 2026-02-26 at 12:44
+- 2026-02-26 at 13:40
+- 2026-02-26 at 14:36
+- 2026-02-27 at 09:00
+- 2026-02-27 at 09:56
+- 2026-02-27 at 10:52
+- 2026-02-27 at 11:48
+
+... and 10 more slots
+  AI Token Usage        : {}
+  Match Detail          : Number 35 matches
+
+Test #18 [PASS] - Job-Specific - Details
+  Question Asked        : Give me details about AI Developer
+  Manual Query Code     : SELECT * FROM jobdescription WHERE id = <first_job.id>; SELECT COUNT(*) FROM cvrecord WHERE job_description_id = <first_job.id>;
+  Manual Query Result   : {"title": "AI Developer", "is_active": true, "type": "Full-time", "count": 3}
+  AI Agent Response     : # AI Developer
+
+**Job ID:** `26`  
+**Status:** <span style='color:green'>Active</span>  
+**Type:** Full-time  
+**Location:** San Francisco, CA  
+**Department:** Artificial Intelligence  
+**Candidates:** 3  
+**Interviews:** 3  
+**Decisions:** INTERVIEW: 3  
+**Score Stats:** Avg=12.7, Max=17, Min=8  
+
+## Description
+We are seeking a skilled AI Developer with experience in designing and implementing cutting-edge AI solutions. Our team is dedicated to pushing the boundaries of what is possible with AI, and we are looking for a talented individual to join us in this mission. As an AI Developer, you will be responsible for developing and deploying AI models, integrating them with our existing systems, and collaborating with cross-functional teams to drive business growth.
+
+The role requires strong expertise in 
+
+## Requirements & Skills
+- Proficiency in Python, TensorFlow, and Keras
+- Experience with deep learning frameworks such as PyTorch or Caffe
+- Strong understanding of machine learning algorithms and techniques
+- Experience with natural language processing and text analysis
+- Familiarity with cloud-based services such as AWS or Google Cloud
+- Strong understanding of software development principles and practices
+- Experience with containerization using Docker
+- Strong communication and collaboration skills
+  AI Token Usage        : {}
+  Match Detail          : Number 3 matches
+
+Test #19 [PASS] - Settings - Qualification
+  Question Asked        : What are my qualification settings?
+  Manual Query Code     : SELECT * FROM recruiterqualificationsettings WHERE company_user_id = <company_user.id>;
+  Manual Query Result   : {"interview_threshold": 65, "hold_threshold": 45}
+  AI Agent Response     : **Qualification Settings:** Interview threshold: **65**, Hold threshold: **45**, Custom thresholds: False.
+  AI Token Usage        : {}
+  Match Detail          : Number 65 matches
+
+Test #20 [PASS] - Global - Jobs Summary
+  Question Asked        : List all jobs with their candidates count
+  Manual Query Code     : SELECT title FROM jobdescription WHERE company_user_id = <company_user.id> ORDER BY created_at DESC; SELECT COUNT(*) FROM jobdescription WHERE company_user_id = <company_user.id>;
+  Manual Query Result   : {"count": 6, "items": ["AI Developer", "Python Flask Developer", "Django Developer with LLM Integration Expertise", "Ruby on Rails Developer with .NET Razor Pages Experience", "junior mern stack", "Me
+  AI Agent Response     : **All Jobs** (6 total, 5 active, 1 inactive):
+
+- **AI Developer** — Active, 3 candidates, 3 interviews
+- **Python Flask Developer** — Active, 3 candidates, 1 interviews
+- **Django Developer with LLM Integration Expertise** — Inactive, 1 candidates, 1 interviews
+- **Ruby on Rails Developer with .NET Razor Pages Experience** — Active, 8 candidates, 1 interviews
+- **junior mern stack** — Active, 20 candidates, 13 interviews
+- **Mern Stack Developer** — Active, 8 candidates, 8 interviews
+  AI Token Usage        : {}
+  Match Detail          : Number 6 matches
+
+Test #21 [PASS] - LLM - Recruitment Overview
+  Question Asked        : Give me an overview summary of my recruitment data with jobs, candidates, and interviews in a markdown table.
+  Manual Query Code     : LLM_ONLY (uses recruitment data context + Groq for narrative/table).
+  Manual Query Result   : N/A (LLM-only summary; no single ground-truth row)
+  AI Agent Response     : ## Recruitment Data Overview
+### Jobs, Candidates, and Interviews
+
+| **Jobs** | **Active** | **Inactive** | **Candidates** | **Interviews** | **Interview Outcomes** |
+| --- | --- | --- | --- | --- | --- |
+| Job Title | Active | Inactive | Total | Scheduled | Pending | Completed | Cancelled | Hired | Onsite Interview |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AI Developer | | | 3 | 3 |  | 3 |  |  |  |  |
+| Python Flask Developer | | | 3 | 1 |  | 1 | 2 |  |  |  |
+| Django Developer with LLM Integration Expertise | | | 1 | 1 |  | 1 |  |  |  |  |
+| Ruby on Rails Developer with .NET Razor Pages Experience | | | 8 | 1 |  | 1 | 3 |  |  |  |
+| junior mern stack | | | 20 | 13 |  | 8 | 3 |  |  |  |
+| Mern Stack Developer | | | 8 | 8 |  | 8 |  |  |  |  |
+
+### Summary
+The recruitment data shows a total of 6 jobs, with 5 active and 1 inactive. There are 43 candidates in total, with 22 candidates having made interview decisions, 3 candidates on hold, and 8 candidates rejected. The total number of interviews is 29, with 18 pending and 11 completed. The interview outcomes show 2 candidates hired and 4 candidates invited for onsite interviews.
+
+### Top Candidates and Jobs
+
+#### Top Candidates
+- **Job ID 20: junior mern stack**
+  - Candidates: 20
+  - Interviews: 13
+  - Interview Decision: 8
+  - Hold: 2
+  - Rejected: 3
+- **Job ID 18: Mern Stack Developer**
+  - Candidates: 8
+  - Interviews: 8
+  - Interview Decision: 8
+  - Hold: 0
+  - Rejected: 0
+- **Job ID 22: Ruby on Rails Developer with .NET Razor Pages Experience**
+  - Candidates: 8
+  - Interviews: 1
+  - Interview Decision: 1
+  - Hold: 1
+  - Rejected: 3
+
+#### Top Jobs
+- **Job ID 20: junior mern stack**
+  - Title: junior mern stack
+  - Department: web development
+  - Location: Lahore
+  - Type: Full-time
+  - Candidates: 20
+  - Interviews: 13
+  - Interview Decision: 8
+  - Hold: 2
+  - Rejected: 3
+- **Job ID 18: Mern Stack Developer**
+  - Title: Mern Stack Developer
+  - Department: Web Development
+  - Location: Lah
+  AI Token Usage        : {'queue_time': 0.005917834, 'prompt_tokens': 927, 'prompt_time': 0.066777617, 'completion_tokens': 684, 'completion_time': 0.809151928, 'total_tokens': 1611, 'total_time': 0.875929545}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #22 [PASS] - LLM - React Interview Questions
+  Question Asked        : Give me advanced React interview questions for senior developers.
+  Manual Query Code     : LLM_ONLY (general tech/interview knowledge via Groq).
+  Manual Query Result   : N/A (general knowledge LLM question; no DB query).
+  AI Agent Response     : ## Advanced React Interview Questions for Senior Developers
+
+### Context and State Management
+
+- Explain the difference between `context` and `state` in React. When would you use each?
+- How do you handle complex state management in a large React application? Provide an example.
+- Describe a scenario where you would use a library like Redux or MobX for state management.
+- How do you optimize the performance of a React application with complex state management?
+
+### React Hooks
+
+- What are the differences between `useState`, `useReducer`, and `useContext` hooks? Provide an example of each.
+- How do you handle side effects in a React application using `useEffect` hook? What are some common pitfalls to avoid?
+- Describe a scenario where you would use `useCallback` and `useMemo` hooks to optimize performance.
+- How do you handle errors in a React application using `useErrorBoundary` hook?
+
+### Advanced React Concepts
+
+- Explain the concept of React Fiber and how it improves the performance of React applications.
+- Describe the difference between `React.memo` and `shouldComponentUpdate`. When would you use each?
+- How do you implement server-side rendering (SSR) in a React application?
+- What are some best practices for implementing internationalization (i18n) and accessibility (a11y) in a React application?
+
+### Performance Optimization
+
+- What are some common performance optimization techniques in React, such as memoization and lazy loading?
+- How do you use React DevTools to profile and optimize the performance of a React application?
+- Describe a scenario where you would use a library like React Query or SWR to optimize data fetching and caching.
+- How do you handle slow network requests and errors in a React application?
+
+### Code Review and Best Practices
+
+- What are some common code smells in React applications, and how would you refactor them?
+- Describe a scenario where you would use a linter like ESLint to enforce coding standards and best practices.
+- How do y
+  AI Token Usage        : {'queue_time': 0.006003652, 'prompt_tokens': 283, 'prompt_time': 0.018546905, 'completion_tokens': 703, 'completion_time': 1.151306387, 'total_tokens': 986, 'total_time': 1.169853292}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #23 [PASS] - LLM - Active Jobs Summary
+  Question Asked        : Give me a short markdown summary of my active jobs with their candidates and interviews in one table.
+  Manual Query Code     : LLM_ONLY (uses recruitment data context + Groq for compact table).
+  Manual Query Result   : N/A (LLM-only active jobs summary; no single exact row).
+  AI Agent Response     : ## Active Jobs Summary
+### Job Table
+
+| Job ID | Title | Department | Location | Candidates | Interviews | Interview Decision | Hold | Rejected |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 26 | AI Developer | Artificial Intelligence | San Francisco, CA | 3 | 3 | 3 | 0 | 0 |
+| 25 | Python Flask Developer | Software Engineering | New York City | 3 | 1 | 1 | 0 | 2 |
+| 22 | Ruby on Rails Developer with .NET Razor Pages Experience | Software Development | New York City | 8 | 1 | 1 | 1 | 3 |
+| 20 | junior mern stack | web development | Lahore | 20 | 13 | 8 | 2 | 3 |
+| 18 | Mern Stack Developer | Web Development | Lahore | 8 | 8 | 8 | 0 | 0 |
+
+## Top Candidates and Jobs Summary
+
+### Top Candidates
+
+* **Job ID 20: junior mern stack**
+  - Candidates: 20
+  - Interviews: 13
+  - Interview Decision: 8
+  - Hold: 2
+  - Rejected: 3
+* **Job ID 18: Mern Stack Developer**
+  - Candidates: 8
+  - Interviews: 8
+  - Interview Decision: 8
+  - Hold: 0
+  - Rejected: 0
+* **Job ID 26: AI Developer**
+  - Candidates: 3
+  - Interviews: 3
+  - Interview Decision: 3
+  - Hold: 0
+  - Rejected: 0
+* **Job ID 25: Python Flask Developer**
+  - Candidates: 3
+  - Interviews: 1
+  - Interview Decision: 1
+  - Hold: 0
+  - Rejected: 2
+* **Job ID 22: Ruby on Rails Developer with .NET Razor Pages Experience**
+  - Candidates: 8
+  - Interviews: 1
+  - Interview Decision: 1
+  - Hold: 1
+  - Rejected: 3
+
+### Top Jobs
+
+* **Job ID 20: junior mern stack**
+  - Department: web development
+  - Location: Lahore
+  - Candidates: 20
+  - Interviews: 13
+  - Interview Decision: 8
+  - Hold: 2
+  - Rejected: 3
+* **Job ID 18: Mern Stack Developer**
+  - Department: Web Development
+  - Location: Lahore
+  - Candidates: 8
+  - Interviews: 8
+  - Interview Decision: 8
+  - Hold: 0
+  - Rejected: 0
+* **Job ID 26: AI Developer**
+  - Department: Artificial Intelligence
+  - Location: San Francisco, CA
+  - Candidates: 3
+  - Interviews: 3
+  - Interview Decision: 3
+  - Hold: 0
+  - Rejected: 0
+* **Job ID 25: Python Flask Developer**
+  - Dep
+  AI Token Usage        : {'queue_time': 0.006323455, 'prompt_tokens': 925, 'prompt_time': 0.083723152, 'completion_tokens': 788, 'completion_time': 0.816803299, 'total_tokens': 1713, 'total_time': 0.900526451}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #24 [PASS] - LLM - Interview Analysis
+  Question Asked        : Explain my interview outcomes and recommend 3 improvements to my recruitment process.
+  Manual Query Code     : LLM_ONLY (uses recruitment data context + Groq for analysis/recommendations).
+  Manual Query Result   : N/A (LLM analysis over interview outcomes).
+  AI Agent Response     : ## Interview Outcomes Analysis
+
+To analyze your interview outcomes, let's consider the following factors:
+
+- **Candidate pool**: Was the pool of candidates diverse and representative of the target audience?
+- **Interview process**: Was the interview process well-structured, and did it assess the required skills and qualifications?
+- **Interviewer bias**: Were the interviewers aware of their biases and took steps to mitigate them?
+- **Candidate experience**: Did the candidates feel engaged and valued throughout the interview process?
+
+### Current Interview Outcomes
+
+Please provide me with the following information to analyze your current interview outcomes:
+
+- Number of candidates interviewed
+- Number of candidates selected
+- Time-to-hire
+- Candidate satisfaction ratings (if available)
+- Common reasons for rejecting candidates (if available)
+
+Once I have this information, I can provide a more detailed analysis and recommendations for improvement.
+
+## Recommendations for Improvement
+
+Based on common issues in recruitment processes, here are three potential improvements to consider:
+
+### 1. **Standardize the Interview Process**
+
+- **Create a standardized interview guide**: Develop a comprehensive guide that outlines the skills and qualifications to be assessed during the interview.
+- **Use a consistent evaluation framework**: Establish a framework to evaluate candidates' responses and ensure that all interviewers use the same criteria.
+- **Train interviewers**: Provide training to interviewers on the standardized process, evaluation framework, and bias mitigation techniques.
+
+### 2. **Enhance Candidate Experience**
+
+- **Improve communication**: Regularly update candidates on the status of their application and the interview process.
+- **Provide clear expectations**: Clearly outline the interview process, timeline, and required skills to candidates.
+- **Offer a positive candidate experience**: Ensure that candidates feel valued and engaged throughout the interview proce
+  AI Token Usage        : {'queue_time': 0.005565034, 'prompt_tokens': 288, 'prompt_time': 0.018098549, 'completion_tokens': 462, 'completion_time': 0.972039143, 'total_tokens': 750, 'total_time': 0.990137692}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #25 [PASS] - LLM - Job Comparison
+  Question Asked        : Create a concise markdown table comparing jobs by candidates, interviews, and average score, followed by a short summary.
+  Manual Query Code     : LLM_ONLY (uses recruitment data context + Groq table + summary).
+  Manual Query Result   : N/A (LLM comparison; no single ground truth).
+  AI Agent Response     : ## Job Comparison Table
+
+### Active Jobs
+
+| Job Title | Department | Location | Candidates | Interviews | Interview Decision | Hold | Rejected | Interview Outcome |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AI Developer | Artificial Intelligence | San Francisco, CA | 3 | 3 | 3 | 0 | 0 |  |
+| Python Flask Developer | Software Engineering | New York City | 3 | 1 | 1 | 0 | 2 |  |
+| Django Developer with LLM Integration Expertise | Artificial Intelligence Engineering | Remote | 1 | 1 | 1 | 0 | 0 |  |
+| Ruby on Rails Developer with .NET Razor Pages Experience | Software Development | New York City | 8 | 1 | 1 | 1 | 3 |  |
+| junior mern stack | web development | Lahore | 20 | 13 | 8 | 2 | 3 |  |
+| Mern Stack Developer | Web Development | Lahore | 8 | 8 | 8 | 0 | 0 |  |
+
+### Inactive Job
+
+| Job Title | Department | Location | Candidates | Interviews | Interview Decision | Hold | Rejected | Interview Outcome |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Django Developer with LLM Integration Expertise | Artificial Intelligence Engineering | Remote | 1 | 1 | 1 | 0 | 0 |  |
+
+### Candidates and Interview Outcomes
+
+- Total Candidates: 43
+- Candidates Interview Decision: 22
+- Candidates Hold: 3
+- Candidates Reject: 8
+- Interview Outcome Hired: 2
+- Interview Outcome Onsite Interview: 4
+
+### Summary
+The table above compares active and inactive jobs based on various metrics such as candidates, interviews, interview decisions, and outcomes. The active jobs are listed with their respective details, while the inactive job is shown separately. The candidates and interview outcomes are also summarized below the table.
+
+---
+<small>🔢 **Tokens used:** 1355 &nbsp;|&nbsp; Prompt: 928 &nbsp;|&nbsp; Completion: 427</small>
+  AI Token Usage        : {'queue_time': 0.006801045, 'prompt_tokens': 928, 'prompt_time': 0.058504058, 'completion_tokens': 427, 'completion_time': 0.533285578, 'total_tokens': 1355, 'total_time': 0.591789636}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #26 [PASS] - LLM - Django Interview Questions
+  Question Asked        : Give me senior Python Django interview questions focusing on performance and scalability.
+  Manual Query Code     : LLM_ONLY (general tech/interview knowledge via Groq).
+  Manual Query Result   : N/A (general knowledge LLM question; no DB query).
+  AI Agent Response     : ## Senior Python Django Interview Questions: Performance and Scalability
+
+### Understanding the Basics
+
+- What are the key differences between synchronous and asynchronous programming in Django?
+- How do you optimize database queries in Django for better performance?
+- What is the purpose of caching in Django, and how do you implement it?
+
+### Performance Optimization
+
+#### Database Performance
+
+1. How do you optimize database queries using Django's ORM?
+2. What are the benefits and drawbacks of using raw SQL queries in Django?
+3. How do you use Django's database routing to improve performance?
+4. What is the difference between `select_related()` and `prefetch_related()` in Django?
+
+#### Caching
+
+1. What are the different types of caching available in Django (e.g., cache framework, Redis, Memcached)?
+2. How do you configure and use the cache framework in Django?
+3. What are the benefits and drawbacks of using Redis as a caching backend in Django?
+
+#### Asynchronous Programming
+
+1. How do you use Django's built-in support for asynchronous programming (e.g., `asyncio`, `celery`) to improve performance?
+2. What are the benefits and drawbacks of using asynchronous programming in Django?
+3. How do you handle errors and exceptions in asynchronous code in Django?
+
+### Scalability
+
+#### Horizontal Scaling
+
+1. How do you use Django's built-in support for horizontal scaling (e.g., load balancing, clustering) to improve scalability?
+2. What are the benefits and drawbacks of using a load balancer in front of a Django application?
+3. How do you configure and use a clustering solution (e.g., Redis, Memcached) in Django?
+
+#### Vertical Scaling
+
+1. How do you use Django's built-in support for vertical scaling (e.g., database optimization, caching) to improve scalability?
+2. What are the benefits and drawbacks of using a caching layer in Django?
+3. How do you optimize database queries for better performance in a vertically scaled Django application?
+
+### Advanced Topics
+
+1. How do y
+  AI Token Usage        : {'queue_time': 0.010170633, 'prompt_tokens': 286, 'prompt_time': 0.127462761, 'completion_tokens': 620, 'completion_time': 0.932062223, 'total_tokens': 906, 'total_time': 1.059524984}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #27 [PASS] - LLM - MERN Interview Questions
+  Question Asked        : Give me MERN stack interview questions for experienced developers in markdown bullet points.
+  Manual Query Code     : LLM_ONLY (general tech/interview knowledge via Groq).
+  Manual Query Result   : N/A (general knowledge LLM question; no DB query).
+  AI Agent Response     : ## MERN Stack Interview Questions for Experienced Developers
+
+### MongoDB
+
+* What are the differences between MongoDB and relational databases like MySQL?
+* How do you handle data consistency and integrity in MongoDB?
+* Can you explain the concept of MongoDB's document-based data model?
+* How do you implement data aggregation and grouping in MongoDB?
+* What are the advantages and disadvantages of using MongoDB's MapReduce feature?
+
+### Express.js
+
+* Can you explain the concept of middleware in Express.js and how to use it?
+* How do you handle errors and exceptions in Express.js?
+* Can you explain the concept of routing in Express.js and how to use it?
+* How do you implement authentication and authorization in Express.js?
+* What are the differences between Express.js and other Node.js frameworks like Koa.js?
+
+### React
+
+* Can you explain the concept of state and props in React?
+* How do you handle side effects in React, such as API calls and timers?
+* Can you explain the concept of React hooks and how to use them?
+* How do you implement conditional rendering and rendering lists in React?
+* What are the differences between React and other JavaScript libraries like Angular and Vue.js?
+
+### Node.js
+
+* Can you explain the concept of asynchronous programming in Node.js?
+* How do you handle errors and exceptions in Node.js?
+* Can you explain the concept of streams in Node.js and how to use them?
+* How do you implement caching in Node.js?
+* What are the differences between Node.js and other JavaScript runtimes like V8 and SpiderMonkey?
+
+### Advanced Questions
+
+* Can you explain the concept of microservices architecture and how to implement it using MERN stack?
+* How do you handle distributed transactions and consistency in MERN stack?
+* Can you explain the concept of event sourcing and how to implement it using MERN stack?
+* How do you implement real-time updates and notifications in MERN stack?
+* What are the best practices for securing MERN stack applications?
+
+### System
+  AI Token Usage        : {'queue_time': 0.005102621, 'prompt_tokens': 288, 'prompt_time': 0.018354426, 'completion_tokens': 556, 'completion_time': 0.799882228, 'total_tokens': 844, 'total_time': 0.818236654}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #28 [PASS] - LLM - Candidate Experience Tips
+  Question Asked        : Suggest best practices for improving candidate experience during interviews.
+  Manual Query Code     : LLM_ONLY (recruitment knowledge via Groq).
+  Manual Query Result   : N/A (recruitment best practices; no DB query).
+  AI Agent Response     : ## Improving Candidate Experience During Interviews
+
+### Pre-Interview Preparation
+
+- Clearly communicate the interview process, timeline, and expectations to the candidate.
+- Provide necessary information about the company culture, job description, and requirements.
+- Ensure the interview panel is diverse and representative of the team.
+- Prepare a list of questions in advance to avoid last-minute scrambling.
+
+### Interview Logistics
+
+- Schedule interviews at a convenient time and location for the candidate.
+- Provide a detailed agenda for the interview, including the format and duration.
+- Ensure the interview space is comfortable, quiet, and free from distractions.
+- Have necessary equipment, such as a laptop and projector, ready for technical interviews.
+
+### Communication and Feedback
+
+- Respond promptly to candidate inquiries and concerns.
+- Provide regular updates on the interview process and timeline.
+- Offer constructive feedback to candidates, whether they are moving forward or not.
+- Consider sending a thank-you note or email after the interview to show appreciation.
+
+### Interview Format and Structure
+
+- Use a mix of behavioral, technical, and cultural fit questions to assess the candidate's skills and fit.
+- Allocate sufficient time for each interview segment, including introductions, questions, and discussions.
+- Consider using a panel interview format to get multiple perspectives and opinions.
+- Have a clear plan for handling difficult or unexpected questions.
+
+### Post-Interview Process
+
+- Send a follow-up email or letter to thank the candidate for their time and reiterate the next steps.
+- Provide a clear timeline for when the candidate can expect to hear back from the company.
+- Consider offering a tour of the office or meeting with other team members to give the candidate a better sense of the company culture.
+- Keep the candidate informed about the status of their application, even if it's a rejection.
+
+### Best Practices for Remote Interviews
+
+-
+  AI Token Usage        : {'queue_time': 0.005075866, 'prompt_tokens': 284, 'prompt_time': 0.01830278, 'completion_tokens': 507, 'completion_time': 1.100590408, 'total_tokens': 791, 'total_time': 1.118893188}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #29 [PASS] - LLM - Behavioral Questions
+  Question Asked        : Give me common behavioral interview questions I can ask any developer.
+  Manual Query Code     : LLM_ONLY (recruitment knowledge via Groq).
+  Manual Query Result   : N/A (general interview knowledge; no DB query).
+  AI Agent Response     : ## Behavioral Interview Questions for Developers
+
+Behavioral interview questions are designed to assess a candidate's past experiences and behaviors to predict their future performance in a role. Here are some common behavioral interview questions you can ask developers:
+
+### Basic Questions
+
+- Can you tell me about a project you worked on that you're particularly proud of? What was your role in the project?
+- How do you handle conflicting priorities and tight deadlines?
+- Can you describe a situation where you had to work with a difficult team member or customer?
+- How do you stay current with industry trends and developments?
+- Can you give an example of a time when you had to learn a new technology or skill quickly?
+
+### Communication and Teamwork
+
+- Can you describe a situation where you had to explain a complex technical concept to a non-technical team member or manager?
+- How do you handle feedback or constructive criticism on your work?
+- Can you tell me about a time when you had to collaborate with a team to solve a difficult problem?
+- How do you prioritize tasks and delegate work to team members?
+- Can you describe a situation where you had to negotiate with a team member or manager to resolve a conflict?
+
+### Problem-Solving and Adaptability
+
+- Can you describe a situation where you had to troubleshoot a difficult technical issue?
+- How do you approach a problem that you're not familiar with?
+- Can you tell me about a time when you had to adapt to a change in requirements or scope?
+- How do you handle ambiguity or uncertainty in a project?
+- Can you describe a situation where you had to make a difficult technical decision?
+
+### Leadership and Initiative
+
+- Can you describe a situation where you took the lead on a project or initiative?
+- How do you motivate and inspire team members to work towards a common goal?
+- Can you tell me about a time when you identified a problem or opportunity and took initiative to address it?
+- How do you handle a situation wh
+  AI Token Usage        : {'queue_time': 0.254771424, 'prompt_tokens': 285, 'prompt_time': 0.036084937, 'completion_tokens': 702, 'completion_time': 0.873836021, 'total_tokens': 987, 'total_time': 0.909920958}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #30 [PASS] - LLM - Very Short Overall Summary
+  Question Asked        : Give me a very short summary (max 5 bullet points) of my overall recruitment status.
+  Manual Query Code     : LLM_ONLY (uses recruitment data context + Groq, but answer is forced short).
+  Manual Query Result   : N/A (LLM-only short summary over recruitment data).
+  AI Agent Response     : ## Recruitment Status Summary
+
+### Active Jobs
+| Job ID | Title | Department | Location | Candidates | Interviews | Interview Decision | Hold | Rejected |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 26 | AI Developer | Artificial Intelligence | San Francisco, CA | 3 | 3 | 3 | 0 | 0 |
+| 25 | Python Flask Developer | Software Engineering | New York City | 3 | 1 | 1 | 0 | 2 |
+| 22 | Ruby on Rails Developer with .NET Razor Pages Experience | Software Development | New York City | 8 | 1 | 1 | 1 | 3 |
+| 20 | junior mern stack | web development | Lahore | 20 | 13 | 8 | 2 | 3 |
+| 18 | Mern Stack Developer | Web Development | Lahore | 8 | 8 | 8 | 0 | 0 |
+
+### Inactive Jobs
+| Job ID | Title | Department | Location | Candidates | Interviews | Interview Decision | Hold | Rejected |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 23 | Django Developer with LLM Integration Expertise | Artificial Intelligence Engineering | Remote | 1 | 1 | 1 | 0 | 0 |
+
+### Candidates
+| Status | Count |
+| --- | --- |
+| Total Candidates | 43 |
+| Hold | 3 |
+| Rejected | 8 |
+| Interview Decision | 22 |
+
+### Interview Outcomes
+| Outcome | Count |
+| --- | --- |
+| Hired | 2 |
+| Onsite Interview | 4 |
+
+### Top Candidates
+#### Job ID 20: junior mern stack
+- 20 candidates applied
+- 13 interviews scheduled
+- 8 candidates have made an interview decision
+- 2 candidates are on hold
+- 3 candidates have been rejected
+
+#### Job ID 18: Mern Stack Developer
+- 8 candidates applied
+- 8 interviews scheduled
+- 8 candidates have made an interview decision
+- 0 candidates are on hold
+- 0 candidates have been rejected
+
+### Top Jobs
+#### Job ID 20: junior mern stack
+- 20 candidates applied
+- 13 interviews scheduled
+- 8 candidates have made an interview decision
+- 2 candidates are on hold
+- 3 candidates have been rejected
+- Department: web development
+- Location: Lahore
+
+#### Job ID 18: Mern Stack Developer
+- 8 candidates applied
+- 8 interviews scheduled
+- 8 candidates have made an interview decision
+-
+  AI Token Usage        : {'queue_time': 0.013058752, 'prompt_tokens': 925, 'prompt_time': 0.140565055, 'completion_tokens': 581, 'completion_time': 0.624735096, 'total_tokens': 1506, 'total_time': 0.765300151}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+==========================================================================================
+SUMMARY: 30 Passed | 0 Failed | 0 Errors | Total: 30
+Accuracy: 100.0%
+
+==========================================================================================
+GROQ LLM TOKEN USAGE
+==========================================================================================
+#    Category                       Prompt       Completion   Total        LLM?  
+----------------------------------------------------------------------------
+1    Global - Total Jobs            0            0            0            No    
+2    Global - Active Jobs           0            0            0            No    
+3    Global - Total CVs             0            0            0            No    
+4    Global - Interviews            0            0            0            No    
+5    Global - Inactive Jobs         0            0            0            No    
+6    Global - Rejected              0            0            0            No    
+7    Global - Hold                  0            0            0            No    
+8    Global - Interview Decision    0            0            0            No    
+9    Global - Completed Interview.. 0            0            0            No    
+10   Global - Pending Interviews    0            0            0            No    
+11   Global - Pending Apps          0            0            0            No    
+12   Job-Specific - Candidates fo.. 0            0            0            No    
+13   Job-Specific - List Candidat.. 0            0            0            No    
+14   Job-Specific - Best Candidat.. 0            0            0            No    
+15   Job-Specific - Interviews      0            0            0            No    
+16   Job-Specific - Rejected        0            0            0            No    
+17   Job-Specific - Time Slots      0            0            0            No    
+18   Job-Specific - Details         0            0            0            No    
+19   Settings - Qualification       0            0            0            No    
+20   Global - Jobs Summary          0            0            0            No    
+21   LLM - Recruitment Overview     927          684          1611         Yes   
+22   LLM - React Interview Questi.. 283          703          986          Yes   
+23   LLM - Active Jobs Summary      925          788          1713         Yes   
+24   LLM - Interview Analysis       288          462          750          Yes   
+25   LLM - Job Comparison           928          427          1355         Yes   
+26   LLM - Django Interview Quest.. 286          620          906          Yes   
+27   LLM - MERN Interview Questio.. 288          556          844          Yes   
+28   LLM - Candidate Experience T.. 284          507          791          Yes   
+29   LLM - Behavioral Questions     285          702          987          Yes   
+30   LLM - Very Short Overall Sum.. 925          581          1506         Yes   
+----------------------------------------------------------------------------
+TOTAL: Prompt=5419 | Completion=6030 | Total=11449
+LLM Calls: 10 | DB-only: 20
