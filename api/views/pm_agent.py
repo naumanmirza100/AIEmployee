@@ -19,9 +19,15 @@ from api.permissions import IsCompanyUserOnly
 
 import logging
 import json
+import re
 from datetime import datetime, timedelta
 import os
 import tempfile
+
+from django.db.models import Count
+from django.utils import timezone
+
+from project_manager_agent.ai_agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,121 @@ def _assignee_display(assignee):
         return assignee.get_full_name() or getattr(assignee, "username", None)
     except Exception:
         return getattr(assignee, "username", None)
+
+
+def _pm_extract_first_json(raw_text: str):
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        raise ValueError("Empty LLM response")
+
+    if raw_text.startswith("```"):
+        lines = raw_text.split("\n")
+        start = 1
+        end = len(lines)
+        for i in range(start, len(lines)):
+            if lines[i].strip() == "```":
+                end = i
+                break
+        raw_text = "\n".join(lines[start:end]).strip()
+
+    if raw_text.lower().startswith("json"):
+        raw_text = raw_text[4:].strip()
+
+    try:
+        return json.loads(raw_text)
+    except Exception:
+        pass
+
+    start_match = re.search(r"[\[{]", raw_text)
+    if not start_match:
+        raise ValueError("No JSON object/array found in LLM response")
+
+    start_idx = start_match.start()
+    opening = raw_text[start_idx]
+    closing = "]" if opening == "[" else "}"
+
+    stack = [opening]
+    in_string = False
+    escaped = False
+
+    for i in range(start_idx + 1, len(raw_text)):
+        ch = raw_text[i]
+
+        if in_string:
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+
+        if ch in "[{":
+            stack.append(ch)
+            continue
+
+        if ch in "]}":
+            if not stack:
+                continue
+
+            last = stack[-1]
+            if (last == "{" and ch == "}") or (last == "[" and ch == "]"):
+                stack.pop()
+                if not stack:
+                    candidate = raw_text[start_idx : i + 1].strip()
+                    return json.loads(candidate)
+            continue
+
+    raise ValueError("Unterminated JSON in LLM response")
+
+
+def _pm_repair_llm_json(raw_text: str, analytics_data: dict) -> str:
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return raw_text
+
+    # If the model outputs variable-like tokens, rewrite them into literal JSON so parsing succeeds.
+    try:
+        tasks_by_project = analytics_data.get('tasks_by_project_obj') or {}
+
+        def _replace_tasks_by_project(m):
+            project_name = (m.group('project') or '').strip()
+            value = 0
+            try:
+                value = int(tasks_by_project.get(project_name, 0) or 0)
+            except Exception:
+                value = 0
+            return json.dumps({project_name or 'Project': value})
+
+        raw_text = re.sub(
+            r"\btasks_by_project_obj\s*\[\s*\"(?P<project>[^\"]+)\"\s*\]",
+            _replace_tasks_by_project,
+            raw_text,
+            flags=re.IGNORECASE,
+        )
+    except Exception:
+        pass
+
+    replacements = {
+        'projects_by_status_obj': json.dumps(analytics_data.get('projects_by_status_obj') or {'No data': 0}),
+        'projects_by_priority_obj': json.dumps(analytics_data.get('projects_by_priority_obj') or {'No data': 0}),
+        'tasks_by_status_obj': json.dumps(analytics_data.get('tasks_by_status_obj') or {'No data': 0}),
+        'tasks_by_priority_obj': json.dumps(analytics_data.get('tasks_by_priority_obj') or {'No data': 0}),
+        'tasks_by_project_obj': json.dumps(analytics_data.get('tasks_by_project_obj') or {'No data': 0}),
+    }
+    for token, value in replacements.items():
+        try:
+            raw_text = re.sub(rf"\b{re.escape(token)}\b", value, raw_text)
+        except Exception:
+            continue
+
+    return raw_text
 
 
 def _get_chat_history(request):
@@ -1570,6 +1691,205 @@ def knowledge_qa(request):
             {"status": "error", "message": "Knowledge Q&A failed", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+def _pm_build_analytics_data(company_user, project_id=None):
+    """Build controlled aggregate data for graph generation (no sensitive free-text)."""
+    projects_qs = Project.objects.filter(created_by_company_user=company_user)
+    tasks_qs = Task.objects.filter(project__created_by_company_user=company_user)
+    if project_id:
+        projects_qs = projects_qs.filter(id=project_id)
+        tasks_qs = tasks_qs.filter(project_id=project_id)
+
+    projects_qs = projects_qs.order_by()
+    tasks_qs = tasks_qs.order_by()
+
+    projects_by_status = {}
+    for item in projects_qs.values('status').annotate(count=Count('id')):
+        if item.get('status'):
+            projects_by_status[str(item['status'])] = item['count']
+
+    projects_by_priority = {}
+    for item in projects_qs.values('priority').annotate(count=Count('id')):
+        if item.get('priority'):
+            projects_by_priority[str(item['priority'])] = item['count']
+
+    tasks_by_status = {}
+    for item in tasks_qs.values('status').annotate(count=Count('id')):
+        if item.get('status'):
+            tasks_by_status[str(item['status'])] = item['count']
+
+    tasks_by_priority = {}
+    for item in tasks_qs.values('priority').annotate(count=Count('id')):
+        if item.get('priority'):
+            tasks_by_priority[str(item['priority'])] = item['count']
+
+    tasks_by_project = {}
+    for item in tasks_qs.values('project__name').annotate(count=Count('id')):
+        name = item.get('project__name')
+        if name:
+            tasks_by_project[str(name)[:40]] = item['count']
+
+    now = timezone.now()
+    overdue_tasks_count = tasks_qs.filter(due_date__isnull=False, due_date__lt=now).exclude(status__in=['done', 'completed']).count()
+
+    return {
+        'projects_total': projects_qs.count(),
+        'tasks_total': tasks_qs.count(),
+        'overdue_tasks_count': overdue_tasks_count,
+        'projects_by_status_obj': projects_by_status,
+        'projects_by_priority_obj': projects_by_priority,
+        'tasks_by_status_obj': tasks_by_status,
+        'tasks_by_priority_obj': tasks_by_priority,
+        'tasks_by_project_obj': tasks_by_project,
+    }
+
+
+def _pm_generate_chart_from_prompt(prompt: str, analytics_data: dict):
+    system = f"""You are a data visualization assistant.
+
+Return ONLY a single, valid JSON object (no prose, no markdown, no code fences).
+
+The JSON schema must be:
+{{
+  "chart_type": "bar"|"pie"|"line"|"area"|"scatter"|"heatmap",
+  "title": string,
+  "data": object|array,
+  "insights": string,
+  "colors": [string],
+  "orientation": "horizontal"|"vertical" (only for bar)
+}}
+
+CRITICAL:
+- "data" MUST be literal JSON (objects/arrays/numbers) copied from the provided data summary.
+- Do NOT reference variables or expressions like tasks_by_status_obj or tasks_by_project_obj["..."] in the output.
+- If you want "tasks by status" then set data equal to the literal object shown for tasks_by_status_obj.
+"""
+    data_summary = f"""
+PROJECT MANAGER DATA:
+- Total projects: {analytics_data.get('projects_total', 0)}
+- Total tasks: {analytics_data.get('tasks_total', 0)}
+- Overdue tasks: {analytics_data.get('overdue_tasks_count', 0)}
+
+Projects by status (use projects_by_status_obj for bar/pie): {json.dumps(analytics_data.get('projects_by_status_obj', {}))}
+Projects by priority (use projects_by_priority_obj for bar/pie): {json.dumps(analytics_data.get('projects_by_priority_obj', {}))}
+
+Tasks by status (use tasks_by_status_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_status_obj', {}))}
+Tasks by priority (use tasks_by_priority_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_priority_obj', {}))}
+Tasks by project (use tasks_by_project_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_project_obj', {}))}
+"""
+
+    system = """You are an AI that generates chart configurations for a project management dashboard.
+Use ONLY the data provided below. Return ONLY a valid JSON object (no markdown, no explanation).
+
+Output format:
+{
+  "chart_type": "bar" | "pie" | "line" | "area",
+  "title": "Chart title",
+  "data": either { "Label1": value1, "Label2": value2 } for bar/pie, OR [ { "label": "x", "value": y } ] for line/area,
+  "insights": "Brief 1-2 sentence insight",
+  "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"],
+  "orientation": "horizontal" | "vertical"  (only for bar charts; omit for other types)
+}
+
+Rules:
+- bar/pie: data must be object with string keys and number values.
+- line/area: data must be array of objects with "label" and "value".
+- Only use numbers from the provided data summary; do not invent values.
+- For "projects by status" use projects_by_status_obj.
+- For "projects by priority" use projects_by_priority_obj.
+- For "tasks by status" use tasks_by_status_obj.
+- For "tasks by priority" use tasks_by_priority_obj.
+- For "tasks by project" use tasks_by_project_obj.
+- If user asks "top N", limit to N items (sorted by value descending).
+- Sort bar/pie by value descending unless chronological/alphabetical order is requested.
+- Use "vertical" orientation when user asks for column chart, vertical bars, histogram, or columns.
+"""
+
+    agent = BaseAgent()
+    raw = agent._call_llm(
+        prompt=f"Generate a chart for: {prompt}",
+        system_prompt=system + "\n\nAvailable data:\n" + data_summary,
+        temperature=0.2,
+        max_tokens=800,
+    )
+    raw = _pm_repair_llm_json(raw, analytics_data)
+    chart_config = None
+    try:
+        chart_config = _pm_extract_first_json(raw)
+    except Exception:
+        try:
+            raw_preview = (raw or "")
+            raw_preview = raw_preview[:800] + ("..." if len(raw_preview) > 800 else "")
+            logger.warning("PM graph: failed to parse chart JSON from LLM. raw=%s", raw_preview)
+        except Exception:
+            pass
+        chart_config = {
+            'chart_type': 'bar',
+            'title': 'Tasks by Status',
+            'data': analytics_data.get('tasks_by_status_obj') or {'No data': 0},
+            'orientation': 'horizontal',
+            'colors': ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"],
+            'insights': 'Unable to parse a valid chart JSON from the model response. Showing a default chart instead.',
+        }
+
+    chart_type = chart_config.get('chart_type') or 'bar'
+    title = chart_config.get('title') or 'Project Manager Graph'
+    chart_data = chart_config.get('data')
+    if chart_data is None:
+        chart_data = analytics_data.get('tasks_by_status_obj') or {'No data': 0}
+    colors = chart_config.get('colors') or ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+
+    chart_out = {
+        'type': chart_type,
+        'title': title,
+        'data': chart_data,
+        'colors': colors,
+        'color': colors[0] if colors else '#3b82f6',
+    }
+    if chart_type == 'bar':
+        chart_out['orientation'] = chart_config.get('orientation', 'horizontal')
+
+    return {
+        'chart': chart_out,
+        'insights': chart_config.get('insights') or '',
+    }
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_generate_graph(request):
+    """Generate a chart from a natural language prompt using project/task aggregates."""
+    try:
+        company_user = request.user
+
+        prompt = (request.data.get('prompt') or '').strip() if isinstance(getattr(request, 'data', None), dict) else ''
+        if not prompt:
+            return Response({'status': 'error', 'message': 'prompt is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        project_id = request.data.get('project_id') if isinstance(getattr(request, 'data', None), dict) else None
+        if project_id in ['', None, 'all']:
+            project_id = None
+        if project_id is not None:
+            try:
+                project_id = int(project_id)
+            except Exception:
+                project_id = None
+
+        analytics_data = _pm_build_analytics_data(company_user, project_id=project_id)
+        result = _pm_generate_chart_from_prompt(prompt, analytics_data)
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'chart': result.get('chart'),
+                'insights': result.get('insights', ''),
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("pm_generate_graph failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ---------- PM Knowledge QA Chats ----------
