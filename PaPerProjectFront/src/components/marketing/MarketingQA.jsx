@@ -3,18 +3,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { 
-  Loader2, 
-  Send, 
-  MessageSquare, 
-  Plus, 
-  MessageCircle, 
-  Trash2,
+import {
+  Loader2,
+  Send,
+  MessageSquare,
+  Plus,
+  MessageCircle,
   Bot,
   User,
   Sparkles,
@@ -28,12 +27,9 @@ import {
   TrendingUp,
   Target,
   BarChart3,
-  HelpCircle,
   BookOpen,
   Award,
   Zap,
-  CheckCircle2,
-  AlertCircle,
   Search,
   BarChart2,
   Maximize2,
@@ -92,43 +88,43 @@ function isMetaQuestion(question) {
 /** Markdown to HTML for Q&A answers - readable paragraphs, headings, bullets, tables */
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
-  
+
   const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-primary">$1</strong>');
-  
+
   const lines = markdown.split('\n');
   const out = [];
   let inList = false;
   let i = 0;
-  
+
   while (i < lines.length) {
     const line = lines[i];
     const t = line.trim();
-    
+
     // Markdown table: | col | col |
     if (t.startsWith('|') && t.endsWith('|')) {
       if (inList) { out.push('</ul>'); inList = false; }
-      
+
       const tableRows = [];
       let j = i;
       while (j < lines.length && lines[j].trim().startsWith('|')) {
         const cells = lines[j].trim().split('|').map(c => c.trim()).filter(Boolean);
-        if (cells.length > 0 && cells.every(c => /^[-:\s]+$/.test(c))) { 
-          j++; 
-          continue; 
+        if (cells.length > 0 && cells.every(c => /^[-:\s]+$/.test(c))) {
+          j++;
+          continue;
         }
         tableRows.push(cells);
         j++;
       }
       i = j;
-      
+
       if (tableRows.length > 0) {
         out.push('<div class="my-5 overflow-x-auto rounded-lg border border-border shadow-sm"><table class="w-full text-base">');
-        out.push('<thead><tr class="bg-muted/80">');
+        out.push('<thead><tr class="bg-gradient-to-r from-muted/80 to-muted/40">');
         tableRows[0].forEach(cell => out.push(`<th class="px-4 py-3 text-left font-semibold text-foreground">${bold(escape(cell))}</th>`));
         out.push('</tr></thead><tbody>');
         tableRows.slice(1).forEach((row, idx) => {
-          out.push(`<tr class="${idx % 2 === 0 ? 'bg-muted/30' : ''} hover:bg-muted/50 transition-colors">`);
+          out.push(`<tr class="${idx % 2 === 0 ? 'bg-gradient-to-r from-muted/20 to-transparent' : ''} hover:bg-muted/30 transition-colors">`);
           row.forEach(cell => out.push(`<td class="px-4 py-3 border-t border-border text-base">${bold(escape(cell))}</td>`));
           out.push('</tr>');
         });
@@ -136,65 +132,67 @@ function markdownToHtml(markdown) {
       }
       continue;
     }
-    
+
     if (/^---+$/.test(t)) {
       if (inList) { out.push('</ul>'); inList = false; }
-      out.push('<hr class="my-5 border-border/50"/>');
+      out.push('<hr class="my-5 border-border/50 bg-gradient-to-r from-transparent via-border to-transparent"/>');
       i++; continue;
     }
-    
+
     if (/^## /.test(t)) {
       if (inList) { out.push('</ul>'); inList = false; }
-      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-primary border-b border-primary/20 pb-2">${bold(escape(t.slice(3)))}</h2>`);
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-primary border-b border-primary/20 pb-2 bg-gradient-to-r from-primary/5 to-transparent p-2 rounded-lg">${bold(escape(t.slice(3)))}</h2>`);
       i++; continue;
     }
-    
+
     if (/^### /.test(t)) {
       if (inList) { out.push('</ul>'); inList = false; }
-      out.push(`<h3 class="text-lg font-bold mt-4 mb-2 text-foreground">${bold(escape(t.slice(4)))}</h3>`);
+      out.push(`<h3 class="text-lg font-bold mt-4 mb-2 text-foreground bg-gradient-to-r from-muted/30 to-transparent p-2 rounded-lg">${bold(escape(t.slice(4)))}</h3>`);
       i++; continue;
     }
-    
+
     // Lines ending with : (like "Opportunities We're Missing:") treated as h2
     if (t.endsWith(':') && t.length > 10 && !t.startsWith('-') && !t.startsWith('*')) {
       if (inList) { out.push('</ul>'); inList = false; }
-      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-primary border-b border-primary/20 pb-2">${bold(escape(t))}</h2>`);
+      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-primary border-b border-primary/20 pb-2 bg-gradient-to-r from-primary/5 to-transparent p-2 rounded-lg">${bold(escape(t))}</h2>`);
       i++; continue;
     }
-    
+
     if (/^[\s]*(?:•|-|\*|\d+\.)\s+/.test(t)) {
-      if (!inList) { 
-        out.push('<ul class="list-disc pl-6 my-4 space-y-2">'); 
-        inList = true; 
+      if (!inList) {
+        out.push('<ul class="list-disc pl-6 my-4 space-y-2 bg-gradient-to-r from-muted/10 to-transparent p-3 rounded-lg">');
+        inList = true;
       }
       const content = t.replace(/^[\s]*(?:•|-|\*|\d+\.)\s+/, '');
-      out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
+      out.push(`<li class="text-base leading-relaxed hover:bg-muted/20 transition-colors rounded px-2">${bold(escape(content))}</li>`);
       i++; continue;
     }
-    
+
     if (t === '' && inList) {
       out.push('</ul>');
       inList = false;
       i++; continue;
     }
-    
+
     if (t && !t.startsWith('<')) {
       if (inList) { out.push('</ul>'); inList = false; }
-      out.push(`<p class="my-4 text-base leading-relaxed">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
+      out.push(`<p class="my-4 text-base leading-relaxed bg-gradient-to-r from-muted/5 to-transparent p-2 rounded-lg">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
     }
     i++;
   }
-  
+
   if (inList) out.push('</ul>');
   return out.join('\n');
 }
 
 /** Suggested questions matching backend / agents_test.html Knowledge Q&A + Analytics */
 const SUGGESTED_QUESTIONS = [
-  { 
-    group: '🚀 Platform & Getting Started', 
+  {
+    group: '🚀 Platform & Getting Started',
     icon: BookOpen,
     color: 'text-blue-500',
+    bgColor: 'from-blue-500/10 to-blue-500/5',
+    borderColor: 'border-blue-500/20',
     options: [
       'What is this platform?',
       'How does this platform work?',
@@ -202,23 +200,25 @@ const SUGGESTED_QUESTIONS = [
       'What is this agent?',
     ]
   },
-  { 
-    group: '📊 Performance & Analytics', 
+  {
+    group: '📊 Performance & Analytics',
     icon: BarChart3,
     color: 'text-emerald-500',
+    bgColor: 'from-emerald-500/10 to-emerald-500/5',
+    borderColor: 'border-emerald-500/20',
     options: [
       'What campaigns are performing best?',
-      'What is our overall ROI?',
-      'Which marketing channels are most effective?',
       'What is our conversion rate?',
       'How are our campaigns performing this month?',
       'What is our customer acquisition cost (CAC)?',
     ]
   },
-  { 
-    group: '🔍 Analysis & Insights', 
+  {
+    group: '🔍 Analysis & Insights',
     icon: TrendingUp,
     color: 'text-purple-500',
+    bgColor: 'from-purple-500/10 to-purple-500/5',
+    borderColor: 'border-purple-500/20',
     options: [
       'Why are sales dropping?',
       'What should we focus on to improve performance?',
@@ -227,20 +227,24 @@ const SUGGESTED_QUESTIONS = [
       'What are our top performing campaigns and why?',
     ]
   },
-  { 
-    group: '🎯 Goals & Targets', 
+  {
+    group: '🎯 Goals & Targets',
     icon: Target,
     color: 'text-amber-500',
+    bgColor: 'from-amber-500/10 to-amber-500/5',
+    borderColor: 'border-amber-500/20',
     options: [
       'How many leads have we generated this month?',
       'What is our lead conversion rate?',
       'Are we on track to meet our campaign goals?',
     ]
   },
-  { 
-    group: '💡 Strategy & Recommendations', 
+  {
+    group: '💡 Strategy & Recommendations',
     icon: Lightbulb,
     color: 'text-rose-500',
+    bgColor: 'from-rose-500/10 to-rose-500/5',
+    borderColor: 'border-rose-500/20',
     options: [
       'What marketing strategies should we implement?',
       'What opportunities are we missing?',
@@ -251,22 +255,22 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 const SUGGESTED_GRAPH_QUESTIONS = [
-  'Show campaigns by status as a pie chart',
-  'Display open rate by campaign as a bar chart',
-  'Compare emails sent by campaign',
-  'Show leads per campaign',
-  'Display replies by campaign as a bar chart',
-  'Top 5 campaigns by emails sent',
-  'Campaigns by status',
-  'Open rate by campaign',
+  { text: 'Show campaigns by status as a pie chart', icon: PieChart, color: 'text-blue-500' },
+  { text: 'Display open rate by campaign as a bar chart', icon: BarChart3, color: 'text-emerald-500' },
+  { text: 'Compare emails sent by campaign', icon: BarChart2, color: 'text-purple-500' },
+  { text: 'Show leads per campaign', icon: TrendingUp, color: 'text-amber-500' },
+  { text: 'Display replies by campaign as a bar chart', icon: Activity, color: 'text-rose-500' },
+  { text: 'Top 5 campaigns by emails sent', icon: Award, color: 'text-indigo-500' },
+  { text: 'Campaigns by status', icon: PieChart, color: 'text-cyan-500' },
+  { text: 'Open rate by campaign', icon: BarChart3, color: 'text-orange-500' },
 ];
 
 const SUGGESTED_SEARCH_QUESTIONS = [
-  'What campaigns are performing best?',
-  'What is our overall ROI?',
-  'Which marketing channels are most effective?',
-  'How are our campaigns performing this month?',
-  'What should we focus on to improve performance?',
+  { text: 'What campaigns are performing best?', icon: Award, color: 'text-emerald-500' },
+  // { text: 'What is our overall ROI?', icon: TrendingUp, color: 'text-blue-500' },
+  // { text: 'Which marketing channels are most effective?', icon: BarChart3, color: 'text-purple-500' },
+  { text: 'How are our campaigns performing this month?', icon: Activity, color: 'text-amber-500' },
+  { text: 'What should we focus on to improve performance?', icon: Target, color: 'text-rose-500' },
 ];
 
 // Chart components
@@ -276,22 +280,26 @@ const SimpleBarChart = ({ data, colors, height = 250, title }) => {
   const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
   const chartColors = colors || defaultColors;
   return (
-    <div className="space-y-3" style={{ minHeight: `${height}px` }}>
+    <div className="space-y-3 p-4 rounded-xl bg-gradient-to-b from-muted/5 to-transparent" style={{ minHeight: `${height}px` }}>
       {title && <h4 className="font-medium text-sm text-muted-foreground mb-4">{title}</h4>}
       {Object.entries(data).map(([key, value], index) => (
-        <div key={key}>
+        <div key={key} className="group">
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-sm">{key}</span>
-            <span className="font-semibold">{value}</span>
+            <span className="text-sm font-medium group-hover:text-primary transition-colors">{key}</span>
+            <span className="font-semibold bg-muted/30 px-2 py-0.5 rounded-full">{value}</span>
           </div>
-          <div className="w-full bg-muted rounded-full h-2">
-            <div
-              className="h-2 rounded-full transition-all"
+          <div className="w-full bg-muted/30 rounded-full h-2.5 overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${(value / maxValue) * 100}%` }}
+              transition={{ duration: 0.5, delay: index * 0.1 }}
+              className="h-2.5 rounded-full transition-all relative"
               style={{
-                width: `${(value / maxValue) * 100}%`,
                 backgroundColor: chartColors[index % chartColors.length],
               }}
-            />
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent" />
+            </motion.div>
           </div>
         </div>
       ))}
@@ -313,7 +321,7 @@ const SimplePieChart = ({ data, colors, title }) => {
     return slice;
   });
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex flex-col items-center gap-4 p-4 rounded-xl bg-gradient-to-b from-muted/5 to-transparent">
       {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
       <div className="relative w-48 h-48 sm:w-56 sm:h-56">
         <svg width="100%" height="100%" viewBox="0 0 200 200" className="transform -rotate-90">
@@ -324,30 +332,47 @@ const SimplePieChart = ({ data, colors, title }) => {
             const y2 = 100 + 100 * Math.sin(((segment.startAngle + segment.angle) * Math.PI) / 180);
             const largeArc = segment.angle > 180 ? 1 : 0;
             return (
-              <path
+              <motion.path
                 key={index}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3, delay: index * 0.1 }}
                 d={`M100,100 L${x1},${y1} A100,100 0 ${largeArc},1 ${x2},${y2} Z`}
                 fill={segment.color}
                 stroke="#000"
                 strokeWidth="1"
+                className="hover:opacity-80 transition-opacity cursor-pointer"
               />
             );
           })}
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-2xl font-bold">{total}</div>
-            <div className="text-xs text-muted-foreground">Total</div>
-          </div>
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: "spring", stiffness: 200, damping: 15 }}
+            className="text-center bg-background/80 backdrop-blur-sm rounded-full w-16 h-16 flex items-center justify-center shadow-lg"
+          >
+            <div>
+              <div className="text-xl font-bold">{total}</div>
+              <div className="text-[10px] text-muted-foreground">Total</div>
+            </div>
+          </motion.div>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
         {segments.map((segment, index) => (
-          <div key={index} className="flex items-center gap-2 text-xs sm:text-sm">
-            <div className="w-3 h-3 rounded shrink-0" style={{ backgroundColor: segment.color }} />
-            <span className="truncate flex-1">{segment.key}</span>
-            <span className="font-medium shrink-0">{segment.percentage}%</span>
-          </div>
+          <motion.div
+            key={index}
+            initial={{ x: -10, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: index * 0.05 }}
+            className="flex items-center gap-2 text-xs sm:text-sm p-1.5 rounded-lg hover:bg-muted/30 transition-colors"
+          >
+            <div className="w-3 h-3 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: segment.color }} />
+            <span className="truncate flex-1 font-medium">{segment.key}</span>
+            <span className="font-semibold shrink-0 bg-muted/30 px-1.5 py-0.5 rounded-full text-[10px]">{segment.percentage}%</span>
+          </motion.div>
         ))}
       </div>
     </div>
@@ -366,19 +391,45 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
   }).join(' ');
   const areaPoints = `0,100 ${points} 100,100`;
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 p-4 rounded-xl bg-gradient-to-b from-muted/5 to-transparent">
       {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
       <div className="relative w-full" style={{ height: `${height}px` }}>
         <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <polygon points={areaPoints} fill={`${color}20`} />
-          <polyline points={points} fill="none" stroke={color} strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round" />
+          <motion.polygon
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.2 }}
+            transition={{ duration: 0.5 }}
+            points={areaPoints}
+            fill={`${color}20`}
+          />
+          <motion.polyline
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={{ pathLength: 1, opacity: 1 }}
+            transition={{ duration: 1, ease: "easeInOut" }}
+            points={points}
+            fill="none"
+            stroke={color}
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
           {values.map((value, index) => (
-            <circle key={index} cx={(index / (values.length - 1 || 1)) * 100} cy={100 - (value / maxValue) * 100} r="1" fill={color} />
+            <motion.circle
+              key={index}
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.8 + index * 0.1, type: "spring" }}
+              cx={(index / (values.length - 1 || 1)) * 100}
+              cy={100 - (value / maxValue) * 100}
+              r="1.5"
+              fill={color}
+              className="cursor-pointer hover:r-2 transition-all"
+            />
           ))}
         </svg>
-        <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[10px] text-muted-foreground px-1">
-          {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate">{label}</span>) : (
-            <><span>{labels[0]}</span><span>{labels[Math.floor(labels.length / 2)]}</span><span>{labels[labels.length - 1]}</span></>
+        <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[10px] text-muted-foreground px-1 mt-2">
+          {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate font-medium">{label}</span>) : (
+            <><span className="font-medium">{labels[0]}</span><span className="font-medium">{labels[Math.floor(labels.length / 2)]}</span><span className="font-medium">{labels[labels.length - 1]}</span></>
           )}
         </div>
       </div>
@@ -427,7 +478,7 @@ function loadChats() {
 function saveChats(chats) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.slice(-50))); // Keep last 50
-  } catch {}
+  } catch { }
 }
 
 // Animation variants
@@ -508,13 +559,15 @@ const MarketingQA = () => {
   const [saving, setSaving] = useState(false);
   const [currentPromptData, setCurrentPromptData] = useState(null);
   const [comparisonResults, setComparisonResults] = useState([]);
-  
+
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
   useEffect(() => {
     setChats(loadChats());
   }, []);
+
+
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
   const currentMessages = selectedChat?.messages ?? [];
@@ -552,7 +605,7 @@ const MarketingQA = () => {
   const compareResponses = async (query, inputMode) => {
     try {
       console.log('🔍 Starting comparison for query:', query);
-      
+
       // Manual API call
       let manualResponse;
       if (inputMode === 'graph') {
@@ -560,7 +613,7 @@ const MarketingQA = () => {
       } else {
         manualResponse = await marketingAgentService.marketingQA(query, []);
       }
-      
+
       console.log('📊 Manual API Response:', manualResponse);
 
       // Store comparison result
@@ -584,10 +637,10 @@ const MarketingQA = () => {
 
       // Add to comparison results
       setComparisonResults(prev => [comparisonData, ...prev].slice(0, 20)); // Keep last 20
-      
+
       console.log('✅ Comparison Result:', comparisonData);
       console.log('📈 All Comparisons:', [comparisonData, ...comparisonResults]);
-      
+
       return comparisonData;
     } catch (error) {
       const errorData = {
@@ -598,10 +651,10 @@ const MarketingQA = () => {
         status: 'error',
         success: false
       };
-      
+
       console.error('❌ Comparison Error:', errorData);
       setComparisonResults(prev => [errorData, ...prev].slice(0, 20));
-      
+
       return errorData;
     }
   };
@@ -609,14 +662,14 @@ const MarketingQA = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!question.trim()) {
-      toast({ 
-        title: 'Error', 
-        description: 'Please enter a question.', 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: 'Please enter a question.',
+        variant: 'destructive'
       });
       return;
     }
-    
+
     const q = question.trim();
 
     // Check for special cases (only for search mode)
@@ -649,7 +702,7 @@ const MarketingQA = () => {
     // Actual API call
     try {
       setLoading(true);
-      
+
       // Send last 6 Q&A pairs for context
       const pairs = [];
       const messages = currentMessages || [];
@@ -660,26 +713,27 @@ const MarketingQA = () => {
         }
       }
       const conversationHistory = pairs.slice(-6);
-      
+      const reducedConversationHistory = pairs.slice(-2);
+
       let result;
-      
+
       if (inputMode === 'graph') {
         // Call graph generation API
         result = await marketingAgentService.generateGraph(q);
       } else {
         // Call QA API
-        result = await marketingAgentService.marketingQA(q, conversationHistory);
+        result = await marketingAgentService.marketingQA(q, reducedConversationHistory);
       }
-      
+
       if (result.status === 'success' && result.data) {
         const response = result.data;
-        
+
         if (inputMode === 'graph') {
           // Handle graph response
           const userMsg = { role: 'user', content: q };
-          const assistantMsg = { 
-            role: 'assistant', 
-            content: q, 
+          const assistantMsg = {
+            role: 'assistant',
+            content: q,
             responseData: {
               isGraph: true,
               chart: response.chart,
@@ -693,7 +747,7 @@ const MarketingQA = () => {
           // Handle QA response
           const answer = response.answer || 'No answer provided.';
           const insights = response.insights || [];
-          
+
           let responseText = answer;
           if (insights.length > 0) {
             responseText += '\n\n**Key Insights & Metrics**\n';
@@ -701,7 +755,7 @@ const MarketingQA = () => {
               responseText += `• **${i.title || 'N/A'}**: ${i.value || 'N/A'}\n`;
             });
           }
-          
+
           const userMsg = { role: 'user', content: q };
           const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
           handleResponse(q, userMsg, assistantMsg, response);
@@ -709,25 +763,20 @@ const MarketingQA = () => {
       } else {
         throw new Error(result.message || 'Failed to get response');
       }
-      
+
       // Run comparison in background (no await - non-blocking)
       compareResponses(q, inputMode).catch(err => console.error('Comparison failed:', err));
     } catch (error) {
-      const errMsg = error?.response?.data?.error ?? error?.response?.data?.message ?? error?.message ?? '';
-      const isRateLimit = /429|rate limit/i.test(errMsg);
-      const description = isRateLimit
-        ? 'Server is busy. Please try again in a few seconds.'
-        : 'Something went wrong. Please try again.';
-      
-      toast({ 
-        title: 'Error', 
-        description, 
-        variant: 'destructive' 
+      toast({
+        title: 'Warning',
+        description: 'Please try again.',
+        variant: 'default'
       });
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleResponse = (q, userMsg, assistantMsg, response) => {
     const now = new Date().toISOString();
@@ -780,9 +829,9 @@ const MarketingQA = () => {
     setChats(updated);
     saveChats(updated);
     if (selectedChatId === chatId) setSelectedChatId(null);
-    toast({ 
-      title: 'Deleted', 
-      description: 'Conversation removed.' 
+    toast({
+      title: 'Deleted',
+      description: 'Conversation removed.'
     });
   };
 
@@ -813,7 +862,7 @@ const MarketingQA = () => {
         chart_data: currentPromptData.chart || null,
         insights: currentPromptData.insights || []
       };
-      
+
       const saved = await marketingAgentService.saveGraphPrompt(promptData);
 
       try {
@@ -829,8 +878,8 @@ const MarketingQA = () => {
           };
           localStorage.setItem(cacheKey, JSON.stringify(cached));
         }
-      } catch {}
-      
+      } catch { }
+
       toast({
         title: 'Success',
         description: 'Prompt saved successfully'
@@ -862,9 +911,9 @@ const MarketingQA = () => {
         chart_data: chart,
         insights: insights || []
       };
-      
+
       await marketingAgentService.saveGraphPrompt(promptData);
-      
+
       toast({
         title: 'Success',
         description: 'Chart added to dashboard'
@@ -895,23 +944,23 @@ const MarketingQA = () => {
         }
       })
     };
-    
+
     console.log('🎯 Marketing QA Comparison Tool Available');
     console.log('Usage: window.marketingQAComparison.getComparisons()');
-    
+
     return () => {
       delete window.marketingQAComparison;
     };
   }, [comparisonResults]);
 
   const truncate = (s, n = 50) => (s.length <= n ? s : s.slice(0, n) + '…');
-  
+
   const formatDate = (iso) => {
     try {
       const d = new Date(iso);
       const now = new Date();
       const diff = now - d;
-      
+
       if (diff < 86400000) { // Less than 24 hours
         return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
       } else if (diff < 604800000) { // Less than 7 days
@@ -925,21 +974,21 @@ const MarketingQA = () => {
   };
 
   return (
-    <motion.div 
+    <motion.div
       className="h-full min-h-0 flex gap-4"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
       {/* Sidebar - Previous chats */}
-      <motion.div 
+      <motion.div
         variants={itemVariants}
         className={cn(
-          "shrink-0 flex flex-col rounded-xl border bg-card overflow-hidden transition-all duration-300",
+          "shrink-0 flex flex-col rounded-2xl border bg-gradient-to-b from-card to-muted/20 overflow-hidden transition-all duration-300 shadow-lg",
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
-        <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-primary/5 via-transparent to-transparent">
+        <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
           <AnimatePresence mode="wait">
             {sidebarOpen ? (
               <motion.span
@@ -965,29 +1014,29 @@ const MarketingQA = () => {
             )}
           </AnimatePresence>
           <div className="flex items-center gap-1">
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="h-7 w-7 hover:bg-primary/10"
+              className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary transition-all"
             >
               {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={newChat} 
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={newChat}
               title="New conversation"
-              className="h-7 w-7 hover:bg-primary/10"
+              className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary transition-all"
             >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
         </div>
-        
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent">
           {chats.length === 0 ? (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="p-6 text-center"
@@ -1022,7 +1071,7 @@ const MarketingQA = () => {
                   .map((c, index) => {
                     const firstQuestion = c.messages?.find(m => m.role === 'user')?.content || 'New chat';
                     const messageCount = c.messages?.filter(m => m.role === 'user').length || 0;
-                    
+
                     return (
                       <motion.div
                         key={c.id}
@@ -1033,30 +1082,30 @@ const MarketingQA = () => {
                         whileHover="hover"
                         transition={{ delay: index * 0.05 }}
                         className={cn(
-                          "group relative flex items-start gap-2 w-full p-3 rounded-lg text-sm transition-all cursor-pointer",
-                          selectedChatId === c.id 
-                            ? 'bg-primary/10 border border-primary/20 shadow-sm' 
-                            : 'hover:bg-muted/80'
+                          "group relative flex items-start gap-2 w-full p-3 rounded-xl text-sm transition-all cursor-pointer",
+                          selectedChatId === c.id
+                            ? 'bg-gradient-to-r from-primary/20 to-primary/5 border border-primary/30 shadow-md'
+                            : 'hover:bg-gradient-to-r hover:from-muted/80 hover:to-muted/40'
                         )}
                         onClick={() => setSelectedChatId(c.id)}
                       >
                         <div className={cn(
-                          "shrink-0 rounded-lg p-1.5",
-                          selectedChatId === c.id ? 'bg-primary/20' : 'bg-muted'
+                          "shrink-0 rounded-lg p-1.5 transition-all",
+                          selectedChatId === c.id ? 'bg-primary/30' : 'bg-muted'
                         )}>
                           <MessageSquare className={cn(
                             "h-3.5 w-3.5",
                             selectedChatId === c.id ? 'text-primary' : 'text-muted-foreground'
                           )} />
                         </div>
-                        
+
                         {sidebarOpen ? (
                           <>
                             <div className="flex-1 min-w-0">
                               <div className="font-medium truncate flex items-center gap-1">
                                 {truncate(firstQuestion, 25)}
                                 {messageCount > 1 && (
-                                  <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                                  <Badge variant="outline" className="h-4 px-1 text-[10px] rounded-full bg-primary/10 border-primary/20">
                                     {messageCount}
                                   </Badge>
                                 )}
@@ -1070,7 +1119,7 @@ const MarketingQA = () => {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive rounded-lg transition-all"
                               onClick={(e) => deleteChat(e, c.id)}
                             >
                               <X className="h-3 w-3" />
@@ -1078,7 +1127,7 @@ const MarketingQA = () => {
                           </>
                         ) : (
                           <div className="absolute -top-1 -right-1">
-                            <Badge variant="outline" className="h-3 px-1 text-[8px]">
+                            <Badge variant="outline" className="h-3 px-1 text-[8px] rounded-full bg-primary/10 border-primary/20">
                               {messageCount}
                             </Badge>
                           </div>
@@ -1093,26 +1142,26 @@ const MarketingQA = () => {
       </motion.div>
 
       {/* Main chat area */}
-      <motion.div 
+      <motion.div
         variants={itemVariants}
         className="flex-1 min-w-0 min-h-0"
       >
-        <Card className="h-full flex flex-col overflow-hidden border-0 shadow-lg">
+        <Card className="h-full flex flex-col overflow-hidden border-0 shadow-xl rounded-2xl bg-gradient-to-b from-background to-muted/10">
           {/* Header */}
-          <CardHeader className="shrink-0 bg-gradient-to-r from-primary/5 via-transparent to-transparent border-b pb-3">
+          <CardHeader className="shrink-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-b pb-3 rounded-t-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <motion.div 
-                  whileHover={{ rotate: 360 }}
+                <motion.div
+                  whileHover={{ rotate: 360, scale: 1.1 }}
                   transition={{ duration: 0.5 }}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 shadow-md"
                 >
                   <Bot className="h-5 w-5 text-primary" />
                 </motion.div>
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     Marketing Q&A Assistant
-                    <Badge variant="outline" className="bg-primary/5 gap-1">
+                    <Badge variant="outline" className="bg-gradient-to-r from-primary/20 to-primary/5 gap-1 rounded-full border-primary/30">
                       <Zap className="h-3 w-3 text-primary" />
                       AI-Powered
                     </Badge>
@@ -1123,7 +1172,7 @@ const MarketingQA = () => {
                 </div>
               </div>
               {selectedChat && (
-                <Badge variant="secondary" className="gap-1">
+                <Badge variant="secondary" className="gap-1 rounded-full bg-gradient-to-r from-muted to-muted/50">
                   <MessageSquare className="h-3 w-3" />
                   {currentMessages.filter(m => m.role === 'user').length} questions
                 </Badge>
@@ -1132,7 +1181,7 @@ const MarketingQA = () => {
           </CardHeader>
 
           {/* Messages area */}
-          <CardContent className="flex-1 overflow-y-auto p-6 scrollbar-thin bg-gradient-to-b from-background via-background to-muted/20">
+          <CardContent className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent bg-gradient-to-b from-background via-background to-muted/10">
             <AnimatePresence mode="popLayout">
               {!selectedChatId ? (
                 <motion.div
@@ -1154,30 +1203,35 @@ const MarketingQA = () => {
                       repeatType: "reverse"
                     }}
                   >
-                    <Bot className="h-20 w-20 text-primary/20 mb-1" />
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
+                      <Bot className="h-20 w-20 text-primary/40 relative z-10" />
+                    </div>
                   </motion.div>
-                  <h3 className="text-xl font-semibold mb-2">Welcome to Marketing Q&A</h3>
-                  <p className="text-muted-foreground max-w-md mb-2">
+                  <h3 className="text-xl font-semibold mb-2 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">Welcome to Marketing Q&A</h3>
+                  <p className="text-muted-foreground max-w-md mb-6">
                     Ask me about campaign performance, ROI, conversion rates, and get data-driven insights
                   </p>
-                  
+
                   <div className="grid grid-cols-2 gap-3 max-w-lg">
-                    <div className="flex items-center gap-2 p-3 r">
-                      <BarChart3 className="h-4 w-4 text-emerald-500" />
-                      <span className="text-sm">Campaign ROI</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 r">
-                      <Target className="h-4 w-4 text-purple-500" />
-                      <span className="text-sm">Conversion Rates</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 r">
-                      <TrendingUp className="h-4 w-4 text-amber-500" />
-                      <span className="text-sm">Channel Analysis</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 r">
-                      <Lightbulb className="h-4 w-4 text-rose-500" />
-                      <span className="text-sm">Recommendations</span>
-                    </div>
+                    {[
+                      { icon: BarChart3, label: 'Campaign ROI', color: 'from-emerald-500/20 to-emerald-500/5' },
+                      { icon: Target, label: 'Conversion Rates', color: 'from-purple-500/20 to-purple-500/5' },
+                      { icon: TrendingUp, label: 'Channel Analysis', color: 'from-amber-500/20 to-amber-500/5' },
+                      { icon: Lightbulb, label: 'Recommendations', color: 'from-rose-500/20 to-rose-500/5' }
+                    ].map((item, i) => (
+                      <motion.div
+                        key={i}
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        className={cn(
+                          "flex items-center gap-2 p-3 rounded-xl bg-gradient-to-r border shadow-sm",
+                          item.color
+                        )}
+                      >
+                        <item.icon className={cn("h-4 w-4", item.color.replace('/20', ''))} />
+                        <span className="text-sm font-medium">{item.label}</span>
+                      </motion.div>
+                    ))}
                   </div>
                 </motion.div>
               ) : (
@@ -1196,10 +1250,10 @@ const MarketingQA = () => {
                         )}
                       >
                         <div className={cn(
-                          "max-w-[85%] rounded-2xl overflow-hidden",
-                          msg.role === 'user' 
-                            ? 'bg-primary text-primary-foreground' 
-                            : 'bg-muted/50 border shadow-sm'
+                          "max-w-[85%] rounded-2xl overflow-hidden shadow-md",
+                          msg.role === 'user'
+                            ? 'bg-gradient-to-r from-primary to-primary/90 text-primary-foreground'
+                            : 'bg-gradient-to-r from-muted/80 to-muted/40 border shadow-sm'
                         )}>
                           {msg.role === 'user' ? (
                             <div className="px-4 py-3">
@@ -1212,27 +1266,27 @@ const MarketingQA = () => {
                           ) : (
                             <div className="px-5 py-4">
                               <div className="flex items-center gap-2 mb-3">
-                                <div className="rounded-full bg-primary/10 p-1">
+                                <div className="rounded-full bg-primary/20 p-1">
                                   <Bot className="h-3 w-3 text-primary" />
                                 </div>
                                 <span className="text-xs font-medium">Marketing Assistant</span>
                                 {msg.responseData?.research_id && (
-                                  <Badge variant="outline" className="text-[10px] h-4">
+                                  <Badge variant="outline" className="text-[10px] h-4 rounded-full bg-primary/10 border-primary/20">
                                     ID: {msg.responseData.research_id.slice(0, 6)}
                                   </Badge>
                                 )}
                               </div>
-                              
+
                               {msg.responseData?.isGraph ? (
                                 <>
                                   <div className="space-y-3">
                                     {msg.responseData.chart && (
-                                      <div className="relative w-full rounded-xl border border-border bg-card p-3 shadow-sm">
+                                      <div className="relative w-full rounded-xl border border-border bg-gradient-to-b from-card to-muted/30 p-3 shadow-sm">
                                         <Button
                                           type="button"
                                           variant="ghost"
                                           size="icon"
-                                          className="absolute top-2 right-2 h-7 w-7 rounded-md opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground"
+                                          className="absolute top-2 right-2 h-7 w-7 rounded-md opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground bg-background/50 backdrop-blur-sm"
                                           onClick={() => setExpandedGraph({ chart: msg.responseData.chart, chartTitle: msg.responseData.chartTitle })}
                                           title="Expand graph"
                                         >
@@ -1245,11 +1299,14 @@ const MarketingQA = () => {
                                     )}
                                     {Array.isArray(msg.responseData.insights) && msg.responseData.insights.length > 0 && (
                                       <div className="pt-2 border-t border-border/50">
-                                        <p className="text-xs font-semibold mb-2">Insights</p>
+                                        <p className="text-xs font-semibold mb-2 flex items-center gap-1">
+                                          <Sparkles className="h-3 w-3 text-amber-500" />
+                                          Insights
+                                        </p>
                                         <table className="w-full text-xs">
                                           <tbody>
                                             {msg.responseData.insights.map((insight, j) => (
-                                              <tr key={j} className="border-b border-border/30">
+                                              <tr key={j} className="border-b border-border/30 hover:bg-muted/20 transition-colors">
                                                 <td className="py-1 pr-2 font-medium">{insight.title || 'N/A'}</td>
                                                 <td className="py-1 text-muted-foreground">{insight.value || 'N/A'}</td>
                                               </tr>
@@ -1262,6 +1319,7 @@ const MarketingQA = () => {
                                       <Button
                                         type="button"
                                         variant="outline"
+                                        className="rounded-xl text-xs gap-1 bg-background/50 backdrop-blur-sm hover:bg-primary/10 hover:text-primary transition-all"
                                         size="sm"
                                         onClick={() => openSaveModal(
                                           currentMessages[currentMessages.indexOf(msg) - 1]?.content,
@@ -1271,7 +1329,7 @@ const MarketingQA = () => {
                                           msg.responseData.insights
                                         )}
                                       >
-                                        <Save className="h-4 w-4 mr-2" />
+                                        <Save className="h-3.5 w-3.5" />
                                         Save Prompt
                                       </Button>
                                       <Button
@@ -1284,9 +1342,9 @@ const MarketingQA = () => {
                                           msg.responseData.chart,
                                           msg.responseData.insights
                                         )}
-                                        className="rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+                                        className="rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-xs gap-1 hover:from-primary/90 hover:to-primary/70 transition-all"
                                       >
-                                        <LayoutDashboard className="h-4 w-4 mr-2 shrink-0" />
+                                        <LayoutDashboard className="h-3.5 w-3.5" />
                                         Add to dashboard
                                       </Button>
                                     </div>
@@ -1296,13 +1354,13 @@ const MarketingQA = () => {
                                 <>
                                   <div
                                     className="prose prose-base max-w-none dark:prose-invert [&_h2]:text-primary [&_strong]:font-semibold"
-                                    dangerouslySetInnerHTML={{ 
-                                      __html: markdownToHtml(msg.responseData?.answer || msg.content) 
+                                    dangerouslySetInnerHTML={{
+                                      __html: markdownToHtml(msg.responseData?.answer || msg.content)
                                     }}
                                   />
-                                  
+
                                   {msg.responseData?.insights?.length > 0 && (
-                                    <motion.div 
+                                    <motion.div
                                       initial={{ opacity: 0, y: 10 }}
                                       animate={{ opacity: 1, y: 0 }}
                                       className="mt-4 pt-4 border-t border-border/50"
@@ -1313,9 +1371,12 @@ const MarketingQA = () => {
                                       </h4>
                                       <div className="grid grid-cols-2 gap-2">
                                         {msg.responseData.insights.map((insight, j) => (
-                                          <div 
+                                          <motion.div
                                             key={j}
-                                            className="rounded-lg bg-muted/50 p-3 border"
+                                            initial={{ scale: 0.9, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            transition={{ delay: j * 0.1 }}
+                                            className="rounded-xl bg-gradient-to-br from-muted/50 to-muted/30 p-3 border shadow-sm hover:shadow-md transition-all"
                                           >
                                             <p className="text-xs font-medium text-muted-foreground mb-1">
                                               {insight.title || 'Metric'}
@@ -1323,7 +1384,7 @@ const MarketingQA = () => {
                                             <p className="text-sm font-semibold">
                                               {insight.value || 'N/A'}
                                             </p>
-                                          </div>
+                                          </motion.div>
                                         ))}
                                       </div>
                                     </motion.div>
@@ -1336,14 +1397,14 @@ const MarketingQA = () => {
                       </motion.div>
                     ))}
                   </AnimatePresence>
-                  
+
                   {loading && (
                     <motion.div
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="flex justify-start"
                     >
-                      <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-3">
+                      <div className="bg-gradient-to-r from-muted to-muted/50 border rounded-2xl px-4 py-3 flex items-center gap-3 shadow-md">
                         <motion.div
                           animate={{ rotate: 360 }}
                           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
@@ -1354,7 +1415,7 @@ const MarketingQA = () => {
                       </div>
                     </motion.div>
                   )}
-                  
+
                   <div ref={messagesEndRef} />
                 </div>
               )}
@@ -1362,196 +1423,288 @@ const MarketingQA = () => {
           </CardContent>
 
           {/* Input form */}
-          <div className="shrink-0 border-t bg-muted/30 p-4">
+          <div className="shrink-0   p-4 rounded-b-2xl">
             <form onSubmit={handleSubmit} className="space-y-3">
-              <div className="flex gap-3 items-center min-h-[48px]">
-                <Select value={inputMode} onValueChange={setInputMode}>
-                  <SelectTrigger className="w-[140px] h-11 rounded-lg text-sm gap-2 border-border bg-background">
-                    {inputMode === 'search' ? (
-                      <>
-                        <Search className="h-4 w-4" />
-                        <span>Search</span>
-                      </>
-                    ) : (
-                      <>
-                        <BarChart2 className="h-4 w-4" />
-                        <span>Graph</span>
-                      </>
-                    )}
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="search">
-                      <div className="flex items-center gap-2">
-                        <Search className="h-4 w-4" />
-                        <span>Search QA</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="graph">
-                      <div className="flex items-center gap-2">
-                        <BarChart2 className="h-4 w-4" />
-                        <span>Generate Graph</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <Textarea
-                  ref={textareaRef}
-                  placeholder={inputMode === 'search' ? 'Ask about campaign performance, ROI, channels...' : 'Describe the chart you want...'}
-                  value={question}
-                  onChange={(e) => { 
-                    setQuestion(e.target.value); 
-                    setSuggestedValue('__none__'); 
+              <div className="relative">
+                <div
+                  className="absolute inset-0 rounded-[28px] pointer-events-none"
+                  style={{
+                    // background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
                   }}
-                  onKeyDown={(e) => { 
-                    if (e.key === 'Enter' && !e.shiftKey) { 
-                      e.preventDefault(); 
-                      handleSubmit(e); 
-                    } 
-                  }}
-                  rows={1}
-                  disabled={loading}
-                  className="flex-1 min-h-[44px] h-11 max-h-32 resize-none rounded-lg border border-border bg-background text-sm py-2.5 text-left"
                 />
-                <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                <div
+                  className="relative z-[1] rounded-[28px] px-2.5 py-2.5 space-y-3"
+                  style={{
+                    background: '#0a0a0f',
+                    border: '1.5px solid rgba(255,255,255,0.08)',
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+                  }}
                 >
-                  <Button 
-                    type="submit" 
-                    disabled={loading || !question.trim()} 
-                    size="icon" 
-                    className="h-11 w-11 shrink-0 rounded-lg bg-primary hover:bg-primary/90"
-                  >
-                    {loading ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <Send className="h-5 w-5" />
-                    )}
-                  </Button>
-                </motion.div>
+                  <div className="flex gap-2.5 items-center">
+                    <Select value={inputMode} onValueChange={setInputMode}>
+                      <SelectTrigger
+                        className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
+                        style={{
+                          background: '#111118',
+                          border: '1.5px solid rgba(139, 92, 246, 0.55)',
+                          boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
+                          color: '#e2e2f0',
+                        }}
+                      >
+                        {inputMode === 'search' ? (
+                          <>
+                            <Search className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                            <span>Search</span>
+                          </>
+                        ) : (
+                          <>
+                            <BarChart2 className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                            <span>Graph</span>
+                          </>
+                        )}
+                      </SelectTrigger>
+                      <SelectContent
+                        className="rounded-xl"
+                        style={{
+                          background: '#161630',
+                          border: '1px solid rgba(139, 92, 246, 0.25)',
+                          color: '#e2e2f0',
+                        }}
+                      >
+                        <SelectItem value="search" className="rounded-lg focus:bg-violet-600/20 focus:text-white">
+                          <div className="flex items-center gap-2">
+                            <Search className="h-4 w-4" />
+                            <span>Search QA</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="graph" className="rounded-lg focus:bg-violet-600/20 focus:text-white">
+                          <div className="flex items-center gap-2">
+                            <BarChart2 className="h-4 w-4" />
+                            <span>Generate Graph</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div
+                      className="flex-1 min-w-0 rounded-full flex items-center overflow-hidden"
+                      style={{
+                        background: '#0e0e14',
+                        boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderLeftColor: 'rgba(139, 92, 246, 0.45)',
+                      }}
+                    >
+                      <Textarea
+                        ref={textareaRef}
+                        placeholder={inputMode === 'search' ? 'Ask about campaign performance, ROI, channels...' : 'Describe the chart you want...'}
+                        value={question}
+                        onChange={(e) => {
+                          setQuestion(e.target.value);
+                          setSuggestedValue('__none__');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSubmit(e);
+                          }
+                        }}
+                        rows={1}
+                        disabled={loading}
+                        className="flex-1 w-full min-h-[44px] h-11 max-h-32 resize-none border-0 bg-transparent text-sm py-3 px-4 text-white placeholder:text-white/30 focus-visible:ring-0 focus-visible:ring-offset-0"
+                      />
+                    </div>
+                    <motion.div
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <Button
+                        type="submit"
+                        disabled={loading || !question.trim()}
+                        size="icon"
+                        className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
+                        style={{
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                          boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                          color: '#ffffff',
+                        }}
+                      >
+                        {loading ? (
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                        ) : (
+                          <Send className="h-5 w-5" />
+                        )}
+                      </Button>
+                    </motion.div>
+                  </div>
+                  {/* Suggested questions */}
+                  <div className="space-y-3 w-full pt-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-white/80 font-medium flex items-center gap-1">
+                        <Sparkles className="h-3 w-3" style={{ color: '#a78bfa' }} />
+                        Try these examples
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowSuggestions(!showSuggestions)}
+                        className="h-7 w-7 p-0 rounded-full transition-all text-white/70 hover:text-white"
+                        style={{
+                          background: 'rgba(17,17,24,0.8)',
+                          border: '1px solid rgba(139, 92, 246, 0.30)',
+                          boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
+                        }}
+                        title={showSuggestions ? 'Hide suggestions' : 'Show suggestions'}
+                      >
+                        {showSuggestions ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </Button>
+                    </div>
+
+                    <AnimatePresence>
+                      {showSuggestions && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="flex flex-wrap gap-2">
+                            {(inputMode === 'graph' ? SUGGESTED_GRAPH_QUESTIONS : SUGGESTED_SEARCH_QUESTIONS).map((item, index) => (
+                              <motion.button
+                                key={item.text}
+                                type="button"
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                transition={{ delay: index * 0.05 }}
+                                whileHover={{ scale: 1.05, y: -2 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => setQuestion(item.text)}
+                                className={cn(
+                                  "text-xs text-white/90 rounded-xl px-3 py-1.5 text-left transition-all shadow-sm hover:shadow-md flex items-center gap-1.5 border",
+                                  item.color
+                                )}
+                                style={{
+                                  background: 'rgba(255,255,255,0.05)',
+                                  borderColor: 'rgba(255,255,255,0.10)',
+                                }}
+                              >
+                                <item.icon className={cn("h-3 w-3", item.color)} />
+                                {item.text}
+                              </motion.button>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
               </div>
 
-              {/* Suggested questions */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground font-medium">Try these examples</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowSuggestions(!showSuggestions)}
-                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                    title={showSuggestions ? 'Hide suggestions' : 'Show suggestions'}
-                  >
-                    {showSuggestions ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </Button>
-                </div>
-                
-                <AnimatePresence>
-                  {showSuggestions && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="flex flex-wrap gap-1.5">
-                        {(inputMode === 'graph' ? SUGGESTED_GRAPH_QUESTIONS : SUGGESTED_SEARCH_QUESTIONS).map((q) => (
-                          <button
-                            key={q}
-                            type="button"
-                            onClick={() => setQuestion(q)}
-                            className="text-xs text-foreground bg-muted/80 hover:bg-muted border border-border hover:border-border rounded-md px-2 py-1 text-left transition-colors"
-                          >
-                            {q}
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
 
               {/* Quick action chips */}
-              {/* {!selectedChatId && showSuggestions && (
-                <motion.div 
+              {!selectedChatId && showSuggestions && (
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="flex flex-wrap gap-2 mt-2"
+                  className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2"
                 >
-                  {SUGGESTED_QUESTIONS.slice(0, 2).flatMap(group => 
-                    group.options.slice(0, 2).map((prompt, i) => (
-                      <Button
-                        key={i}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs h-7 bg-background/50 hover:bg-primary/5"
-                        onClick={() => setQuestion(prompt)}
-                      >
-                        {truncate(prompt, 20)}
-                      </Button>
-                    ))
-                  )}
+                  {SUGGESTED_QUESTIONS.slice(0, 2).map((group, groupIndex) => (
+                    <div
+                      key={groupIndex}
+                      className="space-y-1.5 rounded-xl p-2 border"
+                      style={{
+                        background: 'rgba(255,255,255,0.04)',
+                        borderColor: 'rgba(255,255,255,0.10)',
+                      }}
+                    >
+                      <p className={cn("text-xs font-medium flex items-center gap-1 text-white/85", group.color)}>
+                        <group.icon className="h-3 w-3" />
+                        {group.group}
+                      </p>
+                      {group.options.slice(0, 2).map((prompt, i) => (
+                        <Button
+                          key={i}
+                          variant="outline"
+                          size="sm"
+                          className={cn(
+                            "w-full text-xs h-8 justify-start rounded-xl transition-all text-white/90 border hover:text-white",
+                            group.color
+                          )}
+                          style={{
+                            background: 'rgba(17,17,24,0.9)',
+                            borderColor: 'rgba(139, 92, 246, 0.22)',
+                          }}
+                          onClick={() => setQuestion(prompt)}
+                        >
+                          {truncate(prompt, 20)}
+                        </Button>
+                      ))}
+                    </div>
+                  ))}
                 </motion.div>
-              )} */}
+              )}
             </form>
           </div>
 
-        {/* Expand graph dialog */}
-        <Dialog open={!!expandedGraph} onOpenChange={(open) => !open && setExpandedGraph(null)}>
-          <DialogContent className="max-w-[95vw] w-full max-h-[90vh] overflow-auto">
-            <DialogHeader className="shrink-0">
-              <DialogTitle>{expandedGraph?.chartTitle || 'Graph'}</DialogTitle>
-            </DialogHeader>
-            <div className="min-h-[400px] py-4">
-              {expandedGraph?.chart && renderChart(expandedGraph.chart)}
-            </div>
-          </DialogContent>
-        </Dialog>
+          {/* Expand graph dialog */}
+          <Dialog open={!!expandedGraph} onOpenChange={(open) => !open && setExpandedGraph(null)}>
+            <DialogContent className="max-w-[95vw] w-full max-h-[90vh] overflow-auto rounded-2xl">
+              <DialogHeader className="shrink-0">
+                <DialogTitle className="text-xl bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                  {expandedGraph?.chartTitle || 'Graph'}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="min-h-[400px] py-4">
+                {expandedGraph?.chart && renderChart(expandedGraph.chart)}
+              </div>
+            </DialogContent>
+          </Dialog>
 
-        {/* Save prompt dialog */}
-        <Dialog open={saveModalOpen} onOpenChange={(open) => {
-          if (!open) {
-            setSaveModalOpen(false);
-            setSaveTitle('');
-            setSaveTags('');
-            setCurrentPromptData(null);
-          }
-        }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Save Prompt</DialogTitle>
-              <DialogDescription>Save this graph prompt for quick access later.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="save-title">Title</Label>
-                <Input
-                  id="save-title"
-                  value={saveTitle}
-                  onChange={(e) => setSaveTitle(e.target.value)}
-                  placeholder="e.g. Monthly Campaign Performance"
-                />
+          {/* Save prompt dialog */}
+          <Dialog open={saveModalOpen} onOpenChange={(open) => {
+            if (!open) {
+              setSaveModalOpen(false);
+              setSaveTitle('');
+              setSaveTags('');
+              setCurrentPromptData(null);
+            }
+          }}>
+            <DialogContent className="max-w-md rounded-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-xl bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">Save Prompt</DialogTitle>
+                <DialogDescription>Save this graph prompt for quick access later.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="save-title">Title</Label>
+                  <Input
+                    id="save-title"
+                    value={saveTitle}
+                    onChange={(e) => setSaveTitle(e.target.value)}
+                    placeholder="e.g. Monthly Campaign Performance"
+                    className="rounded-xl border-border focus:border-primary/50 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="save-tags">Tags (comma-separated)</Label>
+                  <Input
+                    id="save-tags"
+                    value={saveTags}
+                    onChange={(e) => setSaveTags(e.target.value)}
+                    placeholder="e.g. analytics, campaigns"
+                    className="rounded-xl border-border focus:border-primary/50 transition-all"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="save-tags">Tags (comma-separated)</Label>
-                <Input
-                  id="save-tags"
-                  value={saveTags}
-                  onChange={(e) => setSaveTags(e.target.value)}
-                  placeholder="e.g. analytics, campaigns"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setSaveModalOpen(false)}>Cancel</Button>
-              <Button onClick={handleSavePrompt} disabled={saving}>
-                {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="h-4 w-4 mr-2" /> Save Prompt</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSaveModalOpen(false)} className="rounded-xl">Cancel</Button>
+                <Button onClick={handleSavePrompt} disabled={saving} className="rounded-xl bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70">
+                  {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="h-4 w-4 mr-2" /> Save Prompt</>}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </Card>
       </motion.div>
     </motion.div>

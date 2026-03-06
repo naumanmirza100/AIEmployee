@@ -93,6 +93,8 @@ class MarketingBaseAgent:
             self.embedding_model = None
         
         self.agent_name = self.__class__.__name__
+        self.last_token_usage = None
+        self.last_llm_used = False
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
@@ -155,8 +157,43 @@ class MarketingBaseAgent:
                 temperature=temperature,
                 max_tokens=max_tokens
             )
-            
-            return response.choices[0].message.content
+
+            usage = getattr(response, 'usage', None)
+            content = response.choices[0].message.content
+            self.last_llm_used = True
+
+            prompt_text = ''
+            try:
+                prompt_text = '\n'.join([m.get('content', '') for m in messages if isinstance(m, dict)])
+            except Exception:
+                prompt_text = ''
+
+            prompt_tokens = getattr(usage, 'prompt_tokens', None) if usage else None
+            completion_tokens = getattr(usage, 'completion_tokens', None) if usage else None
+            total_tokens = getattr(usage, 'total_tokens', None) if usage else None
+            estimated = False
+
+            if total_tokens is None:
+                estimated = True
+                def _est_tokens(t: str) -> int:
+                    t = t or ''
+                    return max(1, int(len(t) / 4))
+                if prompt_tokens is None:
+                    prompt_tokens = _est_tokens(prompt_text)
+                if completion_tokens is None:
+                    completion_tokens = _est_tokens(content)
+                total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+            self.last_token_usage = {
+                'provider': 'openai',
+                'model': model_to_use,
+                'prompt_tokens': prompt_tokens,
+                'completion_tokens': completion_tokens,
+                'total_tokens': total_tokens,
+                'estimated': estimated,
+            }
+
+            return content
             
         except Exception as e:
             logger.error(f"Error in {self.agent_name} OpenAI LLM call: {str(e)}")
@@ -249,7 +286,41 @@ class MarketingBaseAgent:
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
-                return response.choices[0].message.content
+                usage = getattr(response, 'usage', None)
+                content = response.choices[0].message.content
+                self.last_llm_used = True
+
+                prompt_text = ''
+                try:
+                    prompt_text = '\n'.join([m.get('content', '') for m in messages if isinstance(m, dict)])
+                except Exception:
+                    prompt_text = ''
+
+                prompt_tokens = getattr(usage, 'prompt_tokens', None) if usage else None
+                completion_tokens = getattr(usage, 'completion_tokens', None) if usage else None
+                total_tokens = getattr(usage, 'total_tokens', None) if usage else None
+                estimated = False
+
+                if total_tokens is None:
+                    estimated = True
+                    def _est_tokens(t: str) -> int:
+                        t = t or ''
+                        return max(1, int(len(t) / 4))
+                    if prompt_tokens is None:
+                        prompt_tokens = _est_tokens(prompt_text)
+                    if completion_tokens is None:
+                        completion_tokens = _est_tokens(content)
+                    total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+                self.last_token_usage = {
+                    'provider': 'groq',
+                    'model': self.model,
+                    'prompt_tokens': prompt_tokens,
+                    'completion_tokens': completion_tokens,
+                    'total_tokens': total_tokens,
+                    'estimated': estimated,
+                }
+                return content
             except Exception as e:
                 last_error = e
                 err_str = str(e)

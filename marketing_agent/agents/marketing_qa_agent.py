@@ -1,7 +1,23 @@
 """
 Marketing Knowledge Q&A + Analytics Agent
 Foundation Agent - Provides data understanding and answers marketing questions
-This is the BRAIN that all other agents will use.
+
+ROUTING ARCHITECTURE (Smart Enum Router):
+  Every question goes through _classify_question() which returns ONE of these:
+  
+  DB-only (0 LLM tokens):
+    - GREETING          → short friendly reply
+    - PLATFORM_INFO     → static platform description
+    - META_HELP         → "what can I ask?" reply
+    - DB_COUNT_STATUS   → campaign count / active / list
+    - DB_TOTAL_LEADS    → total leads number
+    - DB_ANALYTICS      → open rate, click rate, top campaigns
+    - DB_CAMPAIGN_DETAIL→ specific named campaign metrics
+    - DB_BEST_CHANNEL   → channel recommendation (static logic)
+
+  LLM-needed:
+    - GENERAL_DEFINITION→ "what is X", full form, meaning (small LLM call, no data)
+    - LLM_REASONING     → why, strategy, improve, optimize (full LLM + data)
 """
 
 from .marketing_base_agent import MarketingBaseAgent
@@ -10,205 +26,405 @@ from typing import Dict, Optional, List
 from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, EmailSendHistory, Reply, CampaignLead
 import json
 import re
+from enum import Enum
 from datetime import datetime, timedelta
 from django.db.models import Sum, Avg, Count, Q
+
+
+# ──────────────────────────────────────────────
+#  Question Categories (Smart Enum Router)
+# ──────────────────────────────────────────────
+class QuestionCategory(Enum):
+    GREETING            = "greeting"
+    PLATFORM_INFO       = "platform_info"
+    META_HELP           = "meta_help"
+    DB_COUNT_STATUS     = "db_count_status"
+    DB_TOTAL_LEADS      = "db_total_leads"
+    DB_ANALYTICS        = "db_analytics"
+    DB_CAMPAIGN_DETAIL  = "db_campaign_detail"
+    DB_BEST_CHANNEL     = "db_best_channel"
+    GENERAL_DEFINITION  = "general_definition"
+    LLM_REASONING       = "llm_reasoning"   # fallback — needs LLM
+
+
+# ──────────────────────────────────────────────
+#  Router Config — all keyword rules in ONE place
+#  To add a new question type: just add a new entry here.
+# ──────────────────────────────────────────────
+ROUTER_CONFIG = {
+    QuestionCategory.GREETING: {
+        "exact": {
+            'hi', 'hello', 'hey', 'yo', 'sup', 'howdy', 'greetings',
+            'hi!', 'hello!', 'hey!', 'thanks', 'thank you', 'ok', 'okay',
+            'bye', 'goodbye', 'good', 'great', 'nice', 'cool', 'alright',
+            'fine', 'good to know', 'got it', 'understood', 'perfect',
+            'sure', 'yeah', 'yep', 'nope', 'no',
+        },
+        "startswith": (
+            'how are', "how's it", 'hows it', 'how do you do',
+            'how r u', 'how r you', 'good morning', 'good afternoon',
+            'good evening', 'hi there', 'hello there', 'hey there',
+        ),
+        "max_len": 35,
+    },
+
+    QuestionCategory.PLATFORM_INFO: {
+        "contains": (
+            'what is this platform', 'what does this platform', 'how helpful is this platform',
+            'what is this website', 'what is this site', 'what is this app', 'what is this system',
+            'how to use this platform', 'how to run campaign', 'how to build campaign',
+            'how to create campaign', 'how do i run a campaign', 'what are the agents',
+            'tell me about this platform', 'explain this platform', 'describe this platform',
+            'campaign agent', 'research agent', 'outreach agent', 'notification agent',
+            'what is the campaign agent', 'how does this platform work', 'how this platform work',
+            'how does this agent', 'how this agent work',
+        ),
+        "max_len": 120,
+    },
+
+    QuestionCategory.META_HELP: {
+        "contains": (
+            'what question', 'what questions', 'what can i ask', 'what can you answer',
+            'how can you help', 'how can i use', 'what do you do', 'what do you know',
+            'what can you tell', 'what can you do', 'what should i ask',
+            'give me examples', 'example questions', 'what to ask', 'help me ask',
+        ),
+        "max_len": 80,
+    },
+
+    QuestionCategory.DB_COUNT_STATUS: {
+        "contains": (
+            'how many campaign', 'how many campaigns', 'campaigns are working',
+            'campaigns working', 'how many are active', 'how many active',
+            'number of campaign', 'total campaign', 'list my campaign', 'list campaigns',
+            'campaign count', 'show my campaign', 'show campaigns',
+            'campaign status', 'status of my campaigns', 'status of campaigns',
+        ),
+        "max_len": 120,
+    },
+
+    QuestionCategory.DB_TOTAL_LEADS: {
+        "contains": (
+            'total leads', 'total no of leads', 'total number of leads',
+            'how many leads', 'no of leads', 'number of leads',
+        ),
+        "max_len": 100,
+    },
+
+    QuestionCategory.DB_ANALYTICS: {
+        "contains": (
+            'how are our campaigns performing', 'how are my campaigns performing',
+            'campaigns performing', 'best performing campaign', 'top campaigns',
+            'emails sent', 'open rate', 'click rate', 'reply rate',
+            'leads per campaign', 'show leads', 'campaigns by status',
+            # vague follow-ups
+            'their performance', 'campaign performance', 'campaigns performance',
+            'performance of campaigns', 'performance', 'stats', 'metrics',
+            # "best campaign" / "which is best" variants
+            'best campaign', 'which is best campaign', 'which campaign is best',
+            'which is the best campaign', 'best camapgin', 'best compagin',
+            # average / total aggregates
+            'average open rate', 'avg open rate', 'total open rate',
+            'average click rate', 'avg click rate', 'total click rate',
+            'average reply rate', 'avg reply rate', 'total reply rate',
+            'average bounce rate', 'avg bounce rate',
+            'total emails sent', 'total number of emails',
+            'just tell average', 'average rate',
+        ),
+        "exact_also": {
+            'performance', 'stats', 'metrics',
+            'their performance', 'campaign performance', 'campaigns performance',
+            'just tell average', 'average',
+        },
+        "exclude_if_contains": (
+            'why', 'recommend', 'strategy', 'optimize', 'improve',
+            'suggest', 'analyze', 'analysis', 'insights', 'plan',
+        ),
+        "max_len": 180,
+    },
+
+    QuestionCategory.DB_BEST_CHANNEL: {
+        "requires_any": ('best', 'which'),
+        "requires_channel": (
+            'channel', 'platform', 'instagram', 'insta', 'facebook', 'tiktok',
+            'linkedin', 'google', 'seo', 'ads', 'email', 'whatsapp',
+            'sms', 'youtube', 'twitter',
+        ),
+        "contains": (
+            'best channel', 'which channel', 'best platform', 'which platform',
+            'email or instagram', 'email vs instagram', 'instagram or email',
+            'where should i run', 'where to run',
+        ),
+        "max_len": 160,
+    },
+
+    QuestionCategory.GENERAL_DEFINITION: {
+        "contains": (
+            'full form of', 'full form', 'what is the full form', 'fullform of',
+            'meaning of', 'what do you mean by', 'define ', 'definition of',
+            'abbreviation of', 'stand for',
+        ),
+        # These prefixes only when question is short (no "our/my" data context)
+        "startswith_short": ('what does ', 'what is '),
+        "exclude_if_contains": (
+            'our ', 'my ', 'this campaign', 'the campaign', 'the active',
+            'lead conversion', 'conversion rate', 'our lead', 'campaign',
+        ),
+        "max_len": 100,
+    },
+}
 
 
 class MarketingQAAgent(MarketingBaseAgent):
     """
     Foundation Agent - Marketing Knowledge Q&A + Analytics
-    
-    This agent is the BRAIN of the marketing system:
-    - Answers marketing and business questions using data
-    - Analyzes campaign performance
-    - Provides data-backed insights
-    - Connects internal data with market insights
-    - Serves as foundation for all other marketing agents
-    
-    Capabilities:
-    - Answer questions like "Why are sales dropping?"
-    - Analyze what's working and what's not
-    - Compare campaign performance
-    - Provide marketing intelligence
-    - Data-driven recommendations
+
+    Uses Smart Enum Router to classify every question into one category,
+    then routes to either a DB-only handler or the LLM.
     """
-    
+
     def __init__(self):
         super().__init__()
-        self.system_prompt = """You are a Marketing Knowledge Q&A + Analytics Agent - the foundation brain of a marketing system.
-        Your role is to:
-        1. Answer marketing and business questions using data
-        2. Analyze campaign performance and metrics
-        3. Provide data-backed insights and recommendations
-        4. Understand what's working and what's not working
-        5. Connect internal company data with market insights
-        
-        You provide intelligent, data-driven answers to questions like:
-        - "Why are sales dropping?"
-        - "What campaigns are performing best?" (always name the best campaign(s) first with a short reason, then optionally list others)
-        - "Which channels are most effective?"
-        - "What should we focus on?"
-        
-        Always base your answers on the data provided. Be specific, actionable, and data-driven.
-        When asked "which/what campaigns are performing best?", you must state clearly which campaign(s) are best and why (e.g. highest open rate, conversion progress)—do not only list all campaigns.
-        When asked general questions like "best practices for our industry" or "industry best practices", give general best practices only—do not list campaign names, metrics, Key Trends, or "which campaign is this about".
-        Do NOT put your reasoning in the answer (no "To answer your question...", "I will look at...", "The last Q&A..."). Give only the direct answer with numbers. Never repeat the same sentence or paragraph—state each fact once, then stop.
-
-        CONVERSATION CONTEXT (apply this first, for every question):
-        - **Override – "all campaigns" in current question:** If the user's current question says "all campaigns", "of all campaigns", "for all campaigns", "each campaign", "every campaign", or "all campagins", answer for **ALL** campaigns (list or aggregate for every campaign). Do NOT answer only for the last-discussed campaign.
-        - **STEP 1 – Which campaign is being discussed?** Look at the **most recent (last) Q&A pair only**. The campaign in context is the one from the **last** user question or **last** answer. Example: if the last Q was "detail about campaign summer sales 26" and the last A was about summer sales 26, then the next question ("Are we on track?") is about **summer sales 26**, not summer sales 261 from earlier in the conversation. Do NOT use a campaign from an older Q&A when the most recent exchange was about a different campaign.
-        - **If YES (a campaign in the last Q&A):** Answer in that campaign's context. For "it"/"its"/"this campaign"/"the campaign" (singular) answer **ONLY** that campaign—do NOT add other campaigns. For other questions (goals, opportunities, conversion rate, etc.) when the user did NOT say "all campaigns", answer **ONLY** for that campaign. Do NOT list or discuss summer sales 26, testing compagin, or any other campaign unless the user explicitly asked for "all campaigns".
-        - **If NO (no campaign in the last Q&A):** Answer using ALL campaigns.
-        - **Exceptions:** (1) "all campaigns" / "of all campaigns" in current question → answer for all. (2) "this platform" / "how to run a campaign" → use PLATFORM CONTEXT. (3) User names a campaign in current question → use that campaign.
-        - When naming or listing campaigns, always include **status** after each name (e.g. summer sales 261 (paused), testing compagin (draft), summer sales 26 (paused)). **Conversion rate** = conversions/target_conversions. **Lead conversion rate** = leads_count/target_leads."""
-    
-    def _normalize_question_typos(self, question: str) -> str:
-        """Fix common typos so platform/campaign detection and LLM understand the question."""
-        if not question or not isinstance(question, str):
-            return question
-        q = question.strip()
-        # Common typos for "campaign" (preserve rest of question)
-        typos = [
-            (r'\bcaomaphin\b', 'campaign'),
-            (r'\bcaompagin\b', 'campaign'),
-            (r'\bcampagin\b', 'campaign'),
-            (r'\bcompagin\b', 'campaign'),
-            (r'\bcomapgin\b', 'campaign'),
-            (r'\bcampagins\b', 'campaigns'),
-            (r'\bcaampaign\b', 'campaign'),
-            (r'\bcampain\b', 'campaign'),
-            (r'\bcampagn\b', 'campaign'),
-        ]
-        for pattern, replacement in typos:
-            q = re.sub(pattern, replacement, q, flags=re.IGNORECASE)
-        return q
-    
-    def _is_greeting_or_small_talk(self, question: str) -> bool:
-        """Return True if the input is just a greeting or small talk, not a real question."""
-        if not question or not isinstance(question, str):
-            return True
-        t = question.strip().lower().rstrip('?!.')
-        if len(t) > 35:
-            return False
-        greetings = (
-            'hi', 'hello', 'hey', 'hi there', 'hello there', 'hey there',
-            'good morning', 'good afternoon', 'good evening', 'howdy',
-            'yo', 'sup', 'what\'s up', 'greetings', 'hi!', 'hello!', 'hey!',
-            'how are you', 'how are u', 'how r u', 'how r you', 'howre you',
-            'how\'s it going', 'hows it going', 'how are you doing', 'how u doing',
-            'whats up', 'what\'s going on', 'how do you do', 'how is it going',
-            'how have you been', 'how\'s everything', 'hows everything',
+        self.system_prompt = (
+            "You are a Marketing Q&A agent. Answer directly using the provided data. "
+            "Keep answers short. Do not include reasoning or filler like 'based on the data'. "
+            "If listing campaigns, include status after each name."
         )
-        if t in greetings:
-            return True
-        if t in ('thanks', 'thank you', 'ok', 'okay', 'bye', 'goodbye'):
-            return True
-        # Short acknowledgments / affirmations (not marketing questions)
-        if t in ('good', 'great', 'nice', 'cool', 'alright', 'fine', 'good to know', 'got it', 'understood', 'perfect', 'sure', 'yeah', 'yep', 'nope', 'no'):
-            return True
-        if len(t) <= 30 and (t.startswith('how are') or t.startswith('how\'s it') or t.startswith('hows it') or t.startswith('how do you do')):
-            return True
-        return False
 
-    def _is_platform_question(self, question: str) -> bool:
-        """Return True if the user is asking about this platform/website/system—what it is, how to use it, how to run a campaign."""
+    # ══════════════════════════════════════════════════════════
+    #  SMART ENUM ROUTER  ← THE BRAIN OF ROUTING
+    # ══════════════════════════════════════════════════════════
+
+    def _classify_question(self, question: str, campaigns: Optional[List[Dict]] = None) -> QuestionCategory:
+        """
+        Single entry point for ALL routing decisions.
+        Returns a QuestionCategory enum value.
+
+        Order matters — more specific checks come first.
+        To add a new route: add config to ROUTER_CONFIG and a case here.
+        """
         if not question or not isinstance(question, str):
-            return False
-        q = question.strip().lower()
-        if len(q) > 120:
-            return False
-        platform_phrases = (
-            'what is this platform', 'what does this platform', 'how helpful is this platform',
-            'what is this website', 'what is this site', 'what is this app', 'what is this system',
-            'how to use this platform', 'how to use this', 'how to run campaign', 'how to build campaign',
-            'how to create campaign', 'how do i run a campaign', 'what are the agents', 'what agents',
-            'tell me about this platform', 'explain this platform', 'describe this platform',
-            # Questions about a specific agent (campaign agent, research agent, etc.) → platform, not your campaign list
-            'campaign agent', 'campaigns agent', 'research agent', 'outreach agent', 'notification agent', 'notifications agent',
-            'what is the campaign agent', 'which is campaign agent', 'what is campaign agent',
-            # Broader: "this agent", "this platform" as subject; how it works
-            'this agent', 'what is this agent', 'how does this agent', 'how this agent work',
-            'how does this platform work', 'how this platform work', 'how does it work', 'how does this work',  # "it"/"this" = platform
-            'how to run a campaign', 'run campaign on it', 'run a campaign on it', 'how to run campaign on it',
-        )
-        if any(p in q for p in platform_phrases):
-            return True
-        # Short questions that are clearly about the platform/agent
-        if len(q) <= 25 and q in ('this platform', 'this agent', 'what is this', 'how does this work'):
-            return True
-        return False
+            return QuestionCategory.GREETING
 
-    def _is_meta_question(self, question: str) -> bool:
-        """Return True if the user is asking what they can ask / how the agent helps (not a data question)."""
-        if not question or not isinstance(question, str):
-            return False
-        q = question.strip().lower()
-        if len(q) > 80:
-            return False
-        meta_phrases = (
-            'what question', 'what questions', 'what can i ask', 'what can you answer',
-            'how can you help', 'how can i use', 'what do you do', 'what do you know',
-            'what can you tell', 'what can you do', 'how does this work', 'what should i ask',
-            'give me examples', 'example questions', 'what to ask', 'help me ask',
-        )
-        return any(p in q for p in meta_phrases)
+        q = question.strip().lower().rstrip('?!.')
 
-    def _is_definition_or_general_question(self, question: str) -> bool:
-        """Return True if the question is about meaning/full form/definition (general knowledge, not marketing data)."""
-        if not question or not isinstance(question, str):
-            return False
-        q = question.strip().lower()
-        if len(q) > 100:
-            return False
-        # Do NOT treat as definition when user is asking about OUR data / metrics / campaign
-        if any(x in q for x in (
-            'our ', 'my ', 'this campaign', 'the campaign', 'the active',
-            'lead conversion', 'conversion rate', 'our lead', 'campaign',
-        )):
-            return False
-        definition_phrases = (
-            'full form of', 'full form', 'what is the full form', 'fullform of',
-            'what does ', 'what is ', 'meaning of', 'what do you mean by',
-            'define ', 'definition of', 'abbreviation of', 'stand for',
-        )
-        return any(p in q for p in definition_phrases)
+        # ── 1. Greeting / small talk ──────────────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.GREETING]
+        if len(q) <= cfg["max_len"]:
+            if q in cfg["exact"]:
+                return QuestionCategory.GREETING
+            if any(q.startswith(p) for p in cfg["startswith"]):
+                return QuestionCategory.GREETING
 
-    def _is_campaign_count_or_status_question(self, question: str) -> bool:
-        """Return True if the question is asking how many campaigns, how many working/active, or list/status of campaigns."""
-        if not question or not isinstance(question, str):
-            return False
-        q = question.strip().lower()
-        if len(q) > 120:
-            return False
-        count_status_phrases = (
-            'how many campaign', 'how many campaigns', 'how many are working', 'how many campaign are working',
-            'campaigns are working', 'campaigns working', 'how many are active', 'how many active',
-            'number of campaign', 'number of campaigns', 'total campaign', 'total campaigns',
-            'list my campaign', 'list campaign', 'list my campaigns', 'list campaigns',
-            'how many campaign do', 'how many campaigns do', 'campaign count', 'campaigns count',
-        )
-        return any(p in q for p in count_status_phrases)
+        # ── 2. Platform info ──────────────────────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.PLATFORM_INFO]
+        if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
+            return QuestionCategory.PLATFORM_INFO
 
-    def _answer_campaign_count_or_status(self, marketing_data: Dict) -> Optional[Dict]:
-        """Answer campaign count/status directly from data. Returns None if not applicable."""
+        # ── 3. Meta / help ────────────────────────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.META_HELP]
+        if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
+            return QuestionCategory.META_HELP
+
+        # ── 4. DB: total leads ────────────────────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.DB_TOTAL_LEADS]
+        if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
+            return QuestionCategory.DB_TOTAL_LEADS
+
+        # ── 5. DB: campaign count / status ────────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.DB_COUNT_STATUS]
+        if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
+            return QuestionCategory.DB_COUNT_STATUS
+
+        # ── 6. DB: specific campaign detail ───────────────────
+        #    Check this BEFORE generic analytics so named campaigns win
+        if campaigns:
+            perf_terms = (
+                'performance', 'open rate', 'click rate', 'reply rate', 'bounce',
+                'conversion', 'leads', 'goal', 'target', 'positive', 'negative',
+                'details', 'detail', 'about', 'achieved', 'achievement',
+                'status', 'how is', 'how are', 'tell me about',
+            )
+            if any(t in q for t in perf_terms):
+                matched = self._find_campaign_in_question(question, campaigns)
+                if matched is not None:
+                    return QuestionCategory.DB_CAMPAIGN_DETAIL
+
+        # ── 7. DB: analytics / performance summary ────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.DB_ANALYTICS]
+        if len(q) <= cfg["max_len"]:
+            has_exclude = any(x in q for x in cfg["exclude_if_contains"])
+            if not has_exclude:
+                # exact match (short vague follow-ups like "performance", "stats")
+                if q in cfg.get("exact_also", set()):
+                    return QuestionCategory.DB_ANALYTICS
+                # phrase match
+                if any(p in q for p in cfg["contains"]):
+                    return QuestionCategory.DB_ANALYTICS
+
+        # ── 8. DB: best channel ───────────────────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.DB_BEST_CHANNEL]
+        if len(q) <= cfg["max_len"]:
+            has_trigger = any(x in q for x in cfg["requires_any"])
+            has_channel = any(t in q for t in cfg["requires_channel"])
+            has_phrase  = any(p in q for p in cfg["contains"])
+            if (has_trigger and has_channel) or has_phrase:
+                return QuestionCategory.DB_BEST_CHANNEL
+
+        # ── 9. General definition / full form ─────────────────
+        cfg = ROUTER_CONFIG[QuestionCategory.GENERAL_DEFINITION]
+        if len(q) <= cfg["max_len"]:
+            has_exclude = any(x in q for x in cfg["exclude_if_contains"])
+            if not has_exclude:
+                if any(p in q for p in cfg["contains"]):
+                    return QuestionCategory.GENERAL_DEFINITION
+                # "what is X" / "what does X" only when short and no data context
+                if len(q) <= 50 and any(q.startswith(p) for p in cfg["startswith_short"]):
+                    return QuestionCategory.GENERAL_DEFINITION
+
+        # ── 10. Default: needs LLM reasoning ──────────────────
+        return QuestionCategory.LLM_REASONING
+
+    # ══════════════════════════════════════════════════════════
+    #  MAIN ENTRY POINT
+    # ══════════════════════════════════════════════════════════
+
+    def process(self, question: str, context: Optional[Dict] = None, user_id: Optional[int] = None) -> Dict:
+        """
+        Main entry point — classifies question and routes to correct handler.
+        """
+        self.log_action("Processing marketing question", {"question": (question or '')[:100]})
+
+        # Fix common typos first
+        question = self._normalize_question_typos(question)
+
+        # ── Fast-path: categories that need NO DB data ────────
+        pre_db_category = self._classify_question(question, campaigns=None)
+
+        if pre_db_category == QuestionCategory.GREETING:
+            return self._handle_greeting(question)
+
+        if pre_db_category == QuestionCategory.PLATFORM_INFO:
+            return self._handle_platform_info(question)
+
+        if pre_db_category == QuestionCategory.META_HELP:
+            return self._handle_meta_help(question)
+
+        if pre_db_category == QuestionCategory.DB_BEST_CHANNEL:
+            return self._handle_best_channel(question)
+
+        if pre_db_category == QuestionCategory.GENERAL_DEFINITION:
+            return self._handle_general_definition(question)
+
+        # ── DB required from here ─────────────────────────────
+        marketing_data = self._get_marketing_data(user_id)
+        campaigns = marketing_data.get('campaigns', []) or []
+
+        # Re-classify with campaign list (needed for DB_CAMPAIGN_DETAIL)
+        category = self._classify_question(question, campaigns=campaigns)
+
+        if category == QuestionCategory.DB_TOTAL_LEADS:
+            return self._handle_total_leads(marketing_data, question)
+
+        if category == QuestionCategory.DB_COUNT_STATUS:
+            return self._handle_count_status(marketing_data, question)
+
+        if category == QuestionCategory.DB_CAMPAIGN_DETAIL:
+            matched = self._find_campaign_in_question(question, campaigns)
+            if matched:
+                return self._handle_campaign_detail(matched, marketing_data, question)
+
+        if category == QuestionCategory.DB_ANALYTICS:
+            return self._handle_db_analytics(question, marketing_data)
+
+        # ── LLM reasoning (last resort) ───────────────────────
+        return self._handle_llm_reasoning(question, marketing_data, context)
+
+    # ══════════════════════════════════════════════════════════
+    #  HANDLERS — one per category
+    # ══════════════════════════════════════════════════════════
+
+    def _handle_greeting(self, question: str) -> Dict:
+        q = (question or '').strip().lower()
+        if any(x in q for x in ('how are', "how's it", 'hows it', 'how r u', 'how do you do')):
+            answer = "I'm doing well, thanks for asking! How can I help you with your marketing today?"
+        elif q in ('good', 'great', 'nice', 'cool', 'alright', 'fine', 'got it', 'understood', 'perfect', 'sure', 'yeah', 'yep'):
+            answer = "Got it. What would you like to ask about your marketing?"
+        else:
+            answer = "Hi! How can I help you with your marketing today? Ask me about campaigns, performance, or insights."
+        return self._ok(answer, question)
+
+    def _handle_platform_info(self, question: str) -> Dict:
+        return self._ok(get_platform_response(question), question)
+
+    def _handle_meta_help(self, question: str) -> Dict:
+        answer = (
+            "You can ask me about your **campaigns** (how many, status, list), **performance** (clicks, conversions, ROI), "
+            "**leads**, and **marketing insights**. Examples: \"How many campaigns?\", \"What's performing best?\", \"List my campaigns.\" "
+            "Ask for details or recommendations only when you want a longer analysis."
+        )
+        return self._ok(answer, question)
+
+    def _handle_best_channel(self, question: str) -> Dict:
+        q = (question or '').strip().lower()
+        if any(x in q for x in ('b2b', 'saas', 'enterprise', 'lead', 'outreach', 'cold email')):
+            answer = (
+                "**Email** is usually the best channel for B2B/outreach — direct, measurable, great for follow-ups. "
+                "If your audience is professional, **LinkedIn** is the next-best companion."
+            )
+        elif any(x in q for x in ('brand', 'awareness', 'followers', 'engagement', 'visual', 'b2c')):
+            answer = (
+                "For **brand awareness** and visual audiences, **Instagram** (and often **TikTok**) works best. "
+                "Use **email** after capturing leads to convert and retain them."
+            )
+        else:
+            answer = (
+                "For **leads + conversions** → start with **email** (best ROI and tracking). "
+                "For **awareness** → use **Instagram**. "
+                "Best combo: Instagram/ads to attract → email to convert and nurture."
+            )
+        return self._ok(answer, question)
+
+    def _handle_general_definition(self, question: str) -> Dict:
+        prompt = (
+            f'The user asked: "{question}"\n\n'
+            "Give a brief, direct answer only (definition, full form, or general knowledge). "
+            "Do NOT mention marketing data, campaigns, or trends. Keep it to 1–4 sentences."
+        )
+        try:
+            answer = self._call_llm_for_reasoning(
+                prompt,
+                "You answer general knowledge and definition questions briefly.",
+                temperature=0.2,
+                max_tokens=300,
+            )
+        except Exception as e:
+            answer = "I couldn't answer that right now. For definitions, try a search engine."
+        return self._ok(answer, question)
+
+    def _handle_total_leads(self, marketing_data: Dict, question: str) -> Dict:
+        campaigns = marketing_data.get('campaigns', []) or []
+        total = sum(int(c.get('leads_count') or 0) for c in campaigns)
+        return self._ok(f"**{total}** lead(s) in total.", question, marketing_data)
+
+    def _handle_count_status(self, marketing_data: Dict, question: str) -> Dict:
         stats = marketing_data.get('stats', {})
-        campaigns = marketing_data.get('campaigns', [])
+        campaigns = marketing_data.get('campaigns', []) or []
         total = stats.get('total_campaigns', len(campaigns))
-        active = stats.get('active_campaigns', 0)
         active_list = [c for c in campaigns if (c.get('status') or '').lower() == 'active']
-        if len(active_list) != active and campaigns:
-            active = len(active_list)
-        # Build a short, direct answer
+        active = len(active_list)
+
         if total == 0:
             answer = "You have **0** campaigns. Create a campaign to get started."
         else:
-            answer = f"You have **{total}** campaign(s) in total. **{active}** are currently active (working)."
-            if campaigns and len(campaigns) <= 15:
+            answer = f"You have **{total}** campaign(s) in total. **{active}** are currently active."
+            if len(campaigns) <= 15:
                 all_names = ", ".join(c.get('name', 'Unnamed') for c in campaigns)
-                answer += f" Campaign names: {all_names}."
-            elif active_list and len(active_list) <= 10:
-                names = ", ".join(c.get('name', 'Unnamed') for c in active_list)
+                answer += f" Campaigns: {all_names}."
+            elif active_list:
+                names = ", ".join(c.get('name', 'Unnamed') for c in active_list[:10])
                 answer += f" Active: {names}."
+
         insights = []
         if total > 0:
             insights.append({
@@ -217,534 +433,548 @@ class MarketingQAAgent(MarketingBaseAgent):
                 'value': f"{active} of {total} active",
                 'status': 'good' if active > 0 else 'warning'
             })
-        return {'answer': answer, 'insights': insights}
-
-    def _generate_general_answer(self, question: str) -> str:
-        """Answer a definition/general-knowledge question with AI, without using marketing data."""
-        prompt = f"""The user asked: "{question}"
-
-Give a brief, direct answer only (definition, full form, or general knowledge). Do NOT mention marketing data, campaigns, or market trends. Keep it to the point: 1–4 sentences. If you don't know, say so briefly."""
-        try:
-            return self._call_llm_for_reasoning(
-                prompt,
-                "You answer general knowledge and definition questions briefly and to the point.",
-                temperature=0.2,
-                max_tokens=500,
-            )
-        except Exception as e:
-            self.log_action("Error generating general answer", {"error": str(e)})
-            return "I couldn't answer that. For definitions or full forms, try a search engine."
-
-    def process(self, question: str, context: Optional[Dict] = None, user_id: Optional[int] = None) -> Dict:
-        """
-        Main entry point - answers marketing questions with data
-        
-        Args:
-            question (str): Marketing/business question
-            context (Dict): Optional context (campaigns, performance data, etc.)
-            user_id (int): User ID for filtering user's data
-            
-        Returns:
-            Dict: Answer with insights and data
-        """
-        self.log_action("Processing marketing question", {"question": question[:100]})
-        
-        # Normalize typos so "caomaphin"/"campagin" -> "campaign" for routing and LLM
-        question = self._normalize_question_typos(question)
-        
-        # Greetings and small talk: short reply, no data or insights
-        if self._is_greeting_or_small_talk(question):
-            q_lower = (question or '').strip().lower()
-            if any(x in q_lower for x in ('how are', 'how r u', 'how\'s it', 'hows it', 'how do you do')):
-                answer = "I'm doing well, thanks for asking! How can I help you with your marketing today?"
-            elif q_lower in ('good', 'great', 'nice', 'cool', 'alright', 'fine', 'good to know', 'got it', 'understood', 'perfect', 'sure', 'yeah', 'yep'):
-                answer = "Got it. What would you like to ask about your marketing?"
-            else:
-                answer = 'Hi! How can I help you with your marketing today? Ask me about campaigns, performance, or insights.'
-            return {
-                'success': True,
-                'answer': answer,
-                'insights': [],
-                'data_summary': {},
-                'question': question
-            }
-
-        # Platform/website/system questions: full Marketing Agent overview or single-agent detail
-        if self._is_platform_question(question):
-            answer = get_platform_response(question)
-            return {
-                'success': True,
-                'answer': answer,
-                'insights': [],
-                'data_summary': {},
-                'question': question
-            }
-
-        # Meta/support questions ("what can I ask", "how can you help"): short answer only
-        if self._is_meta_question(question):
-            answer = (
-                "You can ask me about your **campaigns** (how many, status, list), **performance** (clicks, conversions, ROI), "
-                "**leads**, and **marketing insights**. Examples: \"How many campaigns?\", \"What's performing best?\", \"List my campaigns.\" "
-                "Ask for details or recommendations only when you want a longer analysis."
-            )
-            return {
-                'success': True,
-                'answer': answer,
-                'insights': [],
-                'data_summary': {},
-                'question': question
-            }
-
-        # Definition/general knowledge (full form of, what is X, meaning of): answer from AI only, no marketing data
-        if self._is_definition_or_general_question(question):
-            answer = self._generate_general_answer(question)
-            return {
-                'success': True,
-                'answer': answer,
-                'insights': [],
-                'data_summary': {},
-                'question': question
-            }
-        
-        # Get marketing data from database
-        marketing_data = self._get_marketing_data(user_id)
-        
-        # Direct answer for "how many campaigns" / "campaigns working" / "active campaigns" – use data only, no LLM
-        if self._is_campaign_count_or_status_question(question):
-            direct = self._answer_campaign_count_or_status(marketing_data)
-            if direct is not None:
-                return {
-                    'success': True,
-                    'answer': direct['answer'],
-                    'insights': direct.get('insights', []),
-                    'data_summary': self._create_data_summary(marketing_data),
-                    'question': question
-                }
-        
-        # Build comprehensive context (includes conversation history if provided)
-        full_context = self._build_context(marketing_data, context)
-        
-        # Generate answer using AI
-        answer = self._generate_answer(question, full_context, context)
-        
-        # Extract insights
-        insights = self._extract_insights(marketing_data, question)
-        
         return {
             'success': True,
             'answer': answer,
             'insights': insights,
             'data_summary': self._create_data_summary(marketing_data),
-            'question': question
+            'question': question,
         }
-    
+
+    def _handle_campaign_detail(self, campaign: Dict, marketing_data: Dict, question: str) -> Dict:
+        name   = campaign.get('name') or 'Unnamed'
+        status = campaign.get('status') or 'N/A'
+
+        sent    = campaign.get('emails_sent', 0) or 0
+        opened  = campaign.get('emails_opened', 0) or 0
+        clicked = campaign.get('emails_clicked', 0) or 0
+        replied = campaign.get('emails_replied', 0) or 0
+        bounced = campaign.get('emails_bounced', 0) or 0
+        failed  = campaign.get('emails_failed', 0) or 0
+
+        def _r(v): return v if v is not None else 'N/A'
+
+        lines = [
+            f"**{name} ({status})**",
+            f"- Emails: sent={sent}, opened={opened}, clicked={clicked}, replied={replied}, bounced={bounced}, failed={failed}",
+            f"- Rates: open={_r(campaign.get('open_rate'))}%, click={_r(campaign.get('click_rate'))}%, reply={_r(campaign.get('reply_rate'))}%, bounce={_r(campaign.get('bounce_rate'))}%",
+            f"- Leads: {_r(campaign.get('leads_count'))} (target={_r(campaign.get('target_leads'))}, progress={_r(campaign.get('leads_progress'))}%)",
+            f"- Conversions: {_r(campaign.get('positive_replies'))} (target={_r(campaign.get('target_conversions'))}, progress={_r(campaign.get('conversion_progress'))}%)",
+            f"- Replies: positive={_r(campaign.get('positive_replies'))}, negative={_r(campaign.get('negative_replies'))}",
+        ]
+        if campaign.get('goals'):
+            lines.append(f"- Goals: {campaign['goals']}")
+        if campaign.get('channels'):
+            lines.append(f"- Channels: {campaign['channels']}")
+
+        return self._ok("\n".join(lines), question, marketing_data)
+
+    def _handle_db_analytics(self, question: str, marketing_data: Dict) -> Dict:
+        q = (question or '').strip().lower()
+        campaigns = marketing_data.get('campaigns', []) or []
+
+        def _r(v): return v if v is not None else 'N/A'
+
+        def _line(c):
+            return (
+                f"{c.get('name','Unnamed')} ({c.get('status','N/A')}): "
+                f"sent={c.get('emails_sent',0)}, open={_r(c.get('open_rate'))}%, "
+                f"click={_r(c.get('click_rate'))}%, reply={_r(c.get('reply_rate'))}%, "
+                f"leads={_r(c.get('leads_count'))}, conversion_progress={_r(c.get('conversion_progress'))}%"
+            )
+
+        if not campaigns:
+            return self._ok("You have **0** campaigns.", question)
+
+        # Average emails sent per campaign
+        # Handles queries like:
+        # - "average emails sent"
+        # - "avg number of emails sent per campaign"
+        if ('average' in q or 'avg' in q) and ('email' in q and 'sent' in q):
+            sent_values = []
+            for c in campaigns:
+                try:
+                    sent_values.append(int(c.get('emails_sent') or 0))
+                except Exception:
+                    sent_values.append(0)
+            total_sent = sum(sent_values)
+            avg_sent = (total_sent / len(campaigns)) if campaigns else 0.0
+            answer = (
+                f"Average emails sent per campaign: **{avg_sent:.2f}** "
+                f"(total_sent={total_sent}, campaigns={len(campaigns)})."
+            )
+            return self._ok(answer, question, marketing_data)
+
+        # Average open rate per campaign
+        if ('average' in q or 'avg' in q) and ('open' in q and 'rate' in q):
+            rates = []
+            for c in campaigns:
+                try:
+                    val = float(c.get('open_rate') or 0)
+                    if val >= 0:
+                        rates.append(val)
+                except Exception:
+                    pass
+            avg_rate = (sum(rates) / len(rates)) if rates else 0.0
+            answer = (
+                f"Average open rate per campaign: **{avg_rate:.2f}%** "
+                f"(from {len(rates)} campaigns with data)."
+            )
+            return self._ok(answer, question, marketing_data)
+
+        # Average click rate per campaign
+        if ('average' in q or 'avg' in q) and ('click' in q and 'rate' in q):
+            rates = []
+            for c in campaigns:
+                try:
+                    val = float(c.get('click_rate') or 0)
+                    if val >= 0:
+                        rates.append(val)
+                except Exception:
+                    pass
+            avg_rate = (sum(rates) / len(rates)) if rates else 0.0
+            answer = (
+                f"Average click rate per campaign: **{avg_rate:.2f}%** "
+                f"(from {len(rates)} campaigns with data)."
+            )
+            return self._ok(answer, question, marketing_data)
+
+        # Average reply rate per campaign
+        if ('average' in q or 'avg' in q) and ('reply' in q and 'rate' in q):
+            rates = []
+            for c in campaigns:
+                try:
+                    val = float(c.get('reply_rate') or 0)
+                    if val >= 0:
+                        rates.append(val)
+                except Exception:
+                    pass
+            avg_rate = (sum(rates) / len(rates)) if rates else 0.0
+            answer = (
+                f"Average reply rate per campaign: **{avg_rate:.2f}%** "
+                f"(from {len(rates)} campaigns with data)."
+            )
+            return self._ok(answer, question, marketing_data)
+
+        # Best performing
+        # Accept common variants like:
+        # - "best performing campaign"
+        # - "what campaigns are performing best"
+        # - "which is the best campaign"
+        is_best_intent = (
+            'performing best' in q
+            or 'best performing' in q
+            or 'top campaign' in q
+            or 'best campaign' in q
+            or 'which campaign is best' in q
+            or 'which is the best campaign' in q
+        )
+        if is_best_intent:
+            def _score(c):
+                def _n(v):
+                    try: return float(v)
+                    except: return 0.0
+                return (
+                    _n(c.get('conversion_progress')), _n(c.get('reply_rate')),
+                    _n(c.get('open_rate')), _n(c.get('click_rate')),
+                    int(c.get('emails_sent') or 0),
+                )
+            best = sorted(campaigns, key=_score, reverse=True)[:5]
+            answer = f"Best performing: **{best[0].get('name','Unnamed')} ({best[0].get('status','N/A')})**.\n"
+            answer += "\n".join(f"- {_line(c)}" for c in best)
+            return self._ok(answer, question, marketing_data)
+
+        # Status breakdown
+        if 'by status' in q or ('status' in q and 'campaign' in q):
+            by_status: Dict = {}
+            for c in campaigns:
+                s = (c.get('status') or 'N/A').lower()
+                by_status.setdefault(s, []).append(c)
+            parts = [
+                f"- **{s}**: {len(items)} ({', '.join(i.get('name','Unnamed') for i in items)})"
+                for s, items in sorted(by_status.items())
+            ]
+            return self._ok("\n".join(parts), question, marketing_data)
+
+        # Generic performance table (up to 10)
+        answer = "\n".join(f"- {_line(c)}" for c in campaigns[:10])
+        return self._ok(answer, question, marketing_data)
+
+    def _handle_llm_reasoning(self, question: str, marketing_data: Dict, context: Optional[Dict]) -> Dict:
+        """Full LLM call — only reached when DB handlers cannot answer."""
+        full_context = self._build_context(marketing_data, context)
+        answer = self._generate_answer(question, full_context, context)
+        insights = self._extract_insights(marketing_data, question)
+        return {
+            'success': True,
+            'answer': answer,
+            'insights': insights,
+            'data_summary': self._create_data_summary(marketing_data),
+            'question': question,
+        }
+
+    # ══════════════════════════════════════════════════════════
+    #  HELPERS
+    # ══════════════════════════════════════════════════════════
+
+    def _ok(self, answer: str, question: str, marketing_data: Optional[Dict] = None) -> Dict:
+        """Shorthand for building a success response."""
+        return {
+            'success': True,
+            'answer': answer,
+            'insights': [],
+            'data_summary': self._create_data_summary(marketing_data) if marketing_data else {},
+            'question': question,
+        }
+
+    def _normalize_question_typos(self, question: str) -> str:
+        if not question or not isinstance(question, str):
+            return question
+        q = question.strip()
+        typos = [
+            (r'\bcaomaphin\b', 'campaign'),  (r'\bcaompagin\b', 'campaign'),
+            (r'\bcampagin\b',  'campaign'),  (r'\bcompagin\b',  'campaign'),
+            (r'\bcomapgin\b',  'campaign'),  (r'\bcampagins\b', 'campaigns'),
+            (r'\bcaampaign\b', 'campaign'),  (r'\bcampain\b',   'campaign'),
+            (r'\bcampagn\b',   'campaign'),
+            (r'\bavergae\b',      'average'),       (r'\baverge\b',      'average'),
+            (r'\bavreage\b',      'average'),       (r'\bavgerage\b',    'average'),
+            (r'\bperformane\b',   'performance'),  (r'\bperformace\b',  'performance'),
+            (r'\bperfomance\b',   'performance'),   (r'\bpreformance\b', 'performance'),
+            (r'\banaltics\b',     'analytics'),     (r'\banalyitcs\b',   'analytics'),
+            (r'\bleades\b',       'leads'),          (r'\bledes\b',       'leads'),
+            (r'\bchanel\b',       'channel'),        (r'\bchanell\b',     'channel'),
+            (r'\bplatfrom\b',     'platform'),       (r'\bplatfom\b',     'platform'),
+            (r'\bqeustion\b',     'question'),       (r'\bqestion\b',     'question'),
+            (r'\bemials\b',       'emails'),         (r'\bemails\b',      'emails'),
+            (r'\bstaregy\b',      'strategy'),       (r'\bstratgey\b',    'strategy'),
+        ]
+        for pattern, replacement in typos:
+            q = re.sub(pattern, replacement, q, flags=re.IGNORECASE)
+        return q
+
+    def _find_campaign_in_question(self, question: str, campaigns: List[Dict]) -> Optional[Dict]:
+        """Match a campaign name inside the question text (with fuzzy/partial support)."""
+        q = (question or '').strip().lower()
+        if not q or not campaigns:
+            return None
+
+        def _norm(s: str) -> str:
+            s = (s or '').lower()
+            s = re.sub(r'[^a-z0-9\s]+', ' ', s)
+            return re.sub(r'\s+', ' ', s).strip()
+
+        def _word_similarity(word1: str, word2: str) -> float:
+            """Simple character-level similarity (0-1). Handles typos."""
+            if word1 == word2:
+                return 1.0
+            if not word1 or not word2:
+                return 0.0
+            # Check if one is a prefix/suffix of the other (e.g. 'sale' vs 'sales')
+            if word1.startswith(word2) or word2.startswith(word1):
+                return 0.85
+            # Simple edit-distance ratio
+            longer = max(len(word1), len(word2))
+            common = sum(1 for a, b in zip(word1, word2) if a == b)
+            return common / longer if longer > 0 else 0.0
+
+        qn = _norm(q)
+        qn_words = set(qn.split())
+
+        best_match = None
+        best_score = 0.0
+
+        for c in campaigns:
+            nn = _norm(c.get('name') or '')
+            if not nn:
+                continue
+
+            # Exact substring match (best)
+            if nn in qn:
+                return c
+
+            # All-words exact containment
+            name_words = [w for w in nn.split() if w]
+            if len(name_words) >= 2 and all(w in qn for w in name_words):
+                return c
+
+            # Fuzzy: check if each campaign-name word has a close match in question words
+            if len(name_words) >= 2:
+                word_scores = []
+                for nw in name_words:
+                    best_word_score = max(
+                        (_word_similarity(nw, qw) for qw in qn_words),
+                        default=0.0
+                    )
+                    word_scores.append(best_word_score)
+                # Average similarity across all name words
+                avg_score = sum(word_scores) / len(word_scores) if word_scores else 0.0
+                # Require high avg similarity (all words roughly match)
+                if avg_score > best_score and avg_score >= 0.75:
+                    best_score = avg_score
+                    best_match = c
+
+        return best_match
+
+    # ══════════════════════════════════════════════════════════
+    #  DB DATA FETCH (unchanged from original)
+    # ══════════════════════════════════════════════════════════
+
     def _get_marketing_data(self, user_id: Optional[int] = None) -> Dict:
-        """Get all marketing data from database"""
         campaigns_query = Campaign.objects.all()
         if user_id:
             campaigns_query = campaigns_query.filter(owner_id=user_id)
-        
+
         campaigns = list(campaigns_query.select_related('owner').prefetch_related('performance_metrics'))
         campaign_ids = [c.id for c in campaigns]
 
-        # Bulk aggregates to avoid N+1 queries (one query per aggregate type)
         email_stats = {}
         if campaign_ids:
             sent_statuses = ['sent', 'delivered', 'opened', 'clicked']
             for row in EmailSendHistory.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
-                total_sent=Count('id', filter=Q(status__in=sent_statuses)),
-                total_opened=Count('id', filter=Q(status__in=['opened', 'clicked'])),
-                total_clicked=Count('id', filter=Q(status='clicked')),
-                total_bounced=Count('id', filter=Q(status='bounced')),
-                total_failed=Count('id', filter=Q(status='failed')),
+                total_sent    = Count('id', filter=Q(status__in=sent_statuses)),
+                total_opened  = Count('id', filter=Q(status__in=['opened', 'clicked'])),
+                total_clicked = Count('id', filter=Q(status='clicked')),
+                total_bounced = Count('id', filter=Q(status='bounced')),
+                total_failed  = Count('id', filter=Q(status='failed')),
             ).order_by('campaign_id'):
                 email_stats[row['campaign_id']] = row
 
         reply_stats = {}
         if campaign_ids:
             for row in Reply.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
-                total_replied=Count('id'),
-                positive_replies=Count('id', filter=Q(interest_level__in=['positive', 'neutral', 'requested_info', 'objection'])),
-                negative_replies=Count('id', filter=Q(interest_level__in=['negative', 'unsubscribe'])),
+                total_replied    = Count('id'),
+                positive_replies = Count('id', filter=Q(interest_level__in=['positive', 'neutral', 'requested_info', 'objection'])),
+                negative_replies = Count('id', filter=Q(interest_level__in=['negative', 'unsubscribe'])),
             ).order_by('campaign_id'):
                 reply_stats[row['campaign_id']] = row
 
         lead_counts = {}
         if campaign_ids:
-            for row in CampaignLead.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(count=Count('id')).order_by('campaign_id'):
+            for row in CampaignLead.objects.filter(campaign_id__in=campaign_ids).values('campaign_id').annotate(
+                count=Count('id')
+            ).order_by('campaign_id'):
                 lead_counts[row['campaign_id']] = row['count']
 
-        # Build campaign data using prefetched metrics and bulk lookups
         campaigns_data = []
         for campaign in campaigns:
             cid = campaign.id
-            es = email_stats.get(cid, {})
-            rs = reply_stats.get(cid, {})
-            total_sent = es.get('total_sent') or 0
-            total_opened = es.get('total_opened') or 0
+            es  = email_stats.get(cid, {})
+            rs  = reply_stats.get(cid, {})
+            total_sent    = es.get('total_sent') or 0
+            total_opened  = es.get('total_opened') or 0
             total_clicked = es.get('total_clicked') or 0
             total_bounced = es.get('total_bounced') or 0
-            total_failed = es.get('total_failed') or 0
+            total_failed  = es.get('total_failed') or 0
             total_replied = rs.get('total_replied') or 0
             positive_replies = rs.get('positive_replies') or 0
             negative_replies = rs.get('negative_replies') or 0
             leads_count = lead_counts.get(cid, 0)
 
-            target_leads = getattr(campaign, 'target_leads', None)
-            target_conversions = getattr(campaign, 'target_conversions', None)
+            target_leads        = getattr(campaign, 'target_leads', None)
+            target_conversions  = getattr(campaign, 'target_conversions', None)
             conversion_progress = round((positive_replies / target_conversions * 100), 1) if target_conversions and target_conversions > 0 else None
-            leads_progress = round((leads_count / target_leads * 100), 1) if target_leads and target_leads > 0 else None
-            open_rate = round((total_opened / total_sent) * 100, 2) if total_sent > 0 else None
-            click_rate = round((total_clicked / total_sent) * 100, 2) if total_sent > 0 else None
-            reply_rate = round((total_replied / total_sent) * 100, 2) if total_sent > 0 else None
-            bounce_rate = round((total_bounced / total_sent) * 100, 2) if total_sent > 0 else None
+            leads_progress      = round((leads_count / target_leads * 100), 1) if target_leads and target_leads > 0 else None
+            open_rate    = round((total_opened  / total_sent) * 100, 2) if total_sent > 0 else None
+            click_rate   = round((total_clicked / total_sent) * 100, 2) if total_sent > 0 else None
+            reply_rate   = round((total_replied / total_sent) * 100, 2) if total_sent > 0 else None
+            bounce_rate  = round((total_bounced / total_sent) * 100, 2) if total_sent > 0 else None
 
             metrics_prefetched = list(campaign.performance_metrics.all())[:20]
-            camp_dict = {
-                'id': campaign.id,
-                'name': campaign.name,
-                'type': campaign.campaign_type,
+            campaigns_data.append({
+                'id': campaign.id, 'name': campaign.name, 'type': campaign.campaign_type,
                 'status': campaign.status,
                 'start_date': campaign.start_date.isoformat() if campaign.start_date else None,
-                'end_date': campaign.end_date.isoformat() if campaign.end_date else None,
+                'end_date':   campaign.end_date.isoformat()   if campaign.end_date   else None,
                 'metrics': [
-                    {'name': m.metric_name, 'value': float(m.metric_value), 'date': m.date.isoformat(), 'channel': m.channel}
+                    {'name': m.metric_name, 'value': float(m.metric_value),
+                     'date': m.date.isoformat(), 'channel': m.channel}
                     for m in metrics_prefetched
                 ],
-                'goals': campaign.goals,
-                'channels': campaign.channels,
-                'target_leads': target_leads,
-                'target_conversions': target_conversions,
-                'leads_count': leads_count,
-                'positive_replies': positive_replies,
-                'negative_replies': negative_replies,
-                'conversions': positive_replies,
-                'conversion_progress': conversion_progress,
-                'leads_progress': leads_progress,
-                'emails_sent': total_sent,
-                'emails_opened': total_opened,
-                'emails_clicked': total_clicked,
-                'emails_replied': total_replied,
-                'emails_bounced': total_bounced,
-                'emails_failed': total_failed,
-                'open_rate': open_rate,
-                'click_rate': click_rate,
-                'reply_rate': reply_rate,
-                'bounce_rate': bounce_rate,
-            }
-            campaigns_data.append(camp_dict)
-        
-        # Get market research data
+                'goals': campaign.goals, 'channels': campaign.channels,
+                'target_leads': target_leads, 'target_conversions': target_conversions,
+                'leads_count': leads_count, 'positive_replies': positive_replies,
+                'negative_replies': negative_replies, 'conversions': positive_replies,
+                'conversion_progress': conversion_progress, 'leads_progress': leads_progress,
+                'emails_sent': total_sent, 'emails_opened': total_opened,
+                'emails_clicked': total_clicked, 'emails_replied': total_replied,
+                'emails_bounced': total_bounced, 'emails_failed': total_failed,
+                'open_rate': open_rate, 'click_rate': click_rate,
+                'reply_rate': reply_rate, 'bounce_rate': bounce_rate,
+            })
+
         research_query = MarketResearch.objects.all()
         if user_id:
             research_query = research_query.filter(created_by_id=user_id)
-        
+
         research_data = [
-            {
-                'id': r.id,
-                'type': r.research_type,
-                'topic': r.topic,
-                'insights': r.insights,
-                'findings': r.findings,
-                'created_at': r.created_at.isoformat()
-            }
-            for r in research_query[:10]  # Recent research
+            {'id': r.id, 'type': r.research_type, 'topic': r.topic,
+             'insights': r.insights, 'findings': r.findings,
+             'created_at': r.created_at.isoformat()}
+            for r in research_query[:10]
         ]
-        
-        # Calculate aggregate metrics
+
         active_campaigns = campaigns_query.filter(status='active').count()
-        
-        # Get performance aggregates
         all_metrics = CampaignPerformance.objects.filter(
             campaign__in=campaigns_query
         ).values('metric_name').annotate(
-            avg_value=Avg('metric_value'),
-            total_count=Count('id')
-        ).order_by('metric_name')  # Override default ordering to fix SQL Server GROUP BY error
-        
+            avg_value=Avg('metric_value'), total_count=Count('id')
+        ).order_by('metric_name')
+
         return {
             'campaigns': campaigns_data,
             'research': research_data,
             'stats': {
                 'total_campaigns': len(campaigns_data),
                 'active_campaigns': active_campaigns,
-                'performance_metrics': list(all_metrics)
+                'performance_metrics': list(all_metrics),
             }
         }
-    
+
+    # ══════════════════════════════════════════════════════════
+    #  LLM CONTEXT BUILDER (for _handle_llm_reasoning only)
+    # ══════════════════════════════════════════════════════════
+
     def _build_context(self, marketing_data: Dict, additional_context: Optional[Dict] = None) -> str:
-        """Build comprehensive context string for AI"""
         parts = []
 
-        # Platform/agent context: so the model can answer "this platform", "this agent", "how does it work", "how to run campaign"
         parts.append(
-            "PLATFORM CONTEXT (use when the user asks about 'this platform', 'this agent', 'how does it work', or 'how to run a campaign'): "
-            "This is the **Marketing Agent** platform. It has tabs: **Research** (market/competitor reports), **Q&A** (this agent—answers about campaigns, ROI, conversion, leads), **Campaigns** (create and run campaigns: add leads, set emails, launch), **Notifications**, **Outreach**. "
-            "When the user says 'this agent' they mean this Q&A/analytics agent or the whole platform. "
-            "To run a campaign: go to Campaigns tab → create campaign (name, goal, audience) → add/import leads → set up emails → launch. Track performance in the dashboard and ask this Q&A agent for insights.\n\n"
+            "PLATFORM CONTEXT: This is the **Marketing Agent** platform with tabs: "
+            "Research, Q&A, Campaigns, Notifications, Outreach. "
+            "To run a campaign: Campaigns tab → create → add leads → set emails → launch.\n\n"
         )
 
-        # Recent conversation so the model can resolve "this campaign", "the active one", follow-ups
         conv_history = (additional_context or {}).get('conversation_history') or []
         if conv_history:
-            parts.append("RECENT CONVERSATION – Campaign in context = the campaign from the **last Q&A only**. If the user says 'the campaign', 'it', 'its', or 'performance/issues/improvement of the campaign' (and did NOT say 'all campaigns'), answer **ONLY** for that one campaign. Do NOT add summer sales 26, testing compagin, or any other campaign. If user says 'all campaigns' or 'of all campaigns', answer for ALL campaigns.")
-            for i, pair in enumerate(conv_history[-4:], 1):  # last 4 Q&A to keep prompt smaller
+            parts.append("RECENT CONVERSATION (last campaign mentioned = current context):")
+            for i, pair in enumerate(conv_history[-4:], 1):
                 q = pair.get('question') or pair.get('q') or ''
                 a = pair.get('answer') or pair.get('a') or ''
                 if q or a:
                     parts.append(f"  Q{i}: {q}")
-                    parts.append(f"  A{i}: {a[:600]}{'...' if len(a) > 600 else ''}")
+                    parts.append(f"  A{i}: {a[:500]}{'...' if len(a) > 500 else ''}")
             parts.append("")
 
-        context = "\n".join(parts) if parts else ""
-        context += (
-            "INSTRUCTION: For questions about HOW MANY campaigns, which are WORKING/ACTIVE, or campaign COUNT/STATUS, "
-            "answer ONLY from the OVERVIEW and CAMPAIGNS sections below. Do NOT use the Market Research section for those questions.\n\n"
-        )
-        context += "MARKETING DATA CONTEXT:\n\n"
-        
-        # Add stats (primary source for count/status)
+        context = "\n".join(parts)
+        context += "MARKETING DATA:\n\n"
+
         stats = marketing_data.get('stats', {})
-        context += f"OVERVIEW (use these numbers for 'how many' / 'working' / 'active' questions):\n"
-        context += f"- Total Campaigns: {stats.get('total_campaigns', 0)}\n"
-        context += f"- Active Campaigns: {stats.get('active_campaigns', 0)}\n\n"
-        
-        # Add campaigns (include email stats so "proper details" uses real numbers)
+        context += f"OVERVIEW:\n- Total Campaigns: {stats.get('total_campaigns', 0)}\n- Active: {stats.get('active_campaigns', 0)}\n\n"
+
         campaigns = marketing_data.get('campaigns', [])
         if campaigns:
-            context += f"CAMPAIGNS ({len(campaigns)} total):\n"
-            for camp in campaigns[:10]:
-                context += f"\nCampaign: {camp['name']}\n"
-                context += f"- Type: {camp['type']}, Status: {camp['status']}\n"
-                # Email performance (source of truth for campaign details)
-                if camp.get('emails_sent') is not None and camp['emails_sent'] > 0:
-                    context += f"- Emails sent: {camp['emails_sent']}\n"
-                    if camp.get('open_rate') is not None:
-                        context += f"  Open rate: {camp['open_rate']}%\n"
-                    if camp.get('click_rate') is not None:
-                        context += f"  Click rate: {camp['click_rate']}%\n"
-                    if camp.get('reply_rate') is not None:
-                        context += f"  Reply rate: {camp['reply_rate']}%\n"
-                    if camp.get('bounce_rate') is not None:
-                        context += f"  Bounce rate: {camp['bounce_rate']}%\n"
-                    if camp.get('emails_opened') is not None:
-                        context += f"  Emails opened: {camp['emails_opened']}\n"
-                    if camp.get('emails_clicked') is not None:
-                        context += f"  Emails clicked: {camp['emails_clicked']}\n"
-                    if camp.get('emails_replied') is not None:
-                        context += f"  Replies: {camp['emails_replied']}\n"
-                    if camp.get('emails_failed') is not None and camp['emails_failed'] > 0:
-                        context += f"  Failed emails: {camp['emails_failed']}\n"
-                if camp.get('leads_count') is not None:
-                    context += f"- Leads: {camp['leads_count']}\n"
-                if camp.get('target_leads') is not None or camp.get('target_conversions') is not None:
-                    context += f"- Targets: leads={camp.get('target_leads', 'N/A')}, conversions={camp.get('target_conversions', 'N/A')}\n"
-                if camp.get('positive_replies') is not None or camp.get('conversions') is not None:
-                    context += f"- Positive/Neutral replies (conversions): {camp.get('positive_replies', camp.get('conversions', 'N/A'))}\n"
-                if camp.get('conversion_progress') is not None:
-                    context += f"- Conversion progress: {camp['conversion_progress']}% (towards target conversions)\n"
-                if camp.get('leads_progress') is not None:
-                    context += f"- Leads progress: {camp['leads_progress']}% (towards target leads)\n"
-                if camp['metrics']:
-                    context += f"- Legacy metrics (use only if no email stats above):\n"
-                    for metric in camp['metrics'][:5]:
-                        context += f"  * {metric['name']}: {metric['value']} ({metric.get('channel', 'N/A')})\n"
-        
-        # Add market research (for strategy/trend questions only – do not use for count/status)
+            context += f"CAMPAIGNS (up to 5):\n"
+            for c in campaigns[:5]:
+                context += (
+                    f"- {c.get('name','Unnamed')} ({c.get('status','N/A')}): "
+                    f"sent={c.get('emails_sent',0)}, open={c.get('open_rate','N/A')}%, "
+                    f"click={c.get('click_rate','N/A')}%, reply={c.get('reply_rate','N/A')}%, "
+                    f"leads={c.get('leads_count','N/A')}, conv_progress={c.get('conversion_progress','N/A')}%\n"
+                )
+
         research = marketing_data.get('research', [])
         if research:
-            context += f"\nMARKET RESEARCH (recent topics only – do NOT use for 'how many campaigns' or 'working now'):\n"
-            for r in research[:5]:
+            context += "\nMARKET RESEARCH (for strategy questions only):\n"
+            for r in research[:3]:
                 context += f"- {r['type']}: {r['topic']}\n"
-                if r.get('insights'):
-                    context += f"  (Summary: {r['insights'][:150]}...)\n"
-        
-        # Add additional context if provided (skip conversation_history, already added above)
+
         if additional_context:
             extra = {k: v for k, v in additional_context.items() if k != 'conversation_history'}
             if extra:
                 context += f"\nADDITIONAL CONTEXT:\n{json.dumps(extra, indent=2)}\n"
-        
+
         return context
-    
+
     def _generate_answer(self, question: str, context: str, request_context: Optional[Dict] = None) -> str:
-        """Generate AI-powered answer to marketing question using Groq API"""
-        # Format prompt for Groq (chat format)
-        prompt = f"""Based on the marketing data and any RECENT CONVERSATION provided below, answer this question: "{question}"
-
-{context}
-
-CRITICAL RULES:
-- **GENERAL / INDUSTRY QUESTIONS – no campaign data:** When the user asks **general** questions like "What are the best practices for our industry?", "best practices for email marketing?", "industry best practices", or "best practices for [marketing/campaigns]", give **general** best practices only (e.g. clear subject lines, A/B testing, segmentation, lead nurturing, clear CTAs, mobile-friendly, optimize send time). Do NOT list campaign names, conversion rates, "Key Trends", "Active Campaigns: 1", "Total campaigns: 5", "Campaign: tutor nearby users", "Which campaign is this about?", or any CAMPAIGNS data. One optional short line like "You can apply these to your campaigns" is fine; no dump of campaign metrics or status.
-- **NEVER repeat the same sentence or paragraph.** If you have already stated a metric or fact once, STOP. Do not output "However, since the user..." or the same conversion/rate line again. One short answer only. If you find yourself writing the same line twice, delete it and end the response.
-- **Do NOT put reasoning in your answer.** Do NOT write "To answer your question...", "I will look at the most recent Q&A...", "The last Q&A pair is...", "Since the user asked...", "Let me...". Give ONLY the direct answer with numbers (e.g. "For **summer sales 26**: conversion rate 0/100 = **0%**."). The user must see only the result.
-- **Override – "all campaigns" in current question:** If the user says "all campaigns", "of all campaigns", "for all campaigns", "each campaign", "every campaign", or "all campagins" in the **current question**, answer for **ALL** campaigns (list metric or detail for every campaign). Do NOT answer only for the last-discussed campaign.
-- **STEP 1 – Campaign in context = most recent Q&A only:** Which campaign (if any) is in the **last** user question or **last** answer? Use only that. If a campaign is in context and the user did NOT say "all campaigns", answer **ONLY** for that campaign. Do NOT add other campaigns (e.g. do NOT add summer sales 26, testing compagin, etc.). If the user says "the campaign", "it", "its", "this campaign", "performance/issues/improvement of the campaign", that means the campaign from the last Q&A only—answer for that one campaign only and stop. If no campaign in last Q&A → answer for all campaigns. Give one direct answer; no repetition.
-- **User names a campaign in current question:** Use that campaign. **User says "it"/"its"/"this campaign"/"the campaign":** Use the campaign from the **last** Q&A only; answer ONLY for that campaign. Do NOT list other campaigns.
-- **Single-word "campaign" or "campaigns":** Answer with count and names from OVERVIEW and CAMPAIGNS.
-- **"This platform" / "this agent":** Use PLATFORM CONTEXT.
-- **"For all campaigns" / "tell generally":** Apply the PREVIOUS answer's topic to all campaigns; give the actual content, not just campaign names.
-- **Always name campaigns with status**: When listing or naming campaigns, always include **status** (draft/active/paused) after each name, e.g. "summer sales 261 (paused)", "testing compagin (draft)". Do not list campaign names without their status.
-- **"What campaigns are performing best?" / "Which campaigns are performing best?" / "best performing campaigns"**: You MUST **name the best campaign(s) first** with a short reason (e.g. highest open rate, conversion progress, or reply rate). Then optionally list others briefly. Example: "**summer sales 261** (paused) is performing best: 54.55% open rate, 72.73% reply rate, 70% conversion progress. Other campaigns have 0 emails sent or 0% rates." Do NOT only list all campaigns with metrics—always state clearly "**X** is performing best" (or "**X** and **Y**") and why, then stop or briefly summarize the rest.
-- **"How are our campaigns performing?" / "campaigns performing this month?"**: The user wants **performance metrics**, not just names. For each campaign in CAMPAIGNS, give name **with status** (e.g. summer sales 261 (paused)), then: Emails sent, Open rate, Click rate, Reply rate, Conversion progress, Leads progress. Do NOT reply with only "Total: 4, Active: 0" and a list of names—include actual performance numbers per campaign, each with status.
-- **Campaign count/status questions** (e.g. "how many campaigns", "give their names"): Answer with numbers from OVERVIEW and list each campaign with its status, e.g. "summer sales 2 (draft), testing compagin (draft), summer sales 261 (paused), summer sales 26 (paused)".
-- **"Are we on track to meet our campaign goals?"**: Answer **first with Yes or No** (e.g. "**No.**" or "**Yes**, for [campaign name]."), then give reasons. Format: "**No.** Reasons: (1) ... (2) ..." or "**Yes**, for summer sales 261. Reasons: ...". Do NOT start with "Reasons:" only—always state Yes or No first.
-- **"What are the key trends in our marketing data?"**: "Key trends" means **performance patterns** in the data, not just a list of campaigns. Summarize: (a) overall pattern (e.g. no active campaigns; all draft/paused); (b) **performance trends** by campaign—which have strong vs weak conversion, open/click rates, leads progress (e.g. summer sales 261 (paused): 70% conversion progress but 3% leads progress, 54% open rate; summer sales 26: 0% open/click); (c) takeaway (e.g. low engagement overall, leads lagging targets). Do NOT answer with only "Total: 4, Active: 0" and campaign names with status—include **metrics and patterns** (conversion %, open %, click %, leads %).
-- **"Which campaigns are in working state?" / "which campaigns are working?" / "which are active?"**: Use OVERVIEW (active_campaigns) and CAMPAIGNS (Status: active/draft/paused). If active_campaigns = 0, answer clearly: "**None** of your campaigns are currently in active/working state. All [N] are draft or paused: [list each with status, e.g. summer sales 2 (draft), testing compagin (draft), summer sales 261 (paused), summer sales 26 (paused)]." If some are active, list only those: "Campaigns in working/active state: [names]. Others are draft/paused: [names]." Do NOT just list all campaign names without stating clearly that none are working when active = 0.
-- **Campaign count/status questions** (e.g. "how many are working", "campaigns working now"): Answer from OVERVIEW and CAMPAIGNS. Give a clear count and, for "which are working", list by status as above. Do NOT output "Market Trend Analysis" or generic trend content.
-- **"Why are sales dropping?" / "why is performance low?" / "why are conversions low?"**: This is an **analysis** question—give **reasons** from the data, not just one metric. Use CAMPAIGNS and OVERVIEW: e.g. no campaigns are currently active (all draft/paused) so there’s no live outreach; low conversion or leads progress; low open/click rates; few emails sent. List 2–4 specific causes from the data (campaign status, conversion %, leads %, open/click rates). Do NOT reply with only "conversion rate 0/100"—explain **why** sales might be dropping (e.g. "**Reasons:** (1) No campaigns are active—all are draft or paused. (2) Campaigns that ran have low leads progress (e.g. 3/100) and low click rates. (3) ...").
-- **"How do they need optimization?" / "how do [these] campaigns need to be optimized?"** (follow-up after "which need optimization"): Give **specific optimization steps** using CAMPAIGNS data. Do NOT repeat the list of campaign names only. For each campaign (or in summary): **Paused/draft** → Resume or launch; **Low open rate** → Improve subject lines and send time; **Low click rate** → Improve email content and CTA; **Low leads/conversion progress** → Improve targeting, lead magnets, follow-up. Use actual metrics (e.g. summer sales 261 (paused): click rate 9.09% → improve CTAs; leads 3/100 → improve lead gen). Give concrete **how** (actions/steps), not just names.
-- **"Ideal email template" / "best email template" / "what should email template include"**: Answer with **template structure and best practices** (e.g. clear subject line, preview text, personalized greeting, short body, one clear CTA, signature, mobile-friendly, concise). Do NOT paste full campaign stats (Emails sent, Open rate, etc.) in this answer—give template advice only. Optionally one short line on how it helps open/click rates, but no campaign data dump.
-- **Campaign details / "proper details" / "give details"**: Use the EMAIL stats from the CAMPAIGNS section (Emails sent, Open rate, Click rate, Reply rate, Leads, Failed emails). These are the real numbers. Do NOT use "Legacy metrics" when a campaign has "Emails sent" and rates listed.
-- **Conversion rate** (when the user asks "conversion rate" or "our conversion rate" only—NOT "lead conversion rate"): This is progress toward the **Conversions Target** (positive_replies / target_conversions). When the user does NOT name a campaign, report for **every campaign that has conversion data**, e.g. "summer sales 261: **70%** (7/10); summer sales 26: 0%; others: 0%." Do NOT default to only the first or "active" campaign—that can wrongly show 0%. If only one campaign has non-zero conversion progress, say e.g. "**70%** for summer sales 261; other campaigns have 0%." so the user sees the real number.
-- **Lead conversion rate** (when the user asks "lead conversion rate" or "our lead conversion rate"): This is **only** leads_count / target_leads (Leads Target progress). Report e.g. "summer sales 261: 3/100 = **3%**". **Never** report positive_replies/target_conversions (e.g. 7/10 = 70%) as "lead conversion rate"—that is "conversion rate". Lead conversion rate = leads progress only (3/100 = 3%). If specific campaign in context, use that; otherwise give for all campaigns.
-- **"About which campaign are you answering?" / "which campaign is this about?" / "which campaign u are answering?"**: Answer from the **last answer** you gave. If the last answer was about **one** campaign (because the user had asked about "this campaign" or named a campaign), say "I was answering about **[that campaign name]**." If the last answer was about **all** campaigns (e.g. "what campaigns are performing best?", "how are campaigns performing?"), say "I was answering about **all** your campaigns—you didn’t specify one, so I summarized or compared all of them." Do NOT guess or pick the first/active campaign name when the user had asked about all campaigns.
-- **Default: SHORT.** Unless the user asks for "details", "full analysis", "recommendations", "insights", "strategy", or "why", give 1–4 sentences only. No "Key Insights", "Recommendations", or long tables.
-- **Simple factual questions** (how many, list, count, total, which, status): One direct sentence or brief list; include campaign names **with status** (e.g. summer sales 261 (paused)) when listing campaigns. No trend analysis.
-- **Only when the user explicitly asks for more** (e.g. "analyze", "recommend", "insights", "strategy"): You may add ## Key Insights and ## Recommendations. Otherwise do not.
-
-FORMATTING:
-1. Use **double asterisks** for key metrics/terms.
-2. Prefer 1–3 sentences. No ## sections unless the user asked for analysis/recommendations/details.
-3. Never respond with "Market Trend Analysis" or "Current Market Trends" unless the user explicitly asked about market trends.
-4. **No repetition**: Give a single, direct answer. NEVER write the same sentence or paragraph twice. If you have given the conversion rate (or any metric) once, END the response. Do not write "However, since the user..." more than once. Do not repeat the same line (e.g. "For summer sale 26, the conversion rate is 0 conversions...") again—once only, then stop.
-5. **No reasoning in the answer**: Do not start with "To answer your question...", "I will look at...", "The last Q&A pair is...". Start directly with the answer (e.g. "For **summer sales 26**: conversion rate 0/100 = **0%**.").
-6. **One campaign only when user said "the campaign" / "it" / "its":** When the user asked about "performance, issues, steps of improvement of the campaign" and the last Q&A was about one campaign, give details for **that one campaign only**. Stop after that campaign.
-
-Be specific and use numbers. Give only the direct answer; then stop."""
-        
+        prompt = (
+            f'Answer this question using the provided context: "{question}"\n\n'
+            f"{context}\n\n"
+            "RULES:\n"
+            "- Be direct and short (1–4 sentences unless details were asked).\n"
+            "- No filler like 'based on...'.\n"
+            "- If listing campaigns, include status after each name.\n"
+        )
         try:
-            # Use Groq for Q&A
-            answer = self._call_llm_for_reasoning(
-                prompt,
-                self.system_prompt,
-                temperature=0.3,  # Lower temperature for more factual answers
-                max_tokens=2000  # Groq supports longer responses
+            return self._call_llm_for_reasoning(
+                prompt, self.system_prompt, temperature=0.3, max_tokens=700
             )
-            return answer
         except Exception as e:
-            self.log_action("Error generating answer", {"error": str(e)})
             err_str = str(e)
             if "429" in err_str or "rate_limit" in err_str.lower():
-                return "The service is busy (rate limit). Please try again in a few seconds."
-            return f"I encountered an error while analyzing the data: {err_str}"
-    
+                return "The service is busy. Please try again in a few seconds."
+            return f"Error analyzing data: {err_str}"
+
     def _extract_insights(self, marketing_data: Dict, question: str) -> List[Dict]:
-        """Extract key insights from data"""
         insights = []
-        
-        stats = marketing_data.get('stats', {})
+        stats     = marketing_data.get('stats', {})
         campaigns = marketing_data.get('campaigns', [])
-        
-        # Campaign status insights
-        active_count = stats.get('active_campaigns', 0)
-        total_count = stats.get('total_campaigns', 0)
-        if total_count > 0:
-            active_percentage = (active_count / total_count) * 100
+        total  = stats.get('total_campaigns', 0)
+        active = stats.get('active_campaigns', 0)
+        if total > 0:
+            pct = (active / total) * 100
             insights.append({
-                'type': 'campaigns',
-                'title': 'Active Campaigns',
-                'value': f"{active_count}/{total_count} campaigns active ({active_percentage:.1f}%)",
-                'status': 'good' if active_percentage > 50 else 'warning'
+                'type': 'campaigns', 'title': 'Active Campaigns',
+                'value': f"{active}/{total} campaigns active ({pct:.1f}%)",
+                'status': 'good' if pct > 50 else 'warning',
             })
-        
-        # Performance insights (email stats or legacy metrics)
         if campaigns:
-            campaigns_with_metrics = [c for c in campaigns if c.get('metrics') or (c.get('emails_sent') is not None and c.get('emails_sent', 0) > 0)]
-            if campaigns_with_metrics:
+            has_data = [c for c in campaigns if c.get('emails_sent', 0) and c['emails_sent'] > 0]
+            if has_data:
                 insights.append({
-                    'type': 'performance',
-                    'title': 'Data Availability',
-                    'value': f"{len(campaigns_with_metrics)} campaigns have performance data",
-                    'status': 'good'
+                    'type': 'performance', 'title': 'Data Availability',
+                    'value': f"{len(has_data)} campaigns have performance data",
+                    'status': 'good',
                 })
-        
         return insights
-    
-    def _create_data_summary(self, marketing_data: Dict) -> Dict:
-        """Create summary of available data"""
+
+    def _create_data_summary(self, marketing_data: Optional[Dict]) -> Dict:
+        if not marketing_data:
+            return {}
         return {
             'campaigns_count': len(marketing_data.get('campaigns', [])),
-            'research_count': len(marketing_data.get('research', [])),
+            'research_count':  len(marketing_data.get('research', [])),
             'has_performance_data': any(
                 c.get('metrics') for c in marketing_data.get('campaigns', [])
             ),
-            'stats': marketing_data.get('stats', {})
+            'stats': marketing_data.get('stats', {}),
         }
-    
+
+    # ══════════════════════════════════════════════════════════
+    #  CAMPAIGN ANALYSIS (unchanged public API)
+    # ══════════════════════════════════════════════════════════
+
     def analyze_campaign_performance(self, campaign_id: int, user_id: Optional[int] = None) -> Dict:
-        """
-        Analyze specific campaign performance
-        
-        Args:
-            campaign_id (int): Campaign ID to analyze
-            user_id (int): User ID for access control
-            
-        Returns:
-            Dict: Performance analysis
-        """
         try:
             campaign = Campaign.objects.get(id=campaign_id)
             if user_id and campaign.owner_id != user_id:
                 return {'success': False, 'error': 'Access denied'}
-            
+
             metrics = CampaignPerformance.objects.filter(campaign=campaign)
-            
-            # Calculate key metrics
-            total_impressions = metrics.filter(metric_name='impressions').aggregate(
-                total=Sum('metric_value')
-            )['total'] or 0
-            
-            total_clicks = metrics.filter(metric_name='clicks').aggregate(
-                total=Sum('metric_value')
-            )['total'] or 0
-            
-            total_conversions = metrics.filter(metric_name='conversions').aggregate(
-                total=Sum('metric_value')
-            )['total'] or 0
-            
-            # Calculate rates
-            ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-            conversion_rate = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
-            
-            # Generate analysis
-            analysis_prompt = f"""Analyze this campaign performance:
+            total_impressions = metrics.filter(metric_name='impressions').aggregate(total=Sum('metric_value'))['total'] or 0
+            total_clicks      = metrics.filter(metric_name='clicks').aggregate(total=Sum('metric_value'))['total'] or 0
+            total_conversions = metrics.filter(metric_name='conversions').aggregate(total=Sum('metric_value'))['total'] or 0
+            ctr              = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+            conversion_rate  = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
 
-Campaign: {campaign.name}
-Type: {campaign.campaign_type}
-Status: {campaign.status}
-
-Performance Metrics:
-- Impressions: {total_impressions:,.0f}
-- Clicks: {total_clicks:,.0f}
-- Conversions: {total_conversions:,.0f}
-- CTR: {ctr:.2f}%
-- Conversion Rate: {conversion_rate:.2f}%
-
-Provide:
-1. Overall performance assessment
-2. What's working well
-3. Areas for improvement
-4. Recommendations for optimization"""
-            
-            # Use Groq for Q&A analysis
+            analysis_prompt = (
+                f"Analyze this campaign performance:\n"
+                f"Campaign: {campaign.name}\nType: {campaign.campaign_type}\nStatus: {campaign.status}\n"
+                f"Impressions: {total_impressions:,.0f}\nClicks: {total_clicks:,.0f}\n"
+                f"Conversions: {total_conversions:,.0f}\nCTR: {ctr:.2f}%\nConversion Rate: {conversion_rate:.2f}%\n\n"
+                "Provide: 1) Overall assessment  2) What's working  3) Areas to improve  4) Recommendations"
+            )
             analysis = self._call_llm_for_reasoning(analysis_prompt, self.system_prompt, temperature=0.3)
-            
             return {
-                'success': True,
-                'campaign_id': campaign_id,
+                'success': True, 'campaign_id': campaign_id,
                 'campaign_name': campaign.name,
                 'metrics': {
-                    'impressions': float(total_impressions),
-                    'clicks': float(total_clicks),
-                    'conversions': float(total_conversions),
-                    'ctr': ctr,
-                    'conversion_rate': conversion_rate
+                    'impressions': float(total_impressions), 'clicks': float(total_clicks),
+                    'conversions': float(total_conversions), 'ctr': ctr,
+                    'conversion_rate': conversion_rate,
                 },
-                'analysis': analysis
+                'analysis': analysis,
             }
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
-
