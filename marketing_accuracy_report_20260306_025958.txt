@@ -1,0 +1,306 @@
+MARKETING AGENT - COMPREHENSIVE COMPARISON REPORT
+Generated : 2026-03-06 02:59:58
+User      : company_user_3_noorfatima200426@gmail.com (ID: 6)
+Campaign  : summer sales 261 (ID: 3)
+==========================================================================================
+
+Test #01 [PASS] - DB - Total Campaigns
+  Question Asked        : How many campaigns do I have?
+  Manual Query Code     : SELECT COUNT(*) FROM ppp_marketingagent_campaign WHERE owner_id = <user.id>;
+SELECT name FROM ppp_marketingagent_campaign WHERE owner_id = <user.id>;
+  Manual Query Result   : {"count": 5, "items": ["tutor nearby users", "summer sales 2", "testing compagin", "summer sales 261", "summer sales 26"]}
+  AI Agent Response     : You have **5** campaign(s) in total. **0** are currently active. Campaigns: tutor nearby users, summer sales 2, testing compagin, summer sales 261, summer sales 26.
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Number 5 matches
+
+Test #02 [PASS] - DB - Total Leads
+  Question Asked        : How many leads do I have in total?
+  Manual Query Code     : SELECT COUNT(*) FROM ppp_marketingagent_campaign_leads cl
+INNER JOIN ppp_marketingagent_campaign c ON cl.campaign_id = c.id
+WHERE c.owner_id = <user.id>;
+  Manual Query Result   : {"count": 12}
+  AI Agent Response     : **12** lead(s) in total.
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Number 12 matches
+
+Test #03 [PASS] - DB - Best Performing Campaign
+  Question Asked        : What campaigns are performing best?
+  Manual Query Code     : SELECT c.name, c.status,
+  COUNT(CASE WHEN e.status IN ('sent','delivered','opened','clicked') THEN 1 END) AS emails_sent,
+  COUNT(CASE WHEN e.status IN ('opened','clicked') THEN 1 END) AS emails_opened,
+  COUNT(CASE WHEN e.status = 'clicked' THEN 1 END) AS emails_clicked
+FROM ppp_marketingagent_campaign c
+LEFT JOIN ppp_marketingagent_emailsendhistory e ON e.campaign_id = c.id
+WHERE c.owner_id = <user.id>
+GROUP BY c.id ORDER BY emails_opened DESC, emails_sent DESC LIMIT 5;
+  Manual Query Result   : {"name": "summer sales 261", "count": 5, "items": ["tutor nearby users (paused)", "summer sales 2 (draft)", "testing compagin (draft)", "summer sales 261 (paused)", "summer sales 26 (paused)"]}
+  AI Agent Response     : The campaign performing best is summer sales 261 (paused). It has a 54.55% open rate, 9.09% click rate, and 72.73% reply rate.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 414, 'completion_tokens': 41, 'total_tokens': 455, 'estimated': False}
+  Match Detail          : Number 261 matches
+
+Test #04 [PASS] - DB - Campaigns by Status
+  Question Asked        : Show campaigns by status
+  Manual Query Code     : SELECT status, COUNT(*) AS cnt, GROUP_CONCAT(name)
+FROM ppp_marketingagent_campaign
+WHERE owner_id = <user.id>
+GROUP BY status;
+  Manual Query Result   : {"count": 5, "statuses": {"draft": {"count": 2, "names": ["summer sales 2", "testing compagin"]}, "paused": {"count": 3, "names": ["tutor nearby users", "summer sales 261", "summer sales 26"]}}}
+  AI Agent Response     : You have **5** campaign(s) in total. **0** are currently active. Campaigns: tutor nearby users, summer sales 2, testing compagin, summer sales 261, summer sales 26.
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Number 5 matches
+
+Test #05 [PASS] - DB - Campaign Detail (summer sales 261)
+  Question Asked        : Tell me about summer sales 261
+  Manual Query Code     : SELECT c.*, 
+  (SELECT COUNT(*) FROM ppp_marketingagent_emailsendhistory e WHERE e.campaign_id = c.id AND e.status IN ('sent','delivered','opened','clicked')) AS emails_sent,
+  (SELECT COUNT(*) FROM ppp_marketingagent_emailsendhistory e WHERE e.campaign_id = c.id AND e.status IN ('opened','clicked')) AS emails_opened,
+  (SELECT COUNT(*) FROM ppp_marketingagent_campaign_leads cl WHERE cl.campaign_id = c.id) AS leads_count
+FROM ppp_marketingagent_campaign c
+WHERE c.owner_id = <user.id> AND c.name = 'summer sales 261';
+  Manual Query Result   : {"name": "summer sales 261", "status": "paused", "emails_sent": 11, "emails_opened": 6, "emails_clicked": 1, "leads_count": 3, "replies_count": 8, "open_rate": 54.55}
+  AI Agent Response     : **summer sales 261 (paused)**
+- Emails: sent=11, opened=6, clicked=1, replied=8, bounced=0, failed=0
+- Rates: open=54.55%, click=9.09%, reply=72.73%, bounce=0.0%
+- Leads: 3 (target=100, progress=3.0%)
+- Conversions: 7 (target=10, progress=70.0%)
+- Replies: positive=7, negative=1
+- Goals: {'leads': 100, 'conversions': 10}
+- Channels: ['email']
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Number 261 matches
+
+Test #06 [PASS] - DB - Average Open Rate
+  Question Asked        : What is the average open rate?
+  Manual Query Code     : SELECT AVG(open_rate) FROM (
+  SELECT c.id,
+    CASE WHEN COUNT(CASE WHEN e.status IN ('sent','delivered','opened','clicked') THEN 1 END) > 0
+      THEN ROUND(COUNT(CASE WHEN e.status IN ('opened','clicked') THEN 1 END) * 100.0 / COUNT(CASE WHEN e.status IN ('sent','delivered','opened','clicked') THEN 1 END), 2)
+      ELSE 0 END AS open_rate
+  FROM ppp_marketingagent_campaign c
+  LEFT JOIN ppp_marketingagent_emailsendhistory e ON e.campaign_id = c.id
+  WHERE c.owner_id = <user.id>
+  GROUP BY c.id
+) sub;
+  Manual Query Result   : {"avg_open_rate": 27.27, "campaigns_with_data": 2}
+  AI Agent Response     : Average open rate per campaign: **27.27%** (total=54.55, from 2/5 campaigns with data).
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Number 27 matches
+
+Test #07 [PASS] - DB - Total Emails Sent
+  Question Asked        : How many emails have been sent in total?
+  Manual Query Code     : SELECT COUNT(*) FROM ppp_marketingagent_emailsendhistory e
+INNER JOIN ppp_marketingagent_campaign c ON e.campaign_id = c.id
+WHERE c.owner_id = <user.id>
+  AND e.status IN ('sent','delivered','opened','clicked');
+  Manual Query Result   : {"count": 14}
+  AI Agent Response     : Total emails sent: 14.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 417, 'completion_tokens': 8, 'total_tokens': 425, 'estimated': False}
+  Match Detail          : Number 14 matches
+
+Test #08 [PASS] - DB - Campaign Detail (tutor nearby users)
+  Question Asked        : How is tutor nearby users performing?
+  Manual Query Code     : SELECT c.*, 
+  (SELECT COUNT(*) FROM ppp_marketingagent_emailsendhistory e WHERE e.campaign_id = c.id AND e.status IN ('sent','delivered','opened','clicked')) AS emails_sent,
+  (SELECT COUNT(*) FROM ppp_marketingagent_emailsendhistory e WHERE e.campaign_id = c.id AND e.status IN ('opened','clicked')) AS emails_opened
+FROM ppp_marketingagent_campaign c
+WHERE c.owner_id = <user.id> AND c.name = 'tutor nearby users';
+  Manual Query Result   : {"name": "tutor nearby users", "status": "paused", "emails_sent": 0, "emails_opened": 0, "emails_clicked": 0, "leads_count": 3, "replies_count": 0, "open_rate": 0}
+  AI Agent Response     : **tutor nearby users (paused)**
+- Emails: sent=0, opened=0, clicked=0, replied=0, bounced=0, failed=0
+- Rates: open=N/A%, click=N/A%, reply=N/A%, bounce=N/A%
+- Leads: 3 (target=100, progress=3.0%)
+- Conversions: 0 (target=19, progress=0.0%)
+- Replies: positive=0, negative=0
+- Goals: {'leads': 100, 'conversions': 19}
+- Channels: ['email']
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Number 0 matches
+
+Test #09 [PASS] - DB - Leads Per Campaign
+  Question Asked        : Show leads per campaign
+  Manual Query Code     : SELECT c.name, COUNT(cl.id) AS leads_count
+FROM ppp_marketingagent_campaign c
+LEFT JOIN ppp_marketingagent_campaign_leads cl ON cl.campaign_id = c.id
+WHERE c.owner_id = <user.id>
+GROUP BY c.id ORDER BY leads_count DESC;
+  Manual Query Result   : {"count": 5, "items": ["tutor nearby users: 3", "summer sales 2: 0", "testing compagin: 3", "summer sales 261: 3", "summer sales 26: 3"]}
+  AI Agent Response     : - tutor nearby users (paused): sent=0, open=N/A%, click=N/A%, reply=N/A%, leads=3, conversion_progress=0.0%
+- summer sales 2 (draft): sent=0, open=N/A%, click=N/A%, reply=N/A%, leads=0, conversion_progress=N/A%
+- testing compagin (draft): sent=0, open=N/A%, click=N/A%, reply=N/A%, leads=3, conversion_progress=0.0%
+- summer sales 261 (paused): sent=11, open=54.55%, click=9.09%, reply=72.73%, leads=3, conversion_progress=70.0%
+- summer sales 26 (paused): sent=3, open=0.0%, click=0.0%, reply=0.0%, 
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Key values found
+
+Test #10 [PASS] - DB - Campaign Performance
+  Question Asked        : How are our campaigns performing this month?
+  Manual Query Code     : SELECT c.name, c.status,
+  COUNT(CASE WHEN e.status IN ('sent','delivered','opened','clicked') THEN 1 END) AS sent,
+  COUNT(CASE WHEN e.status IN ('opened','clicked') THEN 1 END) AS opened,
+  COUNT(CASE WHEN e.status = 'clicked' THEN 1 END) AS clicked
+FROM ppp_marketingagent_campaign c
+LEFT JOIN ppp_marketingagent_emailsendhistory e ON e.campaign_id = c.id
+WHERE c.owner_id = <user.id>
+GROUP BY c.id;
+  Manual Query Result   : {"count": 5, "total_sent": 14, "total_opened": 6, "items": ["tutor nearby users (paused)", "summer sales 2 (draft)", "testing compagin (draft)", "summer sales 261 (paused)", "summer sales 26 (paused)"]}
+  AI Agent Response     : - tutor nearby users (paused): sent=0, open=N/A%, click=N/A%, reply=N/A%, leads=3, conversion_progress=0.0%
+- summer sales 2 (draft): sent=0, open=N/A%, click=N/A%, reply=N/A%, leads=0, conversion_progress=N/A%
+- testing compagin (draft): sent=0, open=N/A%, click=N/A%, reply=N/A%, leads=3, conversion_progress=0.0%
+- summer sales 261 (paused): sent=11, open=54.55%, click=9.09%, reply=72.73%, leads=3, conversion_progress=70.0%
+- summer sales 26 (paused): sent=3, open=0.0%, click=0.0%, reply=0.0%, 
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : 5/5 items found
+
+Test #11 [PASS] - LLM - Strategy Recommendations
+  Question Asked        : What marketing strategies should we implement to improve performance?
+  Manual Query Code     : LLM_ONLY (uses marketing data context + Groq for strategy analysis).
+  Manual Query Result   : N/A (LLM-only strategy recommendation; no single DB query).
+  AI Agent Response     : To improve performance, consider the following marketing strategies:
+
+1. Resume paused campaigns: 'tutor nearby users' and 'summer sales 261'.
+2. Launch new campaign: 'summer sales 2' and 'testing compagin' after editing and setting leads.
+3. Increase engagement with email personalization and segmentation.
+4. Monitor and analyze campaign performance regularly.
+5. Consider targeting cloud computing and AWS users based on market research.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 418, 'completion_tokens': 89, 'total_tokens': 507, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #12 [PASS] - LLM - Sales Analysis
+  Question Asked        : Why are sales dropping and what should we do about it?
+  Manual Query Code     : LLM_ONLY (uses campaign performance data + Groq for analysis).
+  Manual Query Result   : N/A (LLM reasoning over campaign data; no single DB query).
+  AI Agent Response     : Sales are dropping because there are no active campaigns running. 
+
+To address this, launch the paused campaigns: 
+- tutor nearby users (paused)
+- summer sales 2 (draft) - convert to paused and set a launch date
+- summer sales 261 (paused)
+- summer sales 26 (paused)
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 420, 'completion_tokens': 64, 'total_tokens': 484, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #13 [PASS] - LLM - Campaign Optimization
+  Question Asked        : Which campaigns need optimization and what changes do you recommend?
+  Manual Query Code     : LLM_ONLY (uses campaign metrics + Groq for optimization recommendations).
+  Manual Query Result   : N/A (LLM analysis over campaign metrics; no single DB query).
+  AI Agent Response     : The following campaigns need optimization:
+
+- tutor nearby users (paused)
+- summer sales 2 (draft)
+- testing compagin (draft)
+
+Recommended changes:
+- Set clear goals and target audience for 'tutor nearby users'.
+- Define a clear strategy for 'summer sales 2'.
+- Add leads and set emails for 'testing compagin'.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 419, 'completion_tokens': 72, 'total_tokens': 491, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #14 [PASS] - LLM - Marketing Trends
+  Question Asked        : What are the key trends in our marketing data?
+  Manual Query Code     : LLM_ONLY (uses all campaign/performance data + Groq for trend analysis).
+  Manual Query Result   : N/A (LLM trend analysis; no single DB query).
+  AI Agent Response     : Key trends in our marketing data include:
+
+- Low campaign activity with only 0 active campaigns out of 5.
+- Most campaigns are paused or in draft stage.
+- Summer sales campaigns show some engagement, with 'summer sales 2' having the highest open rate at 54.55%.
+- 'Summer sales 261' campaign has the highest conversion progress at 70.0%.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 418, 'completion_tokens': 79, 'total_tokens': 497, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #15 [PASS] - LLM - Missed Opportunities
+  Question Asked        : What opportunities are we missing in our current marketing approach?
+  Manual Query Code     : LLM_ONLY (uses marketing data context + Groq for opportunity analysis).
+  Manual Query Result   : N/A (LLM insight generation; no single DB query).
+  AI Agent Response     : You are missing opportunities in the following areas:
+
+- Running active campaigns, as all 5 campaigns are paused or in draft mode.
+- Utilizing the leads generated from paused campaigns, such as 'tutor nearby users' and 'summer sales 261', which have a high conversation progress of 70.0%.
+- Creating and launching new campaigns to target the SaaS market opportunities, cloud computing, and AWS.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 419, 'completion_tokens': 84, 'total_tokens': 503, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #16 [PASS] - LLM - Performance Improvement
+  Question Asked        : How can we improve our campaign performance?
+  Manual Query Code     : LLM_ONLY (uses campaign data + Groq for improvement suggestions).
+  Manual Query Result   : N/A (LLM improvement recommendations; no single DB query).
+  AI Agent Response     : To improve campaign performance, consider the following:
+
+1. Launch more campaigns to increase the number of leads and conversions.
+2. Resume paused campaigns, such as 'tutor nearby users' and 'summer sales 261', to continue generating leads.
+3. Update and refine existing campaigns to improve engagement metrics.
+4. Analyze successful campaigns, like 'summer sales 261', to apply best practices to other campaigns.
+5. Consider creating more targeted campaigns to reach specific audiences.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 416, 'completion_tokens': 96, 'total_tokens': 512, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #17 [PASS] - LLM - Industry Best Practices
+  Question Asked        : What are the best practices for email marketing in our industry?
+  Manual Query Code     : LLM_ONLY (general email marketing knowledge via Groq).
+  Manual Query Result   : N/A (LLM general knowledge; no DB query).
+  AI Agent Response     : For **leads + conversions** → start with **email** (best ROI and tracking). For **awareness** → use **Instagram**. Best combo: Instagram/ads to attract → email to convert and nurture.
+  LLM Used              : False
+  AI Token Usage        : {}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #18 [PASS] - LLM - Goals Analysis
+  Question Asked        : Are we on track to meet our campaign goals?
+  Manual Query Code     : LLM_ONLY (uses campaign targets + actual data + Groq for goal analysis).
+  Manual Query Result   : N/A (LLM analysis of goal progress; no single DB query).
+  AI Agent Response     : No, we are not on track to meet our campaign goals.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 418, 'completion_tokens': 14, 'total_tokens': 432, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #19 [PASS] - LLM - Conversion Strategy
+  Question Asked        : What should we focus on to improve lead conversion rates?
+  Manual Query Code     : LLM_ONLY (uses lead/campaign data + Groq for conversion strategy).
+  Manual Query Result   : N/A (LLM conversion optimization; no single DB query).
+  AI Agent Response     : To improve lead conversion rates, focus on the campaigns with the highest conversion progress and engagement metrics. 
+
+Campaigns to focus on:
+- summer sales 261 (paused): 70.0% conv_progress
+- tutor nearby users (paused): 0.0% conv_progress
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 419, 'completion_tokens': 57, 'total_tokens': 476, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+Test #20 [PASS] - LLM - Overall Summary
+  Question Asked        : Give me an overall summary of my marketing performance with top 3 recommendations.
+  Manual Query Code     : LLM_ONLY (uses all marketing data + Groq for summary + recommendations).
+  Manual Query Result   : N/A (LLM-only narrative summary; no single DB query).
+  AI Agent Response     : Your marketing performance summary:
+
+- Total campaigns: 5 (0 active)
+- Total leads: 12
+- Successful campaigns: Summer Sales 261 (paused), with 54.55% open rate, 9.09% click rate, and 72.73% reply rate.
+
+Top 3 recommendations:
+1. Launch Summer Sales 261 to capitalize on its success.
+2. Revamp Tutor Nearby Users and Summer Sales 2 to improve performance.
+3. Create a new campaign targeting the SaaS market opportunities.
+  LLM Used              : True
+  AI Token Usage        : {'provider': 'groq', 'model': 'llama-3.1-8b-instant', 'prompt_tokens': 423, 'completion_tokens': 107, 'total_tokens': 530, 'estimated': False}
+  Match Detail          : Complex LLM query (not auto-verified)
+
+==========================================================================================
+SUMMARY: 20 Passed | 0 Failed | 0 Errors | Total: 20
+Accuracy: 100.0%
+Total Tokens: 5312 (prompt: 4601, completion: 711)
