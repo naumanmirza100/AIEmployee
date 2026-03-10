@@ -629,8 +629,17 @@ Return ONLY text - NO JSON, NO actions."""
                             project_id_to_use = proj.get('id')
                             break
                 
+                # CRITICAL: If a project is SELECTED (via dropdown), the user intends to work within that project.
+                # Only allow new project creation if they EXPLICITLY say "new project" or "create project".
+                if context.get('project'):
+                    explicit_new_project_phrases = ['new project', 'create project', 'make project', 'add project', 'start project', 'create a project', 'make a project']
+                    if not any(phrase in question_lower for phrase in explicit_new_project_phrases):
+                        wants_new_project = False
+                        existing_project_mentioned = True
+                        project_id_to_use = context['project'].get('id')
+
                 # CRITICAL: If user said "add task in [name]" / "add a new task in [name]", that's the existing project—do NOT create a new project.
-                add_task_in_patterns = ['add task in', 'add a task in', 'add new task in', 'add tasks in', 'add a new task to', 'add task to', 'add tasks to', 'in the', 'in project']
+                add_task_in_patterns = ['add task in', 'add a task in', 'add new task in', 'add tasks in', 'add a new task to', 'add task to', 'add tasks to', 'in the', 'in project', 'in this project', 'to this project', 'for this project']
                 if existing_project_mentioned or any(p in question_lower for p in add_task_in_patterns):
                     # Prefer "add to existing project" when they named a project (or used "in X" / "to X")
                     if existing_project_mentioned:
