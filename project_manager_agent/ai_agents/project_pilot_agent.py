@@ -131,9 +131,12 @@ class ProjectPilotAgent(BaseAgent):
         # Update should only trigger if explicitly about existing items
         has_explicit_update_context = any(phrase in question_lower for phrase in [
             'update existing', 'update the', 'update this', 'modify existing', 'change existing',
-            'edit existing', 'update task', 'update project', 'modify task', 'change task'
+            'edit existing', 'update task', 'update project', 'modify task', 'change task',
+            'change priority', 'change status', 'change deadline', 'change due date',
+            'set priority', 'set status', 'set deadline', 'set due date',
+            'move to', 'mark as', 'mark all',
         ])
-        
+
         is_assignment_request = any(keyword in question_lower for keyword in assignment_keywords) and not has_explicit_creation
         is_creation_request = has_explicit_creation
         # IMPORTANT: Only detect deletion if explicitly about deletion AND not describing a new project
@@ -144,7 +147,7 @@ class ProjectPilotAgent(BaseAgent):
             not is_detailed_spec
         )
         # Only treat as update if explicitly about updating existing items AND not creating
-        is_update_request = any(keyword in question_lower for keyword in update_keywords) and has_explicit_update_context and not has_explicit_creation
+        is_update_request = (any(keyword in question_lower for keyword in update_keywords) and has_explicit_update_context and not has_explicit_creation) or is_assignment_request
         is_action_request = is_assignment_request or is_creation_request or is_deletion_request or is_update_request
         
         # Check for things the agent CANNOT do
@@ -222,8 +225,19 @@ class ProjectPilotAgent(BaseAgent):
                 context_str += f"- Name: {project.get('name', 'Unknown')}\n"
                 context_str += f"- ID: {project.get('id', 'Unknown')}\n"
                 context_str += f"- Status: {project.get('status', 'Unknown')}\n"
-                context_str += f"- Tasks: {project.get('tasks_count', 0)} tasks\n"
-            
+                context_str += f"- Tasks: {len(project.get('tasks', []))} tasks\n"
+                # Show tasks nested inside the selected project
+                if project.get('tasks'):
+                    context_str += f"\nTasks in Selected Project:\n"
+                    for task in project['tasks']:
+                        task_id = task.get('id', 'N/A')
+                        task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                        if task.get('assignee_username'):
+                            task_line += f" [Assigned to: {task.get('assignee_username')}]"
+                        else:
+                            task_line += f" [Unassigned]"
+                        context_str += task_line + "\n"
+
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
@@ -259,31 +273,63 @@ class ProjectPilotAgent(BaseAgent):
                     users_str += f"  Role: {user.get('role')}\n"
         
         if is_action_request:
-            # Handle assignment requests FIRST (assigning existing tasks) - these are NOT creation requests
+            # Handle assignment requests - these are UPDATE operations on existing tasks
             if is_assignment_request and not is_creation_request:
-                # User wants to assign tasks, not create them
-                prompt = f"""The user wants to ASSIGN existing tasks, not create new ones.
+                # User wants to assign/reassign existing tasks to users
+                # Determine target project
+                target_project_id = None
+                if context.get('project'):
+                    target_project_id = context['project'].get('id')
+                elif context.get('all_projects'):
+                    for proj in context['all_projects']:
+                        proj_name = proj.get('name', '').lower()
+                        if proj_name and proj_name in question_lower:
+                            target_project_id = proj.get('id')
+                            break
+
+                from datetime import datetime as _dt
+                _today = _dt.now().strftime('%Y-%m-%d')
+
+                prompt = f"""You are an AI assistant that manages projects and tasks. Analyze the request and return ONLY valid JSON.
+
+TODAY'S DATE: {_today}
 
 {context_str}
 {users_str}
 
 User Request: {question}
 
-IMPORTANT: The user said "assign" which means they want to assign EXISTING tasks to a user.
-You CANNOT assign tasks - that's a task management function, not a creation function.
+The user wants to ASSIGN or REASSIGN existing tasks to users. You MUST return update_task actions.
 
-You can ONLY:
-- CREATE new tasks or projects
+INSTRUCTIONS:
+- Look at the existing tasks in the context above
+- Match them with available users
+- Return update_task actions to assign tasks to the requested users
+- If user says "assign to all users" or "all available users", distribute tasks evenly across ALL available users (round-robin)
+- If user mentions specific users, assign only to those users
+- If user says "assign all tasks", update ALL tasks in the project/context
 
-Respond politely that:
-1. You cannot assign existing tasks to users (that's done through the task management interface)
-2. You can only CREATE new tasks or projects
-3. If they want to create NEW tasks and assign them, they should say "create tasks" not "assign tasks"
+Return ONLY this JSON format (no other text):
+[
+    {{
+        "action": "update_task",
+        "task_id": task_id_number,
+        "task_title": "current task title",
+        "updates": {{
+            "assignee_id": user_id
+        }},
+        "reasoning": "Brief explanation of why this user was assigned this task"
+    }}
+]
 
-Return a helpful text response (NOT JSON) explaining this limitation. Example:
-"I'm sorry, but I cannot assign existing tasks to users. I can only create new tasks or projects. If you'd like to create new tasks and assign them to a user, please ask me to 'create tasks in [project name] and assign them to [user]'."
-
-Do NOT return JSON. Do NOT create any projects or tasks."""
+CRITICAL RULES:
+- Return ONLY the JSON array, no explanations
+- Use task IDs from the context above
+- Use user IDs from the available users list above
+- For "assign to all users": distribute tasks evenly across all users using round-robin
+- For specific user assignment: use only the mentioned user's ID
+- DO NOT create new projects or tasks - ONLY update existing ones
+- DO NOT return create_project or create_task actions"""
             
             # Handle deletion requests
             elif is_deletion_request:
@@ -376,8 +422,8 @@ Return a helpful text response (NOT JSON) asking for clarification:
 - Or which task(s) do you want to delete? (e.g., 'delete task Y' or 'delete all tasks in Project X')
 
 Do NOT return JSON. Do NOT delete anything."""
-            # Handle update requests - ONLY if explicitly about updating existing items
-            elif is_update_request and has_explicit_update_context:
+            # Handle update requests - updating existing items (priority, status, assignee, deadlines, etc.)
+            elif is_update_request:
                 # Verify that user is actually asking to update existing tasks/projects
                 # NOT asking to create something new
                 
@@ -395,18 +441,19 @@ Do NOT return JSON. Do NOT delete anything."""
                 # CRITICAL: Check if user mentions specific existing task IDs or task titles
                 # If no specific tasks mentioned, it might be ambiguous
                 has_specific_task_reference = False
-                if context.get('tasks'):
-                    for task in context['tasks']:
-                        task_title = task.get('title', '').lower()
-                        task_id = task.get('id')
-                        # Check if task title or ID is mentioned in question
-                        if task_title and task_title in question_lower:
-                            has_specific_task_reference = True
-                            break
-                        # Check for task ID patterns
-                        if task_id and (f'task {task_id}' in question_lower or f'task_id {task_id}' in question_lower):
-                            has_specific_task_reference = True
-                            break
+                # Get tasks from either top-level context or nested inside project
+                _tasks_list = context.get('tasks') or (context.get('project', {}).get('tasks') if context.get('project') else None) or []
+                for task in _tasks_list:
+                    task_title = task.get('title', '').lower()
+                    task_id = task.get('id')
+                    # Check if task title or ID is mentioned in question
+                    if task_title and task_title in question_lower:
+                        has_specific_task_reference = True
+                        break
+                    # Check for task ID patterns
+                    if task_id and (f'task {task_id}' in question_lower or f'task_id {task_id}' in question_lower):
+                        has_specific_task_reference = True
+                        break
                 
                 # If user wants to update but doesn't specify which tasks, ask for clarification
                 if is_task_update and not has_specific_task_reference and not ('all' in question_lower and 'task' in question_lower):
