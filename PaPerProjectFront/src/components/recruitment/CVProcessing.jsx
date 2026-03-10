@@ -200,207 +200,224 @@ const CVProcessing = ({ onProcessComplete }) => {
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6 w-full">
-      {/* Upload Form Card */}
-      <Card>
-        <CardHeader className="p-4 sm:p-6">
-          <CardTitle className="text-lg sm:text-xl">Process CV Files</CardTitle>
-          <CardDescription className="text-xs sm:text-sm">
-            Upload CV files to analyze and rank candidates based on job requirements
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 space-y-4">
-          {/* File Upload */}
-          <div className="space-y-2">
-            <Label htmlFor="cv-files" className="text-sm font-medium">CV Files</Label>
-            <div className="relative">
-              <Input
-                id="cv-files"
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx"
-                onChange={handleFileChange}
-                className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
-              />
-            </div>
-            {files.length > 0 && (
-              <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground bg-muted/50 p-2 rounded-md">
-                <FileText className="h-4 w-4 shrink-0" />
-                <span>{files.length} file(s) selected</span>
-              </div>
-            )}
-          </div>
-
-          {/* Job Description Selection (Required) */}
-          <div className="space-y-2">
-            <Label htmlFor="job-description" className="text-sm font-medium">
-              Select Job Description <span className="text-destructive">*</span>
-            </Label>
-            <Select value={selectedJobId || ""} onValueChange={handleJobSelection}>
-              <SelectTrigger className="w-full text-sm">
-                <SelectValue placeholder="Select a job (required)" />
-              </SelectTrigger>
-              <SelectContent>
-                {jobDescriptions.map((job) => (
-                  <SelectItem key={job.id} value={job.id.toString()}>
-                    {job.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">
-              Job selection is required to process CVs. Ensure interview settings are complete for the selected job.
-            </p>
-            
-            {/* Display Keywords when job is selected */}
-            {selectedJobId && selectedJobId !== "none" && displayedKeywords.length > 0 && (
-              <div className="mt-3 p-2.5 sm:p-3 bg-muted/50 rounded-lg border">
-                <div className="text-xs sm:text-sm font-semibold mb-2">Extracted Keywords:</div>
-                <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                  {displayedKeywords.map((keyword, index) => (
-                    <Badge key={index} variant="secondary" className="text-[10px] sm:text-xs">
-                      {keyword}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Keywords (Optional) */}
-          <div className="space-y-2">
-            <Label htmlFor="keywords" className="text-sm font-medium">
-              Keywords <span className="text-muted-foreground text-xs">(Optional)</span>
-            </Label>
-            <Input
-              id="keywords"
-              value={jobKeywords}
-              onChange={(e) => setJobKeywords(e.target.value)}
-              placeholder="Python, React, etc."
-              className="text-sm"
-            />
-          </div>
-
-          {/* Top N */}
-          <div className="space-y-2">
-            <Label htmlFor="top-n" className="text-sm font-medium">
-              Top N Results <span className="text-muted-foreground text-xs">(Optional)</span>
-            </Label>
-            <Input
-              id="top-n"
-              type="number"
-              value={topN}
-              onChange={(e) => setTopN(e.target.value)}
-              placeholder="All results"
-              className="text-sm"
-            />
-          </div>
-
-          <Button
-            onClick={handleProcess}
-            disabled={processing || files.length === 0 || !selectedJobId}
-            className="w-full sm:w-auto sm:min-w-[200px] h-10 text-sm"
-          >
-            {processing ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                <span className="hidden sm:inline">Processing CVs...</span>
-                <span className="sm:hidden">Processing...</span>
-              </>
-            ) : (
-              <>
-                <Upload className="h-4 w-4 mr-2" />
-                Process CVs
-              </>
-            )}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Results */}
-      {results && results.results && (
-        <Card>
+    <div
+      className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
+      style={{
+        background:
+          'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+      }}
+    >
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
+        {/* Upload Form Card */}
+        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="p-4 sm:p-6">
-            <CardTitle className="text-lg sm:text-xl">Processing Results</CardTitle>
-            <CardDescription className="text-xs sm:text-sm">
-              {results.results.length} candidate(s) analyzed and ranked
+            <CardTitle className="text-lg sm:text-xl text-white">Process CV Files</CardTitle>
+            <CardDescription className="text-xs sm:text-sm text-white/60">
+              Upload CV files to analyze and rank candidates based on job requirements
             </CardDescription>
           </CardHeader>
-          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
-            <div className="space-y-3 sm:space-y-4">
-              {results.results.map((result, index) => {
-                const qualified = result.qualified || {};
-                const summary = result.summary || {};
-                const parsed = result.parsed || {};
-
-                return (
-                  <Card key={index} className="border-l-4 border-l-primary overflow-hidden">
-                    <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-3">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          <CardTitle className="text-sm sm:text-lg flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="shrink-0 text-xs">#{index + 1}</Badge>
-                            <span className="truncate">{result.file_name}</span>
-                          </CardTitle>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                          {getDecisionBadge(qualified.decision)}
-                          {qualified.priority && (
-                            <Badge variant="outline" className="text-[10px] sm:text-xs">{qualified.priority}</Badge>
-                          )}
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0 sm:pt-0 space-y-3">
-                      {/* Summary */}
-                      {summary.summary && (
-                        <div className="bg-muted/30 rounded-md p-2.5 sm:p-3">
-                          <h4 className="font-semibold text-xs sm:text-sm mb-1">Summary</h4>
-                          <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">{summary.summary}</p>
-                        </div>
-                      )}
-                      
-                      {/* Qualification Reasoning */}
-                      {qualified.reasoning && (
-                        <QualificationReasoning 
-                          reasoning={qualified.reasoning}
-                          exactMatchedSkills={qualified.exact_matched_skills || []}
-                          relatedMatchedSkills={qualified.related_matched_skills || []}
-                          missingSkills={qualified.missing_skills || []}
-                          inferredSkills={[]}
-                        />
-                      )}
-                      
-                      {/* Candidate Info */}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs sm:text-sm pt-2 border-t">
-                        {parsed.name && (
-                          <div className="flex items-center gap-1.5">
-                            <User className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                            <span className="font-medium">{parsed.name}</span>
-                          </div>
-                        )}
-                        {parsed.email && (
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Mail className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                            <span className="text-muted-foreground truncate">{parsed.email}</span>
-                          </div>
-                        )}
-                        {qualified.confidence_score !== undefined && (
-                          <div className="flex items-center gap-1.5">
-                            <Percent className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                            <span className="font-medium">{qualified.confidence_score}%</span>
-                            <span className="text-muted-foreground hidden sm:inline">confidence</span>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 space-y-4">
+            {/* File Upload */}
+            <div className="space-y-2">
+              <Label htmlFor="cv-files" className="text-sm font-medium text-white">
+                CV Files
+              </Label>
+              <div className="relative">
+                <Input
+                  id="cv-files"
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx"
+                  onChange={handleFileChange}
+                  className="text-sm bg-black/30 border-white/20 text-white file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+                />
+              </div>
+              {files.length > 0 && (
+                <div className="flex items-center gap-2 text-xs sm:text-sm text-white/70 bg-black/40 border border-white/10 p-2 rounded-md">
+                  <FileText className="h-4 w-4 shrink-0" />
+                  <span>{files.length} file(s) selected</span>
+                </div>
+              )}
             </div>
+
+            {/* Job Description Selection (Required) */}
+            <div className="space-y-2">
+              <Label htmlFor="job-description" className="text-sm font-medium text-white">
+                Select Job Description <span className="text-destructive">*</span>
+              </Label>
+              <Select value={selectedJobId || ''} onValueChange={handleJobSelection}>
+                <SelectTrigger className="w-full text-sm bg-black/30 border-white/20 text-white">
+                  <SelectValue placeholder="Select a job (required)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {jobDescriptions.map((job) => (
+                    <SelectItem key={job.id} value={job.id.toString()}>
+                      {job.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] sm:text-xs text-white/60">
+                Job selection is required to process CVs. Ensure interview settings are complete for the selected job.
+              </p>
+              
+              {/* Display Keywords when job is selected */}
+              {selectedJobId && selectedJobId !== 'none' && displayedKeywords.length > 0 && (
+                <div className="mt-3 p-2.5 sm:p-3 bg-black/40 rounded-lg border border-white/10">
+                  <div className="text-xs sm:text-sm font-semibold mb-2 text-white">Extracted Keywords:</div>
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                    {displayedKeywords.map((keyword, index) => (
+                      <Badge key={index} variant="secondary" className="text-[10px] sm:text-xs">
+                        {keyword}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Keywords (Optional) */}
+            <div className="space-y-2">
+              <Label htmlFor="keywords" className="text-sm font-medium text-white">
+                Keywords <span className="text-white/60 text-xs">(Optional)</span>
+              </Label>
+              <Input
+                id="keywords"
+                value={jobKeywords}
+                onChange={(e) => setJobKeywords(e.target.value)}
+                placeholder="Python, React, etc."
+                className="text-sm bg-black/30 border-white/20 text-white"
+              />
+            </div>
+
+            {/* Top N */}
+            <div className="space-y-2">
+              <Label htmlFor="top-n" className="text-sm font-medium text-white">
+                Top N Results <span className="text-white/60 text-xs">(Optional)</span>
+              </Label>
+              <Input
+                id="top-n"
+                type="number"
+                value={topN}
+                onChange={(e) => setTopN(e.target.value)}
+                placeholder="All results"
+                className="text-sm bg-black/30 border-white/20 text-white"
+              />
+            </div>
+
+            <Button
+              onClick={handleProcess}
+              disabled={processing || files.length === 0 || !selectedJobId}
+              className="w-full sm:w-auto sm:min-w-[200px] h-10 text-sm"
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  <span className="hidden sm:inline">Processing CVs...</span>
+                  <span className="sm:hidden">Processing...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Process CVs
+                </>
+              )}
+            </Button>
           </CardContent>
         </Card>
-      )}
+
+        {/* Results */}
+        {results && results.results && (
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <CardHeader className="p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl text-white">Processing Results</CardTitle>
+              <CardDescription className="text-xs sm:text-sm text-white/60">
+                {results.results.length} candidate(s) analyzed and ranked
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
+              <div className="space-y-3 sm:space-y-4">
+                {results.results.map((result, index) => {
+                  const qualified = result.qualified || {};
+                  const summary = result.summary || {};
+                  const parsed = result.parsed || {};
+
+                  return (
+                    <Card
+                      key={index}
+                      className="border-l-4 border-l-primary overflow-hidden bg-black/40 border border-white/10"
+                    >
+                      <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-3">
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="text-sm sm:text-lg flex items-center gap-2 flex-wrap text-white">
+                              <Badge variant="outline" className="shrink-0 text-xs">
+                                #{index + 1}
+                              </Badge>
+                              <span className="truncate">{result.file_name}</span>
+                            </CardTitle>
+                          </div>
+                          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                            {getDecisionBadge(qualified.decision)}
+                            {qualified.priority && (
+                              <Badge variant="outline" className="text-[10px] sm:text-xs">
+                                {qualified.priority}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-3 sm:p-4 pt-0 sm:pt-0 space-y-3">
+                        {/* Summary */}
+                        {summary.summary && (
+                          <div className="bg-black/40 border border-white/10 rounded-md p-2.5 sm:p-3">
+                            <h4 className="font-semibold text-xs sm:text-sm mb-1 text-white">Summary</h4>
+                            <p className="text-xs sm:text-sm text-white/70 leading-relaxed">{summary.summary}</p>
+                          </div>
+                        )}
+                        
+                        {/* Qualification Reasoning */}
+                        {qualified.reasoning && (
+                          <QualificationReasoning 
+                            reasoning={qualified.reasoning}
+                            exactMatchedSkills={qualified.exact_matched_skills || []}
+                            relatedMatchedSkills={qualified.related_matched_skills || []}
+                            missingSkills={qualified.missing_skills || []}
+                            inferredSkills={[]}
+                          />
+                        )}
+                        
+                        {/* Candidate Info */}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs sm:text-sm pt-2 border-t border-white/10">
+                          {parsed.name && (
+                            <div className="flex items-center gap-1.5">
+                              <User className="h-3 w-3 sm:h-4 sm:w-4 text-white/60 shrink-0" />
+                              <span className="font-medium text-white">{parsed.name}</span>
+                            </div>
+                          )}
+                          {parsed.email && (
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Mail className="h-3 w-3 sm:h-4 sm:w-4 text-white/60 shrink-0" />
+                              <span className="text-white/70 truncate">{parsed.email}</span>
+                            </div>
+                          )}
+                          {qualified.confidence_score !== undefined && (
+                            <div className="flex items-center gap-1.5">
+                              <Percent className="h-3 w-3 sm:h-4 sm:w-4 text-white/60 shrink-0" />
+                              <span className="font-medium text-white">{qualified.confidence_score}%</span>
+                              <span className="text-white/60 hidden sm:inline">confidence</span>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 };
