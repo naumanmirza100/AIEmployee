@@ -350,8 +350,8 @@ const AIGraphGenerator = () => {
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
       <div>
-        <h2 className="text-xl sm:text-2xl font-bold py-3 sm:py-5">AI Graph Generator</h2>
-        <p className="text-xs sm:text-sm text-muted-foreground">
+        <h2 className="text-xl sm:text-2xl font-bold py-3 sm:py-5 text-white">AI Graph Generator</h2>
+        <p className="text-xs sm:text-sm text-white/60">
           Generate visualizations using natural language. Describe what you want to see and AI will create the chart.
         </p>
       </div>
@@ -370,7 +370,7 @@ const AIGraphGenerator = () => {
 
         {/* Generate Tab */}
         <TabsContent value="generate" className="space-y-4 mt-4">
-          <Card>
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader className="p-4 sm:p-6">
               <CardTitle className="text-base sm:text-lg flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-primary" />
@@ -434,7 +434,7 @@ const AIGraphGenerator = () => {
 
           {/* Generated Chart Display */}
           {generating && (
-            <Card>
+            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
               <CardContent className="py-12 flex flex-col items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
                 <p className="text-sm text-muted-foreground">Analyzing your request and generating visualization...</p>
@@ -443,7 +443,7 @@ const AIGraphGenerator = () => {
           )}
 
           {generatedChart && !generating && (
-            <Card>
+            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader className="p-4 sm:p-6 flex flex-row items-start justify-between">
                 <div>
                   <CardTitle className="text-base sm:text-lg flex items-center gap-2">
@@ -482,7 +482,7 @@ const AIGraphGenerator = () => {
 
         {/* Saved Prompts Tab */}
         <TabsContent value="saved" className="space-y-4 mt-4">
-          <Card>
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader className="p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>

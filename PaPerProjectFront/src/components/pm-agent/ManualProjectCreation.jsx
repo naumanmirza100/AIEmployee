@@ -131,7 +131,7 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
   };
 
   return (
-    <Card>
+    <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
       <CardHeader>
         <CardTitle>Create Project Manually</CardTitle>
         <CardDescription>
