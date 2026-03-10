@@ -206,7 +206,6 @@ const MarketingDashboard = () => {
   useEffect(() => {
     if (activeTab === 'dashboard') {
       fetchCampaigns(campaignsPage);
-      fetchEmailAccounts();
       getSavedGraphPrompts()
         .then((res) => {
           if (res?.status === 'success' && Array.isArray(res.data)) {
@@ -569,14 +568,8 @@ const MarketingDashboard = () => {
     }
   };
 
-  const totalEmailsSent = emailAccounts.reduce((sum, account) => sum + (Number(account?.sent_count) || 0), 0);
-
   return (
-    <div
-      className="w-full rounded-2xl max-w-full border border-white/[0.06] p-0 overflow-hidden"
-      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
-    >
-    <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
+    <div className="space-y-3">
       {/* Chart rendering helper */}
       {(() => {
         // Define renderChart as an IIFE to use in JSX
@@ -716,124 +709,124 @@ const MarketingDashboard = () => {
         return null; 
       })()}
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8 w-full">
-        {[
-          {
-            label: 'Total Campaigns',
-            value: stats.totalCampaigns,
-            sub: 'All time campaigns',
-            icon: Target,
-            color: '#a78bfa',
-            bgColor: 'rgba(167,139,250,0.2)',
-            borderColor: 'rgba(167,139,250,0.2)',
-            gradientFrom: 'rgba(167,139,250,0.2)',
-            gradientTo: 'rgba(147,51,234,0.1)',
-          },
-          {
-            label: 'Active Campaigns',
-            value: stats.activeCampaigns,
-            sub: 'Currently running',
-            icon: TrendingUp,
-            color: '#60a5fa',
-            bgColor: 'rgba(96,165,250,0.2)',
-            borderColor: 'rgba(96,165,250,0.2)',
-            gradientFrom: 'rgba(96,165,250,0.2)',
-            gradientTo: 'rgba(34,211,238,0.1)',
-          },
-          {
-            label: 'Total Emails Sent',
-            value: totalEmailsSent,
-            sub: 'Across all sender accounts',
-            icon: Send,
-            color: '#34d399',
-            bgColor: 'rgba(52,211,153,0.2)',
-            borderColor: 'rgba(52,211,153,0.2)',
-            gradientFrom: 'rgba(52,211,153,0.2)',
-            gradientTo: 'rgba(16,185,129,0.1)',
-          },
-          {
-            label: 'Unread Alerts',
-            value: notificationUnreadCount,
-            sub: 'Need your attention',
-            icon: Bell,
-            color: '#f87171',
-            bgColor: 'rgba(248,113,113,0.2)',
-            borderColor: 'rgba(248,113,113,0.2)',
-            gradientFrom: 'rgba(248,113,113,0.2)',
-            gradientTo: 'rgba(252,165,165,0.1)',
-          },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className="relative group w-full min-w-0 rounded-xl backdrop-blur-sm p-5 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
-            style={{
-              border: `1px solid ${card.borderColor}`,
-              background: `linear-gradient(135deg, ${card.gradientFrom} 0%, ${card.gradientTo} 100%)`,
-            }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="rounded-lg p-2.5" style={{ backgroundColor: card.bgColor }}>
-                <card.icon className="h-5 w-5" style={{ color: card.color }} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Total Campaigns */}
+        <Card className="bg-black/40 backdrop-blur-xl border-purple-500/20 hover:border-purple-500/40 transition-all duration-300 group relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+
+          <CardHeader className="pb-0 pt-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-300">Total Campaigns</CardTitle>
+              <div className="p-2.5 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl">
+                <Target className="h-5 w-5 text-purple-400" />
               </div>
             </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-white/50 tracking-wide">{card.label}</p>
-              <p className="text-3xl font-bold text-white tracking-tight">{card.value}</p>
-              <p className="text-xs text-white/40">{card.sub}</p>
+          </CardHeader>
+
+          <CardContent className="pt-0 pb-3">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="text-3xl font-bold text-white">{stats.totalCampaigns}</div>
+                <p className="text-xs text-gray-400 mt-1">All time campaigns</p>
+              </div>
+              <div className="text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
+                +{stats.campaignGrowth || '12%'}
+              </div>
             </div>
-          </div>
-        ))}
+
+            {/* Progress bar
+      <div className="mt-3 h-1.5 w-full bg-purple-900/30 rounded-full overflow-hidden">
+        <div 
+          className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+          style={{ width: '75%' }}
+        ></div>
+      </div> */}
+          </CardContent>
+        </Card>
+
+        {/* Active Campaigns */}
+        <Card className="bg-black/40 backdrop-blur-xl border-purple-500/20 hover:border-purple-500/40 transition-all duration-300 group relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+
+          <CardHeader className="pb-0 pt-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-300">Active Campaigns</CardTitle>
+              <div className="p-2.5 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl">
+                <TrendingUp className="h-5 w-5 text-blue-400" />
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-0 pb-5">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="text-3xl font-bold text-white">{stats.activeCampaigns}</div>
+                <p className="text-xs text-gray-400 mt-1">Currently running</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span className="text-xs text-green-400">Live</span>
+              </div>
+            </div>
+
+            {/* Active indicator
+      <div className="mt-3 flex items-center gap-2">
+        <div className="text-xs text-gray-400">Budget used:</div>
+        <div className="flex-1 h-1.5 bg-blue-900/30 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
+            style={{ width: '45%' }}
+          ></div>
+        </div>
+        <div className="text-xs text-gray-300">$2.4k</div>
+      </div> */}
+          </CardContent>
+        </Card>
       </div>
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="pb-1">
-          <TabsList
-            className="grid w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-          >
-            {[
-              { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-              { value: 'campaigns', label: 'Campaigns', icon: Megaphone },
-              { value: 'email', label: 'Email', icon: Mail },
-              { value: 'qa', label: 'Q&A', icon: MessageSquare },
-              { value: 'research', label: 'Research', icon: Sparkles },
-              { value: 'documents', label: 'Documents', icon: FileText },
-              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount },
-              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles },
-            ].map((item) => (
-              <TabsTrigger
-                key={item.value}
-                value={item.value}
-                className="w-full min-w-0 px-2 sm:px-3 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative flex items-center justify-center gap-2"
-                style={activeTab === item.value
-                  ? {
-                      background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
-                      color: '#fff',
-                      border: '1.5px solid #a259ff',
-                      boxShadow: '0 0 8px 0 #a259ff55',
-                    }
-                  : {
-                      background: 'rgba(60, 30, 90, 0.22)',
-                      color: '#cfc6e6',
-                      border: '1.5px solid #2d2342',
-                      boxShadow: 'none',
-                    }
-                }
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="flex flex-wrap gap-1 w-full">
+          <TabsTrigger value="dashboard" className="flex-1 min-w-[100px]">
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Dashboard
+          </TabsTrigger>
+          <TabsTrigger value="campaigns" className="flex-1 min-w-[100px]">
+            <Megaphone className="h-4 w-4 mr-2" />
+            Campaigns
+          </TabsTrigger>
+          <TabsTrigger value="email" className="flex-1 min-w-[100px]">
+            <Mail className="h-4 w-4 mr-2" />
+            Email
+          </TabsTrigger>
+          <TabsTrigger value="qa" className="flex-1 min-w-[100px]">
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Q&A
+          </TabsTrigger>
+          <TabsTrigger value="research" className="flex-1 min-w-[100px]">
+            <Sparkles className="h-4 w-4 mr-2" />
+            Research
+          </TabsTrigger>
+          <TabsTrigger value="documents" className="flex-1 min-w-[100px]">
+            <FileText className="h-4 w-4 mr-2" />
+            Documents
+          </TabsTrigger>
+          <TabsTrigger value="notifications" className="flex-1 min-w-[100px] relative">
+            <Bell className="h-4 w-4 mr-2" />
+            Notifications
+            {notificationUnreadCount > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground"
+                title={`${notificationUnreadCount} unread`}
               >
-                <item.icon className="h-4 w-4" />
-                <span className="truncate">{item.label}</span>
-                {item.badge > 0 && (
-                  <span
-                    className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground"
-                    title={`${item.badge} unread`}
-                  >
-                    {item.badge > 99 ? '99+' : item.badge}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
+                {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="saved-graphs" className="flex-1 min-w-[100px]">
+            <Sparkles className="h-4 w-4 mr-2" />
+            Saved Graphs
+          </TabsTrigger>
+        </TabsList>
 
         <TabsContent value="dashboard" className="space-y-4">
           {loading ? (
@@ -842,10 +835,10 @@ const MarketingDashboard = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+              <Card>
                 <CardHeader>
                   <div className="flex flex-row items-center justify-between">
-                    <CardTitle className="text-white">Marketing Overview</CardTitle>
+                    <CardTitle>Marketing Overview</CardTitle>
                     {/* Main action buttons */}
                     <div className="flex flex-wrap gap-3">
                       <Button
@@ -867,7 +860,7 @@ const MarketingDashboard = () => {
                       </Button>
                     </div>
                   </div>
-                  <CardDescription className="text-white/60">
+                  <CardDescription>
                     Your marketing campaigns and performance metrics
                   </CardDescription>
                 </CardHeader>
@@ -1012,11 +1005,11 @@ const MarketingDashboard = () => {
 
         <TabsContent value="email" className="space-y-4">
           <div className="relative flex gap-4">
-            <Card className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
+            <Card className={selectedAccount ? 'flex-1 min-w-0' : 'w-full'}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div>
-                  <CardTitle className="text-white">Email accounts</CardTitle>
-                  <CardDescription className="text-white/60">
+                  <CardTitle>Email accounts</CardTitle>
+                  <CardDescription>
                     Accounts used to send campaign emails. Click an account to see details in the sidebar.
                   </CardDescription>
                 </div>
@@ -1112,9 +1105,9 @@ const MarketingDashboard = () => {
 
             {/* Right-side account details sidebar */}
             {selectedAccount && (
-              <div className="w-[380px] shrink-0 flex flex-col rounded-lg border border-white/10 bg-black/20 backdrop-blur-sm shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/[0.03]">
-                  <h3 className="font-semibold text-base text-white">Account details</h3>
+              <div className="w-[380px] shrink-0 flex flex-col rounded-lg border bg-card shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between p-4 border-b bg-muted/30">
+                  <h3 className="font-semibold text-base">Account details</h3>
                   <Button variant="ghost" size="icon" onClick={() => setSelectedAccount(null)} aria-label="Close">
                     <X className="h-4 w-4" />
                   </Button>
@@ -1413,13 +1406,13 @@ const MarketingDashboard = () => {
         </TabsContent>
 
         <TabsContent value="saved-graphs" className="!mt-2">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card>
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-amber-500" />
                 Saved Graph Prompts
               </CardTitle>
-              <CardDescription className="text-white/60">
+              <CardDescription>
                 Manage your saved graph prompts. Click View to preview saved chart data without regenerating.
               </CardDescription>
             </CardHeader>
@@ -1561,7 +1554,6 @@ const MarketingDashboard = () => {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
     </div>
   );
 };

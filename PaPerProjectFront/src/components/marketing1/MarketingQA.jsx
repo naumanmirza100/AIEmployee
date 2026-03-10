@@ -13,6 +13,7 @@ import {
   Send,
   MessageSquare,
   Plus,
+  MessageCircle,
   Bot,
   User,
   Sparkles,
@@ -20,6 +21,7 @@ import {
   ChevronRight,
   ChevronUp,
   ChevronDown,
+  Clock,
   X,
   Lightbulb,
   TrendingUp,
@@ -548,8 +550,6 @@ const MarketingQA = () => {
   const [suggestedValue, setSuggestedValue] = useState('__none__');
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showSidebarSearch, setShowSidebarSearch] = useState(false);
-  const [sidebarSearch, setSidebarSearch] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [inputMode, setInputMode] = useState('search');
   const [expandedGraph, setExpandedGraph] = useState(null);
@@ -975,7 +975,7 @@ const MarketingQA = () => {
 
   return (
     <motion.div
-      className={cn('h-full min-h-0 flex', sidebarOpen ? 'gap-4' : 'gap-0')}
+      className="h-full min-h-0 flex gap-4"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -984,183 +984,160 @@ const MarketingQA = () => {
       <motion.div
         variants={itemVariants}
         className={cn(
-          'shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out',
-          sidebarOpen ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
+          "shrink-0 flex flex-col rounded-2xl border bg-gradient-to-b from-card to-muted/20 overflow-hidden transition-all duration-300 shadow-lg",
+          sidebarOpen ? "w-80" : "w-16"
         )}
-        style={{
-          minWidth: sidebarOpen ? '16rem' : '0',
-          background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
-          borderRight: '1.5px solid rgba(255,255,255,0.10)',
-          boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
-          borderTopLeftRadius: 16,
-          borderBottomLeftRadius: 16,
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-        }}
       >
-        <div className={cn('w-64', !sidebarOpen && 'pointer-events-none')}>
-          <div
-            className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2"
-            style={{
-              background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)',
-              borderTopLeftRadius: 16,
-            }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
-              <button
-                onClick={() => setSidebarOpen(false)}
-                title="Close sidebar"
-                className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150"
-                style={{ boxShadow: '0 0 0 2px rgba(139,92,246,0.10) inset' }}
+        <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
+          <AnimatePresence mode="wait">
+            {sidebarOpen ? (
+              <motion.span
+                key="title"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-sm font-semibold flex items-center gap-2"
               >
-                <ChevronLeft className="h-4 w-4 text-white/80" />
-              </button>
-            </div>
-
-            {showSidebarSearch ? (
-              <div
-                className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                style={{
-                  border: '1.5px solid rgba(139,92,246,0.22)',
-                  background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
-                  boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
-                }}
-              >
-                <input
-                  autoFocus
-                  value={sidebarSearch}
-                  onChange={(e) => setSidebarSearch(e.target.value)}
-                  placeholder="Search conversations..."
-                  className="flex-1 bg-transparent outline-none border-0 text-white/90 text-sm px-2 py-1.5 placeholder-white/40"
-                  style={{ minWidth: 0 }}
-                />
-                <button
-                  title="Close search"
-                  onClick={() => {
-                    setSidebarSearch('');
-                    setShowSidebarSearch(false);
-                  }}
-                  className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
-                >
-                  <X className="h-4 w-4 text-white/70" />
-                </button>
-              </div>
+                <MessageCircle className="h-4 w-4 text-primary" />
+                Conversations
+              </motion.span>
             ) : (
-              <div
-                className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                style={{
-                  border: '1.5px solid rgba(139,92,246,0.22)',
-                  background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
-                  boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
-                }}
+              <motion.div
+                key="icon"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="w-full flex justify-center"
               >
-                <span className="text-sm font-medium text-white/80 flex-1">Conversation</span>
-                <button
-                  title="Search"
-                  onClick={() => setShowSidebarSearch(true)}
-                  className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
-                >
-                  <Search className="h-4 w-4 text-white/70" />
-                </button>
-                <button
-                  onClick={newChat}
-                  title="New chat"
-                  className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
-                >
-                  <Plus className="h-4 w-4 text-white/80" />
-                </button>
-              </div>
+                <MessageCircle className="h-4 w-4 text-primary" />
+              </motion.div>
             )}
+          </AnimatePresence>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary transition-all"
+            >
+              {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={newChat}
+              title="New conversation"
+              className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary transition-all"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
           </div>
+        </div>
 
-          <div>
-            {chats.length === 0 ? (
-              <div className="p-4 text-center text-sm text-muted-foreground">
-                No conversations yet. Ask a question to start.
-              </div>
-            ) : (
-              <div
-                className="p-2 space-y-1"
-                style={{
-                  background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)',
-                  borderRadius: 12,
-                }}
-              >
-                <AnimatePresence>
-                  {(() => {
-                    const searchTerm = sidebarSearch.trim().toLowerCase();
-                    const sortedChats = [...chats].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                    const filteredChats = searchTerm
-                      ? sortedChats.filter((c) => {
-                        const title = (c.messages?.find((m) => m.role === 'user')?.content || '').toLowerCase();
-                        const messagesMatch = (c.messages || []).some((m) => (m.content || '').toLowerCase().includes(searchTerm));
-                        return title.includes(searchTerm) || messagesMatch;
-                      })
-                      : sortedChats;
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent">
+          {chats.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="p-6 text-center"
+            >
+              {sidebarOpen ? (
+                <>
+                  <motion.div
+                    animate={{
+                      scale: [1, 1.1, 1],
+                      rotate: [0, 5, -5, 0]
+                    }}
+                    transition={{
+                      duration: 3,
+                      repeat: Infinity,
+                      repeatType: "reverse"
+                    }}
+                  >
+                    <MessageCircle className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
+                  </motion.div>
+                  <p className="text-sm text-muted-foreground">No conversations yet</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Ask a question to start</p>
+                </>
+              ) : (
+                <MessageCircle className="h-5 w-5 mx-auto text-muted-foreground/50" />
+              )}
+            </motion.div>
+          ) : (
+            <div className="p-2 space-y-1">
+              <AnimatePresence>
+                {[...chats]
+                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                  .map((c, index) => {
+                    const firstQuestion = c.messages?.find(m => m.role === 'user')?.content || 'New chat';
+                    const messageCount = c.messages?.filter(m => m.role === 'user').length || 0;
 
-                    if (searchTerm && filteredChats.length === 0) {
-                      return (
-                        <div className="p-4 text-center text-sm text-muted-foreground">
-                          No matching conversations found.
+                    return (
+                      <motion.div
+                        key={c.id}
+                        variants={sidebarItemVariants}
+                        initial="hidden"
+                        animate="visible"
+                        exit={{ x: -20, opacity: 0 }}
+                        whileHover="hover"
+                        transition={{ delay: index * 0.05 }}
+                        className={cn(
+                          "group relative flex items-start gap-2 w-full p-3 rounded-xl text-sm transition-all cursor-pointer",
+                          selectedChatId === c.id
+                            ? 'bg-gradient-to-r from-primary/20 to-primary/5 border border-primary/30 shadow-md'
+                            : 'hover:bg-gradient-to-r hover:from-muted/80 hover:to-muted/40'
+                        )}
+                        onClick={() => setSelectedChatId(c.id)}
+                      >
+                        <div className={cn(
+                          "shrink-0 rounded-lg p-1.5 transition-all",
+                          selectedChatId === c.id ? 'bg-primary/30' : 'bg-muted'
+                        )}>
+                          <MessageSquare className={cn(
+                            "h-3.5 w-3.5",
+                            selectedChatId === c.id ? 'text-primary' : 'text-muted-foreground'
+                          )} />
                         </div>
-                      );
-                    }
 
-                    return filteredChats.map((c, index) => {
-                      const firstQuestion = c.messages?.find((m) => m.role === 'user')?.content || 'New chat';
-                      return (
-                        <motion.div
-                          key={c.id}
-                          variants={sidebarItemVariants}
-                          initial="hidden"
-                          animate="visible"
-                          exit={{ x: -20, opacity: 0 }}
-                          whileHover="hover"
-                          transition={{ delay: index * 0.04 }}
-                          className={cn(
-                            'group flex items-center gap-1 rounded-lg border text-sm transition-all duration-200',
-                            selectedChatId === c.id
-                              ? 'border-violet-500/60 bg-gradient-to-r from-violet-900/40 to-violet-700/20 shadow-[0_0_12px_rgba(139,92,246,0.18)]'
-                              : 'border-white/10 bg-white/2 hover:bg-white/5 hover:border-violet-400/20'
-                          )}
-                          style={{
-                            boxShadow: selectedChatId === c.id
-                              ? '0 0 12px 0 rgba(139,92,246,0.18), 0 1.5px 0 0 rgba(120,80,255,0.10) inset'
-                              : '0 1px 2px 0 rgba(36,18,54,0.08) inset',
-                            borderWidth: 1.5,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setSelectedChatId(c.id)}
-                            className="flex-1 min-w-0 text-left p-3 rounded-lg"
-                          >
-                            <div className={cn('font-medium truncate', selectedChatId === c.id ? 'text-violet-300' : 'text-white/90')}>
-                              {truncate(firstQuestion, 40)}
+                        {sidebarOpen ? (
+                          <>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate flex items-center gap-1">
+                                {truncate(firstQuestion, 25)}
+                                {messageCount > 1 && (
+                                  <Badge variant="outline" className="h-4 px-1 text-[10px] rounded-full bg-primary/10 border-primary/20">
+                                    {messageCount}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground">
+                                <Clock className="h-3 w-3" />
+                                {formatDate(c.timestamp)}
+                              </div>
                             </div>
-                            <div className={cn('text-xs mt-0.5', selectedChatId === c.id ? 'text-violet-400/70' : 'text-muted-foreground')}>
-                              {formatDate(c.timestamp)}
-                            </div>
-                          </button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                            onClick={(e) => deleteChat(e, c.id)}
-                            title="Delete chat"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </motion.div>
-                      );
-                    });
-                  })()}
-                </AnimatePresence>
-              </div>
-            )}
-          </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive rounded-lg transition-all"
+                              onClick={(e) => deleteChat(e, c.id)}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </>
+                        ) : (
+                          <div className="absolute -top-1 -right-1">
+                            <Badge variant="outline" className="h-3 px-1 text-[8px] rounded-full bg-primary/10 border-primary/20">
+                              {messageCount}
+                            </Badge>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
       </motion.div>
 
@@ -1194,38 +1171,12 @@ const MarketingQA = () => {
                   </CardDescription>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                {selectedChat && (
-                  <Badge variant="secondary" className="gap-1 rounded-full bg-gradient-to-r from-muted to-muted/50">
-                    <MessageSquare className="h-3 w-3" />
-                    {currentMessages.filter(m => m.role === 'user').length} questions
-                  </Badge>
-                )}
-                <Button
-                  variant={sidebarOpen ? 'ghost' : 'outline'}
-                  size="sm"
-                  onClick={() => setSidebarOpen((v) => !v)}
-                  title={sidebarOpen ? 'Hide chat history' : 'Show chat history'}
-                  className={cn(
-                    'gap-1.5 transition-all duration-200',
-                    !sidebarOpen
-                      ? 'bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary'
-                      : 'hover:bg-muted'
-                  )}
-                >
-                  {sidebarOpen ? (
-                    <>
-                      <ChevronLeft className="h-4 w-4" />
-                      <span className="text-xs hidden sm:inline">Hide</span>
-                    </>
-                  ) : (
-                    <>
-                      <ChevronRight className="h-4 w-4" />
-                      <span className="text-xs hidden sm:inline">History</span>
-                    </>
-                  )}
-                </Button>
-              </div>
+              {selectedChat && (
+                <Badge variant="secondary" className="gap-1 rounded-full bg-gradient-to-r from-muted to-muted/50">
+                  <MessageSquare className="h-3 w-3" />
+                  {currentMessages.filter(m => m.role === 'user').length} questions
+                </Badge>
+              )}
             </div>
           </CardHeader>
 

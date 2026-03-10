@@ -395,7 +395,7 @@ const Documents = () => {
       {/* Header with gradient */}
       <motion.div 
         variants={itemVariants}
-        className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/20 backdrop-blur-sm p-6"
+        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-background p-6"
       >
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -403,11 +403,11 @@ const Documents = () => {
               whileHover={{ rotate: 15, scale: 1.1 }}
               className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/20"
             >
-              <FileText className="h-7 w-7 text-violet-400" />
+              <FileText className="h-7 w-7 text-primary" />
             </motion.div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white">Marketing Documents</h1>
-              <p className="text-sm text-white/60 mt-1">
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">Marketing Documents</h1>
+              <p className="text-sm text-muted-foreground mt-1">
                 Create, manage, and collaborate on marketing documents with AI assistance
               </p>
             </div>
@@ -453,8 +453,8 @@ const Documents = () => {
             transition={{ duration: 0.3 }}
             className="overflow-hidden"
           >
-            <Card className="relative border-white/10 bg-black/20 backdrop-blur-sm overflow-hidden">
-              <div className="absolute inset-0" />
+            <Card className="relative border-0 shadow-lg overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent" />
               <Button
                 type="button"
                 variant="ghost"
@@ -610,7 +610,7 @@ const Documents = () => {
 
       {/* Search and filters */}
       <motion.div variants={itemVariants}>
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card className="border-0 shadow-sm">
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3">
@@ -707,7 +707,7 @@ const Documents = () => {
 
       {/* Document list */}
       <motion.div variants={itemVariants}>
-        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
+        <Card className="overflow-hidden border-0 shadow-lg">
           <CardContent className="p-0">
             {loadingList ? (
               <div className="flex flex-col items-center justify-center py-24">
@@ -715,9 +715,9 @@ const Documents = () => {
                   animate={{ rotate: 360 }}
                   transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                 >
-                  <Loader2 className="h-12 w-12 text-violet-400" />
+                  <Loader2 className="h-12 w-12 text-primary" />
                 </motion.div>
-                <p className="mt-4 text-sm text-white/60">Loading documents...</p>
+                <p className="mt-4 text-sm text-muted-foreground">Loading documents...</p>
               </div>
             ) : documents.length === 0 ? (
               <motion.div 

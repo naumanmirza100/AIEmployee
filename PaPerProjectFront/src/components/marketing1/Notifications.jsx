@@ -740,18 +740,18 @@ const Notifications = ({ onUnreadCountChange }) => {
     >
       {/* Page header with animated gradient */}
       <motion.div variants={itemVariants}>
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/20 backdrop-blur-sm p-8">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-background p-8">
           <div className="relative z-10">
             <div className="flex items-center gap-3">
-              <motion.div
+              <motion.div 
                 whileHover={{ rotate: 15, scale: 1.1 }}
-                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/20"
+                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/20"
               >
-                <BellRing className="h-6 w-6 text-violet-400" />
+                <BellRing className="h-6 w-6 text-primary" />
               </motion.div>
               <div>
-                <h1 className="text-3xl font-bold tracking-tight text-white">Notifications</h1>
-                <p className="mt-1 text-sm text-white/60">
+                <h1 className="text-3xl font-bold tracking-tight text-foreground">Notifications</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
                   Monitor campaigns and manage alerts from the Proactive Notification Agent
                 </p>
               </div>
@@ -771,7 +771,7 @@ const Notifications = ({ onUnreadCountChange }) => {
             key={stat.label}
             variants={statCardVariants}
             whileHover={{ scale: 1.02, y: -2 }}
-            className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/20 backdrop-blur-sm p-4 transition-all hover:shadow-lg"
+            className="group relative overflow-hidden rounded-xl border bg-card p-4 transition-all hover:shadow-lg"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="relative z-10">
@@ -792,7 +792,7 @@ const Notifications = ({ onUnreadCountChange }) => {
 
       {/* Monitor section with enhanced design */}
       <motion.div variants={itemVariants}>
-        <Card className="relative overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
+        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-muted/50 via-background to-background shadow-lg">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]" />
           <CardHeader className="relative pb-3">
             <div className="flex items-center gap-3">
@@ -804,8 +804,8 @@ const Notifications = ({ onUnreadCountChange }) => {
                 <BarChart3 className="h-5 w-5 text-primary" />
               </motion.div>
               <div>
-                <CardTitle className="text-lg text-white">Monitor Campaigns</CardTitle>
-                <CardDescription className="text-sm text-white/60">
+                <CardTitle className="text-lg">Monitor Campaigns</CardTitle>
+                <CardDescription className="text-sm">
                   Run a health check on your campaigns to discover insights and opportunities
                 </CardDescription>
               </div>
@@ -876,7 +876,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ delay: 0.1 }}
-                        className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/20 backdrop-blur-sm p-4"
+                        className="group relative overflow-hidden rounded-xl border bg-background/50 backdrop-blur-sm p-4"
                       >
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="flex items-center gap-3">
@@ -900,18 +900,18 @@ const Notifications = ({ onUnreadCountChange }) => {
 
       {/* Unread notifications with filters */}
       <motion.div variants={itemVariants}>
-        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
-          <CardHeader className="pb-4">
+        <Card className="overflow-hidden border-0 shadow-lg">
+          <CardHeader className="bg-gradient-to-r from-primary/5 via-transparent to-transparent pb-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <motion.div
+                <motion.div 
                   whileHover={{ scale: 1.1, rotate: 10 }}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/20"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10"
                 >
-                  <Inbox className="h-5 w-5 text-violet-400" />
+                  <Inbox className="h-5 w-5 text-primary" />
                 </motion.div>
                 <div>
-                  <CardTitle className="text-lg text-white flex items-center gap-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
                     Unread Notifications
                     {unreadCount > 0 && (
                       <motion.div
@@ -1079,18 +1079,18 @@ const Notifications = ({ onUnreadCountChange }) => {
 
       {/* History with similar enhancements */}
       <motion.div variants={itemVariants}>
-        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
-          <CardHeader className="pb-4">
+        <Card className="overflow-hidden border-0 shadow-lg">
+          <CardHeader className="bg-gradient-to-r from-muted/30 via-transparent to-transparent pb-4">
             <div className="flex items-center gap-3">
-              <motion.div
+              <motion.div 
                 whileHover={{ scale: 1.1, rotate: -10 }}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.05]"
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted"
               >
-                <History className="h-5 w-5 text-white/40" />
+                <History className="h-5 w-5 text-muted-foreground" />
               </motion.div>
               <div>
-                <CardTitle className="text-lg text-white">History</CardTitle>
-                <CardDescription className="text-sm text-white/60">
+                <CardTitle className="text-lg">History</CardTitle>
+                <CardDescription className="text-sm">
                   {historyTotal} archived notification{historyTotal !== 1 ? 's' : ''}
                 </CardDescription>
               </div>

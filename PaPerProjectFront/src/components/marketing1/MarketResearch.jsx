@@ -574,11 +574,11 @@ const MarketResearch = () => {
       <motion.div 
         variants={itemVariants}
         className={cn(
-          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
+          "shrink-0 flex flex-col rounded-2xl border bg-gradient-to-b from-card to-muted/20 overflow-hidden transition-all duration-300 shadow-lg",
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
-        <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/[0.03]">
+        <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
           <AnimatePresence mode="wait">
             {sidebarOpen ? (
               <motion.span
@@ -724,27 +724,27 @@ const MarketResearch = () => {
         variants={itemVariants}
         className="flex-1 min-w-0 min-h-0"
       >
-        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm rounded-2xl">
+        <Card className="h-full flex flex-col overflow-hidden border-0 shadow-xl rounded-2xl bg-gradient-to-b from-background to-muted/10">
           {/* Header */}
-          <CardHeader className="shrink-0 border-b border-white/10 pb-3 rounded-t-2xl bg-white/[0.03]">
+          <CardHeader className="shrink-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-b pb-3 rounded-t-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <motion.div
+                <motion.div 
                   whileHover={{ rotate: 360, scale: 1.1 }}
                   transition={{ duration: 0.5 }}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/20"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 shadow-md"
                 >
-                  <Bot className="h-5 w-5 text-violet-400" />
+                  <Bot className="h-5 w-5 text-primary" />
                 </motion.div>
                 <div>
-                  <CardTitle className="text-white flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2">
                     Market Research Assistant
                     <Badge variant="outline" className="bg-gradient-to-r from-primary/20 to-primary/5 gap-1 rounded-full border-primary/30">
                       <Award className="h-3 w-3 text-primary" />
                       AI-Powered
                     </Badge>
                   </CardTitle>
-                  <CardDescription className="text-white/60">
+                  <CardDescription>
                     Analyze markets, competitors, and opportunities with AI
                   </CardDescription>
                 </div>
@@ -759,7 +759,7 @@ const MarketResearch = () => {
           </CardHeader>
 
           {/* Messages area */}
-          <CardContent className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+          <CardContent className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent bg-gradient-to-b from-background via-background to-muted/10">
             <AnimatePresence mode="popLayout">
               {!selectedChatId ? (
                 <motion.div
