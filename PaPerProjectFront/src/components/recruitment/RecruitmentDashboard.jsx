@@ -237,12 +237,29 @@ const RecruitmentDashboard = () => {
 
         {/* Desktop: Regular Tabs (lg and above - 1024px+) with horizontal scroll */}
         <div className="hidden lg:block overflow-x-auto pb-1">
-          <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+          <TabsList
+            className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
+            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+          >
             {TAB_ITEMS.map((item) => (
-              <TabsTrigger 
-                key={item.value} 
-                value={item.value} 
-                className="whitespace-nowrap shrink-0 px-3 py-1.5 text-sm"
+              <TabsTrigger
+                key={item.value}
+                value={item.value}
+                className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                style={activeTab === item.value
+                  ? {
+                      background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                      color: '#fff',
+                      border: '1.5px solid #a259ff',
+                      boxShadow: '0 0 8px 0 #a259ff55',
+                    }
+                  : {
+                      background: 'rgba(60, 30, 90, 0.22)',
+                      color: '#cfc6e6',
+                      border: '1.5px solid #2d2342',
+                      boxShadow: 'none',
+                    }
+                }
               >
                 <item.icon className="h-4 w-4 mr-2" />
                 {item.label}

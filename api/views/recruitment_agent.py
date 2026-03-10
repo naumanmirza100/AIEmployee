@@ -2001,11 +2001,11 @@ def recruitment_analytics(request):
         total_interviews = Interview.objects.filter(interview_base_filter).count()
         # When filtering by job: show 1 job (that job's active state). Otherwise all jobs.
         if job_filter:
-            total_jobs = 1 if not job_filter.is_deleted else 0
-            active_jobs = 1 if job_filter.is_active and not job_filter.is_deleted else 0
+            total_jobs = 1
+            active_jobs = 1 if job_filter.is_active else 0
         else:
-            total_jobs = JobDescription.objects.filter(company_user=company_user, is_deleted=False).count()
-            active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True, is_deleted=False).count()
+            total_jobs = JobDescription.objects.filter(company_user=company_user).count()
+            active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True).count()
         
         # ========== CV STATISTICS ==========
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -2134,7 +2134,7 @@ def recruitment_analytics(request):
         
         # ========== JOB STATISTICS ==========
         # When filtering by job: show only that job's status. Otherwise all jobs.
-        jobs_q = JobDescription.objects.filter(company_user=company_user, is_deleted=False)
+        jobs_q = JobDescription.objects.filter(company_user=company_user)
         if job_filter:
             jobs_q = jobs_q.filter(pk=job_filter.id)
         jobs_by_status = list(jobs_q.order_by().values('is_active').annotate(
@@ -2154,7 +2154,6 @@ def recruitment_analytics(request):
         # Jobs created over time (monthly for last 6 months). When job filter: that job only.
         jobs_over_time_q = JobDescription.objects.filter(
             company_user=company_user,
-            is_deleted=False,
             created_at__gte=months_ago
         )
         if job_filter:
@@ -2167,7 +2166,7 @@ def recruitment_analytics(request):
         jobs_over_time.sort(key=lambda x: x['month'] if x['month'] else datetime.min)
         
         # Top jobs by CV count. When job filter: that job only.
-        top_jobs_q = JobDescription.objects.filter(company_user=company_user, is_deleted=False)
+        top_jobs_q = JobDescription.objects.filter(company_user=company_user)
         if job_filter:
             top_jobs_q = top_jobs_q.filter(pk=job_filter.id)
         top_jobs_by_cvs = list(top_jobs_q.order_by().annotate(
