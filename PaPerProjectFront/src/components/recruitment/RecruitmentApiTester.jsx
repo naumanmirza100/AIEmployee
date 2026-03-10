@@ -172,57 +172,66 @@ const RecruitmentApiTester = () => {
   };
 
   return (
-    <div className="space-y-6 w-full max-w-full">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Test pipeline APIs step by step
-          </CardTitle>
-          <CardDescription>
-            Add a CV (file or text), then run Parse → Summarize → Enrich → Qualify. Each step shows the result; press Next to run the next step.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Input: CV file or text */}
-          <div className="space-y-2">
-            <Label>CV input (file or paste text)</Label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="file"
-                  accept=".pdf,.docx,.txt"
-                  onChange={(e) => {
-                    setCvFile(e.target.files?.[0] || null);
-                    if (!e.target.files?.[0]) setCvText('');
-                  }}
-                  className="max-w-xs"
-                />
-                {cvFile && <Badge variant="secondary">{cvFile.name}</Badge>}
+    <div
+      className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
+      style={{
+        background:
+          'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+      }}
+    >
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
+        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <FileText className="h-5 w-5" />
+              Test pipeline APIs step by step
+            </CardTitle>
+            <CardDescription className="text-white/60">
+              Add a CV (file or text), then run Parse → Summarize → Enrich → Qualify. Each step shows the result; press
+              Next to run the next step.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Input: CV file or text */}
+            <div className="space-y-2">
+              <Label className="text-white">CV input (file or paste text)</Label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="file"
+                    accept=".pdf,.docx,.txt"
+                    onChange={(e) => {
+                      setCvFile(e.target.files?.[0] || null);
+                      if (!e.target.files?.[0]) setCvText('');
+                    }}
+                    className="max-w-xs bg-black/30 border-white/20 text-white"
+                  />
+                  {cvFile && <Badge variant="secondary">{cvFile.name}</Badge>}
+                </div>
+                <span className="text-sm text-white/60 self-center">or paste text below</span>
               </div>
-              <span className="text-sm text-muted-foreground self-center">or paste text below</span>
+              <Textarea
+                placeholder="Paste raw CV text here if not using a file..."
+                value={cvText}
+                onChange={(e) => setCvText(e.target.value)}
+                rows={4}
+                className="font-mono text-sm bg-black/30 border-white/20 text-white"
+              />
             </div>
-            <Textarea
-              placeholder="Paste raw CV text here if not using a file..."
-              value={cvText}
-              onChange={(e) => setCvText(e.target.value)}
-              rows={4}
-              className="font-mono text-sm"
-            />
-          </div>
 
-          {/* Optional job keywords (used in Summarize & Qualify) */}
-          <div className="space-y-2">
-            <Label>Job keywords (optional, comma-separated)</Label>
-            <Input
-              placeholder="e.g. React, Node.js, Python"
-              value={jobKeywords}
-              onChange={(e) => setJobKeywords(e.target.value)}
-            />
-          </div>
+            {/* Optional job keywords (used in Summarize & Qualify) */}
+            <div className="space-y-2">
+              <Label className="text-white">Job keywords (optional, comma-separated)</Label>
+              <Input
+                placeholder="e.g. React, Node.js, Python"
+                value={jobKeywords}
+                onChange={(e) => setJobKeywords(e.target.value)}
+                className="bg-black/30 border-white/20 text-white"
+              />
+            </div>
 
-          {/* Step 1: Parse */}
-          <div className="rounded-lg border p-4 space-y-2">
+            {/* Step 1: Parse */}
+            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">1. CV Parse</span>
@@ -251,10 +260,10 @@ const RecruitmentApiTester = () => {
                 </Button>
               </>
             )}
-          </div>
+            </div>
 
-          {/* Step 2: Summarize */}
-          <div className="rounded-lg border p-4 space-y-2">
+            {/* Step 2: Summarize */}
+            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">2. Summarize</span>
@@ -283,10 +292,10 @@ const RecruitmentApiTester = () => {
                 </Button>
               </>
             )}
-          </div>
+            </div>
 
-          {/* Step 3: Enrich */}
-          <div className="rounded-lg border p-4 space-y-2">
+            {/* Step 3: Enrich */}
+            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">3. Enrich</span>
@@ -315,10 +324,10 @@ const RecruitmentApiTester = () => {
                 </Button>
               </>
             )}
-          </div>
+            </div>
 
-          {/* Step 4: Qualify */}
-          <div className="rounded-lg border p-4 space-y-2">
+            {/* Step 4: Qualify */}
+            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">4. Qualify</span>
@@ -349,9 +358,10 @@ const RecruitmentApiTester = () => {
                 <ResultBlock title="Full qualification" data={qualification} onCopy={copyToClipboard} />
               </div>
             )}
-          </div>
-        </CardContent>
-      </Card>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
