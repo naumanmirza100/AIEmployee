@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, TrendingUp, Users, Calendar, BarChart3, PieChart, Activity, Target } from 'lucide-react';
+import { Loader2, TrendingUp, Users, Calendar, BarChart3, PieChart, Activity, Target, ArrowUpRight } from 'lucide-react';
 import { getRecruitmentAnalytics, getJobDescriptions } from '@/services/recruitmentAgentService';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -240,9 +240,9 @@ const RecruitmentAnalytics = () => {
 
   if (!analytics) {
     return (
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
         <CardContent className="py-8 sm:py-12 px-4 text-center">
-          <p className="text-muted-foreground text-sm sm:text-base">No analytics data available</p>
+          <p className="text-white/60 text-sm sm:text-base">No analytics data available</p>
         </CardContent>
       </Card>
     );
@@ -257,12 +257,12 @@ const RecruitmentAnalytics = () => {
   return (
     <div className="space-y-4 sm:space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Job Filter: All Jobs = analytics for all; specific job = analytics for that job only */}
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
         <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
-            <label className="text-sm font-medium shrink-0">Filter by Job:</label>
+            <label className="text-sm font-medium shrink-0 text-white">Filter by Job:</label>
             <Select value={selectedJobId ? String(selectedJobId) : 'all'} onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}>
-              <SelectTrigger className="w-full sm:w-[280px] md:w-[300px] min-w-0">
+              <SelectTrigger className="w-full sm:w-[280px] md:w-[300px] min-w-0 border-white/20">
                 <SelectValue placeholder="Select a job" />
               </SelectTrigger>
               <SelectContent>
@@ -285,56 +285,70 @@ const RecruitmentAnalytics = () => {
         </CardContent>
       </Card>
 
-      {/* Overview Cards - subtle color accents (marketing style) */}
+      {/* Overview Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card className="border-l-4 border-l-blue-500 bg-blue-500/5 dark:bg-blue-500/10 min-w-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 sm:p-6 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium truncate">Total CVs Processed</CardTitle>
-            <Users className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent className="px-4 sm:px-6 pt-0">
-            <div className="text-xl sm:text-2xl font-bold">{overview.total_cvs}</div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">Candidates analyzed</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10 min-w-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 sm:p-6 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium truncate">Total Interviews</CardTitle>
-            <Calendar className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent className="px-4 sm:px-6 pt-0">
-            <div className="text-xl sm:text-2xl font-bold">{overview.total_interviews}</div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">Scheduled interviews</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-amber-500 bg-amber-500/5 dark:bg-amber-500/10 min-w-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 sm:p-6 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium truncate">Conversion Rate</CardTitle>
-            <Target className="h-4 w-4 text-amber-500" />
-          </CardHeader>
-          <CardContent className="px-4 sm:px-6 pt-0">
-            <div className="text-xl sm:text-2xl font-bold">{overview.conversion_rate}%</div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">CV to Interview</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-violet-500 bg-violet-500/5 dark:bg-violet-500/10 min-w-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 sm:p-6 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium truncate">Avg Role Fit Score</CardTitle>
-            <TrendingUp className="h-4 w-4 text-violet-500" />
-          </CardHeader>
-          <CardContent className="px-4 sm:px-6 pt-0">
-            <div className="text-xl sm:text-2xl font-bold">{overview.avg_role_fit_score}%</div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">Average match score</p>
-          </CardContent>
-        </Card>
+        {[
+          {
+            label: 'Total CVs Processed',
+            value: overview.total_cvs,
+            sub: 'Candidates analyzed',
+            icon: Users,
+            color: '#60a5fa',
+            bgColor: 'rgba(96,165,250,0.15)',
+            borderHover: 'rgba(96,165,250,0.4)',
+          },
+          {
+            label: 'Total Interviews',
+            value: overview.total_interviews,
+            sub: 'Scheduled interviews',
+            icon: Calendar,
+            color: '#34d399',
+            bgColor: 'rgba(52,211,153,0.15)',
+            borderHover: 'rgba(52,211,153,0.4)',
+          },
+          {
+            label: 'Conversion Rate',
+            value: `${overview.conversion_rate}%`,
+            sub: 'CV to Interview',
+            icon: Target,
+            color: '#fbbf24',
+            bgColor: 'rgba(251,191,36,0.15)',
+            borderHover: 'rgba(251,191,36,0.4)',
+          },
+          {
+            label: 'Avg Role Fit Score',
+            value: `${overview.avg_role_fit_score}%`,
+            sub: 'Average match score',
+            icon: TrendingUp,
+            color: '#a78bfa',
+            bgColor: 'rgba(167,139,250,0.15)',
+            borderHover: 'rgba(167,139,250,0.4)',
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className="group relative flex flex-col items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-4 text-left transition-all duration-300 hover:bg-white/[0.06]"
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = card.borderHover}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
+          >
+            <div className="flex items-start justify-between w-full">
+              <div className="rounded-lg p-2" style={{ backgroundColor: card.bgColor }}>
+                <card.icon className="h-5 w-5" style={{ color: card.color }} />
+              </div>
+              <ArrowUpRight className="h-3.5 w-3.5 text-white/0 group-hover:text-white/30 transition-all duration-300" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-medium text-white/50 truncate">{card.label}</p>
+              <p className="text-xl sm:text-2xl font-bold text-white">{card.value}</p>
+              <p className="text-[10px] sm:text-xs text-white/40 mt-0.5">{card.sub}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* CV Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="min-w-0 overflow-hidden">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <PieChart className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -350,7 +364,7 @@ const RecruitmentAnalytics = () => {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -370,7 +384,7 @@ const RecruitmentAnalytics = () => {
 
       {/* Interview Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="min-w-0 overflow-hidden">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Activity className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -387,7 +401,7 @@ const RecruitmentAnalytics = () => {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />

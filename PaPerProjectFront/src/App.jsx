@@ -124,6 +124,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/recruitment/ai-graphs" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/api-tester" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/ai-interview-questions" element={<RecruitmentAgentPage />} />
+            <Route path="/recruitment/saved-prompts" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/job-descriptions" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/candidates" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/interviews" element={<RecruitmentAgentPage />} />

@@ -573,23 +573,42 @@ const RecruiterSettings = () => {
   return (
     <div className="space-y-6">
       <Tabs value={activeSettingsTab} onValueChange={handleSettingsTabChange} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="email">
-            <Mail className="h-4 w-4 mr-2" />
-            Email Settings
-          </TabsTrigger>
-          <TabsTrigger value="interview">
-            <Calendar className="h-4 w-4 mr-2" />
-            Interview Settings
-          </TabsTrigger>
-          <TabsTrigger value="qualification">
-            <Target className="h-4 w-4 mr-2" />
-            Qualification Settings
-          </TabsTrigger>
+        <TabsList
+          className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
+          style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+        >
+          {[
+            { value: 'email', label: 'Email Settings', icon: Mail },
+            { value: 'interview', label: 'Interview Settings', icon: Calendar },
+            { value: 'qualification', label: 'Qualification Settings', icon: Target },
+          ].map((item) => (
+            <TabsTrigger
+              key={item.value}
+              value={item.value}
+              className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+              style={activeSettingsTab === item.value
+                ? {
+                    background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                    color: '#fff',
+                    border: '1.5px solid #a259ff',
+                    boxShadow: '0 0 8px 0 #a259ff55',
+                  }
+                : {
+                    background: 'rgba(60, 30, 90, 0.22)',
+                    color: '#cfc6e6',
+                    border: '1.5px solid #2d2342',
+                    boxShadow: 'none',
+                  }
+              }
+            >
+              <item.icon className="h-4 w-4 mr-2" />
+              {item.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="email">
-          <Card>
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Email Settings</CardTitle>
               <CardDescription>
@@ -718,7 +737,7 @@ const RecruiterSettings = () => {
         </TabsContent>
 
         <TabsContent value="interview">
-          <Card>
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
@@ -756,7 +775,7 @@ const RecruiterSettings = () => {
                       }}
                       disabled={loadingJobs}
                     >
-                      <SelectTrigger id="job-select">
+                      <SelectTrigger id="job-select" className="border-white/20">
                         <SelectValue placeholder={loadingJobs ? "Loading jobs..." : "Select a job"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -947,7 +966,7 @@ const RecruiterSettings = () => {
                       default_interview_type: value,
                     })}
                   >
-                    <SelectTrigger id="default_interview_type" className="max-w-[200px]">
+                    <SelectTrigger id="default_interview_type" className="max-w-[200px] border-white/20">
                       <SelectValue placeholder="Online or Onsite" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1170,7 +1189,7 @@ const RecruiterSettings = () => {
         </TabsContent>
 
         <TabsContent value="qualification">
-          <Card>
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Qualification Settings</CardTitle>
               <CardDescription>

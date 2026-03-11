@@ -314,7 +314,12 @@ const ProjectManagerDashboardPage = () => {
         <meta name="description" content="AI-powered project management dashboard" />
       </Helmet>
 
-      <div className="min-h-screen bg-background">
+      <div
+        className="min-h-screen"
+        style={{
+          background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)',
+        }}
+      >
         {/* Header */}
         <DashboardNavbar
           icon={BrainCircuit}
@@ -364,94 +369,105 @@ const ProjectManagerDashboardPage = () => {
 
         {/* Main Content */}
         <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full max-w-full overflow-x-hidden">
+          <div
+            className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
+            style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+          >
+          <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
           {/* Loading indicator */}
           {loading && (
             <div className="mb-4 flex items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary mr-2" />
-              <span className="text-sm text-muted-foreground">Loading projects...</span>
+              <Loader2 className="h-5 w-5 animate-spin text-violet-400 mr-2" />
+              <span className="text-sm text-white/50">Loading projects...</span>
             </div>
           )}
-          
+
           {/* Stats Overview */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
-            <Card className="w-full min-w-0">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-muted-foreground">Total Projects</p>
-                    <p className="text-2xl font-bold">{projects.length}</p>
+            {[
+              {
+                label: 'Total Projects',
+                value: projects.length,
+                sub: 'All projects',
+                icon: FolderKanban,
+                color: '#a78bfa',
+                bgColor: 'rgba(167,139,250,0.2)',
+                borderColor: 'rgba(167,139,250,0.2)',
+                gradientFrom: 'rgba(167,139,250,0.2)',
+                gradientTo: 'rgba(147,51,234,0.1)',
+              },
+              {
+                label: 'Active Projects',
+                value: projects.filter(p => p.status === 'active' || p.status === 'in_progress').length,
+                sub: 'In progress',
+                icon: TrendingUp,
+                color: '#34d399',
+                bgColor: 'rgba(52,211,153,0.2)',
+                borderColor: 'rgba(52,211,153,0.2)',
+                gradientFrom: 'rgba(52,211,153,0.2)',
+                gradientTo: 'rgba(22,163,74,0.1)',
+              },
+              {
+                label: 'Planning',
+                value: projects.filter(p => p.status === 'planning').length,
+                sub: 'In planning phase',
+                icon: Clock,
+                color: '#fbbf24',
+                bgColor: 'rgba(251,191,36,0.2)',
+                borderColor: 'rgba(251,191,36,0.2)',
+                gradientFrom: 'rgba(251,191,36,0.15)',
+                gradientTo: 'rgba(245,158,11,0.08)',
+              },
+              {
+                label: 'Completed',
+                value: projects.filter(p => p.status === 'completed').length,
+                sub: 'Successfully delivered',
+                icon: Sparkles,
+                color: '#60a5fa',
+                bgColor: 'rgba(96,165,250,0.2)',
+                borderColor: 'rgba(96,165,250,0.2)',
+                gradientFrom: 'rgba(96,165,250,0.2)',
+                gradientTo: 'rgba(34,211,238,0.1)',
+              },
+            ].map((card) => (
+              <div
+                key={card.label}
+                className="relative group w-full min-w-0 rounded-xl backdrop-blur-sm p-5 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
+                style={{
+                  border: `1px solid ${card.borderColor}`,
+                  background: `linear-gradient(135deg, ${card.gradientFrom} 0%, ${card.gradientTo} 100%)`,
+                }}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: card.bgColor }}>
+                    <card.icon className="h-5 w-5" style={{ color: card.color }} />
                   </div>
-                  <FolderKanban className="h-8 w-8 text-primary opacity-50 shrink-0" />
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card className="w-full min-w-0">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-muted-foreground">Active Projects</p>
-                    <p className="text-2xl font-bold">
-                      {projects.filter(p => p.status === 'active' || p.status === 'in_progress').length}
-                    </p>
-                  </div>
-                  <TrendingUp className="h-8 w-8 text-green-500 opacity-50 shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-white/50 tracking-wide">{card.label}</p>
+                  <p className="text-3xl font-bold text-white tracking-tight">{card.value}</p>
+                  <p className="text-xs text-white/40">{card.sub}</p>
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card className="w-full min-w-0">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-muted-foreground">Planning</p>
-                    <p className="text-2xl font-bold">
-                      {projects.filter(p => p.status === 'planning').length}
-                    </p>
-                  </div>
-                  <Clock className="h-8 w-8 text-yellow-500 opacity-50 shrink-0" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="w-full min-w-0">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-muted-foreground">Completed</p>
-                    <p className="text-2xl font-bold">
-                      {projects.filter(p => p.status === 'completed').length}
-                    </p>
-                  </div>
-                  <Sparkles className="h-8 w-8 text-blue-500 opacity-50 shrink-0" />
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+            ))}
           </div>
 
           {/* AI Agents Tabs */}
-          <Card className="w-full min-w-0">
-            <CardHeader>
-              <CardTitle>AI Agents</CardTitle>
-              <CardDescription>
-                Interact with AI-powered agents to manage your projects and tasks
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="min-w-0 overflow-x-auto">
+          <div className="w-full min-w-0">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 {/* Mobile & Tablet: Hamburger menu (below lg) */}
                 <div className="lg:hidden w-full mb-4">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between h-11">
+                      <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
                         <div className="flex items-center gap-2 min-w-0">
-                          <CurrentTabIcon className="h-4 w-4 shrink-0" />
+                          <CurrentTabIcon className="h-4 w-4 shrink-0 text-violet-400" />
                           <span className="font-medium truncate">{currentTab.label}</span>
                         </div>
-                        <Menu className="h-5 w-5 text-muted-foreground shrink-0" />
+                        <Menu className="h-5 w-5 text-white/40 shrink-0" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto">
+                    <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
                       {PM_TAB_ITEMS.map((item) => {
                         const isActive = item.value === activeTab;
                         const ItemIcon = item.icon;
@@ -459,13 +475,13 @@ const ProjectManagerDashboardPage = () => {
                           <DropdownMenuItem
                             key={item.value}
                             onClick={() => setActiveTab(item.value)}
-                            className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-primary/10' : ''}`}
+                            className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-violet-600/20' : 'hover:bg-white/5'}`}
                           >
                             <div className="flex items-center gap-3 min-w-0">
-                              <ItemIcon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                              <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
+                              <ItemIcon className={`h-4 w-4 shrink-0 ${isActive ? 'text-violet-400' : 'text-white/40'}`} />
+                              <span className={isActive ? 'font-medium text-violet-300' : 'text-white/70'}>{item.label}</span>
                             </div>
-                            {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
+                            {isActive && <Check className="h-4 w-4 text-violet-400 shrink-0" />}
                           </DropdownMenuItem>
                         );
                       })}
@@ -475,16 +491,33 @@ const ProjectManagerDashboardPage = () => {
 
                 {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
                 <div className="hidden lg:block overflow-x-auto pb-1">
-                  <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+                  <TabsList
+                    className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
+                    style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+                  >
                     {PM_TAB_ITEMS.map((item) => {
                       const TabIcon = item.icon;
                       return (
                         <TabsTrigger
                           key={item.value}
                           value={item.value}
-                          className="whitespace-nowrap shrink-0 px-3 py-1.5 text-sm flex items-center gap-2"
+                          className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                          style={activeTab === item.value
+                            ? {
+                                background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                                color: '#fff',
+                                border: '1.5px solid #a259ff',
+                                boxShadow: '0 0 8px 0 #a259ff55',
+                              }
+                            : {
+                                background: 'rgba(60, 30, 90, 0.22)',
+                                color: '#cfc6e6',
+                                border: '1.5px solid #2d2342',
+                                boxShadow: 'none',
+                              }
+                          }
                         >
-                          <TabIcon className="h-4 w-4" />
+                          <TabIcon className="h-4 w-4 mr-2" />
                           {item.label}
                         </TabsTrigger>
                       );
@@ -494,85 +527,60 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="overview" className="mt-6">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
-                    <Card className="w-full min-w-0">
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Target className="h-5 w-5 text-primary" />
-                          Project Pilot
-                        </CardTitle>
-                        <CardDescription>
-                          Create projects, tasks, and manage operations using natural language
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <Button 
-                          onClick={() => setActiveTab('project-pilot')}
-                          className="w-full"
-                        >
-                          Open Project Pilot
-                        </Button>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="w-full min-w-0">
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <ListChecks className="h-5 w-5 text-primary" />
-                          Task Prioritization
-                        </CardTitle>
-                        <CardDescription>
-                          Prioritize tasks, find bottlenecks, and suggest delegation strategies
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <Button 
-                          onClick={() => setActiveTab('task-prioritization')}
-                          className="w-full"
-                        >
-                          Open Task Prioritization
-                        </Button>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="w-full min-w-0">
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <MessageSquare className="h-5 w-5 text-primary" />
-                          Knowledge Q&A
-                        </CardTitle>
-                        <CardDescription>
-                          Ask questions about your projects and get AI-powered answers
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <Button 
-                          onClick={() => setActiveTab('knowledge-qa')}
-                          className="w-full"
-                        >
-                          Open Knowledge Q&A
-                        </Button>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="w-full min-w-0">
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Calendar className="h-5 w-5 text-primary" />
-                          Timeline & Gantt
-                        </CardTitle>
-                        <CardDescription>
-                          Create timelines, generate Gantt charts, and manage project schedules
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <Button 
-                          onClick={() => setActiveTab('timeline-gantt')}
-                          className="w-full"
-                        >
-                          Open Timeline & Gantt
-                        </Button>
-                      </CardContent>
-                    </Card>
+                    {[
+                      {
+                        title: 'Project Pilot',
+                        desc: 'Create projects, tasks, and manage operations using natural language',
+                        icon: Target,
+                        tab: 'project-pilot',
+                        color: '#a78bfa',
+                        bgColor: 'rgba(167,139,250,0.15)',
+                        borderHover: 'rgba(167,139,250,0.4)',
+                      },
+                      {
+                        title: 'Task Prioritization',
+                        desc: 'Prioritize tasks, find bottlenecks, and suggest delegation strategies',
+                        icon: ListChecks,
+                        tab: 'task-prioritization',
+                        color: '#34d399',
+                        bgColor: 'rgba(52,211,153,0.15)',
+                        borderHover: 'rgba(52,211,153,0.4)',
+                      },
+                      {
+                        title: 'Knowledge Q&A',
+                        desc: 'Ask questions about your projects and get AI-powered answers',
+                        icon: MessageSquare,
+                        tab: 'knowledge-qa',
+                        color: '#60a5fa',
+                        bgColor: 'rgba(96,165,250,0.15)',
+                        borderHover: 'rgba(96,165,250,0.4)',
+                      },
+                      {
+                        title: 'Timeline & Gantt',
+                        desc: 'Create timelines, generate Gantt charts, and manage project schedules',
+                        icon: Calendar,
+                        tab: 'timeline-gantt',
+                        color: '#fbbf24',
+                        bgColor: 'rgba(251,191,36,0.15)',
+                        borderHover: 'rgba(251,191,36,0.4)',
+                      },
+                    ].map((card) => (
+                      <button
+                        key={card.title}
+                        onClick={() => setActiveTab(card.tab)}
+                        className="group relative flex flex-col items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-5 text-left transition-all duration-300 hover:bg-white/[0.06] cursor-pointer w-full min-w-0"
+                        onMouseEnter={(e) => e.currentTarget.style.borderColor = card.borderHover}
+                        onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
+                      >
+                        <div className="rounded-lg p-2.5" style={{ backgroundColor: card.bgColor }}>
+                          <card.icon className="h-5 w-5" style={{ color: card.color }} />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm text-white group-hover:text-white transition-colors">{card.title}</p>
+                          <p className="text-xs text-white/40 mt-1 leading-relaxed">{card.desc}</p>
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </TabsContent>
 
@@ -600,9 +608,10 @@ const ProjectManagerDashboardPage = () => {
                   <TimelineGanttAgent projects={projects || []} />
                 </TabsContent>
               </Tabs>
-            </CardContent>
-          </Card>
-          
+          </div>
+          </div>
+          </div>
+
         </main>
       </div>
     </>

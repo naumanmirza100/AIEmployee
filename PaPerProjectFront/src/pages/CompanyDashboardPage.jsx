@@ -803,7 +803,12 @@ const CompanyDashboardPage = () => {
       <Helmet>
         <title>Company Dashboard | Pay Per Project</title>
       </Helmet>
-      <div className="min-h-screen bg-background overflow-x-hidden">
+      <div
+        className="min-h-screen overflow-x-hidden"
+        style={{
+          background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)',
+        }}
+      >
         {/* Header */}
         <DashboardNavbar
           icon={Building2}

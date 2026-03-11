@@ -113,10 +113,10 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-primary" />
+            <Calendar className="h-5 w-5 text-violet-400" />
             Timeline & Gantt Agent
           </CardTitle>
           <CardDescription>
@@ -192,7 +192,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Task Status Distribution Pie Chart */}
               {charts.status_distribution && (
-                <Card>
+                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.status_distribution.title}</CardTitle>
                   </CardHeader>
@@ -223,7 +223,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Priority Distribution Bar Chart */}
               {charts.priority_distribution && (
-                <Card>
+                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.priority_distribution.title}</CardTitle>
                   </CardHeader>
@@ -248,7 +248,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Burndown Chart */}
               {charts.burndown && charts.burndown.data && charts.burndown.data.length > 0 && (
-                <Card>
+                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.burndown.title}</CardTitle>
                   </CardHeader>
@@ -271,7 +271,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Resource Utilization */}
               {charts.resource_utilization && charts.resource_utilization.data && charts.resource_utilization.data.length > 0 && (
-                <Card>
+                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.resource_utilization.title}</CardTitle>
                   </CardHeader>
@@ -294,14 +294,14 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Completion Rate Progress */}
               {charts.completion_rate && (
-                <Card>
+                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.completion_rate.title}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
                       <div className="text-center">
-                        <div className="text-4xl font-bold text-primary mb-2">
+                        <div className="text-4xl font-bold text-violet-400 mb-2">
                           {charts.completion_rate.percentage}%
                         </div>
                         <div className="text-sm text-muted-foreground">
@@ -335,7 +335,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Milestone Status Chart */}
               {charts.milestone_status && (
-                <Card>
+                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.milestone_status.title}</CardTitle>
                   </CardHeader>
@@ -368,7 +368,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
           {/* Unified Timeline Chart for create_timeline action */}
           {action === 'create_timeline' && result.data?.timeline && result.data.timeline.tasks && result.data.timeline.tasks.length > 0 && (
-            <Card>
+            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="text-lg">Project Timeline Visualization</CardTitle>
                 <CardDescription>
@@ -516,7 +516,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                           {/* Task Row */}
                           <div className="flex items-start gap-4 min-w-[1200px]">
                             {/* Task Info - Enhanced Design */}
-                            <div className="w-72 flex-shrink-0 pr-4 border-r border-border/50">
+                            <div className="w-72 flex-shrink-0 pr-4 border-r border-white/[0.08]/50">
                               <div className="space-y-2">
                                 {/* Task Title */}
                                 <div className="group">
@@ -708,7 +708,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                               {/* Detailed Calendar Scale - Below the timeline bar */}
                               <div className="relative border-t pt-2 mt-2 min-h-[80px]">
                                 {/* Project start and end labels - Bottom row */}
-                                <div className="absolute top-6 left-0 text-[10px] font-semibold text-primary whitespace-nowrap bg-background px-1 rounded z-20">
+                                <div className="absolute top-6 left-0 text-[10px] font-semibold text-violet-400 whitespace-nowrap bg-background px-1 rounded z-20">
                                   {projectStart.toLocaleString('en-US', { 
                                     month: 'short', 
                                     day: 'numeric', 
@@ -717,7 +717,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                                     hour12: false 
                                   })}
                                 </div>
-                                <div className="absolute top-6 right-0 text-[10px] font-semibold text-primary whitespace-nowrap bg-background px-1 rounded z-20">
+                                <div className="absolute top-6 right-0 text-[10px] font-semibold text-violet-400 whitespace-nowrap bg-background px-1 rounded z-20">
                                   {projectEnd.toLocaleString('en-US', { 
                                     month: 'short', 
                                     day: 'numeric', 
@@ -917,7 +917,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
           {/* Detailed Results Card - Hidden for create_timeline action */}
           {action !== 'create_timeline' && (
-            <Card>
+            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle>Timeline Results</CardTitle>
               </CardHeader>
@@ -931,7 +931,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       {result.data.gantt_chart.tasks.slice(0, 10).map((task, index) => (
                         <div
                           key={task.id || index}
-                          className="p-3 border rounded-lg bg-card"
+                          className="p-3 border rounded-lg bg-white/[0.03]"
                         >
                           <p className="font-medium">{task.title}</p>
                           {task.start_date && task.end_date && (
@@ -966,7 +966,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   </div>
                   
                   {/* Visual Timeline/Gantt Chart */}
-                  <div className="border rounded-lg p-4 bg-card overflow-x-auto">
+                  <div className="border rounded-lg p-4 bg-white/[0.03] overflow-x-auto">
                     <div className="min-w-full space-y-3">
                       {result.data.timeline.tasks.map((task, index) => {
                         const startDate = new Date(task.date_range.start_date);
@@ -1077,19 +1077,19 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   </p>
                   {result.data.summary && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                      <div className="p-3 border rounded-lg bg-card border-border">
+                      <div className="p-3 border rounded-lg bg-white/[0.03] border-white/[0.08]">
                         <div className="text-2xl font-bold text-foreground">{result.data.summary.total_alerts || 0}</div>
                         <div className="text-sm text-muted-foreground">Total Alerts</div>
                       </div>
-                      <div className="p-3 border rounded-lg bg-card border-red-500/30">
+                      <div className="p-3 border rounded-lg bg-white/[0.03] border-red-500/30">
                         <div className="text-2xl font-bold text-red-400">{result.data.summary.overdue_count || 0}</div>
                         <div className="text-sm text-muted-foreground">Overdue</div>
                       </div>
-                      <div className="p-3 border rounded-lg bg-card border-yellow-500/30">
+                      <div className="p-3 border rounded-lg bg-white/[0.03] border-yellow-500/30">
                         <div className="text-2xl font-bold text-yellow-400">{result.data.summary.upcoming_count || 0}</div>
                         <div className="text-sm text-muted-foreground">Upcoming</div>
                       </div>
-                      <div className="p-3 border rounded-lg bg-card border-orange-500/30">
+                      <div className="p-3 border rounded-lg bg-white/[0.03] border-orange-500/30">
                         <div className="text-2xl font-bold text-orange-400">{result.data.summary.critical_count || 0}</div>
                         <div className="text-sm text-muted-foreground">Critical</div>
                       </div>
@@ -1099,7 +1099,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                     result.data.alerts.map((alert, index) => (
                       <div
                         key={index}
-                        className={`p-3 border rounded-lg bg-card ${
+                        className={`p-3 border rounded-lg bg-white/[0.03] ${
                           alert.urgency === 'critical' 
                             ? 'border-red-500/30'
                             : alert.urgency === 'high'
@@ -1132,7 +1132,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       </div>
                     ))
                   ) : (
-                    <div className="p-4 bg-card border border-green-500/30 rounded-lg">
+                    <div className="p-4 bg-white/[0.03] border border-green-500/30 rounded-lg">
                       <p className="text-sm text-green-400">
                         ✓ No deadline alerts found. All tasks are on track!
                       </p>
@@ -1151,7 +1151,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   {result.data.deadline_warnings.map((warning, index) => (
                     <div
                       key={index}
-                      className="p-3 border border-yellow-500/30 rounded-lg bg-card"
+                      className="p-3 border border-yellow-500/30 rounded-lg bg-white/[0.03]"
                     >
                       <p className="font-medium text-yellow-400">
                         {warning.task_title || 'Task'}
@@ -1191,7 +1191,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   {result.data.suggestions.map((suggestion, index) => (
                     <div
                       key={index}
-                      className={`p-3 border rounded-lg bg-card ${
+                      className={`p-3 border rounded-lg bg-white/[0.03] ${
                         suggestion.priority === 'high' ? 'border-red-200' : 
                         suggestion.priority === 'medium' ? 'border-yellow-200' : 
                         'border-green-200'
@@ -1229,7 +1229,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   {result.data.adjustments.map((adjustment, index) => (
                     <div
                       key={index}
-                      className="p-3 border rounded-lg bg-card"
+                      className="p-3 border rounded-lg bg-white/[0.03]"
                     >
                       <p className="font-medium">{adjustment.task_title}</p>
                       <p className="text-sm text-muted-foreground mt-1">
@@ -1247,7 +1247,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   
                   {/* Team Efficiency Info */}
                   {result.data.estimates.team_efficiency && (
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
                         <div>
                           <div className="text-lg font-bold text-foreground">{result.data.estimates.team_efficiency.current_team_size || 1}</div>
@@ -1270,25 +1270,25 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   )}
                   
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <div className="text-2xl font-bold text-foreground">{result.data.estimates.working_days?.expected?.toFixed(1) || 'N/A'}</div>
                       <div className="text-sm text-muted-foreground">Expected Working Days</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <div className="text-2xl font-bold text-green-400">{result.data.estimates.working_days?.optimistic?.toFixed(1) || 'N/A'}</div>
                       <div className="text-sm text-muted-foreground">Optimistic</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <div className="text-2xl font-bold text-blue-400">{result.data.estimates.working_days?.realistic?.toFixed(1) || 'N/A'}</div>
                       <div className="text-sm text-muted-foreground">Realistic</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <div className="text-2xl font-bold text-red-400">{result.data.estimates.working_days?.pessimistic?.toFixed(1) || 'N/A'}</div>
                       <div className="text-sm text-muted-foreground">Pessimistic</div>
                     </div>
                   </div>
                   
-                  <div className="p-3 border rounded-lg bg-card">
+                  <div className="p-3 border rounded-lg bg-white/[0.03]">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <div className="text-lg font-bold text-foreground">{result.data.estimates.total_estimated_hours?.toFixed(1) || 'N/A'}</div>
@@ -1307,7 +1307,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   
                   {/* AI Reasoning */}
                   {result.data.recommendations?.ai_reasoning && (
-                    <div className="p-4 border rounded-lg bg-card">
+                    <div className="p-4 border rounded-lg bg-white/[0.03]">
                       <p className="text-sm font-medium mb-2 flex items-center gap-2">
                         <BrainCircuit className="h-4 w-4" />
                         AI Analysis & Reasoning:
@@ -1318,7 +1318,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   
                   {/* Improvement Suggestions */}
                   {result.data.recommendations?.improvement_suggestions && result.data.recommendations.improvement_suggestions.length > 0 && (
-                    <div className="p-4 border rounded-lg bg-card">
+                    <div className="p-4 border rounded-lg bg-white/[0.03]">
                       <p className="text-sm font-medium mb-3 flex items-center gap-2">
                         <TrendingUp className="h-4 w-4" />
                         How to Reduce Timeline:
@@ -1326,7 +1326,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       <ul className="space-y-2">
                         {result.data.recommendations.improvement_suggestions.map((suggestion, idx) => (
                           <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
-                            <span className="text-primary mt-1">•</span>
+                            <span className="text-violet-400 mt-1">•</span>
                             <span>{suggestion}</span>
                           </li>
                         ))}
@@ -1336,7 +1336,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   
                   {/* Dependency Analysis */}
                   {result.data.estimates.dependency_analysis && (
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <p className="text-sm font-medium mb-2">Dependency Analysis:</p>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
@@ -1363,7 +1363,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   
                   {/* Recommendations */}
                   {result.data.recommendations && (
-                    <div className="p-3 border rounded-lg bg-card">
+                    <div className="p-3 border rounded-lg bg-white/[0.03]">
                       <p className="text-sm font-medium mb-2">Recommendations:</p>
                       <div className="space-y-2 text-sm">
                         <div>
@@ -1403,9 +1403,9 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Phases (from manage_phases action) - styled design */}
               {result.data?.phases && result.data.phases.length > 0 && (
-                <div className="space-y-4 p-4 rounded-lg bg-muted/50 dark:bg-muted/30 border border-border/50">
+                <div className="space-y-4 p-4 rounded-lg bg-white/[0.02] border border-white/[0.08]/50">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Layers className="h-5 w-5 text-primary" />
+                    <Layers className="h-5 w-5 text-violet-400" />
                     <h3 className="text-lg font-semibold text-foreground">Project Phases</h3>
                     {result.data.total_phases != null && (
                       <Badge variant="secondary" className="text-xs">
@@ -1424,7 +1424,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       };
                       const style = phaseStyles[phase.status] || phaseStyles.todo;
                       return (
-                        <Card key={index} className={`overflow-hidden border-l-4 ${style.border} ${style.bg} border border-border/50 shadow-sm`}>
+                        <Card key={index} className={`overflow-hidden border-l-4 ${style.border} ${style.bg} border border-white/[0.08]/50 shadow-sm`}>
                           <CardHeader className="pb-2 pt-4 px-4">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
@@ -1440,7 +1440,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                             {phase.tasks && phase.tasks.length > 0 ? (
                               <ul className="space-y-2">
                                 {phase.tasks.slice(0, 10).map((task, taskIdx) => (
-                                  <li key={taskIdx} className="flex items-start gap-2 text-sm py-1.5 px-2 rounded-md bg-background/80 dark:bg-background/50 border border-border/60">
+                                  <li key={taskIdx} className="flex items-start gap-2 text-sm py-1.5 px-2 rounded-md bg-white/[0.03] border border-white/[0.08]/60">
                                     <span className="font-medium text-foreground truncate flex-1 min-w-0">{task.title}</span>
                                     <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                                       {task.priority && (

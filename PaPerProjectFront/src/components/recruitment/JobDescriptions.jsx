@@ -271,8 +271,8 @@ const JobDescriptions = ({ onUpdate }) => {
     <div className="space-y-4 w-full max-w-full overflow-x-hidden">
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
-          <h2 className="text-2xl font-bold">Job Descriptions</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-bold text-white">Job Descriptions</h2>
+          <p className="text-sm text-white/60">
             Manage job descriptions for recruitment
           </p>
         </div>
@@ -289,11 +289,11 @@ const JobDescriptions = ({ onUpdate }) => {
       </div>
 
       {jobs.length === 0 ? (
-        <Card>
+        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-12 text-center">
-            <Briefcase className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-lg font-medium mb-2">No job descriptions yet</p>
-            <p className="text-sm text-muted-foreground mb-4">
+            <Briefcase className="h-12 w-12 mx-auto text-white/40 mb-4" />
+            <p className="text-lg font-medium mb-2 text-white">No job descriptions yet</p>
+            <p className="text-sm text-white/60 mb-4">
               Create your first job description to start recruiting
             </p>
             <div className="flex gap-2">
@@ -311,7 +311,7 @@ const JobDescriptions = ({ onUpdate }) => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-full">
           {jobs.map((job) => (
-            <Card key={job.id}>
+            <Card key={job.id} className="border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader>
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
@@ -540,7 +540,7 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
       <div className="space-y-2">
         <Label htmlFor="type">Job Type</Label>
         <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-          <SelectTrigger>
+          <SelectTrigger className="border-white/20">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

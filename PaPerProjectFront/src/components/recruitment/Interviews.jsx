@@ -187,14 +187,14 @@ const Interviews = ({ onUpdate }) => {
       {/* Header and Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl py-3 sm:py-5 font-bold">Interviews</h2>
-          <p className="text-xs sm:text-sm text-muted-foreground">
+          <h2 className="text-xl sm:text-2xl py-3 sm:py-5 font-bold text-white">Interviews</h2>
+          <p className="text-xs sm:text-sm text-white/60">
             Manage interview scheduling and tracking
           </p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
           <Select value={statusFilter || "all"} onValueChange={(value) => setStatusFilter(value === "all" ? "" : value)}>
-            <SelectTrigger className="w-[140px] sm:w-[160px]">
+            <SelectTrigger className="w-[140px] sm:w-[160px] border-white/20">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -206,7 +206,7 @@ const Interviews = ({ onUpdate }) => {
             </SelectContent>
           </Select>
           <Select value={decisionFilter === '' ? "all" : decisionFilter} onValueChange={(value) => setDecisionFilter(value === "all" ? "" : value)}>
-            <SelectTrigger className="w-[140px] sm:w-[160px]">
+            <SelectTrigger className="w-[140px] sm:w-[160px] border-white/20">
               <SelectValue placeholder="Decision" />
             </SelectTrigger>
             <SelectContent>
@@ -222,11 +222,11 @@ const Interviews = ({ onUpdate }) => {
       </div>
 
       {interviews.length === 0 ? (
-        <Card>
+        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
-            <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-base sm:text-lg font-medium mb-2">No interviews yet</p>
-            <p className="text-xs sm:text-sm text-muted-foreground px-4">
+            <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
+            <p className="text-base sm:text-lg font-medium mb-2 text-white">No interviews yet</p>
+            <p className="text-xs sm:text-sm text-white/60 px-4">
               Interviews appear here when scheduled from Candidates.
             </p>
           </CardContent>
@@ -234,7 +234,7 @@ const Interviews = ({ onUpdate }) => {
       ) : (
         <div className="space-y-3 sm:space-y-4">
           {interviews.map((interview) => (
-            <Card key={interview.id} className="overflow-hidden">
+            <Card key={interview.id} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">
                   <div className="min-w-0 flex-1">
@@ -317,7 +317,7 @@ const Interviews = ({ onUpdate }) => {
                         onValueChange={(value) => handleStatusChange(interview.id, value)}
                         disabled={updatingId === interview.id}
                       >
-                        <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm">
+                        <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -342,7 +342,7 @@ const Interviews = ({ onUpdate }) => {
                           onValueChange={(value) => handleOutcomeChange(interview.id, value === 'none' ? '' : value)}
                           disabled={updatingId === interview.id}
                         >
-                          <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
                             <SelectValue placeholder="Set outcome" />
                           </SelectTrigger>
                           <SelectContent>

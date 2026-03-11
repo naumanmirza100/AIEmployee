@@ -564,7 +564,7 @@ const AiInterviewQuestions = () => {
               </div>
             )}
           </div>
-          <div >
+          <div className="overflow-y-auto custom-sidebar-scroll" style={{ maxHeight: 'calc(100vh - 200px)' }}>
             {loadingChats ? (
               <div className="p-4 flex justify-center">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -699,7 +699,7 @@ const AiInterviewQuestions = () => {
         </CardHeader>
         <CardContent className="p-0 flex flex-col flex-1 min-h-0 ">
           {/* Messages area - scrollable when content is long */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 custom-sidebar-scroll">
             {currentMessages.length === 0 && !loading && (
               <div className="flex flex-col items-center justify-center min-h-[420px] text-center px-4">
                 <div className="h-20 w-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(124, 58, 237, 0.12)' }}>
