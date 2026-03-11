@@ -20,6 +20,13 @@ def _is_count_or_aggregate_question(question: str) -> bool:
     a compact context and short answers to save tokens.
     """
     q = question.lower().strip()
+    # If the question asks for a list/detail alongside a count, treat it as detail (not count-only)
+    list_indicators = ["list all", "list the", "list every", "list them", "which tasks", "which users",
+                        "what are the tasks", "name of each", "names of all", "show them", "show all",
+                        "show me all", "show me the", "tell me all", "tell me the"]
+    if any(phrase in q for phrase in list_indicators):
+        return False
+
     count_indicators = [
         "how many",
         "how much",
@@ -50,10 +57,6 @@ def _is_count_or_aggregate_question(question: str) -> bool:
     ]
     if any(phrase in q for phrase in count_indicators):
         return True
-    # "list all", "list the", "which tasks", "what are the" -> list/detail
-    list_indicators = ["list all", "list the", "list every", "which tasks", "which users", "what are the tasks", "name of each", "names of all"]
-    if any(phrase in q for phrase in list_indicators):
-        return False
     return False
 
 
@@ -64,12 +67,20 @@ def _build_aggregates_context(context: Dict, available_users: Optional[List[Dict
     """
     lines = ["\n📊 AGGREGATES (use these exact numbers for count questions):\n"]
 
-    # Total tasks and by status/priority from context['tasks']
+    # Total tasks and by status/priority from context['tasks'] OR context['project']['tasks']
     tasks = context.get("tasks") or []
+    if not tasks and context.get("project") and context["project"].get("tasks"):
+        tasks = context["project"]["tasks"]
     total_tasks = len(tasks)
     lines.append(f"Total tasks: {total_tasks}")
 
     if tasks:
+        # Assigned vs unassigned counts
+        assigned_tasks = [t for t in tasks if t.get("assignee_id") or t.get("assignee_username")]
+        unassigned_tasks = [t for t in tasks if not t.get("assignee_id") and not t.get("assignee_username")]
+        lines.append(f"Assigned tasks: {len(assigned_tasks)}")
+        lines.append(f"Unassigned tasks: {len(unassigned_tasks)}")
+
         by_status = Counter(t.get("status") for t in tasks if t.get("status"))
         if by_status:
             status_str = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
@@ -232,6 +243,18 @@ def _try_answer_count_question_locally(question: str, context: Dict) -> Optional
     # Owner-wide aggregates (across all tasks in context)
     # ------------------------------------------------------------
     tasks = context.get("tasks") or []
+    if not tasks and context.get("project") and context["project"].get("tasks"):
+        tasks = context["project"]["tasks"]
+
+    # Handle assigned/unassigned count questions
+    if ("assigned" in q or "unassigned" in q) and ("how many" in q or "count" in q or "number" in q):
+        assigned = [t for t in tasks if t.get("assignee_id") or t.get("assignee_username")]
+        unassigned = [t for t in tasks if not t.get("assignee_id") and not t.get("assignee_username")]
+        project_name = ""
+        if context.get("project"):
+            project_name = context["project"].get("name", "")
+        scope = f" in {project_name}" if project_name else ""
+        return f"{len(assigned)} assigned tasks, {len(unassigned)} unassigned tasks{scope}."
 
     if ("tasks in each status" in q) or ("by status" in q) or ("broken down by status" in q):
         by_status = Counter(_normalize_key(t.get("status")) for t in tasks if t.get("status"))
@@ -470,8 +493,18 @@ class KnowledgeQAAgent(BaseAgent):
                 context_str += f"- Name: {project.get('name', 'Unknown')}\n"
                 context_str += f"- ID: {project.get('id', 'Unknown')}\n"
                 context_str += f"- Status: {project.get('status', 'Unknown')}\n"
-                context_str += f"- Tasks: {project.get('tasks_count', 0)} tasks\n"
-            
+                context_str += f"- Tasks: {len(project.get('tasks', []))} tasks\n"
+                # Show tasks nested inside the selected project
+                if project.get('tasks'):
+                    context_str += f"\nTasks in Selected Project:\n"
+                    for task in project['tasks']:
+                        task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                        if task.get('assignee_username'):
+                            task_line += f" [Assigned to: {task.get('assignee_username')}]"
+                        else:
+                            task_line += f" [Unassigned]"
+                        context_str += task_line + "\n"
+
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"

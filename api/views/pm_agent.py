@@ -942,6 +942,18 @@ def project_pilot(request):
                         if field in updates:
                             setattr(task_to_update, field, updates[field])
 
+                    # Handle due_date separately (needs date parsing)
+                    if "due_date" in updates:
+                        due_date_val = updates.get("due_date")
+                        if due_date_val:
+                            from datetime import datetime as _dt_update
+                            try:
+                                task_to_update.due_date = _dt_update.strptime(due_date_val, "%Y-%m-%d").date()
+                            except (ValueError, TypeError):
+                                pass  # Skip invalid date formats
+                        else:
+                            task_to_update.due_date = None
+
                     task_to_update.save()
                     action_results.append(
                         {

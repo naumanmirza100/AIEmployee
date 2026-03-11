@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Study/Others/Projectsss/AIEmploees/AIEmployee/PaPerProjectFront/src -type f \\\\\\(-name *pilot* -o -name *project* \\\\\\))",
+      "Bash(grep -r \"openai\\\\|OpenAI\\\\|gpt\\\\|claude\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee --include=*.py)",
+      "Bash(grep -l \"knowledge_qa\\\\|KnowledgeQA\" *.py)"
+    ]
+  }
+}
