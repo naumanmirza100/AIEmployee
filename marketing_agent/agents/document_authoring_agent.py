@@ -977,6 +977,94 @@ The conclusion MUST be a proper, professional ending that:
                     lines.append(lead_str)
                 lines.append("(Performance Report and Campaign Brief: present leads in a markdown table with header row | Email | Name | Company | Status | and one row per lead—do NOT use '1. Email: ... Name: ...' format.)")
         
+        # ——— TARGET vs ACTUAL COMPARISON (pre-computed for brief/report) ———
+        target_leads = campaign_data.get('target_leads')
+        target_conversions = campaign_data.get('target_conversions')
+        actual_leads = campaign_data.get('leads_count', 0)
+        emails_sent = campaign_data.get('emails_sent', 0)
+        status = campaign_data.get('status', '')
+
+        has_any_email_activity = emails_sent > 0
+        has_any_leads = actual_leads > 0
+
+        lines.append("")
+        lines.append("=== TARGET vs ACTUAL COMPARISON (USE THIS IN BRIEF/REPORT TO COMPARE PERFORMANCE AGAINST GOALS) ===")
+        if target_leads is not None:
+            pct = round((actual_leads / target_leads) * 100, 1) if target_leads > 0 else 0
+            lines.append(f"Target Leads: {target_leads} | Actual Leads: {actual_leads} | Achievement: {pct}%")
+        if target_conversions is not None:
+            # Conversions = leads with status 'converted' (approximate from lead data)
+            converted = 0
+            for lead in (campaign_data.get('leads') or []):
+                if (lead.get('status') or '').lower() in ('converted', 'won', 'closed', 'customer'):
+                    converted += 1
+            conv_pct = round((converted / target_conversions) * 100, 1) if target_conversions > 0 else 0
+            lines.append(f"Target Conversions: {target_conversions} | Actual Conversions: {converted} | Achievement: {conv_pct}%")
+        if not has_any_email_activity:
+            lines.append("Email Activity: NONE — no emails have been sent yet. State this clearly in the document.")
+        if not has_any_leads:
+            lines.append("Lead Activity: NONE — no leads have been added yet. State this clearly in the document.")
+
+        # Overall campaign health hint
+        lines.append("")
+        lines.append("=== CAMPAIGN HEALTH ASSESSMENT (USE THIS TO DETERMINE ACHIEVEMENTS AND ISSUES) ===")
+        health_issues = []
+        health_achievements = []
+
+        if status.lower() in ('paused', 'draft', 'cancelled'):
+            health_issues.append(f"Campaign is currently {status} — not actively running")
+        if not has_any_email_activity:
+            health_issues.append("No emails sent — email campaign has not been executed")
+        if has_any_email_activity:
+            open_rate = campaign_data.get('open_rate', 0)
+            click_rate = campaign_data.get('click_rate', 0)
+            reply_rate = campaign_data.get('reply_rate', 0)
+            bounce_rate = campaign_data.get('bounce_rate', 0)
+            if open_rate > 0:
+                health_achievements.append(f"Emails opened — open rate {open_rate}%")
+            if open_rate == 0 and emails_sent > 0:
+                health_issues.append(f"Zero open rate despite {emails_sent} emails sent")
+            if click_rate > 0:
+                health_achievements.append(f"Click engagement — click rate {click_rate}%")
+            if click_rate == 0 and emails_sent > 0:
+                health_issues.append("No clicks on emails sent")
+            if reply_rate > 0:
+                health_achievements.append(f"Replies received — reply rate {reply_rate}%")
+            if bounce_rate > 10:
+                health_issues.append(f"High bounce rate: {bounce_rate}%")
+        if has_any_leads:
+            health_achievements.append(f"{actual_leads} leads generated")
+            if target_leads and actual_leads < target_leads:
+                pct = round((actual_leads / target_leads) * 100, 1)
+                health_issues.append(f"Only {pct}% of target leads achieved ({actual_leads}/{target_leads})")
+        if not has_any_leads:
+            health_issues.append("No leads generated yet")
+        if target_conversions and target_conversions > 0:
+            converted_count = 0
+            for lead in (campaign_data.get('leads') or []):
+                if (lead.get('status') or '').lower() in ('converted', 'won', 'closed', 'customer'):
+                    converted_count += 1
+            if converted_count == 0:
+                health_issues.append(f"Zero conversions achieved (target: {target_conversions})")
+            elif converted_count > 0:
+                health_achievements.append(f"{converted_count} conversions achieved")
+
+        if health_achievements:
+            lines.append("REAL ACHIEVEMENTS (only list these if they exist):")
+            for a in health_achievements:
+                lines.append(f"  + {a}")
+        else:
+            lines.append("REAL ACHIEVEMENTS: NONE — No significant achievements yet. In the document, state clearly: 'No significant achievements have been recorded for this campaign yet.' Do NOT fabricate achievements.")
+
+        if health_issues:
+            lines.append("REAL ISSUES (discuss these specifically in Issues/Challenges):")
+            for issue in health_issues:
+                lines.append(f"  - {issue}")
+        else:
+            lines.append("REAL ISSUES: No major issues identified based on the data.")
+
+        lines.append("(In Key Achievements and Issues/Challenges sections, use ONLY the items listed above. Do NOT invent achievements or issues that are not supported by the data.)")
+
         # Handle nested dicts
         for key, value in campaign_data.items():
             if isinstance(value, dict) and key != 'performance':
@@ -984,7 +1072,7 @@ The conclusion MUST be a proper, professional ending that:
                 lines.append(f"=== {key.upper().replace('_', ' ')} ===")
                 for sub_key, sub_value in value.items():
                     lines.append(f"{sub_key.replace('_', ' ').title()}: {sub_value}")
-        
+
         return "\n".join(lines)
     
     def _get_document_type_instructions(self, document_type: str, target_tables: int = 3) -> str:
@@ -1113,8 +1201,8 @@ Sections (each must have multiple paragraphs or multiple bold items with full pa
 - Campaign Overview: 3–4 full paragraphs. Paragraph 1: campaign name, status, dates, description, and objectives from the data. Paragraph 2: target audience and goals (target leads, target conversions). Paragraph 3: how the campaign was executed (email, sequences, etc.) and current state. Paragraph 4: short summary of how this report is structured. Do NOT use ### under Campaign Overview.
 - Performance Metrics and KPIs: 3+ full paragraphs. Present campaign metrics (Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate, Total Leads) as a markdown table ONLY if user requested tables; otherwise use bullet list. Then write multiple paragraphs: what each metric means, how it compares to targets or benchmarks, what is working and what is not, and why. Use REAL data only. If charts are requested, place [CHART] blocks here.
 - Lead Details: table only (see below). Then 2–3 paragraphs: who the leads are, status mix, engagement level, and what it means for the campaign. Table: | Email | Name | Company | Status |, separator row, one row per lead. Do NOT use "1. Email: ..." format.
-- Key Achievements: 3–5 achievements. For each: **Bold achievement name** plus a FULL paragraph (4–6 sentences) explaining what was achieved, evidence from the data, and why it matters. Include positive opportunities (strong metrics, engaged leads, growth potential) with real detail. No one-line bullets.
-- Challenges and Issues: ALWAYS include. 3–5 issues. For each: **Bold issue name** plus a FULL paragraph (4–6 sentences). Base ONLY on actual data (e.g. low click rate only if data shows it; do not flag low open rate if open rate is 50%+). May include **Limited Lead Engagement** or **Missing Audience Data** when appropriate. No one-line bullets.
+- Key Achievements: Base ONLY on the REAL ACHIEVEMENTS listed in the CAMPAIGN HEALTH ASSESSMENT data. If "REAL ACHIEVEMENTS: NONE", write 1–2 paragraphs clearly stating "No significant achievements have been recorded for this campaign yet" with explanation. Otherwise, 3–5 achievements with **Bold name** plus a FULL paragraph (4–6 sentences) explaining what was achieved, citing exact numbers, comparing against targets (e.g. "3 leads vs 100 target = 3%"), and why it matters. Do NOT fabricate achievements. No one-line bullets.
+- Challenges and Issues: ALWAYS include. Base ONLY on the REAL ISSUES from CAMPAIGN HEALTH ASSESSMENT data. For each: **Bold issue name** plus a FULL paragraph (4–6 sentences) with impact analysis and comparison against targets. If the campaign is paused/not running, discuss this explicitly. If no emails sent, discuss this as a critical gap. Do NOT invent issues not supported by data. If genuinely no issues, state "No major issues identified" with brief explanation. No one-line bullets.
 - Analysis and Insights: 3–5 full paragraphs. Deep analysis of performance: what the data shows, patterns, causes, implications for next steps. Use REAL data only. If there are opportunities, expand on them here with detail.
 - Recommendations: ALWAYS include. 3–5 recommendations. For each: **Bold recommendation name** plus a FULL paragraph (4–6 sentences): what to do, why it helps, how to implement, and expected impact. No one-line bullets.
 - Conclusion: 3 full paragraphs. Summarise key takeaways, overall assessment, and priority actions in your own words. Do NOT re-list metrics, lead table, achievements, or challenges.
@@ -1144,7 +1232,7 @@ Sections (use ONLY these—in this order; each section must have multiple paragr
 3–4 full paragraphs. Paragraph 1: **Campaign name**, **status** (Active, Paused, Draft), **start date**, **end date**, and **description** from the data—with a sentence or two on what the campaign is for. Paragraph 2: **Objectives and targets** (target leads, target conversions, goals)—explain what success looks like and how the campaign is set up to achieve it. Paragraph 3: Current state (e.g. paused, active), what has been done so far, and how it is positioned to meet goals. Paragraph 4: Brief summary of audience and key messaging focus. Use exact data from CAMPAIGN INFORMATION and TARGETS/GOALS; do not write "no data available" when the data is in the prompt.
 
 ## Objectives and Goals
-For each target from the data (Target Leads, Target Conversions, and any goals): **Target name**: value. Then a FULL paragraph (4–5 sentences) explaining what it means, why it matters, and how the campaign will achieve it. Do not write one-line bullets—each objective needs real context.
+For each target from the data (Target Leads, Target Conversions, and any goals): **Target name**: value. Then a FULL paragraph (4–5 sentences) explaining what it means, why it matters, and how the campaign will achieve it. CRITICALLY: Use the TARGET vs ACTUAL COMPARISON data to show progress — e.g. "Target Leads: 100 | Current Progress: 3 leads (3% achieved)" or "Target Conversions: 10 | Current Progress: 0 conversions (0% achieved)." Show both the goal AND current progress toward that goal clearly. Do not write one-line bullets—each objective needs real context with actual progress data.
 
 ## Target Audience
 2–3 paragraphs. Use ONLY the TARGET AUDIENCE data from CAMPAIGN DATA. If the data has demographics, age, location, industry, interests, or company size, describe them in detail across 2–3 paragraphs. If no target audience data, write 1–2 paragraphs stating "Not specified" and why defining audience would help—do NOT invent demographics.
@@ -1156,22 +1244,30 @@ For each target from the data (Target Leads, Target Conversions, and any goals):
 2–3 paragraphs. Use ONLY the campaign Start Date and End Date. Describe phases within this period (e.g. Phase 1: launch; Phase 2: execution; Phase 3: review) with dates. For short windows (e.g. Feb 20–21), use 1–2 phases within those dates only. Then a short paragraph on what each phase delivers. If dates "Not set", write "Not specified" in 1–2 sentences.
 
 ## Success Criteria
-2 full paragraphs. Use targets from the data exactly ("Target conversions" = the number, e.g. 10, not a percentage). Paragraph 1: How success will be measured (leads, conversions, open/click rates if relevant). Paragraph 2: What good looks like and how the team will track it.
+2–3 full paragraphs. Use targets from the data exactly ("Target conversions" = the number, e.g. 10, not a percentage). Paragraph 1: How success will be measured (leads, conversions, open/click rates if relevant) with the exact target numbers. Paragraph 2: CURRENT PROGRESS vs targets — use the TARGET vs ACTUAL COMPARISON data to show where the campaign stands (e.g. "Currently, 3 out of 100 target leads have been generated (3%), and 0 out of 10 target conversions have been achieved (0%)"). Paragraph 3: What good looks like, what needs to happen to close the gap, and how the team will track progress going forward.
 
 ## Email Campaign Performance
-2–3 full paragraphs. Use exact EMAIL CAMPAIGN METRICS from the data: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate—exact numbers. Paragraph 1: The numbers (and table or bullets if helpful) and what they mean. Paragraph 2: What is working well or not, and why. Use correct tense (e.g. "The campaign has sent X emails"). If no email metrics in the data, write 1–2 paragraphs: "Email campaign not yet launched" and what will be measured when it is.
+2–3 full paragraphs. Use exact EMAIL CAMPAIGN METRICS from the data: Total Emails Sent, Open Rate, Click Rate, Reply Rate, Bounce Rate—exact numbers. Paragraph 1: Present the metrics clearly (table or bullets) with the exact values. Paragraph 2: COMPARE each metric against campaign targets/goals and industry benchmarks (e.g. "The open rate of X% is above/below the target of Y%" or "compared to the industry average of ~20%"). Paragraph 3: What is working well or not, why, and what it means for campaign success. Use correct tense (e.g. "The campaign has sent X emails"). If no email metrics in the data (no emails sent), write 1–2 paragraphs: "No emails have been sent yet — the email campaign has not been launched" and explain what metrics will be tracked once launched. Do NOT fabricate email metrics when none exist.
 
 ## Lead Engagement Data
 State total lead count. Present EVERY lead in a markdown table: | Email | Name | Company | Status |, separator, one row per lead. Then 2–3 full paragraphs: how leads are progressing, status mix, engagement level, and what it means for the campaign. Do NOT add a "Lead Details" section later; do NOT repeat the lead list after ## Conclusion.
 
 ## Key Achievements
-ALWAYS include. 3–5 **bold** points, each with a FULL paragraph (4–5 sentences). Base only on REAL data: strong open/reply rate, leads vs target, low bounce, on-time execution, etc. Explain what was achieved and why it matters. If little or no performance data, 1–2 paragraphs stating that and what will be measured. No one-line bullets.
+ALWAYS include. Base ONLY on the REAL ACHIEVEMENTS listed in the CAMPAIGN HEALTH ASSESSMENT section of the data. Do NOT fabricate or invent achievements.
+- If the CAMPAIGN HEALTH ASSESSMENT shows "REAL ACHIEVEMENTS: NONE", write 1–2 paragraphs clearly stating: "No significant achievements have been recorded for this campaign yet." Explain why (e.g. campaign is paused, no emails sent, no conversions). Then briefly mention what achievements are expected once the campaign becomes active. Do NOT list generic achievements like "campaign was set up" or "objectives were defined" — those are not real achievements.
+- If there ARE real achievements listed, write 3–5 **bold** points, each with a FULL paragraph (4–5 sentences). For each achievement, explain what was achieved, cite the exact numbers from the data, compare against targets (e.g. "3 leads generated out of the 100 target, representing 3% progress"), and explain why it matters. No one-line bullets.
 
 ## Issues / Challenges
-ALWAYS include. 3–5 issues. For each: **Bold issue name** plus a FULL PARAGRAPH (4–6 sentences). Base only on actual data (e.g. low click rate only if data shows it). May include **Missing Audience Data** or **Limited Lead Engagement** when appropriate. No one-line bullets.
+ALWAYS include. Base ONLY on the REAL ISSUES listed in the CAMPAIGN HEALTH ASSESSMENT section of the data. Do NOT fabricate issues that the data does not support.
+- Use the specific issues from the CAMPAIGN HEALTH ASSESSMENT (e.g. "Campaign is paused", "No emails sent", "Zero conversions", "Only X% of target leads achieved"). For each issue: **Bold issue name** plus a FULL PARAGRAPH (4–6 sentences) explaining the impact, root cause analysis, and what it means for campaign goals.
+- COMPARE actual performance against targets: e.g. "The campaign has generated 3 leads against a target of 100 (3% achievement)" or "Zero conversions have been recorded against a target of 10."
+- If the campaign is paused/draft/cancelled, explicitly discuss the impact of the campaign not being active.
+- If no emails have been sent, discuss this as a critical issue — the email campaign has not been executed.
+- If there are genuinely no issues (all targets met, campaign running well), write 1–2 paragraphs stating: "No major issues have been identified. The campaign is performing within expected parameters." Do NOT invent issues.
+- No one-line bullets — each issue needs detailed analysis.
 
 ## Improvements / Recommendations
-ALWAYS include. 3–5 recommendations. For each: **Bold name** plus a FULL PARAGRAPH (4–6 sentences): what to do, why it helps, how to implement. Examples: audience research, A/B testing, content improvements, lead nurturing. No one-line bullets.
+ALWAYS include. 3–5 recommendations that DIRECTLY address the specific REAL ISSUES identified in the Issues/Challenges section. For each: **Bold name** plus a FULL PARAGRAPH (4–6 sentences): what to do, why it helps (referencing specific metrics/issues from the data), how to implement, and expected impact on targets. For example, if the issue is "campaign is paused", recommend reactivating with a specific plan; if "no emails sent", recommend launching the email sequence with specific steps; if "low click rate", recommend content/subject line improvements. Each recommendation must tie back to a real issue or gap in the data — do NOT give generic marketing advice unrelated to this campaign's actual problems. No one-line bullets.
 
 ## Conclusion
 3 full paragraphs: campaign status, readiness, and what is needed next (launch, optimization, follow-up). Do NOT repeat lead list, metrics table, or other section data. This is the LAST section—after ## Conclusion output NOTHING else.

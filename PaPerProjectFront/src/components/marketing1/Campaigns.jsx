@@ -62,7 +62,7 @@ const Campaigns = ({ onRefresh }) => {
       <OutreachCampaign onCampaignCreated={() => fetchCampaigns(page)} />
 
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold text-white">Your Campaigns</h3>
+        <h3 className="text-lg font-semibold">Your Campaigns</h3>
         <Button onClick={() => fetchCampaigns(page)} variant="outline" size="sm" disabled={loading}>
           Refresh
         </Button>
@@ -73,20 +73,20 @@ const Campaigns = ({ onRefresh }) => {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : campaigns.length === 0 ? (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card>
           <CardContent className="py-8 text-center">
-            <p className="text-white/60">No campaigns found. Create your first campaign to get started.</p>
+            <p className="text-muted-foreground">No campaigns found. Create your first campaign to get started.</p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4">
           {campaigns.map((campaign) => (
-            <Card key={campaign.id} className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card key={campaign.id}>
               <CardHeader>
                 <div className="flex justify-between items-start">
                   <div>
-                    <CardTitle className="text-lg text-white">{campaign.name}</CardTitle>
-                    <p className="text-sm text-white/60 mt-1">{campaign.description}</p>
+                    <CardTitle className="text-lg">{campaign.name}</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">{campaign.description}</p>
                   </div>
                   <Badge className={getStatusColor(campaign.status)}>
                     {campaign.status}
@@ -96,26 +96,26 @@ const Campaigns = ({ onRefresh }) => {
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
-                    <p className="text-white/60">Start Date</p>
+                    <p className="text-muted-foreground">Start Date</p>
                     <p className="font-semibold">
                       {campaign.start_date ? new Date(campaign.start_date).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
                   <div>
-                    <p className="text-white/60">End Date</p>
+                    <p className="text-muted-foreground">End Date</p>
                     <p className="font-semibold">
                       {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
                   {campaign.target_leads != null && (
                     <div>
-                      <p className="text-white/60">Target Leads</p>
+                      <p className="text-muted-foreground">Target Leads</p>
                       <p className="font-semibold">{campaign.target_leads}</p>
                     </div>
                   )}
                   {campaign.target_conversions != null && (
                     <div>
-                      <p className="text-white/60">Target Conversions</p>
+                      <p className="text-muted-foreground">Target Conversions</p>
                       <p className="font-semibold">{campaign.target_conversions}</p>
                     </div>
                   )}

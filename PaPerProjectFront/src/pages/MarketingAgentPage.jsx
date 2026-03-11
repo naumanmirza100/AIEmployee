@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate, Outlet } from 'react-router-dom';
@@ -251,8 +252,7 @@ const MarketingAgentPage = () => {
           ]}
         />
 
-        {/* <div className="w-full px-4 py-4"> */}
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-3 sm:px-4 py-4  max-w-full overflow-x-hidden">
           <Outlet />
         </div>
       </div>

@@ -486,13 +486,13 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   };
 
   return (
-    <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+    <Card>
       <CardHeader>
-        <CardTitle className="text-white flex items-center gap-2">
-          <Megaphone className="h-5 w-5 text-violet-400" />
+        <CardTitle className="flex items-center gap-2">
+          <Megaphone className="h-5 w-5" />
           Outreach & Campaign Agent
         </CardTitle>
-        <CardDescription className="text-white/60">
+        <CardDescription>
           Design, create, launch, optimize, or schedule email campaigns. Optionally upload leads (CSV/Excel).
         </CardDescription>
       </CardHeader>
