@@ -226,7 +226,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
           'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
       }}
     >
-      <div className="flex w-full max-w-full relative">
+      <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         <div
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
@@ -243,9 +243,9 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
             overflow: 'hidden',
           }}
         >
-          <div className="w-64">
+          <div className="w-64 h-full flex flex-col">
             <div
-              className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2"
+              className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
               style={{
                 background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)',
                 borderTopLeftRadius: 16,
@@ -345,7 +345,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                 </div>
               )}
             </div>
-            <div>
+            <div className="flex-1 min-h-0 overflow-y-auto custom-sidebar-scroll">
               {loadingChats ? (
                 <div className="p-4 flex justify-center">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -571,21 +571,19 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                 borderTop: '1px solid rgba(255,255,255,0.08)',
               }}
             >
-              <div className="mx-4 my-4 flex flex-col gap-3 rounded-2xl px-4 py-4" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div>
-                  <label className="text-sm font-medium mb-1 block" style={{ color: 'rgba(255,255,255,0.72)' }}>
-                    Select Project (optional)
-                  </label>
+              <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                {/* Top row: project select + mode side by side */}
+                <div className="flex items-center gap-2 mb-2">
                   <Select value={selectedProjectId || 'all'} onValueChange={(v) => setSelectedProjectId(v === 'all' ? '' : v)}>
                     <SelectTrigger
-                      className="mb-2"
+                      className="h-8 text-xs flex-1 min-w-0"
                       style={{
                         background: '#111118',
                         border: '1.5px solid rgba(139, 92, 246, 0.35)',
                         color: '#e2e2f0',
                       }}
                     >
-                      <SelectValue placeholder="General Questions" />
+                      <SelectValue placeholder="All projects" />
                     </SelectTrigger>
                     <SelectContent
                       style={{
@@ -606,23 +604,18 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       )}
                     </SelectContent>
                   </Select>
-                </div>
 
-                <div>
-                  <label className="text-sm font-medium mb-1 block" style={{ color: 'rgba(255,255,255,0.72)' }}>
-                    Mode
-                  </label>
                   <Select value={inputMode} onValueChange={setInputMode}>
                     <SelectTrigger
-                      className="mb-2"
+                      className="h-8 text-xs w-[130px] shrink-0"
                       style={{
                         background: '#111118',
                         border: '1.5px solid rgba(139, 92, 246, 0.35)',
                         color: '#e2e2f0',
                       }}
                     >
-                      <div className="flex items-center gap-2">
-                        <SelectedModeIcon className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                      <div className="flex items-center gap-1.5">
+                        <SelectedModeIcon className="h-3.5 w-3.5" style={{ color: '#a78bfa' }} />
                         <SelectValue placeholder="Search" />
                       </div>
                     </SelectTrigger>
@@ -648,6 +641,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                   </Select>
                 </div>
 
+                {/* Textarea + send */}
                 <div className="flex gap-2">
                   <Textarea
                     placeholder={selectedMode.placeholder}
@@ -659,17 +653,17 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                         handleSubmit(e);
                       }
                     }}
-                    rows={2}
+                    rows={1}
                     disabled={loading}
-                    className="min-h-[60px] resize-none flex-1"
+                    className="min-h-[40px] resize-none flex-1 text-sm"
                     style={{
                       background: '#0e0e14',
                       border: '1px solid rgba(255, 255, 255, 0.1)',
                       color: '#e2e2f0',
                     }}
                   />
-                  <Button type="submit" disabled={loading} size="icon" className="h-[60px] w-12 shrink-0">
-                    {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+                  <Button type="submit" disabled={loading} size="icon" className="h-[40px] w-10 shrink-0">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
