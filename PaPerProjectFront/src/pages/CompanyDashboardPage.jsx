@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import SearchableSelect from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -861,33 +862,31 @@ const CompanyDashboardPage = () => {
           {activeSection === 'dashboard' && (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <div className="flex justify-between items-center mb-6">
-              <TabsList>
-                <TabsTrigger value="jobs">
-                  <Briefcase className="h-4 w-4 mr-2" />
-                  My Jobs
-                </TabsTrigger>
-                <TabsTrigger value="projects">
-                  <FolderKanban className="h-4 w-4 mr-2" />
-                  Projects
-                </TabsTrigger>
-                <TabsTrigger value="applications">
-                  <Users className="h-4 w-4 mr-2" />
-                  Applications
-                </TabsTrigger>
-                <TabsTrigger value="users">
-                  <UserCheck className="h-4 w-4 mr-2" />
-                  Users
-                </TabsTrigger>
-                <TabsTrigger value="all-tasks">
-                  <ListTodo className="h-4 w-4 mr-2" />
-                  All Users Tasks
-                </TabsTrigger>
-                {purchasedModules.includes('frontline_agent') && (
-                  <TabsTrigger value="ticket-tasks">
-                    <Ticket className="h-4 w-4 mr-2" />
-                    Ticket Tasks
+              <TabsList
+                className="bg-[#1a1333] border border-[#3a295a] rounded-xl p-1 flex gap-1 h-auto flex-wrap"
+                style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+              >
+                {[
+                  { value: 'jobs', icon: Briefcase, label: 'My Jobs' },
+                  { value: 'projects', icon: FolderKanban, label: 'Projects' },
+                  { value: 'applications', icon: Users, label: 'Applications' },
+                  { value: 'users', icon: UserCheck, label: 'Users' },
+                  { value: 'all-tasks', icon: ListTodo, label: 'All Users Tasks' },
+                  ...(purchasedModules.includes('frontline_agent') ? [{ value: 'ticket-tasks', icon: Ticket, label: 'Ticket Tasks' }] : []),
+                ].map(({ value, icon: TabIcon, label }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all border"
+                    style={activeTab === value
+                      ? { background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', color: '#fff', border: '1.5px solid #a259ff', boxShadow: '0 0 8px 0 #a259ff55' }
+                      : { background: 'rgba(60,30,90,0.22)', color: '#cfc6e6', border: '1.5px solid #2d2342' }
+                    }
+                  >
+                    <TabIcon className="h-4 w-4" />
+                    {label}
                   </TabsTrigger>
-                )}
+                ))}
               </TabsList>
               {activeTab === 'jobs' && (
                 <Button onClick={() => setShowCreateJobModal(true)}>
@@ -914,14 +913,14 @@ const CompanyDashboardPage = () => {
             <TabsContent value="jobs" className="space-y-4">
               {loading ? (
                 <div className="flex justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin" />
+                  <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                 </div>
               ) : jobs.length === 0 ? (
-                <Card>
+                <Card className="bg-[#120d22] border border-[#2d2342]">
                   <CardContent className="py-12 text-center">
-                    <Briefcase className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium mb-2">No jobs posted yet</p>
-                    <Button onClick={() => setShowCreateJobModal(true)}>
+                    <Briefcase className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                    <p className="text-lg font-medium mb-2 text-white">No jobs posted yet</p>
+                    <Button onClick={() => setShowCreateJobModal(true)} className="bg-violet-600 hover:bg-violet-700">
                       Post Your First Job
                     </Button>
                   </CardContent>
@@ -929,12 +928,12 @@ const CompanyDashboardPage = () => {
               ) : (
                 <div className="grid gap-4">
                   {jobs.map((job) => (
-                    <Card key={job.id}>
+                    <Card key={job.id} className="bg-[#120d22] border border-[#2d2342] hover:border-violet-500/30 transition-colors">
                       <CardHeader>
                         <div className="flex justify-between items-start">
                           <div>
-                            <CardTitle>{job.title}</CardTitle>
-                            <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
+                            <CardTitle className="text-white">{job.title}</CardTitle>
+                            <div className="flex gap-4 mt-2 text-sm text-white/50">
                               <span className="flex items-center gap-1">
                                 <MapPin className="h-4 w-4" />
                                 {job.location}
@@ -943,13 +942,14 @@ const CompanyDashboardPage = () => {
                                 <Briefcase className="h-4 w-4" />
                                 {job.department}
                               </span>
-                              <Badge>{job.type}</Badge>
+                              <Badge className="bg-violet-600/20 text-violet-300 border border-violet-500/30">{job.type}</Badge>
                             </div>
                           </div>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => handleViewApplications(job.id)}
+                            className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
                           >
                             <Eye className="h-4 w-4 mr-2" />
                             View Applications
@@ -957,7 +957,7 @@ const CompanyDashboardPage = () => {
                         </div>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-sm text-muted-foreground line-clamp-2">{job.description}</p>
+                        <p className="text-sm text-white/50 line-clamp-2">{job.description}</p>
                       </CardContent>
                     </Card>
                   ))}
@@ -968,17 +968,17 @@ const CompanyDashboardPage = () => {
             <TabsContent value="projects" className="space-y-4">
               {projectsLoading ? (
                 <div className="flex justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin" />
+                  <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                 </div>
               ) : projects.length === 0 ? (
-                <Card>
+                <Card className="bg-[#120d22] border border-[#2d2342]">
                   <CardContent className="py-12 text-center">
-                    <FolderKanban className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium mb-2">No projects yet</p>
-                    <p className="text-sm text-muted-foreground mb-4">
+                    <FolderKanban className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                    <p className="text-lg font-medium mb-2 text-white">No projects yet</p>
+                    <p className="text-sm text-white/50 mb-4">
                       Create projects using the Project Manager Agent
                     </p>
-                    <Button onClick={() => navigate('/project-manager/dashboard')}>
+                    <Button onClick={() => navigate('/project-manager/dashboard')} className="bg-violet-600 hover:bg-violet-700">
                       <BrainCircuit className="h-4 w-4 mr-2" />
                       Go to Project Manager Dashboard
                     </Button>
@@ -989,8 +989,8 @@ const CompanyDashboardPage = () => {
                   {projects.map((project) => {
                     const isExpanded = expandedProjects.has(project.id);
                     return (
-                      <Card key={project.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                        <CardHeader 
+                      <Card key={project.id} className="cursor-pointer bg-[#120d22] border border-[#2d2342] hover:border-violet-500/30 transition-colors">
+                        <CardHeader
                           onClick={() => toggleProject(project.id)}
                           className="pb-3"
                         >
@@ -998,14 +998,14 @@ const CompanyDashboardPage = () => {
                             <div className="flex items-center gap-3 flex-1">
                               <div className="flex-shrink-0">
                                 {isExpanded ? (
-                                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                                  <ChevronDown className="h-5 w-5 text-white/40" />
                                 ) : (
-                                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                                  <ChevronRight className="h-5 w-5 text-white/40" />
                                 )}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between gap-2">
-                                  <CardTitle className="text-lg">{project.name}</CardTitle>
+                                  <CardTitle className="text-lg text-white">{project.name}</CardTitle>
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1019,23 +1019,23 @@ const CompanyDashboardPage = () => {
                                   </Button>
                                 </div>
                                 <div className="mt-2 flex items-center gap-3 flex-wrap">
-                                  <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
+                                  <Badge className={project.status === 'active' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-white/10 text-white/50 border border-white/10'}>
                                     {project.status}
                                   </Badge>
-                                  <Badge variant="outline">{project.priority}</Badge>
-                                  <span className="text-sm text-muted-foreground flex items-center gap-1">
+                                  <Badge variant="outline" className="border-white/20 text-white/60">{project.priority}</Badge>
+                                  <span className="text-sm text-white/50 flex items-center gap-1">
                                     <ListTodo className="h-3 w-3" />
                                     {project.tasks_count} task{project.tasks_count !== 1 ? 's' : ''}
                                   </span>
                                   {project.created_at && (
-                                    <span className="text-sm text-muted-foreground flex items-center gap-1">
+                                    <span className="text-sm text-white/50 flex items-center gap-1">
                                       <Calendar className="h-3 w-3" />
                                       {new Date(project.created_at).toLocaleDateString()}
                                     </span>
                                   )}
                                 </div>
                                 {project.description && !isExpanded && (
-                                  <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                                  <p className="text-sm text-white/50 mt-2 line-clamp-2">
                                     {project.description}
                                   </p>
                                 )}
@@ -1046,13 +1046,13 @@ const CompanyDashboardPage = () => {
                         {isExpanded && (
                           <CardContent className="pt-0">
                             {project.description && (
-                              <p className="text-sm text-muted-foreground mb-4 pb-4 border-b">
+                              <p className="text-sm text-white/50 mb-4 pb-4 border-b border-white/10">
                                 {project.description}
                               </p>
                             )}
                             {project.tasks && project.tasks.length > 0 ? (
                               <div className="space-y-3">
-                                <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                                <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-white/70">
                                   <ListTodo className="h-4 w-4" />
                                   Tasks ({project.tasks.length})
                                 </h4>
@@ -1060,14 +1060,14 @@ const CompanyDashboardPage = () => {
                                   const hasSubtasks = task.subtasks && task.subtasks.length > 0;
                                   const showSubtasks = expandedTasks.has(task.id);
                                   return (
-                                    <div 
-                                      key={task.id} 
-                                      className="border-l-2 border-primary pl-4 py-3 bg-muted/30 rounded-r"
+                                    <div
+                                      key={task.id}
+                                      className="border-l-2 border-violet-500/50 pl-4 py-3 bg-white/[0.03] rounded-r"
                                     >
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="flex-1 min-w-0">
                                           <div className="flex items-center gap-2">
-                                            <p className="font-medium">{task.title}</p>
+                                            <p className="font-medium text-white">{task.title}</p>
                                             <Button
                                               variant="ghost"
                                               size="sm"
@@ -1075,28 +1075,28 @@ const CompanyDashboardPage = () => {
                                                 e.stopPropagation();
                                                 handleEditTask(task);
                                               }}
-                                              className="h-6 w-6 p-0"
+                                              className="h-6 w-6 p-0 text-white/40 hover:text-white"
                                             >
                                               <Edit className="h-3 w-3" />
                                             </Button>
                                           </div>
                                           {task.description && (
-                                            <p className="text-sm text-muted-foreground mt-1">
+                                            <p className="text-sm text-white/50 mt-1">
                                               {task.description}
                                             </p>
                                           )}
                                           {task.due_date && (
-                                            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                                            <p className="text-xs text-white/40 mt-1 flex items-center gap-1">
                                               <Clock className="h-3 w-3" />
                                               Due: {new Date(task.due_date).toLocaleDateString()}
                                             </p>
                                           )}
                                         </div>
                                         <div className="flex items-center gap-2 flex-shrink-0">
-                                          <Badge variant="outline" className="text-xs">
+                                          <Badge variant="outline" className="text-xs border-white/20 text-white/60">
                                             {task.status}
                                           </Badge>
-                                          <Badge variant="secondary" className="text-xs">
+                                          <Badge className="text-xs bg-white/10 text-white/60 border border-white/10">
                                             {task.priority}
                                           </Badge>
                                           {hasSubtasks && (
@@ -1122,23 +1122,23 @@ const CompanyDashboardPage = () => {
                                         </div>
                                       </div>
                                       {hasSubtasks && showSubtasks && (
-                                        <div className="mt-3 ml-2 space-y-2 pl-4 border-l-2 border-muted">
-                                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                                        <div className="mt-3 ml-2 space-y-2 pl-4 border-l-2 border-white/10">
+                                          <p className="text-xs font-medium text-white/40 mb-2">
                                             Subtasks ({task.subtasks.length}):
                                           </p>
                                           {task.subtasks.map((subtask) => (
-                                            <div 
-                                              key={subtask.id} 
-                                              className="flex items-center gap-2 text-sm bg-background p-2 rounded"
+                                            <div
+                                              key={subtask.id}
+                                              className="flex items-center gap-2 text-sm bg-white/[0.03] p-2 rounded"
                                             >
-                                              <span className="text-primary">•</span>
-                                              <span className="flex-1">{subtask.title}</span>
+                                              <span className="text-violet-400">•</span>
+                                              <span className="flex-1 text-white/70">{subtask.title}</span>
                                               {subtask.description && (
-                                                <span className="text-xs text-muted-foreground hidden md:block">
+                                                <span className="text-xs text-white/40 hidden md:block">
                                                   {subtask.description}
                                                 </span>
                                               )}
-                                              <Badge variant="outline" className="text-xs">
+                                              <Badge variant="outline" className="text-xs border-white/20 text-white/60">
                                                 {subtask.status}
                                               </Badge>
                                             </div>
@@ -1150,7 +1150,7 @@ const CompanyDashboardPage = () => {
                                 })}
                               </div>
                             ) : (
-                              <div className="text-center py-8 text-muted-foreground">
+                              <div className="text-center py-8 text-white/30">
                                 <ListTodo className="h-8 w-8 mx-auto mb-2 opacity-50" />
                                 <p className="text-sm">No tasks yet</p>
                               </div>
@@ -1168,27 +1168,27 @@ const CompanyDashboardPage = () => {
               {selectedJob ? (
                 <div>
                   <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-2xl font-bold">Applications for {selectedJob.title}</h2>
-                    <Button variant="outline" onClick={() => setSelectedJob(null)}>
+                    <h2 className="text-2xl font-bold text-white">Applications for {selectedJob.title}</h2>
+                    <Button variant="outline" onClick={() => setSelectedJob(null)} className="border-white/20 text-white/70 hover:text-white hover:bg-white/10">
                       Back to Jobs
                     </Button>
                   </div>
                   {selectedJobApplications.length === 0 ? (
-                    <Card>
+                    <Card className="bg-[#120d22] border border-[#2d2342]">
                       <CardContent className="py-12 text-center">
-                        <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                        <p className="text-lg font-medium">No applications yet</p>
+                        <Users className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                        <p className="text-lg font-medium text-white">No applications yet</p>
                       </CardContent>
                     </Card>
                   ) : (
                     <div className="space-y-4">
                       {selectedJobApplications.map((app) => (
-                        <Card key={app.id}>
+                        <Card key={app.id} className="bg-[#120d22] border border-[#2d2342]">
                           <CardHeader>
                             <div className="flex justify-between items-start">
                               <div>
-                                <CardTitle>{app.applicant_name}</CardTitle>
-                                <CardDescription>{app.email}</CardDescription>
+                                <CardTitle className="text-white">{app.applicant_name}</CardTitle>
+                                <CardDescription className="text-white/50">{app.email}</CardDescription>
                               </div>
                               <Badge className={getStatusColor(app.status)}>{app.status}</Badge>
                             </div>
@@ -1196,28 +1196,27 @@ const CompanyDashboardPage = () => {
                           <CardContent>
                             <div className="space-y-2">
                               {app.cover_letter && (
-                                <p className="text-sm">{app.cover_letter}</p>
+                                <p className="text-sm text-white/70">{app.cover_letter}</p>
                               )}
                               {app.resume_path && (
                                 <a
                                   href={getResumeUrl(app.resume_path)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                                  className="inline-flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 hover:underline"
                                 >
                                   <Download className="h-4 w-4" />
                                   Download Resume
                                 </a>
                               )}
-                              <div className="flex gap-2 pt-2">
+                              <div className="flex gap-2 pt-2 flex-wrap">
                                 {['pending', 'reviewing', 'interview', 'accepted', 'rejected'].map((status) => (
                                   <Button
                                     key={status}
-                                    variant={app.status === status ? 'default' : 'outline'}
                                     size="sm"
                                     onClick={() => handleUpdateStatus(app.id, status)}
                                     disabled={app.status === status}
-                                    className="capitalize"
+                                    className={`capitalize ${app.status === status ? 'bg-violet-600 text-white' : 'border-white/20 text-white/60 hover:text-white hover:bg-white/10 bg-transparent border'}`}
                                   >
                                     {status}
                                   </Button>
@@ -1231,10 +1230,10 @@ const CompanyDashboardPage = () => {
                   )}
                 </div>
               ) : (
-                <Card>
+                <Card className="bg-[#120d22] border border-[#2d2342]">
                   <CardContent className="py-12 text-center">
-                    <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium">Select a job to view applications</p>
+                    <Users className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                    <p className="text-lg font-medium text-white/50">Select a job to view applications</p>
                   </CardContent>
                 </Card>
               )}
@@ -1243,14 +1242,14 @@ const CompanyDashboardPage = () => {
             <TabsContent value="users" className="space-y-4">
               {usersLoading ? (
                 <div className="flex justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin" />
+                  <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                 </div>
               ) : users.length === 0 ? (
-                <Card>
+                <Card className="bg-[#120d22] border border-[#2d2342]">
                   <CardContent className="py-12 text-center">
-                    <UserCheck className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium mb-2">No users yet</p>
-                    <p className="text-sm text-muted-foreground mb-4">
+                    <UserCheck className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                    <p className="text-lg font-medium mb-2 text-white">No users yet</p>
+                    <p className="text-sm text-white/50 mb-4">
                       Add users to your company to manage projects and tasks
                     </p>
                     <Button onClick={() => {
@@ -1260,7 +1259,7 @@ const CompanyDashboardPage = () => {
                         phoneNumber: '', bio: '', location: '',
                       });
                       setShowCreateUserModal(true);
-                    }}>
+                    }} className="bg-violet-600 hover:bg-violet-700">
                       <UserPlus className="h-4 w-4 mr-2" />
                       Add Your First User
                     </Button>
@@ -1268,60 +1267,60 @@ const CompanyDashboardPage = () => {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  <Card>
+                  <Card className="bg-[#120d22] border border-[#2d2342]">
                     <CardContent className="p-0">
                       <Table>
                         <TableHeader>
-                          <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Email</TableHead>
-                            <TableHead>Role</TableHead>
-                            <TableHead>Location</TableHead>
-                            <TableHead>Phone</TableHead>
-                            <TableHead>Joined</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                          <TableRow className="bg-[#1a1333] border-b border-[#2d2342] hover:bg-[#1a1333]">
+                            <TableHead className="text-white/60 font-semibold">Name</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Email</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Role</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Location</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Phone</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Joined</TableHead>
+                            <TableHead className="text-right text-white/60 font-semibold">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {users.map((user) => (
-                            <TableRow key={user.id}>
-                              <TableCell className="font-medium">
+                            <TableRow key={user.id} className="border-white/[0.06] hover:bg-white/[0.04]">
+                              <TableCell className="font-medium text-white">
                                 <div className="flex items-center gap-2">
                                   {user.full_name || user.username}
                                   {user.is_active === false && (
-                                    <Badge variant="secondary" className="text-xs">Inactive</Badge>
+                                    <Badge className="text-xs bg-white/10 text-white/50 border border-white/10">Inactive</Badge>
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="text-white/70">
                                 <div className="flex items-center gap-1">
-                                  <Mail className="h-3 w-3 text-muted-foreground" />
+                                  <Mail className="h-3 w-3 text-white/30" />
                                   {user.email}
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant="outline" className="capitalize">
+                                <Badge variant="outline" className="capitalize border-white/20 text-white/60">
                                   {user.role?.replace('_', ' ')}
                                 </Badge>
                               </TableCell>
                               <TableCell>
                                 {user.location ? (
                                   <div className="flex items-center gap-1">
-                                    <MapPin className="h-3 w-3 text-muted-foreground" />
-                                    {user.location}
+                                    <MapPin className="h-3 w-3 text-white/30" />
+                                    <span className="text-white/70">{user.location}</span>
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">-</span>
+                                  <span className="text-white/30">-</span>
                                 )}
                               </TableCell>
-                              <TableCell>
-                                {user.phone_number || <span className="text-muted-foreground">-</span>}
+                              <TableCell className="text-white/70">
+                                {user.phone_number || <span className="text-white/30">-</span>}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="text-white/70">
                                 {user.date_joined ? (
                                   new Date(user.date_joined).toLocaleDateString()
                                 ) : (
-                                  <span className="text-muted-foreground">-</span>
+                                  <span className="text-white/30">-</span>
                                 )}
                               </TableCell>
                               <TableCell className="text-right">
@@ -1330,7 +1329,7 @@ const CompanyDashboardPage = () => {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleEditUser(user)}
-                                    className="h-8 w-8 p-0"
+                                    className="h-8 w-8 p-0 border-white/20 text-white/60 hover:text-white hover:bg-white/10"
                                   >
                                     <Edit className="h-4 w-4" />
                                   </Button>
@@ -1338,7 +1337,7 @@ const CompanyDashboardPage = () => {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleDeleteUser(user.id)}
-                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    className="h-8 w-8 p-0 border-red-500/30 text-red-400 hover:text-red-300 hover:bg-red-500/10"
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
@@ -1350,11 +1349,11 @@ const CompanyDashboardPage = () => {
                       </Table>
                     </CardContent>
                   </Card>
-                  
+
                   {/* Pagination */}
                   {usersPagination.totalPages > 1 && (
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-white/50">
                         Showing page {usersPagination.page} of {usersPagination.totalPages} ({usersPagination.total} total users)
                       </p>
                       <div className="flex items-center gap-2">
@@ -1363,6 +1362,7 @@ const CompanyDashboardPage = () => {
                           size="sm"
                           onClick={() => setUsersPagination(prev => ({ ...prev, page: prev.page - 1 }))}
                           disabled={usersPagination.page === 1 || usersLoading}
+                          className="border-white/20 text-white/60 hover:text-white hover:bg-white/10"
                         >
                           <ChevronLeft className="h-4 w-4" />
                           Previous
@@ -1372,6 +1372,7 @@ const CompanyDashboardPage = () => {
                           size="sm"
                           onClick={() => setUsersPagination(prev => ({ ...prev, page: prev.page + 1 }))}
                           disabled={usersPagination.page >= usersPagination.totalPages || usersLoading}
+                          className="border-white/20 text-white/60 hover:text-white hover:bg-white/10"
                         >
                           Next
                           <ChevronRight className="h-4 w-4" />
@@ -1386,66 +1387,50 @@ const CompanyDashboardPage = () => {
             <TabsContent value="all-tasks" className="space-y-4">
               {/* Filters */}
               <div className="flex items-center gap-4 flex-wrap">
-                <Select value={taskStatusFilter} onValueChange={(value) => {
-                  setTaskStatusFilter(value);
-                  setTasksPagination(prev => ({ ...prev, page: 1 }));
-                }}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Filter by status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="todo">To Do</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="review">Review</SelectItem>
-                    <SelectItem value="done">Done</SelectItem>
-                    <SelectItem value="blocked">Blocked</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                <Select value={taskUserFilter} onValueChange={(value) => {
-                  setTaskUserFilter(value);
-                  setTasksPagination(prev => ({ ...prev, page: 1 }));
-                }}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Filter by user" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Users</SelectItem>
-                    {availableUsers.length > 0 ? (
-                      availableUsers.map((user) => (
-                        <SelectItem key={user.id} value={user.id.toString()}>
-                          {user.full_name || user.username || user.email}
-                        </SelectItem>
-                      ))
-                    ) : users.length > 0 ? (
-                      users.map((user) => (
-                        <SelectItem key={user.id} value={user.id.toString()}>
-                          {user.full_name || user.username || user.email}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="loading" disabled>Loading users...</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-                
-                <Select value={taskProjectFilter} onValueChange={(value) => {
-                  setTaskProjectFilter(value);
-                  setTasksPagination(prev => ({ ...prev, page: 1 }));
-                }}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Filter by project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Projects</SelectItem>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id.toString()}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={taskStatusFilter}
+                  onValueChange={(value) => { setTaskStatusFilter(value); setTasksPagination(prev => ({ ...prev, page: 1 })); }}
+                  placeholder="Filter by status"
+                  triggerClassName="w-[180px]"
+                  options={[
+                    { value: 'all', label: 'All Statuses' },
+                    { value: 'todo', label: 'To Do' },
+                    { value: 'in_progress', label: 'In Progress' },
+                    { value: 'review', label: 'Review' },
+                    { value: 'done', label: 'Done' },
+                    { value: 'blocked', label: 'Blocked' },
+                  ]}
+                />
+
+                <SearchableSelect
+                  value={taskUserFilter}
+                  onValueChange={(value) => { setTaskUserFilter(value); setTasksPagination(prev => ({ ...prev, page: 1 })); }}
+                  placeholder="Filter by user"
+                  triggerClassName="w-[180px]"
+                  displayLength={20}
+                  options={[
+                    { value: 'all', label: 'All Users' },
+                    ...(availableUsers.length > 0 ? availableUsers : users).map(u => ({
+                      value: u.id.toString(),
+                      label: u.full_name || u.username || u.email,
+                    })),
+                  ]}
+                />
+
+                <SearchableSelect
+                  value={taskProjectFilter}
+                  onValueChange={(value) => { setTaskProjectFilter(value); setTasksPagination(prev => ({ ...prev, page: 1 })); }}
+                  placeholder="Filter by project"
+                  triggerClassName="w-[180px]"
+                  displayLength={20}
+                  options={[
+                    { value: 'all', label: 'All Projects' },
+                    ...projects.map(p => ({
+                      value: p.id.toString(),
+                      label: p.name,
+                    })),
+                  ]}
+                />
               </div>
 
               {allUsersTasksLoading ? (
@@ -1453,11 +1438,11 @@ const CompanyDashboardPage = () => {
                   <Loader2 className="h-8 w-8 animate-spin" />
                 </div>
               ) : allUsersTasks.length === 0 ? (
-                <Card>
+                <Card className="bg-[#120d22] border border-[#2d2342]">
                   <CardContent className="py-12 text-center">
-                    <ListTodo className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium mb-2">No tasks found</p>
-                    <p className="text-sm text-muted-foreground">
+                    <ListTodo className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                    <p className="text-lg font-medium mb-2 text-white">No tasks found</p>
+                    <p className="text-sm text-white/50">
                       {taskStatusFilter !== 'all' || taskUserFilter !== 'all' || taskProjectFilter !== 'all'
                         ? 'No tasks match the selected filters'
                         : 'No tasks have been assigned to your users yet'}
@@ -1466,28 +1451,28 @@ const CompanyDashboardPage = () => {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  <Card>
+                  <Card className="bg-[#120d22] border border-[#2d2342]">
                     <CardContent className="p-0">
                       <Table>
                         <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[250px]">Task</TableHead>
-                            <TableHead>Description</TableHead>
-                            <TableHead>Assignee</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Priority</TableHead>
-                            <TableHead>Due Date</TableHead>
-                            <TableHead>Progress</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                          <TableRow className="bg-[#1a1333] border-b border-[#2d2342] hover:bg-[#1a1333]">
+                            <TableHead className="w-[250px] text-white/60 font-semibold">Task</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Description</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Assignee</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Status</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Priority</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Due Date</TableHead>
+                            <TableHead className="text-white/60 font-semibold">Progress</TableHead>
+                            <TableHead className="text-right text-white/60 font-semibold">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {allUsersTasks.map((task) => (
-                            <TableRow key={task.id}>
+                            <TableRow key={task.id} className="border-white/[0.06] hover:bg-white/[0.04]">
                               <TableCell className="w-[250px]">
                                 <div>
-                                  <div className="font-medium">{task.title}</div>
-                                  <div className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
+                                  <div className="font-medium text-white">{task.title}</div>
+                                  <div className="text-sm text-white/40 mt-1 flex items-center gap-1">
                                     <FolderKanban className="h-3 w-3" />
                                     {task.project_name}
                                   </div>
@@ -1496,7 +1481,7 @@ const CompanyDashboardPage = () => {
                               <TableCell>
                                 {task.description ? (
                                   <div
-                                    className="text-sm text-muted-foreground line-clamp-2 cursor-pointer hover:text-primary hover:underline"
+                                    className="text-sm text-white/50 line-clamp-2 cursor-pointer hover:text-violet-300 hover:underline"
                                     onClick={() => {
                                       setSelectedTaskDescription({
                                         title: task.title,
@@ -1508,17 +1493,17 @@ const CompanyDashboardPage = () => {
                                     {task.description}
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground text-sm">No description</span>
+                                  <span className="text-white/30 text-sm">No description</span>
                                 )}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="text-white/70">
                                 {task.assignee_name ? (
                                   <div className="flex items-center gap-1">
-                                    <User className="h-3 w-3 text-muted-foreground" />
+                                    <User className="h-3 w-3 text-white/30" />
                                     {task.assignee_name}
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">Unassigned</span>
+                                  <span className="text-white/30">Unassigned</span>
                                 )}
                               </TableCell>
                               <TableCell>
@@ -1528,28 +1513,28 @@ const CompanyDashboardPage = () => {
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                <Badge variant="outline" className={getPriorityColor(task.priority)}>
+                                <Badge variant="outline" className={`${getPriorityColor(task.priority)} border-white/20`}>
                                   {task.priority}
                                 </Badge>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="text-white/70">
                                 {task.due_date ? (
                                   <div className="flex items-center gap-1">
-                                    <Calendar className="h-3 w-3 text-muted-foreground" />
+                                    <Calendar className="h-3 w-3 text-white/30" />
                                     {new Date(task.due_date).toLocaleDateString()}
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">-</span>
+                                  <span className="text-white/30">-</span>
                                 )}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="text-white/70">
                                 {task.progress_percentage !== null ? (
                                   <div className="flex items-center gap-1">
-                                    <TrendingUp className="h-3 w-3 text-muted-foreground" />
+                                    <TrendingUp className="h-3 w-3 text-violet-400" />
                                     {task.progress_percentage}%
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">-</span>
+                                  <span className="text-white/30">-</span>
                                 )}
                               </TableCell>
                               <TableCell className="text-right">
@@ -1557,7 +1542,7 @@ const CompanyDashboardPage = () => {
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleEditTask(task)}
-                                  className="h-8 w-8 p-0"
+                                  className="h-8 w-8 p-0 text-white/40 hover:text-white hover:bg-white/10"
                                 >
                                   <Edit className="h-4 w-4" />
                                 </Button>
@@ -1568,11 +1553,11 @@ const CompanyDashboardPage = () => {
                       </Table>
                     </CardContent>
                   </Card>
-                  
+
                   {/* Pagination */}
                   {tasksPagination.totalPages > 1 && (
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-white/50">
                         Showing page {tasksPagination.page} of {tasksPagination.totalPages} ({tasksPagination.total} total tasks)
                       </p>
                       <div className="flex items-center gap-2">
@@ -1581,6 +1566,7 @@ const CompanyDashboardPage = () => {
                           size="sm"
                           onClick={() => setTasksPagination(prev => ({ ...prev, page: prev.page - 1 }))}
                           disabled={tasksPagination.page === 1 || allUsersTasksLoading}
+                          className="border-white/20 text-white/60 hover:text-white hover:bg-white/10"
                         >
                           <ChevronLeft className="h-4 w-4" />
                           Previous
@@ -1590,6 +1576,7 @@ const CompanyDashboardPage = () => {
                           size="sm"
                           onClick={() => setTasksPagination(prev => ({ ...prev, page: prev.page + 1 }))}
                           disabled={tasksPagination.page >= tasksPagination.totalPages || allUsersTasksLoading}
+                          className="border-white/20 text-white/60 hover:text-white hover:bg-white/10"
                         >
                           Next
                           <ChevronRight className="h-4 w-4" />
@@ -1603,51 +1590,51 @@ const CompanyDashboardPage = () => {
 
             {purchasedModules.includes('frontline_agent') && (
               <TabsContent value="ticket-tasks" className="space-y-4">
-                <Card>
+                <Card className="bg-[#120d22] border border-[#2d2342]">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Ticket className="h-5 w-5" />
+                    <CardTitle className="flex items-center gap-2 text-white">
+                      <Ticket className="h-5 w-5 text-violet-400" />
                       Ticket Tasks
                     </CardTitle>
-                    <CardDescription>
+                    <CardDescription className="text-white/50">
                       When the Frontline agent doesn&apos;t have an answer in Knowledge Q&A, a ticket is created here. Upload a document in the Frontline Agent (Documents tab) that covers the topic, then close the ticket from this tab when done.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {loadingTicketTasks ? (
                       <div className="flex justify-center py-8">
-                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                       </div>
                     ) : ticketTasks.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
+                      <div className="text-center py-8 text-white/40">
                         No ticket tasks yet. When you ask something in Frontline Knowledge Q&A that the agent can&apos;t answer, a task will appear here. Add a document in the Frontline Agent to expand the knowledge base, then close the ticket here.
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         {ticketTasks.map((task) => (
                           <div
                             key={task.id}
-                            className={`rounded-lg border p-4 ${task.status === 'resolved' || task.status === 'closed' ? 'bg-muted/50 opacity-80' : 'bg-card'}`}
+                            className={`rounded-lg border p-4 ${task.status === 'resolved' || task.status === 'closed' ? 'bg-white/[0.02] border-white/[0.05] opacity-60' : 'bg-white/[0.04] border-[#2d2342]'}`}
                           >
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-medium">{task.title}</span>
-                                  <span className="text-xs px-2 py-0.5 rounded-full bg-muted">{task.status}</span>
+                                  <span className="font-medium text-white">{task.title}</span>
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/20">{task.status}</span>
                                 </div>
-                                <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap break-words prose prose-sm dark:prose-invert max-w-none">
+                                <div className="mt-2 text-sm text-white/50 whitespace-pre-wrap break-words max-w-none">
                                   {task.description?.replace(/\*\*/g, '')}
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-2">
+                                <p className="text-xs text-white/30 mt-2">
                                   Created {task.created_at ? new Date(task.created_at).toLocaleString() : ''}
                                 </p>
                               </div>
                               {(task.status !== 'resolved' && task.status !== 'closed') && (
                                 <Button
-                                  variant="outline"
                                   size="sm"
                                   onClick={() => handleCloseTicketTask(task.id)}
                                   disabled={resolvingTaskId === task.id}
+                                  className="bg-violet-600 hover:bg-violet-700 text-white shrink-0"
                                 >
                                   {resolvingTaskId === task.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
                                   Close
