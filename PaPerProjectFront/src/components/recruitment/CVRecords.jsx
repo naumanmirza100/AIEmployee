@@ -180,8 +180,8 @@ const CVRecords = () => {
       {/* Header and Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl py-3 sm:py-5 font-bold">Candidates</h2>
-          <p className="text-xs sm:text-sm text-muted-foreground">
+          <h2 className="text-xl sm:text-2xl py-3 sm:py-5 font-bold text-white">Candidates</h2>
+          <p className="text-xs sm:text-sm text-white/60">
             View and manage processed candidate CVs. Select a job to filter, click a row for full details.
           </p>
         </div>
@@ -190,7 +190,7 @@ const CVRecords = () => {
             value={jobFilter || 'all'}
             onValueChange={(value) => setJobFilter(value === 'all' ? '' : value)}
           >
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px] border-white/20">
               <SelectValue placeholder="Select job" />
             </SelectTrigger>
             <SelectContent>
@@ -206,7 +206,7 @@ const CVRecords = () => {
             value={decisionFilter || 'all'}
             onValueChange={(value) => setDecisionFilter(value === 'all' ? '' : value)}
           >
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger className="w-[140px] border-white/20">
               <SelectValue placeholder="Decision" />
             </SelectTrigger>
             <SelectContent>
@@ -266,11 +266,11 @@ const CVRecords = () => {
       )}
 
       {total === 0 ? (
-        <Card>
+        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
-            <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-base sm:text-lg font-medium mb-2">No candidates yet</p>
-            <p className="text-xs sm:text-sm text-muted-foreground px-4">
+            <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
+            <p className="text-base sm:text-lg font-medium mb-2 text-white">No candidates yet</p>
+            <p className="text-xs sm:text-sm text-white/60 px-4">
               {jobFilter || decisionFilter
                 ? 'No records match the selected filters. Try changing job or decision.'
                 : 'Process CVs to see candidate records here'}
@@ -295,9 +295,9 @@ const CVRecords = () => {
               const parsed = record.parsed || {};
               const isSelected = selectedIds.has(record.id);
               return (
-                <Card 
-                  key={record.id} 
-                  className={`cursor-pointer transition-colors ${isSelected ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}
+                <Card
+                  key={record.id}
+                  className={`cursor-pointer transition-colors border-white/10 backdrop-blur-sm ${isSelected ? 'border-primary bg-primary/10' : 'bg-black/20 hover:bg-black/30'}`}
                   onClick={() => handleRowClick(record)}
                 >
                   <CardContent className="p-3 sm:p-4">
@@ -365,7 +365,7 @@ const CVRecords = () => {
           </div>
 
           {/* Desktop Table View */}
-          <Card className="hidden md:block">
+          <Card className="hidden md:block border-white/10 bg-black/20 backdrop-blur-sm">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -436,7 +436,7 @@ const CVRecords = () => {
           </Card>
 
           {/* Pagination - Responsive */}
-          <Card className="md:border-t-0 md:rounded-t-none">
+          <Card className="md:border-t-0 md:rounded-t-none border-white/10 bg-black/20 backdrop-blur-sm">
             <CardContent className="py-3 px-3 sm:px-4">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
@@ -450,7 +450,7 @@ const CVRecords = () => {
                       setPage(1);
                     }}
                   >
-                    <SelectTrigger className="w-[90px] sm:w-[100px] h-8 sm:h-9 text-xs sm:text-sm">
+                    <SelectTrigger className="w-[90px] sm:w-[100px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
