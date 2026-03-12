@@ -123,6 +123,11 @@ ROUTER_CONFIG = {
             # "best campaign" / "which is best" variants
             'best campaign', 'which is best campaign', 'which campaign is best',
             'which is the best campaign', 'best camapgin', 'best compagin',
+            # "low/worst campaign" variants
+            'low performance campaign', 'poor performance campaign',
+            'underperforming campaign', 'underperform campaign',
+            'worst campaign', 'lowest campaign', 'least performing campaign',
+            'which campaign is worst', 'which is the worst campaign',
             # average / total aggregates
             'average open rate', 'avg open rate', 'total open rate',
             'average click rate', 'avg click rate', 'total click rate',
@@ -486,6 +491,20 @@ class MarketingQAAgent(MarketingBaseAgent):
         if not campaigns:
             return self._ok("You have **0** campaigns.", question)
 
+        def _score(c):
+            def _n(v):
+                try:
+                    return float(v)
+                except:
+                    return 0.0
+            return (
+                _n(c.get('conversion_progress')),
+                _n(c.get('reply_rate')),
+                _n(c.get('open_rate')),
+                _n(c.get('click_rate')),
+                int(c.get('emails_sent') or 0),
+            )
+
         # ── Generic average handler ───────────────────────────
         # Works for ANY numeric field: open rate, click rate, reply rate,
         # bounce rate, emails sent/opened/clicked/replied/bounced/failed,
@@ -496,32 +515,22 @@ class MarketingQAAgent(MarketingBaseAgent):
             if result:
                 return self._ok(result, question, marketing_data)
 
-        # Best performing
-        # Accept common variants like:
-        # - "best performing campaign"
-        # - "what campaigns are performing best"
-        # - "which is the best campaign"
-        is_best_intent = (
-            'performing best' in q
-            or 'best performing' in q
-            or 'top campaign' in q
-            or 'best campaign' in q
-            or 'which campaign is best' in q
-            or 'which is the best campaign' in q
-        )
+        # Best performing campaign intent.
+        # Handles typo variants like "best camapgin" too.
+        is_best_intent = self._is_best_campaign_intent(q)
         if is_best_intent:
-            def _score(c):
-                def _n(v):
-                    try: return float(v)
-                    except: return 0.0
-                return (
-                    _n(c.get('conversion_progress')), _n(c.get('reply_rate')),
-                    _n(c.get('open_rate')), _n(c.get('click_rate')),
-                    int(c.get('emails_sent') or 0),
-                )
             best = sorted(campaigns, key=_score, reverse=True)[:5]
             answer = f"Best performing: **{best[0].get('name','Unnamed')} ({best[0].get('status','N/A')})**.\n"
             answer += "\n".join(f"- {_line(c)}" for c in best)
+            return self._ok(answer, question, marketing_data)
+
+        # Low / worst performing campaign intent.
+        # Handles typo variants like "low performance camapgin" too.
+        is_low_intent = self._is_low_campaign_intent(q)
+        if is_low_intent:
+            worst = sorted(campaigns, key=_score)[:5]
+            answer = f"Lowest performing: **{worst[0].get('name','Unnamed')} ({worst[0].get('status','N/A')})**.\n"
+            answer += "\n".join(f"- {_line(c)}" for c in worst)
             return self._ok(answer, question, marketing_data)
 
         # Status breakdown
@@ -627,6 +636,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         typos = [
             (r'\bcaomaphin\b', 'campaign'),  (r'\bcaompagin\b', 'campaign'),
             (r'\bcampagin\b',  'campaign'),  (r'\bcompagin\b',  'campaign'),
+            (r'\bcamapgin\b',  'campaign'),
             (r'\bcomapgin\b',  'campaign'),  (r'\bcampagins\b', 'campaigns'),
             (r'\bcaampaign\b', 'campaign'),  (r'\bcampain\b',   'campaign'),
             (r'\bcampagn\b',   'campaign'),
@@ -645,6 +655,58 @@ class MarketingQAAgent(MarketingBaseAgent):
         for pattern, replacement in typos:
             q = re.sub(pattern, replacement, q, flags=re.IGNORECASE)
         return q
+
+    def _is_best_campaign_intent(self, q: str) -> bool:
+        """Detect requests asking for top/best campaign performance, including typo variants."""
+        text = (q or '').strip().lower()
+        if not text:
+            return False
+
+        # Keep typo coverage local to intent matching in case normalization missed one.
+        text = re.sub(r'\bcamapgin\b|\bcampagin\b|\bcompagin\b|\bcampain\b', 'campaign', text)
+
+        campaign_word = re.search(r'\bcampaigns?\b', text) is not None
+        has_best_signal = (
+            'performing best' in text
+            or 'best performing' in text
+            or 'best campaign' in text
+            or 'top campaign' in text
+            or 'which campaign is best' in text
+            or 'which is the best campaign' in text
+            or (('best' in text or 'top' in text) and campaign_word)
+        )
+        return has_best_signal
+
+    def _is_low_campaign_intent(self, q: str) -> bool:
+        """Detect requests asking for low/worst campaign performance, including typo variants."""
+        text = (q or '').strip().lower()
+        if not text:
+            return False
+
+        text = re.sub(r'\bcamapgin\b|\bcampagin\b|\bcompagin\b|\bcampain\b', 'campaign', text)
+        campaign_word = re.search(r'\bcampaigns?\b', text) is not None
+
+        has_low_signal = (
+            'performing worst' in text
+            or 'worst performing' in text
+            or 'worst campaign' in text
+            or 'lowest campaign' in text
+            or 'least performing campaign' in text
+            or 'underperforming campaign' in text
+            or 'poor performance campaign' in text
+            or 'low performance campaign' in text
+            or 'which campaign is worst' in text
+            or 'which is the worst campaign' in text
+            or ((
+                'low' in text
+                or 'lowest' in text
+                or 'worst' in text
+                or 'underperform' in text
+                or 'poor' in text
+                or 'bad' in text
+            ) and campaign_word)
+        )
+        return has_low_signal
 
     def _find_campaign_in_question(self, question: str, campaigns: List[Dict]) -> Optional[Dict]:
         """Match a campaign name inside the question text (with fuzzy/partial support)."""
