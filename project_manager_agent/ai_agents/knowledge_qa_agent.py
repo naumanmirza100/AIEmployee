@@ -425,9 +425,14 @@ class KnowledgeQAAgent(BaseAgent):
         You have READ-ONLY access to user information (users added by the company user, their roles, and their task assignments).
         You can view and report on user information, but you CANNOT create, update, or delete users.
         For action requests (creating projects, tasks, etc.), users should use the Project Pilot agent.
-        You should be conversational, accurate, and provide context-aware responses.
 
-        IMPORTANT - Count and aggregate questions: When the user asks for a count, total, or aggregate (e.g. "how many tasks", "how many users", "breakdown by status"), answer with ONLY the number(s) and at most one short sentence. Do NOT list individual tasks, projects, or users unless the question explicitly asks for a list. Use the AGGREGATES section when provided."""
+        CRITICAL RESPONSE RULES:
+        1. Answer ONLY what the user asked. Do NOT add extra information they did not request.
+        2. If they ask about users, only provide user info. Do NOT include task assignments unless they specifically ask about tasks or assignments.
+        3. If they ask about tasks, only provide task info. Do NOT add user details unless relevant to the question.
+        4. If they ask for a count, give the number and one short sentence. Do NOT list items unless asked.
+        5. Keep responses concise and well-structured. Use markdown formatting (bold, lists, headings) for readability.
+        6. Be conversational but direct — no filler text or unnecessary preamble."""
     
     def answer_question(self, question: str, context: Optional[Dict] = None,
                        available_users: Optional[List[Dict]] = None,
@@ -623,23 +628,22 @@ Answer briefly with the requested number(s)."""
                     self.log_action("Error in semantic search", {"error": str(e)})
             
             prompt = f"""Answer the following question about the project management system.
-        
+
 {context_str}
 {users_str}
 {conversation_context}
 
 Question: {question}
 
-IMPORTANT INSTRUCTIONS:
-- You have READ-ONLY access to user information. You can view and report on users, their roles, and their task assignments, but you CANNOT create, update, or delete users.
-- If the question asks ONLY for a count or total (e.g. "how many"), give the number(s) and one short sentence; do not list individual items unless asked.
-- If the question asks about users (e.g., "how many users do I have", "what are their roles"), use the "USERS ADDED BY COMPANY USER" section above to provide detailed information.
-- If the question asks for a list or details: list all users with their roles, email addresses, and status; use "USER-TASK ASSIGNMENTS" for task assignments; include task titles, status, priority, and project.
-- If a user has no tasks assigned, mention that clearly.
-- Provide a clear, organized answer that's easy to read.
-
-Provide a helpful, accurate answer. If the question is about specific data that isn't in the context, mention that.
-Be conversational and clear."""
+CRITICAL INSTRUCTIONS:
+- Answer ONLY what the user asked. Do NOT volunteer extra information they did not request.
+- If the question is about users (names, roles, etc.), provide ONLY user info. Do NOT include task assignments or task counts unless specifically asked.
+- If the question is about tasks, provide ONLY task info. Do NOT add unrelated user or project details.
+- If the question is about assignments, then include task-user mapping details.
+- Keep the response concise and well-structured. Use markdown (bold for names, bullet lists for details).
+- Do NOT add disclaimers, notes, or "please note" sections unless the data is missing.
+- If the question is about specific data that isn't in the context, say so briefly.
+- Use clear formatting: headings for sections, bold for key names, sub-bullets for attributes."""
             max_tokens = 800
         
         try:

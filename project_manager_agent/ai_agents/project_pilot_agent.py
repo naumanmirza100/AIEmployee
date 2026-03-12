@@ -290,46 +290,44 @@ class ProjectPilotAgent(BaseAgent):
                 from datetime import datetime as _dt
                 _today = _dt.now().strftime('%Y-%m-%d')
 
-                prompt = f"""You are an AI assistant that manages projects and tasks. Analyze the request and return ONLY valid JSON.
+                # Build a compact user ID reference for the prompt
+                user_id_ref = ""
+                user_ids_list = []
+                if available_users:
+                    user_id_ref = "\nAVAILABLE USER IDs (use ONLY these numeric IDs for assignee_id):\n"
+                    for u in available_users:
+                        user_id_ref += f"- {u.get('id')} = {u.get('name', u.get('username', 'Unknown'))}\n"
+                        user_ids_list.append(str(u.get('id')))
 
-TODAY'S DATE: {_today}
+                # Collect all task IDs from context so we can tell the LLM exactly how many to return
+                all_task_ids = []
+                task_id_ref = ""
+                ctx_tasks = context.get('tasks') or (context.get('project', {}).get('tasks') if context.get('project') else None) or []
+                if ctx_tasks:
+                    task_id_ref = f"\nALL TASK IDs TO ASSIGN ({len(ctx_tasks)} tasks — you MUST return exactly {len(ctx_tasks)} update_task actions):\n"
+                    for t in ctx_tasks:
+                        tid = t.get('id', 'N/A')
+                        all_task_ids.append(str(tid))
+                        task_id_ref += f"- {tid}: {t.get('title', 'Unknown')}\n"
 
-{context_str}
-{users_str}
+                prompt = f"""Return ONLY a valid JSON array. No text before or after.
+
+{task_id_ref}
+{user_id_ref}
 
 User Request: {question}
 
-The user wants to ASSIGN or REASSIGN existing tasks to users. You MUST return update_task actions.
+You MUST return EXACTLY {len(ctx_tasks)} update_task actions — one for EACH task listed above.
+Distribute tasks across users using round-robin: task1→user {user_ids_list[0] if user_ids_list else '?'}, task2→user {user_ids_list[1] if len(user_ids_list) > 1 else user_ids_list[0] if user_ids_list else '?'}, then repeat.
 
-INSTRUCTIONS:
-- Look at the existing tasks in the context above
-- Match them with available users
-- Return update_task actions to assign tasks to the requested users
-- If user says "assign to all users" or "all available users", distribute tasks evenly across ALL available users (round-robin)
-- If user mentions specific users, assign only to those users
-- If user says "assign all tasks", update ALL tasks in the project/context
+Format (keep reasoning under 10 words):
+[{{"action":"update_task","task_id":123,"task_title":"title","updates":{{"assignee_id":1}},"reasoning":"round-robin"}}]
 
-Return ONLY this JSON format (no other text):
-[
-    {{
-        "action": "update_task",
-        "task_id": task_id_number,
-        "task_title": "current task title",
-        "updates": {{
-            "assignee_id": user_id
-        }},
-        "reasoning": "Brief explanation of why this user was assigned this task"
-    }}
-]
-
-CRITICAL RULES:
-- Return ONLY the JSON array, no explanations
-- Use task IDs from the context above
-- Use user IDs from the available users list above
-- For "assign to all users": distribute tasks evenly across all users using round-robin
-- For specific user assignment: use only the mentioned user's ID
-- DO NOT create new projects or tasks - ONLY update existing ones
-- DO NOT return create_project or create_task actions"""
+RULES:
+- assignee_id MUST be a NUMERIC INTEGER from: [{', '.join(user_ids_list)}]. NEVER use strings/emails.
+- task_id MUST be a NUMERIC INTEGER from: [{', '.join(all_task_ids)}]
+- You MUST include ALL {len(ctx_tasks)} tasks. Do NOT skip any.
+- Return ONLY the JSON array"""
             
             # Handle deletion requests
             elif is_deletion_request:
@@ -1102,8 +1100,7 @@ Return a helpful text response (NOT JSON) explaining this."""
             # Determine if this is a text-only response (not JSON)
             # Deletion requests should return JSON (actions), so they're not text-only
             is_text_response = (
-                cannot_do or 
-                (is_assignment_request and not is_creation_request) or
+                cannot_do or
                 ('clarification' in prompt.lower() or "didn't understand" in prompt.lower() or "please specify" in prompt.lower()) or
                 (not is_action_request and not is_deletion_request)
             )

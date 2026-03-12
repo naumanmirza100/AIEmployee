@@ -198,14 +198,33 @@ def _ensure_project_manager(user):
         return False
 
 
-def _build_available_users(project_id=None, project=None):
+def _build_available_users(project_id=None, project=None, company_user=None):
     """
-    - If project_id provided: return team members + owner for that project
-    - Else: return up to 50 users (for general assignment mapping)
-    - Never include superusers (they should not be assigned tasks when creating projects/tasks).
+    Return users created by this company_user (from UserProfile).
+    Falls back to team members if no company_user provided.
+    Never include superusers.
     """
     available_users = []
 
+    # Primary: use UserProfile to get users created by this company user
+    if company_user:
+        from core.models import UserProfile
+        created_profiles = UserProfile.objects.filter(
+            created_by_company_user=company_user
+        ).select_related('user')
+        for profile in created_profiles:
+            user = profile.user
+            if getattr(user, "is_superuser", False):
+                continue
+            available_users.append({
+                "id": user.id,
+                "username": user.username,
+                "name": user.get_full_name() or user.username,
+                "role": profile.role or "team_member",
+            })
+        return available_users
+
+    # Fallback: team members for a specific project
     if project_id and project is not None:
         team_members = TeamMember.objects.filter(project_id=project_id).select_related("user")
         for member in team_members:
@@ -219,20 +238,6 @@ def _build_available_users(project_id=None, project=None):
                     "role": member.role,
                 }
             )
-
-        # Include owner if not in team list (and not a superuser)
-        team_user_ids = {m.user.id for m in team_members}
-        if project.owner_id and project.owner_id not in team_user_ids:
-            owner = project.owner
-            if not getattr(owner, "is_superuser", False):
-                available_users.append(
-                    {
-                        "id": owner.id,
-                        "username": owner.username,
-                        "name": owner.get_full_name() or owner.username,
-                        "role": "owner",
-                    }
-                )
     else:
         User = get_user_model()
         users = User.objects.filter(is_superuser=False)[:50]
@@ -447,7 +452,7 @@ def project_pilot(request):
                 ],
             }
 
-        available_users = _build_available_users(project_id=project_id, project=project)
+        available_users = _build_available_users(project_id=project_id, project=project, company_user=company_user)
         context["user_assignments"] = _build_user_assignments(
             available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
@@ -2518,7 +2523,7 @@ def get_available_users(request):
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         # Use the existing _build_available_users function
-        available_users = _build_available_users(project_id=project_id, project=project)
+        available_users = _build_available_users(project_id=project_id, project=project, company_user=company_user)
         
         return Response({
             'status': 'success',
@@ -2714,7 +2719,7 @@ def project_pilot_from_file(request):
                 ],
             }
 
-        available_users = _build_available_users(project_id=project_id, project=project)
+        available_users = _build_available_users(project_id=project_id, project=project, company_user=company_user)
         context["user_assignments"] = _build_user_assignments(
             available_users, project_id=project_id, all_tasks=all_tasks, owner=None
         )
