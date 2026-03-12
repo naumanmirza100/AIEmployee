@@ -9,6 +9,128 @@ import pmAgentService from '@/services/pmAgentService';
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, ChevronsLeft, ChevronsRight, Bot, Search, BarChart2, Maximize2 } from 'lucide-react';
 import { renderChart } from '../recruitment/ChartRenderer';
 
+function markdownToHtml(markdown) {
+  if (!markdown || typeof markdown !== 'string') return '';
+
+  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-violet-300">$1</strong>');
+
+  // Detect indentation level: count leading spaces before the bullet marker
+  const getIndentLevel = (line) => {
+    const match = line.match(/^(\s*)(?:•|-|\*|\d+\.)\s+/);
+    if (!match) return -1;
+    return Math.floor(match[1].length / 2); // every 2-3 spaces = 1 level
+  };
+
+  const lines = markdown.split('\n');
+  const out = [];
+  // Track nested list depth with a stack
+  let listDepth = -1; // -1 = not in a list
+
+  const closeListsTo = (targetDepth) => {
+    while (listDepth > targetDepth) {
+      out.push('</ul>');
+      listDepth--;
+    }
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+
+    // Markdown table
+    if (t.startsWith('|') && t.endsWith('|')) {
+      closeListsTo(-1);
+      const tableRows = [];
+      let j = i;
+      while (j < lines.length && lines[j].trim().startsWith('|')) {
+        const cells = lines[j].trim().split('|').map(c => c.trim()).filter(Boolean);
+        if (cells.length > 0 && cells.every(c => /^[-:\s]+$/.test(c))) { j++; continue; }
+        tableRows.push(cells);
+        j++;
+      }
+      i = j;
+      if (tableRows.length > 0) {
+        out.push('<div class="my-3 overflow-x-auto rounded-lg border border-white/10"><table class="w-full text-sm">');
+        out.push('<thead><tr class="bg-violet-500/10">');
+        tableRows[0].forEach(cell => out.push(`<th class="px-3 py-2 text-left font-semibold text-violet-300">${bold(escape(cell))}</th>`));
+        out.push('</tr></thead><tbody>');
+        tableRows.slice(1).forEach((row, idx) => {
+          out.push(`<tr class="${idx % 2 === 0 ? 'bg-white/[0.02]' : ''} hover:bg-white/[0.04] transition-colors">`);
+          row.forEach(cell => out.push(`<td class="px-3 py-2 border-t border-white/5 text-sm">${bold(escape(cell))}</td>`));
+          out.push('</tr>');
+        });
+        out.push('</tbody></table></div>');
+      }
+      continue;
+    }
+
+    if (/^---+$/.test(t)) {
+      closeListsTo(-1);
+      out.push('<hr class="my-4 border-white/10"/>');
+      i++; continue;
+    }
+
+    if (/^## /.test(t)) {
+      closeListsTo(-1);
+      out.push(`<h2 class="text-base font-bold mt-4 mb-2 text-violet-300 border-b border-violet-500/20 pb-1.5">${bold(escape(t.slice(3)))}</h2>`);
+      i++; continue;
+    }
+
+    if (/^### /.test(t)) {
+      closeListsTo(-1);
+      out.push(`<h3 class="text-sm font-bold mt-3 mb-1.5 text-violet-200">${bold(escape(t.slice(4)))}</h3>`);
+      i++; continue;
+    }
+
+    // Numbered items or bullet points — with nesting support
+    const indent = getIndentLevel(line);
+    if (indent >= 0) {
+      const content = t.replace(/^[\s]*(?:•|-|\*|\d+\.)\s+/, '');
+
+      if (indent > listDepth) {
+        // Open deeper nested list(s)
+        while (listDepth < indent) {
+          const isTop = listDepth === -1;
+          out.push(`<ul class="${isTop ? 'pl-4 my-2 space-y-1.5' : 'pl-5 mt-1 mb-1 space-y-1 border-l border-white/[0.06]'}">`);
+          listDepth++;
+        }
+      } else if (indent < listDepth) {
+        // Close deeper lists back to current level
+        closeListsTo(indent);
+      }
+
+      const isTopLevel = indent === 0;
+      if (isTopLevel) {
+        out.push(`<li class="text-sm leading-relaxed text-white/90 flex gap-2 pt-1"><span class="text-violet-400 shrink-0 mt-0.5">•</span><span>${bold(escape(content))}</span></li>`);
+      } else {
+        out.push(`<li class="text-sm leading-relaxed text-white/60 flex gap-2"><span class="text-white/30 shrink-0 mt-0.5">›</span><span>${bold(escape(content))}</span></li>`);
+      }
+      i++; continue;
+    }
+
+    if (t === '' && listDepth >= 0) {
+      // Empty line: only close if next non-empty line is not a list item
+      let nextNonEmpty = i + 1;
+      while (nextNonEmpty < lines.length && lines[nextNonEmpty].trim() === '') nextNonEmpty++;
+      if (nextNonEmpty >= lines.length || getIndentLevel(lines[nextNonEmpty]) < 0) {
+        closeListsTo(-1);
+      }
+      i++; continue;
+    }
+
+    if (t && !t.startsWith('<')) {
+      closeListsTo(-1);
+      out.push(`<p class="my-2 text-sm leading-relaxed text-white/80">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
+    }
+    i++;
+  }
+
+  closeListsTo(-1);
+  return out.join('\n');
+}
+
 const KnowledgeQAAgent = ({ projects = [] }) => {
   const { toast } = useToast();
   const safeProjects = Array.isArray(projects) ? projects : [];
@@ -541,9 +663,10 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                     </>
                   ) : (
                     <>
-                      <div className="text-sm text-foreground whitespace-pre-wrap break-words">
-                        {msg.responseData?.answer ?? msg.content}
-                      </div>
+                      <div
+                        className="text-sm text-foreground break-words qa-markdown-response"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.responseData?.answer ?? msg.content) }}
+                      />
                       {msg.responseData?.project_title && (
                         <p className="text-xs text-muted-foreground mt-2">Scoped to: {msg.responseData.project_title}</p>
                       )}
