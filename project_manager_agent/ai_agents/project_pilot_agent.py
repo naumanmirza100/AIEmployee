@@ -236,19 +236,29 @@ class ProjectPilotAgent(BaseAgent):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
                             task_line += f" [Unassigned]"
+                        subtasks = task.get('subtasks', [])
+                        if subtasks:
+                            task_line += f" [{len(subtasks)} subtask(s)]"
                         context_str += task_line + "\n"
+                        for st in subtasks:
+                            context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
 
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
-                for task in context['tasks'][:20]:  # Show more tasks
+                for task in context['tasks'][:20]:
                     task_id = task.get('id', 'N/A')
                     task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
                         task_line += f" [Project: {task.get('project_name')}]"
+                    subtasks = task.get('subtasks', [])
+                    if subtasks:
+                        task_line += f" [{len(subtasks)} subtask(s)]"
                     context_str += task_line + "\n"
+                    for st in subtasks:
+                        context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
         
         # Add user-task assignments if available
         if 'user_assignments' in context:

@@ -393,7 +393,7 @@ def project_pilot(request):
 
         if project_id:
             project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-            tasks = Task.objects.filter(project=project).select_related("assignee")
+            tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
             context = {
                 "project": {
                     "id": project.id,
@@ -410,6 +410,15 @@ def project_pilot(request):
                         "description": t.description,
                         "assignee_id": t.assignee.id if t.assignee else None,
                         "assignee_username": t.assignee.username if t.assignee else None,
+                        "subtasks": [
+                            {
+                                "id": st.id,
+                                "title": st.title,
+                                "status": st.status,
+                                "order": st.order,
+                            }
+                            for st in t.subtasks.all()
+                        ],
                     }
                     for t in tasks
                 ],
@@ -1553,7 +1562,7 @@ def knowledge_qa(request):
         project_id = request.data.get("project_id")
         
         all_projects = Project.objects.filter(created_by_company_user=company_user)
-        all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project", "assignee")
+        all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project", "assignee").prefetch_related("subtasks")
         
         # Get all users created by this company user
         from core.models import UserProfile
@@ -1617,7 +1626,7 @@ def knowledge_qa(request):
 
         if project_id:
             project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-            tasks = Task.objects.filter(project=project).select_related("assignee")
+            tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
             context = {
                 "project": {
                     "id": project.id,
@@ -1634,6 +1643,15 @@ def knowledge_qa(request):
                         "description": t.description,
                         "assignee_id": t.assignee.id if t.assignee else None,
                         "assignee_username": t.assignee.username if t.assignee else None,
+                        "subtasks": [
+                            {
+                                "id": st.id,
+                                "title": st.title,
+                                "status": st.status,
+                                "order": st.order,
+                            }
+                            for st in t.subtasks.all()
+                        ],
                     }
                     for t in tasks
                 ],
@@ -1674,18 +1692,187 @@ def knowledge_qa(request):
                         "project_name": t.project.name,
                         "assignee_id": t.assignee.id if t.assignee else None,
                         "assignee_username": t.assignee.username if t.assignee else None,
+                        "subtasks": [
+                            {
+                                "id": st.id,
+                                "title": st.title,
+                                "status": st.status,
+                                "order": st.order,
+                            }
+                            for st in t.subtasks.all()
+                        ],
                     }
                     for t in all_tasks[:50]
                 ],
                 "user_assignments": user_assignments,
             }
 
+        # ========== RICH CONTEXT: include additional data based on question relevance ==========
+        q_lower = question.lower()
+        from core.models import (
+            TaskActivityLog, TaskComment, TeamMember, TimeEntry,
+            ProjectMilestone, ProjectRisk, ProjectIssue
+        )
+
+        # --- Activity logs (who changed what when) ---
+        # Include if question mentions: changed, updated, modified, history, activity, log, status change, who, when
+        activity_keywords = ['changed', 'updated', 'modified', 'history', 'activity', 'log', 'status change',
+                             'who', 'when did', 'last change', 'recent change', 'what happened', 'timeline',
+                             'assigned', 'reassigned', 'completed', 'moved', 'audit']
+        if any(kw in q_lower for kw in activity_keywords):
+            if project_id:
+                activity_logs = TaskActivityLog.objects.filter(
+                    task__project_id=project_id,
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-created_at')[:30]
+            else:
+                activity_logs = TaskActivityLog.objects.filter(
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-created_at')[:20]
+            context["activity_logs"] = [
+                {
+                    "task_title": log.task.title if log.task else "Unknown",
+                    "task_id": log.task_id,
+                    "action_type": log.action_type,
+                    "old_value": log.old_value,
+                    "new_value": log.new_value,
+                    "user": log.user.get_full_name() or log.user.username if log.user else "System",
+                    "timestamp": log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else None,
+                    "details": log.details if hasattr(log, 'details') and log.details else None,
+                }
+                for log in activity_logs
+            ]
+
+        # --- Comments on tasks ---
+        comment_keywords = ['comment', 'discussion', 'said', 'wrote', 'message', 'feedback', 'note']
+        if any(kw in q_lower for kw in comment_keywords):
+            if project_id:
+                comments = TaskComment.objects.filter(
+                    task__project_id=project_id,
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-created_at')[:20]
+            else:
+                comments = TaskComment.objects.filter(
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-created_at')[:15]
+            context["comments"] = [
+                {
+                    "task_title": c.task.title if c.task else "Unknown",
+                    "user": c.user.get_full_name() or c.user.username if c.user else "Unknown",
+                    "comment": c.comment_text[:200] if c.comment_text else "",
+                    "timestamp": c.created_at.strftime('%Y-%m-%d %H:%M') if c.created_at else None,
+                }
+                for c in comments
+            ]
+
+        # --- Team members ---
+        team_keywords = ['team', 'member', 'who is', 'role', 'joined', 'part of']
+        if any(kw in q_lower for kw in team_keywords):
+            if project_id:
+                members = TeamMember.objects.filter(
+                    project_id=project_id,
+                    project__created_by_company_user=company_user
+                ).select_related('user')
+            else:
+                members = TeamMember.objects.filter(
+                    project__created_by_company_user=company_user
+                ).select_related('user', 'project')
+            context["team_members"] = [
+                {
+                    "user": m.user.get_full_name() or m.user.username if m.user else "Unknown",
+                    "role": m.role,
+                    "project": m.project.name if hasattr(m, 'project') and m.project else None,
+                    "joined_at": m.joined_at.strftime('%Y-%m-%d') if m.joined_at else None,
+                }
+                for m in members[:30]
+            ]
+
+        # --- Time entries ---
+        time_keywords = ['time', 'hours', 'spent', 'tracked', 'timesheet', 'billable', 'effort']
+        if any(kw in q_lower for kw in time_keywords):
+            if project_id:
+                entries = TimeEntry.objects.filter(
+                    task__project_id=project_id,
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-date')[:20]
+            else:
+                entries = TimeEntry.objects.filter(
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-date')[:15]
+            context["time_entries"] = [
+                {
+                    "task_title": e.task.title if e.task else "Unknown",
+                    "user": e.user.get_full_name() or e.user.username if e.user else "Unknown",
+                    "hours": float(e.hours) if e.hours else 0,
+                    "date": e.date.strftime('%Y-%m-%d') if e.date else None,
+                    "description": e.description[:100] if e.description else "",
+                    "billable": e.billable,
+                }
+                for e in entries
+            ]
+
+        # --- Milestones ---
+        milestone_keywords = ['milestone', 'deadline', 'target', 'goal', 'due', 'progress']
+        if any(kw in q_lower for kw in milestone_keywords):
+            if project_id:
+                milestones = ProjectMilestone.objects.filter(
+                    project_id=project_id,
+                    project__created_by_company_user=company_user
+                ).order_by('due_date')
+            else:
+                milestones = ProjectMilestone.objects.filter(
+                    project__created_by_company_user=company_user
+                ).select_related('project').order_by('due_date')[:15]
+            context["milestones"] = [
+                {
+                    "title": ms.title,
+                    "project": ms.project.name if hasattr(ms, 'project') and ms.project else None,
+                    "due_date": ms.due_date.strftime('%Y-%m-%d') if ms.due_date else None,
+                    "status": ms.status,
+                    "completed_at": ms.completed_at.strftime('%Y-%m-%d') if ms.completed_at else None,
+                }
+                for ms in milestones
+            ]
+
+        # --- Risks & Issues ---
+        risk_keywords = ['risk', 'issue', 'problem', 'blocker', 'blocked', 'impediment', 'concern', 'severity']
+        if any(kw in q_lower for kw in risk_keywords):
+            if project_id:
+                risks = ProjectRisk.objects.filter(project_id=project_id, project__created_by_company_user=company_user)[:10]
+                issues = ProjectIssue.objects.filter(project_id=project_id, project__created_by_company_user=company_user)[:10]
+            else:
+                risks = ProjectRisk.objects.filter(project__created_by_company_user=company_user).select_related('project')[:10]
+                issues = ProjectIssue.objects.filter(project__created_by_company_user=company_user).select_related('project')[:10]
+            context["risks"] = [
+                {
+                    "title": r.title,
+                    "project": r.project.name if hasattr(r, 'project') and r.project else None,
+                    "severity": r.severity,
+                    "status": r.status,
+                    "mitigation": r.mitigation_plan[:100] if r.mitigation_plan else None,
+                }
+                for r in risks
+            ]
+            context["issues"] = [
+                {
+                    "title": iss.title,
+                    "project": iss.project.name if hasattr(iss, 'project') and iss.project else None,
+                    "severity": iss.severity,
+                    "status": iss.status,
+                    "reported_by": iss.reported_by.get_full_name() if iss.reported_by else None,
+                    "created_at": iss.created_at.strftime('%Y-%m-%d') if iss.created_at else None,
+                }
+                for iss in issues
+            ]
+
+        # ========== END RICH CONTEXT ==========
+
         # Enhanced: Get session_id for conversational memory
         session_id = request.data.get("session_id")
         if not session_id:
             # Generate session ID from company user ID
             session_id = f"company_user_{company_user.id}"
-        
+
         chat_history = request.data.get("chat_history") or []
         agent = AgentRegistry.get_agent("knowledge_qa")
         result = agent.process(
