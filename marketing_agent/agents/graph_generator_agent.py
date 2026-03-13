@@ -34,6 +34,68 @@ class GraphGeneratorAgent(MarketingBaseAgent):
         super().__init__(**kwargs)
         self.user = user  # Django User (from company user) for filtering campaigns/leads
 
+    def _normalize_prompt_text(self, prompt: str) -> str:
+        """Normalize prompt text and repair common misspellings for intent detection."""
+        p = (prompt or '').lower()
+        p = p.replace('_', ' ').replace('-', ' ')
+
+        typo_fixes = {
+            r'\bcampagin\b': 'campaign',
+            r'\bcampaing\b': 'campaign',
+            r'\bcampain\b': 'campaign',
+            r'\bcampaign\b': 'campaign',
+            r'\bstaus\b': 'status',
+            r'\bstatu\b': 'status',
+            r'\breplys\b': 'replies',
+            r'\breplyes\b': 'replies',
+            r'\bleed\b': 'lead',
+            r'\bemdail\b': 'email',
+            r'\bemial\b': 'email',
+            r'\beamil\b': 'email',
+            r'\bdougnut\b': 'doughnut',
+            r'\bdounut\b': 'donut',
+            r'\bpiar\b': 'pie',
+        }
+        for pattern, replacement in typo_fixes.items():
+            p = re.sub(pattern, replacement, p)
+
+        p = re.sub(r'[^a-z0-9\s]', ' ', p)
+        p = re.sub(r'\s+', ' ', p).strip()
+        return p
+
+    def _contains_any(self, text: str, needles: List[str]) -> bool:
+        return any(n in text for n in needles)
+
+    def _infer_metric_intent(self, prompt: str) -> str:
+        """Infer which metric the user asked to visualize."""
+        p = self._normalize_prompt_text(prompt)
+
+        has_campaign = self._contains_any(p, ['campaign', 'campaigns'])
+        has_status = self._contains_any(p, ['status', 'state'])
+        has_open_or_click = self._contains_any(
+            p,
+            ['open rate', 'openrate', 'click rate', 'clickrate', 'open', 'click'],
+        )
+        has_email = self._contains_any(p, ['email', 'emails', 'mail', 'mails'])
+        has_volume = self._contains_any(p, ['sent', 'send', 'volume', 'count', 'delivered'])
+        has_lead = self._contains_any(p, ['lead', 'leads'])
+        has_reply = self._contains_any(
+            p,
+            ['reply', 'replies', 'respond', 'response', 'responses'],
+        )
+
+        if has_campaign and has_status:
+            return 'status'
+        if has_open_or_click:
+            return 'open_rate'
+        if has_email and (has_volume or has_campaign):
+            return 'emails_sent'
+        if has_lead:
+            return 'leads'
+        if has_reply:
+            return 'replies'
+        return 'default'
+
     def _fetch_marketing_data(self) -> Dict[str, Any]:
         """Fetch all relevant marketing data for the current user (campaigns, email stats, replies)."""
         user_id = self.user.id if self.user else None
@@ -337,12 +399,34 @@ Rules:
 
             chart_config = json.loads(response_text)
 
-            if 'chart_type' not in chart_config:
-                chart_config['chart_type'] = 'bar'
+            # Respect explicit user chart requests like "line chart" even if LLM returns aliases.
+            requested_chart_type = self._get_requested_chart_type(prompt)
+            chart_config['chart_type'] = self._normalize_chart_type(
+                chart_config.get('chart_type'),
+                requested_chart_type=requested_chart_type,
+            )
             if 'title' not in chart_config:
                 chart_config['title'] = 'Generated Chart'
             if 'data' not in chart_config:
                 chart_config['data'] = {}
+            chart_config['data'] = self._coerce_chart_data_for_type(
+                chart_config.get('data'),
+                chart_config['chart_type'],
+            )
+
+            # Force known metric intents to use deterministic data slices so
+            # requests like "area chart of leads by campaign" don't drift.
+            enforced = self._generate_fallback_chart(
+                prompt,
+                marketing_data,
+                forced_intent=self._infer_metric_intent(prompt),
+                forced_chart_type=chart_config['chart_type'],
+            )
+            if enforced and enforced.get('chart'):
+                chart_config['data'] = enforced['chart'].get('data', chart_config['data'])
+                if not chart_config.get('title'):
+                    chart_config['title'] = enforced['chart'].get('title', 'Generated Chart')
+
             if 'colors' not in chart_config:
                 chart_config['colors'] = [
                     '#3b82f6',
@@ -378,20 +462,100 @@ Rules:
             logger.exception(f"Error generating marketing graph: {e}")
             return self._generate_fallback_chart(prompt, marketing_data)
 
-    def _generate_fallback_chart(self, prompt: str, data: Dict) -> Dict[str, Any]:
+    def _get_requested_chart_type(self, prompt: str) -> Optional[str]:
+        """Extract explicit chart type from prompt, including common misspellings."""
+        p = self._normalize_prompt_text(prompt)
+
+        chart_aliases = {
+            'line': ['line', 'linear', 'trend'],
+            'area': ['area', 'areaa', 'aria'],
+            'pie': ['pie', 'donut', 'doughnut'],
+            'bar': ['bar', 'bars', 'column', 'columns', 'histogram'],
+        }
+
+        last_match_pos = -1
+        detected_type = None
+
+        for chart_type, aliases in chart_aliases.items():
+            for alias in aliases:
+                for match in re.finditer(rf'\b{re.escape(alias)}\b', p):
+                    if match.start() >= last_match_pos:
+                        last_match_pos = match.start()
+                        detected_type = chart_type
+
+        return detected_type
+
+    def _normalize_chart_type(
+        self,
+        chart_type: Optional[str],
+        requested_chart_type: Optional[str] = None,
+    ) -> str:
+        """Normalize AI/alias chart types to one of: bar, pie, line, area."""
+        if requested_chart_type in {'bar', 'pie', 'line', 'area'}:
+            return requested_chart_type
+
+        t = (chart_type or '').strip().lower().replace('_', ' ').replace('-', ' ')
+        if not t:
+            return 'bar'
+
+        if 'line' in t:
+            return 'line'
+        if 'area' in t:
+            return 'area'
+        if 'pie' in t or 'donut' in t or 'doughnut' in t:
+            return 'pie'
+        if 'bar' in t or 'column' in t:
+            return 'bar'
+        return 'bar'
+
+    def _coerce_chart_data_for_type(self, data: Any, chart_type: str) -> Any:
+        """Ensure chart data shape matches expected type for frontend renderer."""
+        if chart_type in {'line', 'area'}:
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return [{'label': str(k), 'value': v} for k, v in data.items()]
+            return []
+
+        # bar/pie expected as object
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            return {
+                str(item.get('label', i)): item.get('value', 0)
+                for i, item in enumerate(data)
+                if isinstance(item, dict)
+            }
+        return {}
+
+    def _generate_fallback_chart(
+        self,
+        prompt: str,
+        data: Dict,
+        forced_intent: Optional[str] = None,
+        forced_chart_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Generate a fallback chart when LLM fails."""
-        prompt_lower = prompt.lower()
+        prompt_lower = self._normalize_prompt_text(prompt)
+        requested_chart_type = forced_chart_type or self._get_requested_chart_type(prompt)
+        metric_intent = forced_intent or self._infer_metric_intent(prompt)
 
         # Campaigns by status
-        if 'status' in prompt_lower and 'campaign' in prompt_lower:
+        if metric_intent == 'status':
             by_status = {
                 k: v for k, v in data.get('by_status', {}).items() if v > 0
             } or {'No Data': 0}
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar', 'pie'} else 'pie'
+            chart_data = (
+                [{'label': k, 'value': v} for k, v in by_status.items()]
+                if chart_type in {'line', 'area'}
+                else by_status
+            )
             return {
                 'chart': {
-                    'type': 'pie',
+                    'type': chart_type,
                     'title': 'Campaigns by Status',
-                    'data': by_status,
+                    'data': chart_data,
                     'colors': ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
                     'color': '#3b82f6',
                 },
@@ -399,18 +563,24 @@ Rules:
             }
 
         # Open rate / click rate by campaign
-        if 'open rate' in prompt_lower or 'click rate' in prompt_lower:
+        if metric_intent == 'open_rate':
             by_rate = data.get('by_campaign_open_rate') or {}
             if not by_rate:
                 by_rate = {'No data': 0}
             sorted_data = dict(
                 sorted(by_rate.items(), key=lambda x: (x[1] or 0), reverse=True)
             )
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar'} else 'bar'
+            chart_data = (
+                [{'label': k, 'value': v} for k, v in sorted_data.items()]
+                if chart_type in {'line', 'area'}
+                else sorted_data
+            )
             return {
                 'chart': {
-                    'type': 'bar',
+                    'type': chart_type,
                     'title': 'Open Rate by Campaign (%)',
-                    'data': sorted_data,
+                    'data': chart_data,
                     'colors': ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'],
                     'color': '#10b981',
                 },
@@ -418,7 +588,7 @@ Rules:
             }
 
         # Emails sent by campaign
-        if 'email' in prompt_lower and ('sent' in prompt_lower or 'volume' in prompt_lower):
+        if metric_intent == 'emails_sent':
             by_emails = data.get('by_campaign_emails_sent') or {}
             sorted_data = dict(
                 sorted(by_emails.items(), key=lambda x: x[1], reverse=True)
@@ -432,11 +602,17 @@ Rules:
                 sorted_data = dict(list(sorted_data.items())[:top_n])
             if not sorted_data:
                 sorted_data = {'No Data': 0}
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar'} else 'bar'
+            chart_data = (
+                [{'label': k, 'value': v} for k, v in sorted_data.items()]
+                if chart_type in {'line', 'area'}
+                else sorted_data
+            )
             return {
                 'chart': {
-                    'type': 'bar',
+                    'type': chart_type,
                     'title': 'Emails Sent by Campaign',
-                    'data': sorted_data,
+                    'data': chart_data,
                     'colors': ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
                     'color': '#3b82f6',
                 },
@@ -444,18 +620,24 @@ Rules:
             }
 
         # Leads by campaign
-        if 'lead' in prompt_lower and 'campaign' in prompt_lower:
+        if metric_intent == 'leads':
             by_leads = data.get('by_campaign_leads') or {}
             sorted_data = dict(
                 sorted(by_leads.items(), key=lambda x: x[1], reverse=True)[:10]
             )
             if not sorted_data:
                 sorted_data = {'No Data': 0}
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar'} else 'bar'
+            chart_data = (
+                [{'label': k, 'value': v} for k, v in sorted_data.items()]
+                if chart_type in {'line', 'area'}
+                else sorted_data
+            )
             return {
                 'chart': {
-                    'type': 'bar',
+                    'type': chart_type,
                     'title': 'Leads by Campaign',
-                    'data': sorted_data,
+                    'data': chart_data,
                     'colors': ['#10b981', '#3b82f6', '#f59e0b'],
                     'color': '#10b981',
                 },
@@ -463,18 +645,24 @@ Rules:
             }
 
         # Replies by campaign
-        if 'repl' in prompt_lower and 'campaign' in prompt_lower:
+        if metric_intent == 'replies':
             by_replies = data.get('by_campaign_replies') or {}
             sorted_data = dict(
                 sorted(by_replies.items(), key=lambda x: x[1], reverse=True)[:10]
             )
             if not sorted_data:
                 sorted_data = {'No Data': 0}
+            chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar'} else 'bar'
+            chart_data = (
+                [{'label': k, 'value': v} for k, v in sorted_data.items()]
+                if chart_type in {'line', 'area'}
+                else sorted_data
+            )
             return {
                 'chart': {
-                    'type': 'bar',
+                    'type': chart_type,
                     'title': 'Replies by Campaign',
-                    'data': sorted_data,
+                    'data': chart_data,
                     'colors': ['#8b5cf6', '#3b82f6', '#10b981'],
                     'color': '#8b5cf6',
                 },
@@ -484,11 +672,17 @@ Rules:
         # Default: campaigns by status
         by_status = data.get('by_status') or {}
         by_status = {k: v for k, v in by_status.items() if v > 0} or {'No Data': 0}
+        chart_type = requested_chart_type if requested_chart_type in {'line', 'area', 'bar', 'pie'} else 'pie'
+        chart_data = (
+            [{'label': k, 'value': v} for k, v in by_status.items()]
+            if chart_type in {'line', 'area'}
+            else by_status
+        )
         return {
             'chart': {
-                'type': 'pie',
+                'type': chart_type,
                 'title': 'Marketing Overview – Campaigns by Status',
-                'data': by_status,
+                'data': chart_data,
                 'colors': ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
                 'color': '#3b82f6',
             },

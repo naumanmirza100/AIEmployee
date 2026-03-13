@@ -2042,33 +2042,37 @@ const SUGGESTED_SEARCH_QUESTIONS = [
 // Chart components
 const SimpleBarChart = ({ data, colors, height = 250, title }) => {
   if (!data || Object.keys(data).length === 0) return <div className="text-sm text-muted-foreground">No data available</div>;
-  const maxValue = Math.max(...Object.values(data), 1);
+  const entries = Object.entries(data).map(([key, value]) => [key, Number(value) || 0]);
+  const maxValue = Math.max(...entries.map(([, value]) => value), 1);
   const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
   const chartColors = colors || defaultColors;
+  const dynamicHeight = Math.max(140, Math.min(360, entries.length * 42 + 30));
+
   return (
-    <div className="space-y-3 p-4 rounded-xl bg-gradient-to-b from-muted/5 to-transparent" style={{ minHeight: `${height}px` }}>
-      {title && <h4 className="font-medium text-sm text-muted-foreground mb-4">{title}</h4>}
-      {Object.entries(data).map(([key, value], index) => (
-        <div key={key} className="group">
-          <div className="flex justify-between text-xs mb-1">
-            <span className="text-sm font-medium group-hover:text-primary transition-colors">{key}</span>
-            <span className="font-semibold bg-muted/30 px-2 py-0.5 rounded-full">{value}</span>
+    <div
+      className="rounded-xl border border-white/10 bg-[#090c14] p-3 sm:p-4 shadow-[0_8px_30px_rgba(0,0,0,0.28)]"
+      style={{ minHeight: `${Math.max(dynamicHeight, height * 0.6)}px` }}
+    >
+      {title && <h4 className="font-semibold text-sm text-white/90 mb-3">{title}</h4>}
+      <div className="space-y-2.5" style={{ minHeight: `${dynamicHeight}px` }}>
+        {entries.map(([key, value], index) => (
+          <div key={key} className="grid grid-cols-[minmax(120px,1fr)_minmax(180px,4fr)_58px] items-center gap-3">
+            <span className="text-xs sm:text-sm text-white/75 truncate" title={key}>{key}</span>
+            <div className="w-full h-8 rounded-lg bg-white/10 border border-white/10 overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${value > 0 ? Math.max((value / maxValue) * 100, 4) : 0}%` }}
+                transition={{ duration: 0.55, delay: index * 0.08 }}
+                className="h-full rounded-lg"
+                style={{
+                  backgroundColor: chartColors[index % chartColors.length],
+                }}
+              />
+            </div>
+            <span className="text-right text-sm font-semibold text-white/90">{Number.isInteger(value) ? value : value.toFixed(2)}</span>
           </div>
-          <div className="w-full bg-muted/30 rounded-full h-2.5 overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${(value / maxValue) * 100}%` }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              className="h-2.5 rounded-full transition-all relative"
-              style={{
-                backgroundColor: chartColors[index % chartColors.length],
-              }}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent" />
-            </motion.div>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 };
@@ -2145,8 +2149,9 @@ const SimplePieChart = ({ data, colors, title }) => {
   );
 };
 
-const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
+const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title, variant = 'line' }) => {
   if (!data || data.length === 0) return <div className="text-sm text-muted-foreground">No data available</div>;
+  const isArea = variant === 'area';
   const values = data.map(d => d.value ?? d.count ?? 0);
   const maxValue = Math.max(...values, 1);
   const labels = data.map(d => d.label ?? d.date ?? d.month ?? '');
@@ -2157,16 +2162,39 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
   }).join(' ');
   const areaPoints = `0,100 ${points} 100,100`;
   return (
-    <div className="space-y-2 p-4 rounded-xl bg-gradient-to-b from-muted/5 to-transparent">
-      {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
+    <div className={cn(
+      'space-y-2 p-4 rounded-xl border',
+      isArea
+        ? 'bg-gradient-to-b from-primary/15 via-primary/5 to-transparent border-primary/25'
+        : 'bg-gradient-to-b from-muted/5 to-transparent border-white/10'
+    )}>
+      {title && (
+        <h4 className={cn('font-medium text-sm', isArea ? 'text-primary' : 'text-muted-foreground')}>
+          {title}
+        </h4>
+      )}
       <div className="relative w-full" style={{ height: `${height}px` }}>
         <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {!isArea && [20, 40, 60, 80].map((y) => (
+            <line
+              key={y}
+              x1="0"
+              y1={y}
+              x2="100"
+              y2={y}
+              stroke="currentColor"
+              strokeWidth="0.35"
+              strokeDasharray="2 2"
+              className="text-muted-foreground/30"
+            />
+          ))}
           <motion.polygon
             initial={{ opacity: 0 }}
-            animate={{ opacity: 0.2 }}
+            animate={{ opacity: isArea ? 1 : 0 }}
             transition={{ duration: 0.5 }}
             points={areaPoints}
-            fill={`${color}20`}
+            fill={color}
+            fillOpacity={isArea ? 0.35 : 0}
           />
           <motion.polyline
             initial={{ pathLength: 0, opacity: 0 }}
@@ -2175,7 +2203,8 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
             points={points}
             fill="none"
             stroke={color}
-            strokeWidth="1.5"
+            strokeWidth={isArea ? '2.1' : '2.8'}
+            strokeDasharray={isArea ? '0' : '3 2'}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -2187,8 +2216,10 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
               transition={{ delay: 0.8 + index * 0.1, type: "spring" }}
               cx={(index / (values.length - 1 || 1)) * 100}
               cy={100 - (value / maxValue) * 100}
-              r="1.5"
+              r={isArea ? '1.2' : '1.9'}
               fill={color}
+              stroke={isArea ? 'none' : '#ffffff'}
+              strokeWidth={isArea ? 0 : 0.35}
               className="cursor-pointer hover:r-2 transition-all"
             />
           ))}
@@ -2206,12 +2237,32 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
 const renderChart = (chartData) => {
   if (!chartData) return null;
   const { type, data, title, color, colors } = chartData;
-  switch (type) {
-    case 'bar': return <SimpleBarChart data={data} colors={colors} title={title} />;
-    case 'pie': return <SimplePieChart data={data} colors={colors} title={title} />;
-    case 'line': return <SimpleLineChart data={data} color={color} title={title} />;
-    case 'area': return <SimpleLineChart data={data} color={color} title={title} />;
-    default: return <SimpleBarChart data={data} colors={colors} title={title} />;
+  const normalizedType = String(type || '')
+    .toLowerCase()
+    .replace(/[_-]/g, ' ')
+    .trim();
+
+  const resolvedType = normalizedType.includes('line')
+    ? 'line'
+    : normalizedType.includes('area')
+      ? 'area'
+      : normalizedType.includes('pie') || normalizedType.includes('donut') || normalizedType.includes('doughnut')
+        ? 'pie'
+        : normalizedType.includes('bar') || normalizedType.includes('column')
+          ? 'bar'
+          : 'bar';
+
+  const normalizedData =
+    resolvedType === 'line' || resolvedType === 'area'
+      ? (Array.isArray(data) ? data : Object.entries(data || {}).map(([label, value]) => ({ label, value })))
+      : (Array.isArray(data) ? Object.fromEntries(data.map((d, i) => [d?.label ?? `Item ${i + 1}`, d?.value ?? 0])) : data);
+
+  switch (resolvedType) {
+    case 'bar': return <SimpleBarChart data={normalizedData} colors={colors} title={title} />;
+    case 'pie': return <SimplePieChart data={normalizedData} colors={colors} title={title} />;
+    case 'line': return <SimpleLineChart data={normalizedData} color={color} title={title} variant="line" />;
+    case 'area': return <SimpleLineChart data={normalizedData} color={color} title={title} variant="area" />;
+    default: return <SimpleBarChart data={normalizedData} colors={colors} title={title} />;
   }
 };
 
@@ -3056,10 +3107,12 @@ const MarketingQA = () => {
                         )}
                       >
                         <div className={cn(
-                          "max-w-[85%] rounded-2xl overflow-hidden shadow-md",
+                          'rounded-2xl overflow-hidden shadow-md',
                           msg.role === 'user'
-                            ? 'bg-gradient-to-r from-primary to-primary/90 text-primary-foreground'
-                            : 'bg-gradient-to-r from-muted/80 to-muted/40 border shadow-sm'
+                            ? 'max-w-[85%] bg-gradient-to-r from-primary to-primary/90 text-primary-foreground'
+                            : msg.responseData?.isGraph
+                              ? 'w-full max-w-[980px] bg-gradient-to-r from-muted/80 to-muted/40 border shadow-sm'
+                              : 'max-w-[85%] bg-gradient-to-r from-muted/80 to-muted/40 border shadow-sm'
                         )}>
                           {msg.role === 'user' ? (
                             <div className="px-4 py-3">
@@ -3087,18 +3140,18 @@ const MarketingQA = () => {
                                 <>
                                   <div className="space-y-3">
                                     {msg.responseData.chart && (
-                                      <div className="relative w-full rounded-xl border border-border bg-gradient-to-b from-card to-muted/30 p-3 shadow-sm">
+                                      <div className="relative w-full rounded-xl border border-border bg-card p-2 shadow-sm overflow-x-auto">
                                         <Button
                                           type="button"
                                           variant="ghost"
                                           size="icon"
-                                          className="absolute top-2 right-2 h-7 w-7 rounded-md opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground bg-background/50 backdrop-blur-sm"
+                                          className="absolute top-1.5 right-1.5 h-7 w-7 rounded-md opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground bg-background/50 backdrop-blur-sm"
                                           onClick={() => setExpandedGraph({ chart: msg.responseData.chart, chartTitle: msg.responseData.chartTitle })}
                                           title="Expand graph"
                                         >
                                           <Maximize2 className="h-3.5 w-3.5" />
                                         </Button>
-                                        <div className="pr-8">
+                                        <div className="pr-8 w-full min-w-[560px] sm:min-w-0">
                                           {renderChart(msg.responseData.chart)}
                                         </div>
                                       </div>
@@ -3109,16 +3162,18 @@ const MarketingQA = () => {
                                           <Sparkles className="h-3 w-3 text-amber-500" />
                                           Insights
                                         </p>
-                                        <table className="w-full text-xs">
-                                          <tbody>
-                                            {msg.responseData.insights.map((insight, j) => (
-                                              <tr key={j} className="border-b border-border/30 hover:bg-muted/20 transition-colors">
-                                                <td className="py-1 pr-2 font-medium">{insight.title || 'N/A'}</td>
-                                                <td className="py-1 text-muted-foreground">{insight.value || 'N/A'}</td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
+                                        <div className="overflow-x-auto rounded-lg border border-border/40 bg-background/30">
+                                          <table className="w-full text-xs">
+                                            <tbody>
+                                              {msg.responseData.insights.map((insight, j) => (
+                                                <tr key={j} className="border-b border-border/30 hover:bg-muted/20 transition-colors">
+                                                  <td className="py-1.5 px-2.5 pr-2 font-medium whitespace-nowrap">{insight.title || 'N/A'}</td>
+                                                  <td className="py-1.5 px-2.5 text-muted-foreground">{insight.value || 'N/A'}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
                                       </div>
                                     )}
                                     <div className="flex flex-wrap gap-2 pt-2">
@@ -3461,8 +3516,10 @@ const MarketingQA = () => {
                   {expandedGraph?.chartTitle || 'Graph'}
                 </DialogTitle>
               </DialogHeader>
-              <div className="min-h-[400px] py-4">
-                {expandedGraph?.chart && renderChart(expandedGraph.chart)}
+              <div className="min-h-[400px] py-4 overflow-x-auto">
+                <div className="min-w-[720px] sm:min-w-0">
+                  {expandedGraph?.chart && renderChart(expandedGraph.chart)}
+                </div>
               </div>
             </DialogContent>
           </Dialog>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import SearchableSelect from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -20,7 +21,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, FileText, Calendar, ChevronLeft, ChevronRight, Mail, Briefcase, Percent } from 'lucide-react';
+import { Loader2, FileText, Calendar, ChevronLeft, ChevronRight, Mail, Briefcase, Percent, Printer } from 'lucide-react';
 import { getCVRecords, getJobDescriptions, bulkUpdateCVRecords } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
@@ -167,6 +168,66 @@ const CVRecords = () => {
 
   const clearSelection = () => setSelectedIds(new Set());
 
+  const handlePrint = () => {
+    const printData = records;
+    const selectedJob = jobs.find(j => j.id.toString() === jobFilter);
+    const decisionLabel = { INTERVIEW: 'Interview', HOLD: 'Hold', REJECT: 'Reject' }[decisionFilter] || 'All';
+
+    const rows = printData.map((record) => {
+      const p = record.parsed || {};
+      const decision = record.qualification_decision || '—';
+      const score = (record.qualification_confidence ?? record.role_fit_score) != null ? `${Math.round(record.qualification_confidence ?? record.role_fit_score)}%` : '—';
+      return `
+        <tr>
+          <td>${p.name || record.file_name || '—'}</td>
+          <td>${p.email || '—'}</td>
+          <td>${p.phone || '—'}</td>
+          <td>${record.job_description_title || '—'}</td>
+          <td>${score}</td>
+          <td>${decision}</td>
+          <td>${record.created_at ? new Date(record.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+        </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Candidates Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #111; margin: 24px; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    .meta { color: #555; font-size: 11px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #1a0a2e; color: #fff; padding: 8px 10px; text-align: left; font-size: 11px; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    tr:nth-child(even) td { background: #f9f7ff; }
+    @media print { body { margin: 10px; } }
+  </style>
+</head>
+<body>
+  <h1>Candidates Report</h1>
+  <div class="meta">
+    Job: ${selectedJob?.title || 'All Jobs'} &nbsp;|&nbsp; Decision: ${decisionLabel} &nbsp;|&nbsp; Total: ${total} &nbsp;|&nbsp; Printed: ${new Date().toLocaleString()}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Job</th><th>Score</th><th>Decision</th><th>Date</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -186,36 +247,34 @@ const CVRecords = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
-          <Select
+          <SearchableSelect
             value={jobFilter || 'all'}
             onValueChange={(value) => setJobFilter(value === 'all' ? '' : value)}
-          >
-            <SelectTrigger className="w-[180px] border-white/20">
-              <SelectValue placeholder="Select job" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Jobs</SelectItem>
-              {jobs.map((job) => (
-                <SelectItem key={job.id} value={job.id.toString()}>
-                  {job.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
+            options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.id.toString(), label: j.title }))]}
+            placeholder="All Jobs"
+            triggerClassName="w-[180px]"
+          />
+          <SearchableSelect
             value={decisionFilter || 'all'}
             onValueChange={(value) => setDecisionFilter(value === 'all' ? '' : value)}
+            options={[
+              { value: 'all', label: 'All Decisions' },
+              { value: 'INTERVIEW', label: 'Interview' },
+              { value: 'HOLD', label: 'Hold' },
+              { value: 'REJECT', label: 'Reject' },
+            ]}
+            placeholder="All Decisions"
+            triggerClassName="w-[140px]"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrint}
+            className="h-10 border-white/20 text-white/80 hover:bg-white/10 gap-2"
           >
-            <SelectTrigger className="w-[140px] border-white/20">
-              <SelectValue placeholder="Decision" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Decisions</SelectItem>
-              <SelectItem value="INTERVIEW">Interview</SelectItem>
-              <SelectItem value="HOLD">Hold</SelectItem>
-              <SelectItem value="REJECT">Reject</SelectItem>
-            </SelectContent>
-          </Select>
+            <Printer className="h-4 w-4" />
+            Print
+          </Button>
         </div>
       </div>
 
