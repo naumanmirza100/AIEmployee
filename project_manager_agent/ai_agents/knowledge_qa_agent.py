@@ -508,18 +508,28 @@ class KnowledgeQAAgent(BaseAgent):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
                             task_line += f" [Unassigned]"
+                        subtasks = task.get('subtasks', [])
+                        if subtasks:
+                            task_line += f" [{len(subtasks)} subtask(s)]"
                         context_str += task_line + "\n"
+                        for st in subtasks:
+                            context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
 
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
-                for task in context['tasks'][:20]:  # Show more tasks
+                for task in context['tasks'][:20]:
                     task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
                         task_line += f" [Project: {task.get('project_name')}]"
+                    subtasks = task.get('subtasks', [])
+                    if subtasks:
+                        task_line += f" [{len(subtasks)} subtask(s)]"
                     context_str += task_line + "\n"
+                    for st in subtasks:
+                        context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
         
         # Add available users information to context string
         if available_users:
@@ -553,7 +563,80 @@ class KnowledgeQAAgent(BaseAgent):
                     assignments_str += f"\n👤 {assignment.get('name', assignment.get('username', 'Unknown'))} (Username: {assignment.get('username', 'Unknown')}) - No tasks assigned\n"
         
         context_str += assignments_str
-        
+
+        # --- Rich context: activity logs, comments, team members, time entries, milestones, risks, issues ---
+        if context.get('activity_logs'):
+            context_str += f"\n\n📝 ACTIVITY LOGS ({len(context['activity_logs'])} recent entries):\n"
+            for log in context['activity_logs']:
+                line = f"- [{log.get('timestamp', 'N/A')}] {log.get('user', 'Unknown')} "
+                line += f"performed '{log.get('action_type', 'action')}' on task \"{log.get('task_title', 'Unknown')}\""
+                if log.get('old_value') and log.get('new_value'):
+                    line += f" (changed from '{log['old_value']}' to '{log['new_value']}')"
+                elif log.get('new_value'):
+                    line += f" (set to '{log['new_value']}')"
+                if log.get('details'):
+                    line += f" - {log['details']}"
+                context_str += line + "\n"
+
+        if context.get('comments'):
+            context_str += f"\n\n💬 TASK COMMENTS ({len(context['comments'])} recent):\n"
+            for c in context['comments']:
+                context_str += f"- [{c.get('timestamp', 'N/A')}] {c.get('user', 'Unknown')} on \"{c.get('task_title', 'Unknown')}\": {c.get('comment', '')}\n"
+
+        if context.get('team_members'):
+            context_str += f"\n\n👥 TEAM MEMBERS ({len(context['team_members'])} members):\n"
+            for m in context['team_members']:
+                line = f"- {m.get('user', 'Unknown')} (Role: {m.get('role', 'N/A')})"
+                if m.get('project'):
+                    line += f" [Project: {m['project']}]"
+                if m.get('joined_at'):
+                    line += f" (Joined: {m['joined_at']})"
+                context_str += line + "\n"
+
+        if context.get('time_entries'):
+            context_str += f"\n\n⏱️ TIME ENTRIES ({len(context['time_entries'])} recent):\n"
+            for e in context['time_entries']:
+                line = f"- [{e.get('date', 'N/A')}] {e.get('user', 'Unknown')} logged {e.get('hours', 0)}h on \"{e.get('task_title', 'Unknown')}\""
+                if e.get('description'):
+                    line += f" - {e['description']}"
+                if e.get('billable'):
+                    line += " (billable)"
+                context_str += line + "\n"
+
+        if context.get('milestones'):
+            context_str += f"\n\n🎯 MILESTONES ({len(context['milestones'])} total):\n"
+            for ms in context['milestones']:
+                line = f"- {ms.get('title', 'Unknown')} (Status: {ms.get('status', 'N/A')})"
+                if ms.get('project'):
+                    line += f" [Project: {ms['project']}]"
+                if ms.get('due_date'):
+                    line += f" Due: {ms['due_date']}"
+                if ms.get('completed_at'):
+                    line += f" Completed: {ms['completed_at']}"
+                context_str += line + "\n"
+
+        if context.get('risks'):
+            context_str += f"\n\n⚠️ PROJECT RISKS ({len(context['risks'])} total):\n"
+            for r in context['risks']:
+                line = f"- {r.get('title', 'Unknown')} (Severity: {r.get('severity', 'N/A')}, Status: {r.get('status', 'N/A')})"
+                if r.get('project'):
+                    line += f" [Project: {r['project']}]"
+                if r.get('mitigation'):
+                    line += f" Mitigation: {r['mitigation']}"
+                context_str += line + "\n"
+
+        if context.get('issues'):
+            context_str += f"\n\n🔴 PROJECT ISSUES ({len(context['issues'])} total):\n"
+            for iss in context['issues']:
+                line = f"- {iss.get('title', 'Unknown')} (Severity: {iss.get('severity', 'N/A')}, Status: {iss.get('status', 'N/A')})"
+                if iss.get('project'):
+                    line += f" [Project: {iss['project']}]"
+                if iss.get('reported_by'):
+                    line += f" Reported by: {iss['reported_by']}"
+                if iss.get('created_at'):
+                    line += f" on {iss['created_at']}"
+                context_str += line + "\n"
+
         # Classify question: count/aggregate vs list/detail. Count questions use compact context and short answers.
         question_lower = question.lower()
         # Action detection: avoid false positives from words like "assigned".
