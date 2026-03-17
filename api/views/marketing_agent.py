@@ -27,6 +27,8 @@ from marketing_agent.models import (
     Campaign, Lead, EmailTemplate, EmailSequence, EmailSequenceStep,
     EmailSendHistory, EmailAccount, CampaignContact, MarketingNotification,
     MarketResearch, MarketingDocument, Reply,
+    MarketingQAChat, MarketingQAChatMessage,
+    MarketResearchChat, MarketResearchChatMessage,
 )
 from marketing_agent.services.email_service import EmailService
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
@@ -3036,4 +3038,201 @@ def api_marketing_toggle_prompt_dashboard(request, prompt_id):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ──────────────────────────────────────────────────────────────
+# Marketing QA Chat CRUD
+# ──────────────────────────────────────────────────────────────
+
+def _serialize_chat(chat):
+    """Serialize a chat (QA or Research) with its messages."""
+    messages = []
+    for msg in chat.messages.order_by('created_at'):
+        m = {'role': msg.role, 'content': msg.content}
+        if msg.response_data:
+            m['responseData'] = msg.response_data
+        messages.append(m)
+    return {
+        'id': str(chat.id),
+        'title': chat.title or 'Chat',
+        'messages': messages,
+        'updatedAt': chat.updated_at.isoformat(),
+        'timestamp': chat.updated_at.isoformat(),
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_qa_chats(request):
+    """List all Marketing QA chats for the company user."""
+    try:
+        company_user = request.user
+        chats = MarketingQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        return Response({'status': 'success', 'data': [_serialize_chat(c) for c in chats]})
+    except Exception as e:
+        logger.exception("list_qa_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_qa_chat(request):
+    """Create a new Marketing QA chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = MarketingQAChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            MarketingQAChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except Exception as e:
+        logger.exception("create_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_qa_chat(request, chat_id):
+    """Update a Marketing QA chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = MarketingQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                MarketingQAChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except Exception as e:
+        logger.exception("update_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_qa_chat(request, chat_id):
+    """Delete a Marketing QA chat and all its messages."""
+    try:
+        company_user = request.user
+        chat = MarketingQAChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_qa_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ──────────────────────────────────────────────────────────────
+# Market Research Chat CRUD
+# ──────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_research_chats(request):
+    """List all Market Research chats for the company user."""
+    try:
+        company_user = request.user
+        chats = MarketResearchChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        return Response({'status': 'success', 'data': [_serialize_chat(c) for c in chats]})
+    except Exception as e:
+        logger.exception("list_research_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_research_chat(request):
+    """Create a new Market Research chat with optional initial messages."""
+    try:
+        company_user = request.user
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        messages_data = data.get('messages') or []
+        chat = MarketResearchChat.objects.create(company_user=company_user, title=title)
+        for m in messages_data:
+            MarketResearchChatMessage.objects.create(
+                chat=chat,
+                role=m.get('role', 'user'),
+                content=m.get('content', ''),
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except Exception as e:
+        logger.exception("create_research_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_research_chat(request, chat_id):
+    """Update a Market Research chat: add messages, optionally update title."""
+    try:
+        company_user = request.user
+        chat = MarketResearchChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        messages_data = data.get('messages')
+        if messages_data is not None:
+            for m in messages_data:
+                MarketResearchChatMessage.objects.create(
+                    chat=chat,
+                    role=m.get('role', 'user'),
+                    content=m.get('content', ''),
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except Exception as e:
+        logger.exception("update_research_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_research_chat(request, chat_id):
+    """Delete a Market Research chat and all its messages."""
+    try:
+        company_user = request.user
+        chat = MarketResearchChat.objects.filter(company_user=company_user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_research_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
