@@ -1353,9 +1353,10 @@ class InterviewSchedulingAgent:
             # Calculate when to send reminder
             reminder_time = interview.scheduled_datetime - timedelta(hours=hours_before)
             now = timezone.now()
-            
-            # Only send if we're within 1 hour of the reminder time
-            if abs((reminder_time - now).total_seconds()) > 3600:
+
+            # Only send if we're within 2 hours of the reminder time
+            # This must match the window used in tasks.py and signals.py (±7200 seconds)
+            if abs((reminder_time - now).total_seconds()) > 7200:
                 return {
                     "success": False,
                     "error": f"Not the right time to send reminder (should be {hours_before} hours before interview)",
@@ -1431,9 +1432,9 @@ class InterviewSchedulingAgent:
                 print("="*60 + "\n")
                 raise
             
-            # Update interview record (timestamp will be updated by management command)
-            # interview.pre_interview_reminder_sent_at = timezone.now()
-            # interview.save(update_fields=['pre_interview_reminder_sent_at'])
+            # Update interview record to prevent duplicate reminders
+            interview.pre_interview_reminder_sent_at = timezone.now()
+            interview.save(update_fields=['pre_interview_reminder_sent_at'])
             
             self._log_step("pre_interview_reminder_sent", {
                 "interview_id": interview.id,
