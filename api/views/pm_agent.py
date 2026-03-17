@@ -13,6 +13,7 @@ from project_manager_agent.models import (
     PMKnowledgeQAChatMessage,
     PMProjectPilotChat,
     PMProjectPilotChatMessage,
+    PMNotification,
 )
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
@@ -925,6 +926,65 @@ def project_pilot(request):
                 except Exception as e:
                     action_results.append(
                         {"action": "delete_task", "success": False, "error": f"Error deleting task: {str(e)}"}
+                    )
+
+            elif action_type == "update_project":
+                try:
+                    project_id_to_update = action_data.get("project_id")
+                    if not project_id_to_update:
+                        action_results.append(
+                            {"action": "update_project", "success": False, "error": "project_id is required"}
+                        )
+                        continue
+                    project_to_update = get_object_or_404(Project, id=project_id_to_update, created_by_company_user=company_user)
+                    updates = action_data.get("updates", {})
+
+                    # Update simple string/choice fields
+                    for field in ["name", "description", "status", "priority", "project_type"]:
+                        if field in updates and updates[field] is not None:
+                            setattr(project_to_update, field, updates[field])
+
+                    # Handle date fields
+                    for date_field in ["deadline", "start_date", "end_date"]:
+                        if date_field in updates:
+                            date_val = updates.get(date_field)
+                            if date_val:
+                                from datetime import datetime as _dt_proj
+                                try:
+                                    setattr(project_to_update, date_field, _dt_proj.strptime(date_val, "%Y-%m-%d").date())
+                                except (ValueError, TypeError):
+                                    pass
+                            else:
+                                setattr(project_to_update, date_field, None)
+
+                    # Handle budget fields
+                    for budget_field in ["budget_min", "budget_max"]:
+                        if budget_field in updates:
+                            budget_val = updates.get(budget_field)
+                            if budget_val is not None:
+                                try:
+                                    setattr(project_to_update, budget_field, float(budget_val))
+                                except (ValueError, TypeError):
+                                    pass
+                            else:
+                                setattr(project_to_update, budget_field, None)
+
+                    project_to_update.save()
+                    action_results.append(
+                        {
+                            "action": "update_project",
+                            "success": True,
+                            "project_id": project_to_update.id,
+                            "project_name": project_to_update.name,
+                            "message": f'Project "{project_to_update.name}" updated successfully!',
+                            "status": project_to_update.status,
+                            "priority": project_to_update.priority,
+                            "deadline": project_to_update.deadline.isoformat() if project_to_update.deadline else None,
+                        }
+                    )
+                except Exception as e:
+                    action_results.append(
+                        {"action": "update_project", "success": False, "error": f"Error updating project: {str(e)}"}
                     )
 
             elif action_type == "update_task":
@@ -3322,3 +3382,587 @@ def project_pilot_from_file(request):
             {"status": "error", "message": "Failed to process file", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ==================== DAILY STANDUP ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def daily_standup(request):
+    """Generate daily or weekly standup report for a project."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        action = request.data.get("action", "daily")  # "daily" or "weekly"
+
+        # Gather project data
+        project_info = None
+        tasks_data = []
+        if project_id:
+            try:
+                project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+                project_info = {"id": project.id, "name": project.name, "status": project.status}
+                tasks = Task.objects.filter(project=project).select_related('assignee')
+            except Project.DoesNotExist:
+                return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related('assignee', 'project')
+
+        for t in tasks:
+            tasks_data.append({
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "assignee_username": t.assignee.username if t.assignee else None,
+                "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
+                "due_date": t.due_date.isoformat() if t.due_date else None,
+                "project_name": t.project.name if hasattr(t, 'project') and t.project else None,
+            })
+
+        # Get available users
+        available_users = _build_available_users(company_user=company_user)
+
+        # Get recent activity logs
+        activity_logs_data = []
+        try:
+            from core.models import TaskActivityLog
+            if project_id:
+                logs = TaskActivityLog.objects.filter(
+                    task__project_id=project_id,
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-created_at')[:30]
+            else:
+                logs = TaskActivityLog.objects.filter(
+                    task__project__created_by_company_user=company_user
+                ).select_related('task', 'user').order_by('-created_at')[:20]
+
+            for log in logs:
+                activity_logs_data.append({
+                    "task_title": log.task.title if log.task else "Unknown",
+                    "action_type": log.action_type,
+                    "old_value": log.old_value,
+                    "new_value": log.new_value,
+                    "user": log.user.get_full_name() or log.user.username if log.user else "System",
+                    "timestamp": log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else None,
+                })
+        except Exception:
+            pass
+
+        agent = AgentRegistry.get_agent("daily_standup")
+        result = agent.process(
+            action=action,
+            tasks=tasks_data,
+            team_members=available_users,
+            activity_logs=activity_logs_data,
+            project_info=project_info,
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("daily_standup failed")
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ==================== PROJECT HEALTH SCORE ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def project_health_score(request):
+    """Calculate project health score and risk analysis."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        action = request.data.get("action", "health")  # "health", "risks", "report", "metrics"
+
+        if not project_id:
+            return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        agent = AgentRegistry.get_agent("analytics_dashboard")
+        result = agent.process(
+            action=action,
+            project_id=project_id,
+            company_user=company_user,
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("project_health_score failed")
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ==================== STATUS REPORT ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def project_status_report(request):
+    """Generate comprehensive project status report."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        if not project_id:
+            return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        agent = AgentRegistry.get_agent("analytics_dashboard")
+        result = agent.process(
+            action="report",
+            project_id=project_id,
+            company_user=company_user,
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("project_status_report failed")
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ==================== MEETING NOTES ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def meeting_notes(request):
+    """Process meeting notes and extract action items."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        meeting_text = request.data.get("meeting_text", "")
+        action = request.data.get("action", "summarize")  # "summarize" or "extract_actions"
+        project_id = request.data.get("project_id")
+
+        if not meeting_text:
+            return Response({"status": "error", "message": "meeting_text is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        meeting_info = {
+            "date": request.data.get("date"),
+            "participants": request.data.get("participants", []),
+            "topic": request.data.get("topic"),
+        }
+
+        project_context = None
+        if project_id:
+            try:
+                project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+                tasks = Task.objects.filter(project=project)
+                project_context = {
+                    "name": project.name,
+                    "status": project.status,
+                    "tasks": [{"title": t.title, "status": t.status} for t in tasks[:20]],
+                }
+            except Project.DoesNotExist:
+                pass
+
+        agent = AgentRegistry.get_agent("meeting_notetaker")
+        result = agent.process(
+            action=action,
+            meeting_text=meeting_text,
+            meeting_info=meeting_info,
+            project_context=project_context,
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("meeting_notes failed")
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ==================== WORKFLOW SUGGESTION ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def workflow_suggest(request):
+    """Suggest workflows and checklists for a project."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        action = request.data.get("action", "suggest")  # "suggest", "checklist", "validate"
+
+        if not project_id:
+            return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+        except Project.DoesNotExist:
+            return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        project_info = {
+            "name": project.name,
+            "status": project.status,
+            "priority": project.priority,
+            "project_type": project.project_type,
+            "description": project.description,
+        }
+
+        tasks = Task.objects.filter(project=project).select_related('assignee')
+        tasks_data = [{
+            "id": t.id,
+            "title": t.title,
+            "status": t.status,
+            "priority": t.priority,
+        } for t in tasks]
+
+        agent = AgentRegistry.get_agent("workflow_sop")
+        result = agent.process(
+            action=action,
+            project_info=project_info,
+            tasks=tasks_data,
+            phase=request.data.get("phase", "development"),
+            project_type=project.project_type or "software_development",
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("workflow_suggest failed")
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ==================== CALENDAR SCHEDULE ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def calendar_schedule(request):
+    """Generate optimized task schedules and detect conflicts."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        action = request.data.get("action", "schedule")  # "schedule" or "conflicts"
+
+        if not project_id:
+            return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+        except Project.DoesNotExist:
+            return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        tasks = Task.objects.filter(project=project).select_related('assignee')
+        tasks_data = [{
+            "id": t.id,
+            "title": t.title,
+            "status": t.status,
+            "priority": t.priority,
+            "assignee_username": t.assignee.username if t.assignee else None,
+            "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+        } for t in tasks]
+
+        available_users = _build_available_users(company_user=company_user)
+
+        agent = AgentRegistry.get_agent("calendar_planner")
+        result = agent.process(
+            action=action,
+            tasks=tasks_data,
+            team_members=available_users,
+            start_date=request.data.get("start_date"),
+            end_date=request.data.get("end_date"),
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("calendar_schedule failed")
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ==================== SMART NOTIFICATIONS ENDPOINTS ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def scan_notifications(request):
+    """Scan projects for issues and generate smart notifications."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+
+        # Get projects to scan
+        if project_id:
+            projects = Project.objects.filter(id=project_id, created_by_company_user=company_user)
+        else:
+            projects = Project.objects.filter(created_by_company_user=company_user)
+
+        all_notifications = []
+        agent = AgentRegistry.get_agent("smart_notifications")
+        available_users = _build_available_users(company_user=company_user)
+
+        for project in projects:
+            tasks = Task.objects.filter(project=project).select_related('assignee')
+            tasks_data = [{
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "assignee_username": t.assignee.username if t.assignee else None,
+                "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
+                "due_date": t.due_date.isoformat() if t.due_date else None,
+            } for t in tasks]
+
+            project_info = {
+                "id": project.id,
+                "name": project.name,
+                "status": project.status,
+                "deadline": project.deadline.isoformat() if project.deadline else None,
+                "end_date": project.end_date.isoformat() if project.end_date else None,
+            }
+
+            result = agent.scan_project(project_info, tasks_data, available_users)
+            if result.get("success") and result.get("notifications"):
+                # Save notifications to DB
+                for notif in result["notifications"]:
+                    PMNotification.objects.create(
+                        company_user=company_user,
+                        project=project,
+                        notification_type=notif["type"],
+                        severity=notif["severity"],
+                        title=notif["title"],
+                        message=notif["message"],
+                        data=notif.get("data"),
+                    )
+                all_notifications.extend(result["notifications"])
+
+        return Response({
+            "status": "success",
+            "data": {
+                "notifications": all_notifications,
+                "total": len(all_notifications),
+                "projects_scanned": projects.count(),
+            }
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("scan_notifications failed")
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_notifications(request):
+    """List notifications for the current user."""
+    try:
+        company_user = request.user
+        unread_only = request.GET.get("unread_only", "false").lower() == "true"
+        limit = int(request.GET.get("limit", 50))
+
+        qs = PMNotification.objects.filter(company_user=company_user)
+        if unread_only:
+            qs = qs.filter(is_read=False)
+
+        notifications = qs[:limit]
+        data = [{
+            "id": n.id,
+            "type": n.notification_type,
+            "severity": n.severity,
+            "title": n.title,
+            "message": n.message,
+            "project_id": n.project_id,
+            "project_name": n.project.name if n.project else None,
+            "is_read": n.is_read,
+            "data": n.data,
+            "created_at": n.created_at.isoformat(),
+        } for n in notifications]
+
+        unread_count = PMNotification.objects.filter(company_user=company_user, is_read=False).count()
+
+        return Response({
+            "status": "success",
+            "data": {
+                "notifications": data,
+                "unread_count": unread_count,
+            }
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def mark_notifications_read(request):
+    """Mark notifications as read."""
+    try:
+        company_user = request.user
+        notification_ids = request.data.get("notification_ids", [])
+        mark_all = request.data.get("mark_all", False)
+
+        if mark_all:
+            count = PMNotification.objects.filter(company_user=company_user, is_read=False).update(is_read=True)
+        elif notification_ids:
+            count = PMNotification.objects.filter(
+                company_user=company_user, id__in=notification_ids
+            ).update(is_read=True)
+        else:
+            count = 0
+
+        return Response({
+            "status": "success",
+            "data": {"marked_read": count}
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== TEAM PERFORMANCE ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def team_performance(request):
+    """Get team performance analytics for a project."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        if not project_id:
+            return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        agent = AgentRegistry.get_agent("analytics_dashboard")
+        result = agent.process(
+            action="productivity",
+            project_id=project_id,
+            company_user=company_user,
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("team_performance failed")
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== TIME ESTIMATION ENDPOINT ====================
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def time_estimation(request):
+    """Estimate task durations for a project."""
+    try:
+        company_user = request.user
+        if not company_user.can_access_project_manager_features():
+            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        project_id = request.data.get("project_id")
+        if not project_id:
+            return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+        except Project.DoesNotExist:
+            return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get active tasks (not done)
+        tasks = Task.objects.filter(project=project).exclude(
+            status__in=['done', 'completed']
+        ).select_related('assignee')
+
+        tasks_data = [{
+            "id": t.id,
+            "title": t.title,
+            "status": t.status,
+            "priority": t.priority,
+            "description": t.description[:300] if t.description else "",
+            "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+        } for t in tasks]
+
+        # Get completed tasks for historical reference
+        completed = Task.objects.filter(project=project, status__in=['done', 'completed'])
+        completed_data = [{
+            "title": t.title,
+            "priority": t.priority,
+        } for t in completed[:10]]
+
+        project_info = {"name": project.name, "status": project.status}
+        available_users = _build_available_users(company_user=company_user)
+
+        agent = AgentRegistry.get_agent("time_estimation")
+        result = agent.process(
+            action="estimate",
+            tasks=tasks_data,
+            project_info=project_info,
+            team_members=available_users,
+            completed_tasks=completed_data,
+        )
+
+        return Response({
+            "status": "success",
+            "data": result,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("time_estimation failed")
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

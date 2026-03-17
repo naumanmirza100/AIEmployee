@@ -1,154 +1,195 @@
 """
 Workflow / SOP Runner Agent
-Executes and manages standard operating procedures (SOPs) and workflows.
+Manages project workflows and standard operating procedures.
+Uses LLM to suggest workflows and validate process compliance.
 """
 
 from .base_agent import BaseAgent
 from typing import Dict, List, Optional
+import json
 
 
 class WorkflowSOPAgent(BaseAgent):
     """
     Agent responsible for:
-    - Store and manage project workflows/SOPs
-    - Execute predefined workflows automatically
-    - Guide users through step-by-step processes
-    - Validate workflow completion
-    - Create custom workflows for projects
-    - Track workflow progress and status
-    - Suggest workflow improvements
-    - Handle workflow exceptions and errors
+    - Suggest workflows based on project type
+    - Validate task status transitions
+    - Recommend process improvements
+    - Generate checklists for common project phases
+    - Identify workflow bottlenecks
     """
-    
+
     def __init__(self):
         super().__init__()
-        self.system_prompt = """You are a Workflow / SOP Runner Agent for a project management system.
-        Your role is to execute and manage standard operating procedures and workflows.
-        You should guide users through processes and ensure proper workflow execution."""
-    
-    def store_workflow(self, workflow_name: str, workflow_steps: List[Dict], project_id: Optional[int] = None) -> Dict:
+        self.system_prompt = """You are a Workflow & SOP Agent for a project management system.
+Your role is to help teams follow best practices by suggesting workflows, validating processes,
+and generating checklists. You understand software development, marketing, design, and general
+project management workflows."""
+
+        # Common workflow templates
+        self.workflow_templates = {
+            "software_development": {
+                "name": "Software Development Lifecycle",
+                "phases": ["Requirements", "Design", "Development", "Testing", "Deployment", "Maintenance"],
+                "task_statuses": ["todo", "in_progress", "review", "done"],
+            },
+            "marketing_campaign": {
+                "name": "Marketing Campaign",
+                "phases": ["Research", "Strategy", "Content Creation", "Review", "Launch", "Analysis"],
+                "task_statuses": ["todo", "in_progress", "review", "done"],
+            },
+            "design_sprint": {
+                "name": "Design Sprint",
+                "phases": ["Understand", "Diverge", "Converge", "Prototype", "Test"],
+                "task_statuses": ["todo", "in_progress", "review", "done"],
+            },
+        }
+
+    def suggest_workflow(self, project_info: Dict, tasks: List[Dict] = None) -> Dict:
         """
-        Store and manage project workflows/SOPs.
-        
-        Args:
-            workflow_name (str): Name of the workflow
-            workflow_steps (List[Dict]): List of workflow steps
-            project_id (int): Associated project ID (optional)
-            
-        Returns:
-            Dict: Stored workflow information
+        Suggest a workflow based on project type and current state.
         """
-        # TODO: Implement workflow storage
-        pass
-    
-    def execute_workflow(self, workflow_id: int, context: Optional[Dict] = None) -> Dict:
-        """
-        Execute a predefined workflow automatically.
-        
-        Args:
-            workflow_id (int): Workflow ID to execute
-            context (Dict): Execution context
-            
-        Returns:
-            Dict: Execution results
-        """
-        # TODO: Implement workflow execution
-        pass
-    
-    def guide_user(self, workflow_id: int, current_step: int) -> Dict:
-        """
-        Guide users through step-by-step processes.
-        
-        Args:
-            workflow_id (int): Workflow ID
-            current_step (int): Current step number
-            
-        Returns:
-            Dict: Guidance information
-        """
-        # TODO: Implement user guidance
-        pass
-    
-    def validate_completion(self, workflow_id: int, completed_steps: List[int]) -> Dict:
-        """
-        Validate workflow completion.
-        
-        Args:
-            workflow_id (int): Workflow ID
-            completed_steps (List[int]): List of completed step IDs
-            
-        Returns:
-            Dict: Validation results
-        """
-        # TODO: Implement completion validation
-        pass
-    
-    def create_custom_workflow(self, project_id: int, workflow_template: Dict) -> Dict:
-        """
-        Create custom workflows for projects.
-        
-        Args:
-            project_id (int): Project ID
-            workflow_template (Dict): Workflow template
-            
-        Returns:
-            Dict: Created workflow information
-        """
-        # TODO: Implement custom workflow creation
-        pass
-    
-    def track_progress(self, workflow_id: int) -> Dict:
-        """
-        Track workflow progress and status.
-        
-        Args:
-            workflow_id (int): Workflow ID
-            
-        Returns:
-            Dict: Progress tracking data
-        """
-        # TODO: Implement progress tracking
-        pass
-    
-    def suggest_improvements(self, workflow_id: int, execution_history: List[Dict]) -> Dict:
-        """
-        Suggest workflow improvements.
-        
-        Args:
-            workflow_id (int): Workflow ID
-            execution_history (List[Dict]): Historical execution data
-            
-        Returns:
-            Dict: Improvement suggestions
-        """
-        # TODO: Implement improvement suggestions
-        pass
-    
-    def handle_exceptions(self, workflow_id: int, exception_info: Dict) -> Dict:
-        """
-        Handle workflow exceptions and errors.
-        
-        Args:
-            workflow_id (int): Workflow ID
-            exception_info (Dict): Exception information
-            
-        Returns:
-            Dict: Exception handling results
-        """
-        # TODO: Implement exception handling
-        pass
-    
-    def process(self, action: str, **kwargs) -> Dict:
+        self.log_action("Suggesting workflow", {"project": project_info.get('name', 'Unknown')})
+
+        tasks_str = ""
+        if tasks:
+            for t in tasks[:20]:
+                tasks_str += f"- {t.get('title', 'Unknown')} (Status: {t.get('status')}, Priority: {t.get('priority')})\n"
+
+        prompt = f"""Analyze this project and suggest an optimal workflow.
+
+PROJECT:
+- Name: {project_info.get('name', 'Unknown')}
+- Type: {project_info.get('project_type', 'Unknown')}
+- Status: {project_info.get('status', 'Unknown')}
+- Description: {project_info.get('description', 'N/A')[:500]}
+
+CURRENT TASKS:
+{tasks_str or 'No tasks yet'}
+
+Suggest a workflow with:
+1. Recommended phases/stages
+2. Task status flow (what order statuses should progress)
+3. Checklist for the current phase
+4. Any process improvements based on current task state
+
+Return JSON:
+{{
+    "workflow_name": "name of suggested workflow",
+    "phases": [
+        {{
+            "name": "phase name",
+            "description": "what happens in this phase",
+            "checklist": ["item 1", "item 2"],
+            "is_current": true/false
+        }}
+    ],
+    "status_flow": ["todo", "in_progress", "review", "done"],
+    "current_phase": "which phase the project appears to be in",
+    "recommendations": ["process improvement 1", "process improvement 2"],
+    "bottlenecks": ["any bottlenecks detected from task data"]
+}}
+
+Return ONLY the JSON."""
+
+        try:
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=1500)
+            try:
+                cleaned = response.strip()
+                if "```json" in cleaned:
+                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned:
+                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+                result = json.loads(cleaned)
+                return {"success": True, **result}
+            except (json.JSONDecodeError, IndexError):
+                return {"success": True, "answer": response}
+        except Exception as e:
+            self.log_action("Error suggesting workflow", {"error": str(e)})
+            return {"success": False, "error": str(e)}
+
+    def generate_checklist(self, phase: str, project_type: str = "software_development") -> Dict:
+        """Generate a checklist for a specific project phase."""
+        self.log_action("Generating checklist", {"phase": phase, "type": project_type})
+
+        prompt = f"""Generate a detailed checklist for the "{phase}" phase of a {project_type} project.
+
+Return JSON:
+{{
+    "phase": "{phase}",
+    "checklist": [
+        {{
+            "item": "checklist item description",
+            "priority": "high/medium/low",
+            "category": "category name"
+        }}
+    ],
+    "tips": ["best practice tip 1", "tip 2"]
+}}
+
+Return ONLY the JSON."""
+
+        try:
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=1000)
+            try:
+                cleaned = response.strip()
+                if "```json" in cleaned:
+                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned:
+                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+                result = json.loads(cleaned)
+                return {"success": True, **result}
+            except (json.JSONDecodeError, IndexError):
+                return {"success": True, "answer": response}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def validate_transitions(self, tasks: List[Dict]) -> Dict:
+        """Validate task status transitions and flag issues."""
+        issues = []
+        for t in tasks:
+            status = t.get('status', '')
+            # Flag tasks that skipped review
+            if status == 'done' and not t.get('had_review', False):
+                issues.append({
+                    "task_id": t.get('id'),
+                    "task_title": t.get('title'),
+                    "issue": "Task marked as done without going through review",
+                    "severity": "medium"
+                })
+            # Flag tasks stuck in progress too long
+            if status == 'in_progress' and t.get('days_in_status', 0) > 7:
+                issues.append({
+                    "task_id": t.get('id'),
+                    "task_title": t.get('title'),
+                    "issue": f"Task stuck in 'in_progress' for {t.get('days_in_status', 0)} days",
+                    "severity": "high"
+                })
+
+        return {
+            "success": True,
+            "issues": issues,
+            "issues_count": len(issues),
+            "message": f"Found {len(issues)} workflow issue(s)" if issues else "All tasks following proper workflow"
+        }
+
+    def process(self, action: str = "suggest", **kwargs) -> Dict:
         """
         Main processing method for workflow agent.
-        
-        Args:
-            action (str): Action to perform (store, execute, guide, etc.)
-            **kwargs: Action-specific parameters
-            
-        Returns:
-            dict: Processing results
         """
-        # TODO: Implement action routing
-        pass
-
+        if action == "suggest":
+            return self.suggest_workflow(
+                kwargs.get('project_info', {}),
+                kwargs.get('tasks', [])
+            )
+        elif action == "checklist":
+            return self.generate_checklist(
+                kwargs.get('phase', 'development'),
+                kwargs.get('project_type', 'software_development')
+            )
+        elif action == "validate":
+            return self.validate_transitions(kwargs.get('tasks', []))
+        else:
+            return {"success": False, "error": f"Unknown action: {action}"}

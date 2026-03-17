@@ -1,166 +1,178 @@
 """
 Meeting Notetaker Agent
 Captures, summarizes, and manages meeting notes and action items.
+Uses LLM to extract actionable insights from meeting text.
 """
 
 from .base_agent import BaseAgent
 from typing import Dict, List, Optional
+import json
 
 
 class MeetingNotetakerAgent(BaseAgent):
     """
     Agent responsible for:
-    - Record meeting notes automatically
+    - Summarize meeting notes/transcripts
     - Extract action items from meetings
-    - Summarize meeting discussions
-    - Assign action items to team members
-    - Track action item completion
-    - Generate meeting transcripts
     - Identify key decisions and outcomes
-    - Create meeting summaries and reports
-    - Link meeting notes to relevant projects/tasks
+    - Link action items to projects/tasks
+    - Generate structured meeting reports
     """
-    
+
     def __init__(self):
         super().__init__()
         self.system_prompt = """You are a Meeting Notetaker Agent for a project management system.
-        Your role is to capture, summarize, and extract actionable insights from meetings.
-        You should identify key decisions, action items, and important discussions."""
-    
-    def record_notes(self, meeting_transcript: str, meeting_info: Dict) -> Dict:
+Your role is to analyze meeting notes or transcripts and extract:
+1. Key decisions made
+2. Action items with owners and deadlines
+3. Important discussion points
+4. Risks or blockers mentioned
+5. Follow-up items
+
+You produce structured, actionable summaries that help teams stay aligned."""
+
+    def summarize_meeting(self, meeting_text: str, meeting_info: Optional[Dict] = None,
+                          project_context: Optional[Dict] = None) -> Dict:
         """
-        Record meeting notes automatically.
-        
+        Summarize meeting notes and extract action items.
+
         Args:
-            meeting_transcript (str): Meeting transcript or notes
-            meeting_info (Dict): Meeting metadata (date, participants, etc.)
-            
-        Returns:
-            Dict: Structured meeting notes
+            meeting_text: Raw meeting notes or transcript
+            meeting_info: Optional metadata (date, participants, topic)
+            project_context: Optional project context for linking
         """
-        # TODO: Implement note recording
-        pass
-    
-    def extract_action_items(self, meeting_notes: str) -> List[Dict]:
-        """
-        Extract action items from meeting notes.
-        
-        Args:
-            meeting_notes (str): Meeting notes text
-            
-        Returns:
-            List[Dict]: List of action items
-        """
-        # TODO: Implement action item extraction
-        pass
-    
-    def summarize_meeting(self, meeting_notes: str) -> Dict:
-        """
-        Summarize meeting discussions.
-        
-        Args:
-            meeting_notes (str): Meeting notes text
-            
-        Returns:
-            Dict: Meeting summary
-        """
-        # TODO: Implement meeting summarization
-        pass
-    
-    def assign_action_items(self, action_items: List[Dict], participants: List[Dict]) -> Dict:
-        """
-        Assign action items to team members.
-        
-        Args:
-            action_items (List[Dict]): List of action items
-            participants (List[Dict]): List of meeting participants
-            
-        Returns:
-            Dict: Assignment results
-        """
-        # TODO: Implement action item assignment
-        pass
-    
-    def track_action_completion(self, action_item_id: int, status: str) -> Dict:
-        """
-        Track action item completion.
-        
-        Args:
-            action_item_id (int): Action item ID
-            status (str): Completion status
-            
-        Returns:
-            Dict: Tracking information
-        """
-        # TODO: Implement action item tracking
-        pass
-    
-    def generate_transcript(self, audio_file_path: Optional[str] = None, notes: Optional[str] = None) -> Dict:
-        """
-        Generate meeting transcript.
-        
-        Args:
-            audio_file_path (str): Path to audio file (optional)
-            notes (str): Meeting notes (optional)
-            
-        Returns:
-            Dict: Transcript data
-        """
-        # TODO: Implement transcript generation
-        pass
-    
-    def identify_decisions(self, meeting_notes: str) -> List[Dict]:
-        """
-        Identify key decisions and outcomes.
-        
-        Args:
-            meeting_notes (str): Meeting notes text
-            
-        Returns:
-            List[Dict]: List of decisions
-        """
-        # TODO: Implement decision identification
-        pass
-    
-    def create_summary_report(self, meeting_id: int) -> Dict:
-        """
-        Create meeting summary and report.
-        
-        Args:
-            meeting_id (int): Meeting ID
-            
-        Returns:
-            Dict: Summary report
-        """
-        # TODO: Implement summary report creation
-        pass
-    
-    def link_to_project(self, meeting_id: int, project_id: int, task_ids: Optional[List[int]] = None) -> Dict:
-        """
-        Link meeting notes to relevant projects/tasks.
-        
-        Args:
-            meeting_id (int): Meeting ID
-            project_id (int): Project ID
-            task_ids (List[int]): Related task IDs (optional)
-            
-        Returns:
-            Dict: Linking information
-        """
-        # TODO: Implement project/task linking
-        pass
-    
-    def process(self, action: str, **kwargs) -> Dict:
+        self.log_action("Summarizing meeting", {"text_length": len(meeting_text)})
+
+        if not meeting_text or len(meeting_text.strip()) < 10:
+            return {"success": False, "error": "Meeting text is too short to analyze."}
+
+        context_str = ""
+        if meeting_info:
+            context_str += f"\nMeeting Info:\n"
+            if meeting_info.get('date'):
+                context_str += f"- Date: {meeting_info['date']}\n"
+            if meeting_info.get('participants'):
+                context_str += f"- Participants: {', '.join(meeting_info['participants'])}\n"
+            if meeting_info.get('topic'):
+                context_str += f"- Topic: {meeting_info['topic']}\n"
+
+        if project_context:
+            context_str += f"\nProject Context:\n"
+            context_str += f"- Project: {project_context.get('name', 'Unknown')}\n"
+            if project_context.get('tasks'):
+                context_str += f"- Active Tasks: {len(project_context['tasks'])}\n"
+
+        prompt = f"""Analyze the following meeting notes and extract structured information.
+{context_str}
+
+MEETING NOTES:
+---
+{meeting_text[:3000]}
+---
+
+Return a JSON object with this structure:
+{{
+    "summary": "2-3 sentence executive summary of the meeting",
+    "key_decisions": [
+        {{
+            "decision": "what was decided",
+            "context": "brief context"
+        }}
+    ],
+    "action_items": [
+        {{
+            "action": "what needs to be done",
+            "owner": "person responsible (from notes, or 'TBD')",
+            "deadline": "mentioned deadline or 'TBD'",
+            "priority": "high/medium/low",
+            "suggested_task_title": "short task title for creating in PM tool"
+        }}
+    ],
+    "discussion_points": [
+        "key point 1",
+        "key point 2"
+    ],
+    "risks_mentioned": [
+        {{
+            "risk": "risk description",
+            "severity": "high/medium/low"
+        }}
+    ],
+    "follow_ups": [
+        "follow-up item 1"
+    ],
+    "participants_detected": ["names mentioned in the notes"]
+}}
+
+Return ONLY the JSON."""
+
+        try:
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=2000)
+            try:
+                cleaned = response.strip()
+                if "```json" in cleaned:
+                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned:
+                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+                result = json.loads(cleaned)
+                return {"success": True, **result}
+            except (json.JSONDecodeError, IndexError):
+                return {"success": True, "answer": response}
+        except Exception as e:
+            self.log_action("Error summarizing meeting", {"error": str(e)})
+            return {"success": False, "error": str(e)}
+
+    def extract_action_items(self, meeting_text: str) -> Dict:
+        """Quick extraction of just action items from meeting text."""
+        self.log_action("Extracting action items", {"text_length": len(meeting_text)})
+
+        prompt = f"""Extract ONLY action items from these meeting notes.
+
+MEETING NOTES:
+---
+{meeting_text[:3000]}
+---
+
+Return a JSON array of action items:
+[
+    {{
+        "action": "what needs to be done",
+        "owner": "person responsible or 'TBD'",
+        "deadline": "deadline or 'TBD'",
+        "priority": "high/medium/low"
+    }}
+]
+
+Return ONLY the JSON array."""
+
+        try:
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1000)
+            try:
+                cleaned = response.strip()
+                if "```json" in cleaned:
+                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned:
+                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+                items = json.loads(cleaned)
+                return {"success": True, "action_items": items, "count": len(items)}
+            except (json.JSONDecodeError, IndexError):
+                return {"success": True, "answer": response}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def process(self, action: str = "summarize", **kwargs) -> Dict:
         """
         Main processing method for meeting notetaker agent.
-        
-        Args:
-            action (str): Action to perform (record, extract, summarize, etc.)
-            **kwargs: Action-specific parameters
-            
-        Returns:
-            dict: Processing results
         """
-        # TODO: Implement action routing
-        pass
+        meeting_text = kwargs.get('meeting_text', '')
+        meeting_info = kwargs.get('meeting_info')
+        project_context = kwargs.get('project_context')
 
+        if action == "summarize":
+            return self.summarize_meeting(meeting_text, meeting_info, project_context)
+        elif action == "extract_actions":
+            return self.extract_action_items(meeting_text)
+        else:
+            return {"success": False, "error": f"Unknown action: {action}"}
