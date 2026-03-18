@@ -23,6 +23,8 @@ class ProjectPilotAgent(BaseAgent):
     Agent responsible for:
     - Creating new projects
     - Creating tasks in existing projects
+    - Updating existing projects (name, status, priority, deadlines, description, etc.)
+    - Updating existing tasks (status, priority, assignee, deadlines, etc.)
     - Deleting projects and tasks
     - Handling action requests from users
     - Managing project operations
@@ -93,6 +95,14 @@ class ProjectPilotAgent(BaseAgent):
         
         question_lower = question.lower()
         
+        # Sprint planning detection
+        sprint_planning_keywords = [
+            'plan a sprint', 'plan sprint', 'sprint planning', 'create sprint',
+            'new sprint', 'next sprint', 'plan the sprint', 'sprint plan',
+            'plan 2 week', 'plan two week', 'plan 1 week', 'plan one week',
+        ]
+        is_sprint_planning = any(kw in question_lower for kw in sprint_planning_keywords)
+
         # Distinguish between different types of requests with better context awareness
         assignment_keywords = ['assign', 'reassign', 'delegate']
         creation_keywords = ['create', 'add', 'make', 'new task', 'add task', 'new project', 'make project', 'build', 'develop', 'design', 'start']
@@ -135,7 +145,26 @@ class ProjectPilotAgent(BaseAgent):
             'change priority', 'change status', 'change deadline', 'change due date',
             'set priority', 'set status', 'set deadline', 'set due date',
             'move to', 'mark as', 'mark all',
+            'rename project', 'change project', 'modify project', 'edit project',
+            'update project name', 'update project status', 'update project priority',
+            'change project name', 'change project status', 'change project priority',
+            'set project status', 'set project priority', 'set project deadline',
+            'project to completed', 'project to active', 'project to on hold',
+            'project status to', 'project priority to', 'project deadline to',
+            'complete the project', 'complete project', 'finish project',
+            'put project on hold', 'hold the project', 'cancel project', 'cancel the project',
+            'activate project', 'activate the project', 'start the project',
         ])
+
+        # Detect bulk operations: "mark all tasks as done", "set all to high priority", etc.
+        bulk_operation_patterns = [
+            'mark all', 'set all', 'update all', 'change all', 'move all',
+            'all tasks to', 'all tasks as', 'every task', 'each task',
+            'bulk update', 'batch update', 'all overdue', 'all unassigned',
+        ]
+        is_bulk_operation = any(pattern in question_lower for pattern in bulk_operation_patterns)
+        if is_bulk_operation and not has_explicit_creation:
+            has_explicit_update_context = True  # force into update path
 
         is_assignment_request = any(keyword in question_lower for keyword in assignment_keywords) and not has_explicit_creation
         is_creation_request = has_explicit_creation
@@ -236,19 +265,29 @@ class ProjectPilotAgent(BaseAgent):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
                             task_line += f" [Unassigned]"
+                        subtasks = task.get('subtasks', [])
+                        if subtasks:
+                            task_line += f" [{len(subtasks)} subtask(s)]"
                         context_str += task_line + "\n"
+                        for st in subtasks:
+                            context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
 
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
-                for task in context['tasks'][:20]:  # Show more tasks
+                for task in context['tasks'][:20]:
                     task_id = task.get('id', 'N/A')
                     task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
                         task_line += f" [Project: {task.get('project_name')}]"
+                    subtasks = task.get('subtasks', [])
+                    if subtasks:
+                        task_line += f" [{len(subtasks)} subtask(s)]"
                     context_str += task_line + "\n"
+                    for st in subtasks:
+                        context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
         
         # Add user-task assignments if available
         if 'user_assignments' in context:
@@ -272,6 +311,115 @@ class ProjectPilotAgent(BaseAgent):
                 if 'role' in user:
                     users_str += f"  Role: {user.get('role')}\n"
         
+        # --- SPRINT PLANNING (takes priority) ---
+        if is_sprint_planning:
+            target_project_id = None
+            target_project_name = "the project"
+            if context.get('project'):
+                target_project_id = context['project'].get('id')
+                target_project_name = context['project'].get('name', 'the project')
+
+            from datetime import datetime as _dt_sp
+            _today_sp = _dt_sp.now().strftime('%Y-%m-%d')
+
+            # Determine sprint duration from question
+            sprint_duration = "2 weeks"
+            if '1 week' in question_lower or 'one week' in question_lower:
+                sprint_duration = "1 week"
+            elif '3 week' in question_lower or 'three week' in question_lower:
+                sprint_duration = "3 weeks"
+
+            prompt = f"""You are a Sprint Planning Assistant. Analyze the project's tasks and team, then create a sprint plan.
+
+TODAY: {_today_sp}
+SPRINT DURATION: {sprint_duration}
+PROJECT: {target_project_name}
+
+{context_str}
+{users_str}
+
+User Request: {question}
+
+Create a sprint plan that:
+1. Selects the most important tasks for this sprint based on priority, deadlines, and dependencies
+2. Assigns tasks to team members considering workload balance
+3. Sets realistic due dates within the sprint window
+4. Identifies any risks or blockers
+
+Return a JSON array of update_task actions to set up the sprint.
+For each task included in the sprint, update its status to "in_progress" and set a due_date within the sprint window.
+If tasks need assignment, include assignee_id.
+
+Format:
+[
+    {{
+        "action": "update_task",
+        "task_id": task_id_number,
+        "task_title": "task title",
+        "updates": {{
+            "status": "in_progress",
+            "due_date": "YYYY-MM-DD",
+            "assignee_id": user_id_or_null,
+            "priority": "high|medium|low"
+        }},
+        "reasoning": "Why this task is in the sprint and who it's assigned to"
+    }}
+]
+
+After the JSON array, add a text summary wrapped in ===SUMMARY=== tags:
+===SUMMARY===
+Sprint plan summary here - which tasks, who's doing what, key dates
+===SUMMARY===
+
+RULES:
+- Select tasks that can realistically be completed in {sprint_duration}
+- Prioritize: blocked tasks first (to unblock), then high priority, then by deadline
+- Balance workload across team members
+- Set due dates spread across the sprint window
+- Return ONLY tasks that should be in this sprint (don't include all tasks)"""
+
+            try:
+                response = self._call_llm(prompt, self.system_prompt, temperature=0.7, max_tokens=3000)
+
+                # Try to extract both JSON actions and summary
+                summary = ""
+                if "===SUMMARY===" in response:
+                    parts = response.split("===SUMMARY===")
+                    json_part = parts[0].strip()
+                    summary = parts[1].strip() if len(parts) > 1 else ""
+                else:
+                    json_part = response
+
+                try:
+                    cleaned = json_part.strip()
+                    if "```json" in cleaned:
+                        cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+                    elif "```" in cleaned:
+                        cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+                    first_bracket = cleaned.find('[')
+                    last_bracket = cleaned.rfind(']')
+                    if first_bracket >= 0 and last_bracket > first_bracket:
+                        cleaned = cleaned[first_bracket:last_bracket + 1]
+
+                    actions = json.loads(cleaned)
+                    answer = summary or f"Sprint plan created with {len(actions)} tasks for {sprint_duration}."
+                    return {
+                        "success": True,
+                        "answer": answer,
+                        "actions": actions,
+                        "question": question,
+                        "sprint_info": {"duration": sprint_duration, "start": _today_sp}
+                    }
+                except (json.JSONDecodeError, IndexError):
+                    return {
+                        "success": True,
+                        "answer": response,
+                        "question": question
+                    }
+            except Exception as e:
+                return {"success": False, "error": str(e), "answer": "Error generating sprint plan."}
+
         if is_action_request:
             # Handle assignment requests - these are UPDATE operations on existing tasks
             if is_assignment_request and not is_creation_request:
@@ -290,46 +438,44 @@ class ProjectPilotAgent(BaseAgent):
                 from datetime import datetime as _dt
                 _today = _dt.now().strftime('%Y-%m-%d')
 
-                prompt = f"""You are an AI assistant that manages projects and tasks. Analyze the request and return ONLY valid JSON.
+                # Build a compact user ID reference for the prompt
+                user_id_ref = ""
+                user_ids_list = []
+                if available_users:
+                    user_id_ref = "\nAVAILABLE USER IDs (use ONLY these numeric IDs for assignee_id):\n"
+                    for u in available_users:
+                        user_id_ref += f"- {u.get('id')} = {u.get('name', u.get('username', 'Unknown'))}\n"
+                        user_ids_list.append(str(u.get('id')))
 
-TODAY'S DATE: {_today}
+                # Collect all task IDs from context so we can tell the LLM exactly how many to return
+                all_task_ids = []
+                task_id_ref = ""
+                ctx_tasks = context.get('tasks') or (context.get('project', {}).get('tasks') if context.get('project') else None) or []
+                if ctx_tasks:
+                    task_id_ref = f"\nALL TASK IDs TO ASSIGN ({len(ctx_tasks)} tasks — you MUST return exactly {len(ctx_tasks)} update_task actions):\n"
+                    for t in ctx_tasks:
+                        tid = t.get('id', 'N/A')
+                        all_task_ids.append(str(tid))
+                        task_id_ref += f"- {tid}: {t.get('title', 'Unknown')}\n"
 
-{context_str}
-{users_str}
+                prompt = f"""Return ONLY a valid JSON array. No text before or after.
+
+{task_id_ref}
+{user_id_ref}
 
 User Request: {question}
 
-The user wants to ASSIGN or REASSIGN existing tasks to users. You MUST return update_task actions.
+You MUST return EXACTLY {len(ctx_tasks)} update_task actions — one for EACH task listed above.
+Distribute tasks across users using round-robin: task1→user {user_ids_list[0] if user_ids_list else '?'}, task2→user {user_ids_list[1] if len(user_ids_list) > 1 else user_ids_list[0] if user_ids_list else '?'}, then repeat.
 
-INSTRUCTIONS:
-- Look at the existing tasks in the context above
-- Match them with available users
-- Return update_task actions to assign tasks to the requested users
-- If user says "assign to all users" or "all available users", distribute tasks evenly across ALL available users (round-robin)
-- If user mentions specific users, assign only to those users
-- If user says "assign all tasks", update ALL tasks in the project/context
+Format (keep reasoning under 10 words):
+[{{"action":"update_task","task_id":123,"task_title":"title","updates":{{"assignee_id":1}},"reasoning":"round-robin"}}]
 
-Return ONLY this JSON format (no other text):
-[
-    {{
-        "action": "update_task",
-        "task_id": task_id_number,
-        "task_title": "current task title",
-        "updates": {{
-            "assignee_id": user_id
-        }},
-        "reasoning": "Brief explanation of why this user was assigned this task"
-    }}
-]
-
-CRITICAL RULES:
-- Return ONLY the JSON array, no explanations
-- Use task IDs from the context above
-- Use user IDs from the available users list above
-- For "assign to all users": distribute tasks evenly across all users using round-robin
-- For specific user assignment: use only the mentioned user's ID
-- DO NOT create new projects or tasks - ONLY update existing ones
-- DO NOT return create_project or create_task actions"""
+RULES:
+- assignee_id MUST be a NUMERIC INTEGER from: [{', '.join(user_ids_list)}]. NEVER use strings/emails.
+- task_id MUST be a NUMERIC INTEGER from: [{', '.join(all_task_ids)}]
+- You MUST include ALL {len(ctx_tasks)} tasks. Do NOT skip any.
+- Return ONLY the JSON array"""
             
             # Handle deletion requests
             elif is_deletion_request:
@@ -426,38 +572,128 @@ Do NOT return JSON. Do NOT delete anything."""
             elif is_update_request:
                 # Verify that user is actually asking to update existing tasks/projects
                 # NOT asking to create something new
-                
+
                 # Check if it's an update request for tasks or projects
                 priority_keywords = ['priority', 'priorities', 'prioritize']
                 status_keywords = ['status', 'state']
                 task_keywords = ['task', 'tasks']
                 project_keywords = ['project', 'projects']
-                
+
                 is_priority_update = any(keyword in question_lower for keyword in priority_keywords)
                 is_status_update = any(keyword in question_lower for keyword in status_keywords)
                 is_task_update = any(keyword in question_lower for keyword in task_keywords)
                 is_project_update = any(keyword in question_lower for keyword in project_keywords)
+
+                # Detect if the user wants to update the PROJECT itself (not tasks)
+                project_update_phrases = [
+                    'update project', 'change project', 'modify project', 'edit project',
+                    'rename project', 'project name', 'project status', 'project priority',
+                    'project deadline', 'project description', 'project to completed',
+                    'project to active', 'project to on hold', 'project to cancelled',
+                    'complete the project', 'complete project', 'finish project', 'finish the project',
+                    'put project on hold', 'hold the project', 'cancel project', 'cancel the project',
+                    'activate project', 'activate the project', 'start the project',
+                    'project status to', 'project priority to', 'project deadline to',
+                ]
+                is_project_level_update = any(phrase in question_lower for phrase in project_update_phrases)
+                # Also detect when update keywords + project mentioned but NOT task
+                if is_project_update and not is_task_update and not is_assignment_request:
+                    is_project_level_update = True
                 
-                # CRITICAL: Check if user mentions specific existing task IDs or task titles
-                # If no specific tasks mentioned, it might be ambiguous
-                has_specific_task_reference = False
-                # Get tasks from either top-level context or nested inside project
-                _tasks_list = context.get('tasks') or (context.get('project', {}).get('tasks') if context.get('project') else None) or []
-                for task in _tasks_list:
-                    task_title = task.get('title', '').lower()
-                    task_id = task.get('id')
-                    # Check if task title or ID is mentioned in question
-                    if task_title and task_title in question_lower:
-                        has_specific_task_reference = True
-                        break
-                    # Check for task ID patterns
-                    if task_id and (f'task {task_id}' in question_lower or f'task_id {task_id}' in question_lower):
-                        has_specific_task_reference = True
-                        break
-                
-                # If user wants to update but doesn't specify which tasks, ask for clarification
-                if is_task_update and not has_specific_task_reference and not ('all' in question_lower and 'task' in question_lower):
-                    prompt = f"""The user wants to update tasks, but their request is unclear.
+                # --- PROJECT-LEVEL UPDATE ---
+                if is_project_level_update:
+                    # Determine which project(s) to update
+                    target_project_id = None
+                    target_project_name = None
+                    if context.get('project'):
+                        target_project_id = context['project'].get('id')
+                        target_project_name = context['project'].get('name')
+
+                    # Build project ID reference for the prompt
+                    project_id_ref = ""
+                    if context.get('all_projects'):
+                        project_id_ref = "\nAVAILABLE PROJECTS (use these IDs):\n"
+                        for p in context['all_projects']:
+                            project_id_ref += f"- ID: {p.get('id')}, Name: {p.get('name')}, Status: {p.get('status')}, Priority: {p.get('priority')}\n"
+
+                    from datetime import datetime as _dt_pu
+                    _today_pu = _dt_pu.now().strftime('%Y-%m-%d')
+
+                    prompt = f"""Return ONLY a valid JSON array. No text before or after.
+
+{context_str}
+{project_id_ref}
+
+User Request: {question}
+
+The user wants to UPDATE one or more existing PROJECTS (not tasks).
+{"The currently selected project is: " + target_project_name + " (ID: " + str(target_project_id) + ")" if target_project_id else "No project is selected - match by name from the request."}
+
+TODAY'S DATE: {_today_pu}
+
+Available update fields for projects:
+- name: new project name (string)
+- description: new project description (string)
+- status: "planning", "active", "on_hold", "completed", "cancelled", "in_progress", "review"
+- priority: "low", "medium", "high", "urgent"
+- deadline: "YYYY-MM-DD" format or null
+- start_date: "YYYY-MM-DD" format or null
+- end_date: "YYYY-MM-DD" format or null
+- project_type: "website", "mobile_app", "web_app", "ai_bot", "integration", "marketing", "database", "consulting", "ai_system"
+- budget_min: number or null
+- budget_max: number or null
+
+Return ONLY this JSON format:
+[
+    {{
+        "action": "update_project",
+        "project_id": project_id_number,
+        "project_name": "current project name",
+        "updates": {{
+            "status": "new_status",
+            "priority": "new_priority",
+            "name": "new name",
+            "description": "new description",
+            "deadline": "YYYY-MM-DD"
+        }},
+        "reasoning": "Brief explanation of what was changed and why"
+    }}
+]
+
+RULES:
+- Return ONLY the JSON array, no explanations
+- Include ONLY fields that need to be changed in the "updates" object
+- Use project IDs from the context above
+- Match project names from the user request (case-insensitive)
+- "complete project" / "finish project" = set status to "completed"
+- "cancel project" = set status to "cancelled"
+- "put on hold" / "hold project" = set status to "on_hold"
+- "activate" / "start" = set status to "active"
+- If updating multiple projects, return one update_project action per project"""
+
+                # --- TASK-LEVEL UPDATE (skip to here if not project-level) ---
+                else:
+                    # CRITICAL: Check if user mentions specific existing task IDs or task titles
+                    # If no specific tasks mentioned, it might be ambiguous
+                    has_specific_task_reference = False
+                    # Get tasks from either top-level context or nested inside project
+                    _tasks_list = context.get('tasks') or (context.get('project', {}).get('tasks') if context.get('project') else None) or []
+                    for task in _tasks_list:
+                        task_title = task.get('title', '').lower()
+                        task_id = task.get('id')
+                        # Check if task title or ID is mentioned in question
+                        if task_title and task_title in question_lower:
+                            has_specific_task_reference = True
+                            break
+                        # Check for task ID patterns
+                        if task_id and (f'task {task_id}' in question_lower or f'task_id {task_id}' in question_lower):
+                            has_specific_task_reference = True
+                            break
+
+                    # If user wants to update but doesn't specify which tasks, ask for clarification
+                    # Skip clarification for bulk operations (mark all, set all, etc.)
+                    if is_task_update and not has_specific_task_reference and not is_bulk_operation and not ('all' in question_lower and 'task' in question_lower):
+                        prompt = f"""The user wants to update tasks, but their request is unclear.
 
 {context_str}
 {users_str}
@@ -477,42 +713,42 @@ Examples:
 - "Update task ID 186 to high priority"
 
 Do NOT return JSON. Do NOT update anything yet."""
-                
-                # Determine target project
-                target_project_id = None
-                if context.get('project'):
-                    target_project_id = context['project']['id']
-                elif context.get('all_projects'):
-                    # Try to find project by name in the request
-                    for proj in context['all_projects']:
-                        proj_name = proj.get('name', '').lower()
-                        if proj_name and proj_name in question_lower:
-                            target_project_id = proj.get('id')
-                            break
-                    # If no project found by name, use first project
-                    if not target_project_id and len(context['all_projects']) > 0:
-                        target_project_id = context['all_projects'][0]['id']
-                
-                # Build detailed task list for context
-                tasks_detail = ""
-                if context.get('tasks'):
-                    tasks_detail = "\nCurrent Tasks with IDs:\n"
-                    for task in context['tasks']:
-                        tasks_detail += f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', 'Unknown')}, "
-                        tasks_detail += f"Status: {task.get('status', 'N/A')}, Priority: {task.get('priority', 'N/A')}\n"
-                        if task.get('description'):
-                            tasks_detail += f"  Description: {task.get('description', '')[:100]}...\n"
-                elif target_project_id and context.get('all_projects'):
-                    # Get tasks from project context if available
-                    for proj in context['all_projects']:
-                        if proj.get('id') == target_project_id:
-                            tasks_detail = f"\nProject has {proj.get('tasks_count', 0)} tasks.\n"
-                            break
-                
-                from datetime import datetime
-                current_date_str = datetime.now().strftime('%Y-%m-%d')
-                
-                prompt = f"""You are an AI assistant that extracts UPDATE actions from user requests. Analyze the request and return ONLY valid JSON.
+
+                    # Determine target project
+                    target_project_id = None
+                    if context.get('project'):
+                        target_project_id = context['project']['id']
+                    elif context.get('all_projects'):
+                        # Try to find project by name in the request
+                        for proj in context['all_projects']:
+                            proj_name = proj.get('name', '').lower()
+                            if proj_name and proj_name in question_lower:
+                                target_project_id = proj.get('id')
+                                break
+                        # If no project found by name, use first project
+                        if not target_project_id and len(context['all_projects']) > 0:
+                            target_project_id = context['all_projects'][0]['id']
+
+                    # Build detailed task list for context
+                    tasks_detail = ""
+                    if context.get('tasks'):
+                        tasks_detail = "\nCurrent Tasks with IDs:\n"
+                        for task in context['tasks']:
+                            tasks_detail += f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', 'Unknown')}, "
+                            tasks_detail += f"Status: {task.get('status', 'N/A')}, Priority: {task.get('priority', 'N/A')}\n"
+                            if task.get('description'):
+                                tasks_detail += f"  Description: {task.get('description', '')[:100]}...\n"
+                    elif target_project_id and context.get('all_projects'):
+                        # Get tasks from project context if available
+                        for proj in context['all_projects']:
+                            if proj.get('id') == target_project_id:
+                                tasks_detail = f"\nProject has {proj.get('tasks_count', 0)} tasks.\n"
+                                break
+
+                    from datetime import datetime
+                    current_date_str = datetime.now().strftime('%Y-%m-%d')
+
+                    prompt = f"""You are an AI assistant that extracts UPDATE actions from user requests. Analyze the request and return ONLY valid JSON.
 
 {context_str}
 {tasks_detail}
@@ -1102,8 +1338,7 @@ Return a helpful text response (NOT JSON) explaining this."""
             # Determine if this is a text-only response (not JSON)
             # Deletion requests should return JSON (actions), so they're not text-only
             is_text_response = (
-                cannot_do or 
-                (is_assignment_request and not is_creation_request) or
+                cannot_do or
                 ('clarification' in prompt.lower() or "didn't understand" in prompt.lower() or "please specify" in prompt.lower()) or
                 (not is_action_request and not is_deletion_request)
             )

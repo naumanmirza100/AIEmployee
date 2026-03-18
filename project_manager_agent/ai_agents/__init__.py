@@ -14,6 +14,9 @@ from .calendar_planner_agent import CalendarPlannerAgent
 from .meeting_notetaker_agent import MeetingNotetakerAgent
 from .workflow_sop_agent import WorkflowSOPAgent
 from .subtask_generation_agent import SubtaskGenerationAgent
+from .daily_standup_agent import DailyStandupAgent
+from .smart_notifications_agent import SmartNotificationsAgent
+from .time_estimation_agent import TimeEstimationAgent
 
 # Register all agents
 AgentRegistry.register("task_prioritization", TaskPrioritizationAgent)
@@ -25,6 +28,9 @@ AgentRegistry.register("calendar_planner", CalendarPlannerAgent)
 AgentRegistry.register("meeting_notetaker", MeetingNotetakerAgent)
 AgentRegistry.register("workflow_sop", WorkflowSOPAgent)
 AgentRegistry.register("subtask_generation", SubtaskGenerationAgent)
+AgentRegistry.register("daily_standup", DailyStandupAgent)
+AgentRegistry.register("smart_notifications", SmartNotificationsAgent)
+AgentRegistry.register("time_estimation", TimeEstimationAgent)
 
 __all__ = [
     'BaseAgent',
@@ -38,5 +44,8 @@ __all__ = [
     'MeetingNotetakerAgent',
     'WorkflowSOPAgent',
     'SubtaskGenerationAgent',
+    'DailyStandupAgent',
+    'SmartNotificationsAgent',
+    'TimeEstimationAgent',
 ]
 

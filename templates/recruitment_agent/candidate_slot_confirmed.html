@@ -5,129 +5,543 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interview Confirmed</title>
     <style>
+        :root {
+            --bg-primary: #0f0f23;
+            --bg-card: #1a1a2e;
+            --bg-panel: #16213e;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --text-muted: #707070;
+            --purple-primary: #6366f1;
+            --purple-light: #818cf8;
+            --purple-dark: #4f46e5;
+            --border-color: #2d2d44;
+            --accent-success: #10b981;
+            --accent-success-glow: rgba(16, 185, 129, 0.3);
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-primary);
+            min-height: 100vh;
+            color: var(--text-primary);
+            overflow-x: hidden;
+        }
+
+        /* Animated background particles */
+        .bg-effects {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .bg-effects .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.15;
+            animation: orbFloat 20s ease-in-out infinite;
+        }
+        .bg-effects .orb:nth-child(1) {
+            width: 500px; height: 500px;
+            background: var(--purple-primary);
+            top: -100px; left: -100px;
+            animation-duration: 18s;
+        }
+        .bg-effects .orb:nth-child(2) {
+            width: 400px; height: 400px;
+            background: var(--accent-success);
+            bottom: -80px; right: -80px;
+            animation-duration: 22s;
+            animation-delay: -5s;
+        }
+        .bg-effects .orb:nth-child(3) {
+            width: 300px; height: 300px;
+            background: var(--purple-light);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            animation-duration: 25s;
+            animation-delay: -10s;
+        }
+        @keyframes orbFloat {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            25% { transform: translate(40px, -30px) scale(1.05); }
+            50% { transform: translate(-20px, 40px) scale(0.95); }
+            75% { transform: translate(30px, 20px) scale(1.02); }
+        }
+
+        /* Confetti canvas */
+        #confetti-canvas {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* Main layout */
+        .page-wrapper {
+            position: relative;
+            z-index: 2;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 40px 20px;
         }
+
         .container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            max-width: 600px;
             width: 100%;
-            padding: 40px;
+            max-width: 680px;
+            animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(40px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Animated checkmark */
+        .checkmark-wrapper {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 32px;
+        }
+        .checkmark-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-success), #059669);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 0 0 var(--accent-success-glow);
+            animation: pulseGlow 2s ease-in-out infinite, scaleIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s forwards;
+            opacity: 0;
+            transform: scale(0);
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0) rotate(-45deg); }
+            to { opacity: 1; transform: scale(1) rotate(0deg); }
+        }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 0 0 var(--accent-success-glow), 0 8px 32px rgba(16, 185, 129, 0.25); }
+            50% { box-shadow: 0 0 0 20px transparent, 0 8px 32px rgba(16, 185, 129, 0.4); }
+        }
+
+        .checkmark-svg {
+            width: 60px;
+            height: 60px;
+        }
+        .checkmark-svg .check-path {
+            stroke: white;
+            stroke-width: 4;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            stroke-dasharray: 50;
+            stroke-dashoffset: 50;
+            animation: drawCheck 0.5s ease-out 0.7s forwards;
+        }
+        @keyframes drawCheck {
+            to { stroke-dashoffset: 0; }
+        }
+
+        /* Title */
+        .title {
             text-align: center;
-        }
-        .success-icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 32px;
-        }
-        .confirmation-box {
-            background: #f0f4ff;
-            border-left: 4px solid #667eea;
-            padding: 25px;
-            border-radius: 8px;
-            margin: 30px 0;
-            text-align: left;
-        }
-        .confirmation-box h2 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 22px;
-        }
-        .info-item {
-            margin-bottom: 12px;
-            color: #555;
-            font-size: 16px;
-        }
-        .info-item strong {
-            color: #333;
-            display: inline-block;
-            width: 160px;
-        }
-        .instructions {
-            background: #fff9e6;
-            border-left: 4px solid #ffc107;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 30px 0;
-            text-align: left;
-        }
-        .instructions h3 {
-            color: #333;
-            margin-bottom: 15px;
-        }
-        .instructions ul {
-            margin-left: 20px;
-            color: #555;
-        }
-        .instructions li {
+            font-size: 36px;
+            font-weight: 700;
             margin-bottom: 8px;
+            background: linear-gradient(135deg, #ffffff 0%, var(--accent-success) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: fadeIn 0.6s ease 0.4s forwards;
+            opacity: 0;
         }
-        .note {
-            color: #666;
+        .subtitle {
+            text-align: center;
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 40px;
+            animation: fadeIn 0.6s ease 0.5s forwards;
+            opacity: 0;
+        }
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 20px;
+            animation: fadeSlideIn 0.6s ease forwards;
+            opacity: 0;
+        }
+        .card:nth-child(1) { animation-delay: 0.6s; }
+        .card:nth-child(2) { animation-delay: 0.8s; }
+        .card:nth-child(3) { animation-delay: 1.0s; }
+
+        @keyframes fadeSlideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .card-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        .card-icon.purple {
+            background: rgba(99, 102, 241, 0.15);
+        }
+        .card-icon.amber {
+            background: rgba(245, 158, 11, 0.15);
+        }
+        .card-icon.green {
+            background: rgba(16, 185, 129, 0.15);
+        }
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Info rows */
+        .info-grid {
+            display: grid;
+            gap: 16px;
+        }
+        .info-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 12px 16px;
+            background: var(--bg-panel);
+            border-radius: 10px;
+            transition: background 0.2s ease;
+        }
+        .info-row:hover {
+            background: rgba(99, 102, 241, 0.08);
+        }
+        .info-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            min-width: 130px;
+            flex-shrink: 0;
+            padding-top: 2px;
+        }
+        .info-value {
+            font-size: 15px;
+            color: var(--text-primary);
+            font-weight: 500;
+            line-height: 1.4;
+        }
+        .info-value.highlight {
+            color: var(--purple-light);
+            font-weight: 600;
+        }
+
+        /* Badge */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .badge.online {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--purple-light);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        .badge.onsite {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        /* Checklist */
+        .checklist {
+            display: grid;
+            gap: 12px;
+        }
+        .checklist-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-panel);
+            border-radius: 10px;
             font-size: 14px;
-            margin-top: 30px;
-            font-style: italic;
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+        }
+        .checklist-item:hover {
+            background: rgba(99, 102, 241, 0.08);
+            color: var(--text-primary);
+            transform: translateX(4px);
+        }
+        .checklist-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--purple-primary);
+            flex-shrink: 0;
+        }
+
+        /* Footer note */
+        .footer-note {
+            text-align: center;
+            padding: 24px;
+            animation: fadeIn 0.6s ease 1.2s forwards;
+            opacity: 0;
+        }
+        .footer-note .email-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+        .footer-note .email-badge svg {
+            color: var(--accent-success);
+        }
+        .footer-note p {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .page-wrapper { padding: 24px 16px; }
+            .title { font-size: 28px; }
+            .card { padding: 20px; }
+            .info-row { flex-direction: column; gap: 4px; }
+            .info-label { min-width: auto; }
+            .checkmark-circle { width: 100px; height: 100px; }
+            .checkmark-svg { width: 48px; height: 48px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="success-icon">✅</div>
-        <h1>Interview Confirmed!</h1>
-        
-        <div class="confirmation-box">
-            <h2>Your Interview Details</h2>
-            <div class="info-item"><strong>Position:</strong> {{ interview.job_role }}</div>
-            <div class="info-item"><strong>Candidate:</strong> {{ interview.candidate_name }}</div>
-            <div class="info-item"><strong>Interview Type:</strong> {{ interview.get_interview_type_display }}</div>
-            <div class="info-item"><strong>Scheduled Date & Time:</strong> {{ selected_slot }}</div>
-        </div>
-
-        {% if interview.interview_type == 'ONLINE' %}
-        <div class="instructions">
-            <h3>📋 Preparation Instructions (Online Interview)</h3>
-            <ul>
-                <li>Join the meeting 5 minutes early</li>
-                <li>Ensure you have a stable internet connection</li>
-                <li>Find a quiet, well-lit space</li>
-                <li>Have your resume and relevant documents ready</li>
-                <li>You will receive the meeting link via email separately</li>
-            </ul>
-        </div>
-        {% else %}
-        <div class="instructions">
-            <h3>📋 Preparation Instructions (Onsite Interview)</h3>
-            <ul>
-                <li>Arrive 10 minutes early</li>
-                <li>Bring a copy of your resume</li>
-                <li>Bring a valid ID</li>
-                <li>Prepare any questions you may have</li>
-            </ul>
-        </div>
-        {% endif %}
-
-        <p class="note">
-            A confirmation email has been sent to your email address ({{ interview.candidate_email }}). 
-            You will also receive reminder emails 24 hours and 1 hour before the interview.
-        </p>
+    <!-- Background effects -->
+    <div class="bg-effects">
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
     </div>
+
+    <!-- Confetti -->
+    <canvas id="confetti-canvas"></canvas>
+
+    <div class="page-wrapper">
+        <div class="container">
+            <!-- Animated Checkmark -->
+            <div class="checkmark-wrapper">
+                <div class="checkmark-circle">
+                    <svg class="checkmark-svg" viewBox="0 0 40 40">
+                        <path class="check-path" d="M10 20 L17 27 L30 13" />
+                    </svg>
+                </div>
+            </div>
+
+            <h1 class="title">Interview Confirmed!</h1>
+            <p class="subtitle">Your interview has been successfully scheduled. We look forward to meeting you.</p>
+
+            <!-- Interview Details Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon purple">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    </div>
+                    <div class="card-title">Interview Details</div>
+                </div>
+                <div class="info-grid">
+                    <div class="info-row">
+                        <span class="info-label">Position</span>
+                        <span class="info-value">{{ interview.job_role }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Candidate</span>
+                        <span class="info-value">{{ interview.candidate_name }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Interview Type</span>
+                        <span class="info-value">
+                            {% if interview.interview_type == 'ONLINE' %}
+                            <span class="badge online">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14"/><rect x="1" y="6" width="14" height="12" rx="2" ry="2"/></svg>
+                                Online
+                            </span>
+                            {% else %}
+                            <span class="badge onsite">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                Onsite
+                            </span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Date & Time</span>
+                        <span class="info-value highlight">{{ selected_slot }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preparation Instructions Card -->
+            {% if interview.interview_type == 'ONLINE' %}
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon amber">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </div>
+                    <div class="card-title">Preparation Checklist</div>
+                </div>
+                <div class="checklist">
+                    <div class="checklist-item"><span class="checklist-dot"></span> Join the meeting 5 minutes early</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Ensure a stable internet connection</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Find a quiet, well-lit space</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Keep your resume and documents ready</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Meeting link will be sent via email</div>
+                </div>
+            </div>
+            {% else %}
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon amber">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </div>
+                    <div class="card-title">Preparation Checklist</div>
+                </div>
+                <div class="checklist">
+                    <div class="checklist-item"><span class="checklist-dot"></span> Arrive 10 minutes early</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Bring a copy of your resume</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Bring a valid ID</div>
+                    <div class="checklist-item"><span class="checklist-dot"></span> Prepare any questions you may have</div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Footer -->
+            <div class="footer-note">
+                <div class="email-badge">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                    Confirmation sent to {{ interview.candidate_email }}
+                </div>
+                <p>You will receive a reminder email before your scheduled interview.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Confetti Animation
+        (function() {
+            const canvas = document.getElementById('confetti-canvas');
+            const ctx = canvas.getContext('2d');
+            let particles = [];
+            let animFrame;
+
+            function resize() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            resize();
+            window.addEventListener('resize', resize);
+
+            const colors = ['#6366f1', '#818cf8', '#10b981', '#34d399', '#a78bfa', '#f59e0b', '#fbbf24', '#ffffff'];
+
+            function createParticle() {
+                return {
+                    x: Math.random() * canvas.width,
+                    y: -10,
+                    w: Math.random() * 8 + 4,
+                    h: Math.random() * 6 + 3,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    speed: Math.random() * 3 + 2,
+                    drift: (Math.random() - 0.5) * 2,
+                    rotate: Math.random() * 360,
+                    rotateSpeed: (Math.random() - 0.5) * 8,
+                    opacity: Math.random() * 0.6 + 0.4,
+                };
+            }
+
+            // Burst of confetti
+            for (let i = 0; i < 120; i++) {
+                const p = createParticle();
+                p.y = Math.random() * canvas.height * 0.5 - canvas.height * 0.2;
+                particles.push(p);
+            }
+
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.y += p.speed;
+                    p.x += p.drift;
+                    p.rotate += p.rotateSpeed;
+                    p.opacity -= 0.003;
+
+                    if (p.opacity <= 0 || p.y > canvas.height + 20) {
+                        particles.splice(i, 1);
+                        continue;
+                    }
+
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate((p.rotate * Math.PI) / 180);
+                    ctx.globalAlpha = p.opacity;
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+                    ctx.restore();
+                }
+
+                if (particles.length > 0) {
+                    animFrame = requestAnimationFrame(animate);
+                }
+            }
+
+            // Start confetti after tick animation
+            setTimeout(() => {
+                animate();
+            }, 800);
+        })();
+    </script>
 </body>
 </html>
-

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, TrendingUp, Users, Calendar, BarChart3, PieChart, Activity, Target, ArrowUpRight } from 'lucide-react';
 import { getRecruitmentAnalytics, getJobDescriptions } from '@/services/recruitmentAgentService';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import SearchableSelect from '@/components/ui/searchable-select';
 
 const RecruitmentAnalytics = () => {
   const { toast } = useToast();
@@ -261,19 +261,14 @@ const RecruitmentAnalytics = () => {
         <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
             <label className="text-sm font-medium shrink-0 text-white">Filter by Job:</label>
-            <Select value={selectedJobId ? String(selectedJobId) : 'all'} onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}>
-              <SelectTrigger className="w-full sm:w-[280px] md:w-[300px] min-w-0 border-white/20">
-                <SelectValue placeholder="Select a job" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Jobs</SelectItem>
-                {jobs.map((job) => (
-                  <SelectItem key={job.id} value={job.id.toString()}>
-                    {job.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={selectedJobId ? String(selectedJobId) : 'all'}
+              onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}
+              options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.id.toString(), label: j.title }))]}
+              placeholder="Select a job"
+              triggerClassName="w-full sm:w-[280px] md:w-[300px] min-w-0"
+              displayLength={30}
+            />
             {selectedJob ? (
               <Badge variant="secondary" className="w-fit truncate max-w-full">
                 <span className="truncate">Showing: {selectedJob.title}</span>

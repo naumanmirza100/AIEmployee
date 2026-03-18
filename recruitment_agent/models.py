@@ -378,6 +378,43 @@ class Interview(models.Model):
         settings = self.get_recruiter_settings()
         return settings.min_hours_between_followups
 
+    def is_job_schedule_expired(self):
+        """Check if the job's interview scheduling date range has passed.
+        Returns True if schedule_to_date is set and today is past that date.
+        """
+        from datetime import date
+        job = None
+        if self.cv_record and self.cv_record.job_description_id:
+            job = self.cv_record.job_description
+
+        if not job:
+            return False
+
+        # Check job-specific settings first, then fallback to general settings
+        settings = None
+        if self.company_user:
+            settings = RecruiterInterviewSettings.objects.filter(
+                company_user=self.company_user, job=job
+            ).first()
+            if not settings:
+                settings = RecruiterInterviewSettings.objects.filter(
+                    company_user=self.company_user, job__isnull=True
+                ).first()
+
+        if not settings and self.recruiter:
+            settings = RecruiterInterviewSettings.objects.filter(
+                recruiter=self.recruiter, job=job
+            ).first()
+            if not settings:
+                settings = RecruiterInterviewSettings.objects.filter(
+                    recruiter=self.recruiter, job__isnull=True
+                ).first()
+
+        if settings and settings.schedule_to_date:
+            return date.today() > settings.schedule_to_date
+
+        return False
+
 
 class RecruitmentQAChat(models.Model):
     """Knowledge Q&A chat sessions for recruiters. Each chat contains multiple messages."""

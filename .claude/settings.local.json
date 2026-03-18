@@ -12,6 +12,7 @@
       "Bash(python manage.py migrate marketing_agent)",
       "Bash(python manage.py migrate marketing_agent 0030_add_chart_title_to_savedgraphprompt --fake)",
       "Bash(ls d:/University/work/AI_Employyes/AIEmployee/marketing_agent/migrations/0030*)"
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/project_pilot_agent.py''\\).read\\(\\)\\); print\\(''OK''\\)\")"
     ]
   }
 }

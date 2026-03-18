@@ -1,74 +1,178 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #9C27B0; color: white; padding: 20px; text-align: center; }
-        .content { padding: 20px; background-color: #f9f9f9; }
-        .reminder-box { background-color: #f3e5f5; padding: 15px; margin: 15px 0; border-left: 4px solid #9C27B0; }
-        .details { background-color: white; padding: 15px; margin: 15px 0; }
-        .checklist { background-color: #e1bee7; padding: 15px; margin: 15px 0; }
-        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Reminder</title>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Interview Reminder</h1>
-        </div>
-        <div class="content">
-            <p>Dear {{ candidate_name }},</p>
-            
-            <div class="reminder-box">
-                <h2>This is a reminder that you have an interview scheduled!</h2>
-            </div>
-            
-            <div class="details">
-                <h3>Interview Details:</h3>
-                <ul>
-                    <li><strong>Position:</strong> {{ job_title }}</li>
-                    <li><strong>Interview Type:</strong> {{ interview_type }}</li>
-                    <li><strong>Date & Time:</strong> {{ selected_slot }}</li>
-                </ul>
-            </div>
-            
-            {% if hours_before == 24 %}
-            <p><strong>Your interview is scheduled for tomorrow.</strong> Please make sure you are prepared and available.</p>
-            {% else %}
-            <p><strong>Your interview is scheduled in {{ hours_before }} hours.</strong> Please make sure you are prepared and available.</p>
-            {% endif %}
-            
-            {% if interview_type == 'ONLINE' %}
-            <div class="checklist">
-                <h3>For online interviews, please ensure you have:</h3>
-                <ul>
-                    <li>A stable internet connection</li>
-                    <li>A quiet, well-lit space</li>
-                    <li>Your resume and any relevant documents ready</li>
-                    <li>The meeting link (sent separately)</li>
-                </ul>
-            </div>
-            {% else %}
-            <div class="checklist">
-                <h3>For onsite interviews, please:</h3>
-                <ul>
-                    <li>Arrive 10 minutes early</li>
-                    <li>Bring a copy of your resume</li>
-                    <li>Bring a valid ID</li>
-                </ul>
-            </div>
-            {% endif %}
-            
-            <p>We look forward to meeting you!</p>
-            
-            <p>Best regards,<br>Recruitment Team</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated reminder email.</p>
-        </div>
-    </div>
+<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+    <!-- Wrapper -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:40px 40px 32px;text-align:center;">
+                            <div style="width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">
+                                <img src="https://img.icons8.com/fluency/48/bell.png" alt="" width="36" height="36" style="display:block;" />
+                            </div>
+                            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.3px;">Interview Reminder</h1>
+                            {% if hours_before == 24 %}
+                            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">Your interview is scheduled for tomorrow</p>
+                            {% else %}
+                            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">Your interview is in {{ hours_before }} hours</p>
+                            {% endif %}
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding:36px 40px 20px;">
+                            <p style="margin:0 0 20px;font-size:16px;color:#1a1a2e;line-height:1.6;">Dear <strong>{{ candidate_name }}</strong>,</p>
+                            {% if hours_before == 24 %}
+                            <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.7;">This is a friendly reminder that your interview for the <strong style="color:#4f46e5;">{{ job_title }}</strong> position is scheduled for <strong>tomorrow</strong>. Please make sure you are prepared and available.</p>
+                            {% else %}
+                            <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.7;">This is a friendly reminder that your interview for the <strong style="color:#4f46e5;">{{ job_title }}</strong> position is coming up in <strong>{{ hours_before }} hours</strong>. Please make sure you are prepared and available.</p>
+                            {% endif %}
+                        </td>
+                    </tr>
+
+                    <!-- Details Card -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8f7ff;border-radius:12px;border:1px solid #e8e5ff;">
+                                <tr>
+                                    <td style="padding:20px 24px 8px;">
+                                        <p style="margin:0;font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.8px;">Interview Details</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:12px 24px 20px;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="padding:8px 0;border-bottom:1px solid #ede9fe;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Position</span>
+                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ job_title }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:8px 0;border-bottom:1px solid #ede9fe;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Interview Type</span>
+                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ interview_type }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:8px 0;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Date & Time</span>
+                                                    <span style="font-size:16px;color:#6366f1;font-weight:700;display:block;margin-top:2px;">{{ selected_slot }}</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Checklist -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            {% if interview_type == 'ONLINE' %}
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border-radius:12px;border:1px solid #dbeafe;">
+                                <tr>
+                                    <td style="padding:20px 24px 8px;">
+                                        <p style="margin:0;font-size:13px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:0.8px;">Online Interview Checklist</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:12px 24px 20px;">
+                                        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#2563eb;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Stable internet connection
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#2563eb;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    A quiet, well-lit space
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#2563eb;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Resume and relevant documents ready
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#2563eb;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Meeting link (sent separately)
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                            {% else %}
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef3c7;border-radius:12px;border:1px solid #fde68a;">
+                                <tr>
+                                    <td style="padding:20px 24px 8px;">
+                                        <p style="margin:0;font-size:13px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.8px;">Onsite Interview Checklist</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:12px 24px 20px;">
+                                        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#d97706;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Arrive 10 minutes early
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#d97706;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Bring a copy of your resume
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#d97706;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Bring a valid ID
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                            {% endif %}
+                        </td>
+                    </tr>
+
+                    <!-- Sign-off -->
+                    <tr>
+                        <td style="padding:0 40px 36px;">
+                            <p style="margin:0 0 4px;font-size:15px;color:#444;line-height:1.6;">We look forward to meeting you!</p>
+                            <p style="margin:16px 0 0;font-size:15px;color:#444;">Best regards,<br><strong style="color:#1a1a2e;">Recruitment Team</strong></p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background:#fafafa;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
+                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated reminder email.</p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+
 </body>
 </html>
-
