@@ -995,7 +995,6 @@ class SavedGraphPrompt(models.Model):
         help_text='User who saved this prompt (company user mapped to User)',
     )
     title = models.CharField(max_length=255, help_text='User-friendly title for the prompt')
-    chart_title = models.CharField(max_length=255, default='', help_text='Chart display title')
     prompt = models.TextField(help_text='The natural language prompt for graph generation')
     chart_type = models.CharField(
         max_length=20,

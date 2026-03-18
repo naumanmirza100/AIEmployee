@@ -619,47 +619,52 @@ const MarketingDashboard = () => {
               return Number.isInteger(n) ? String(n) : n.toFixed(1);
             };
 
-            const padL = 10;
-            const chartW = 100 - padL;
+            const padL = 8;
+            const padR = 3;
+            const padT = 3;
+            const padB = 3;
+            const chartW = 100 - padL - padR;
+            const chartH = 100 - padT - padB;
             const yTicks = [0, 1, 2, 3].map(i => ({
               val: minValue + (range * i) / 3,
-              y: 100 - (i / 3) * 100,
+              y: padT + chartH - (i / 3) * chartH,
             }));
 
-            const points = values.map((value, index) => {
+            const chartPoints = values.map((value, index) => {
               const x = padL + (index / (values.length - 1 || 1)) * chartW;
-              const y = 100 - ((value - minValue) / range) * 100;
-              return `${x},${y}`;
-            }).join(' ');
-            const areaPoints = `${padL},100 ${points} ${padL + chartW},100`;
+              const y = padT + chartH - ((value - minValue) / range) * chartH;
+              return { x, y };
+            });
+            const points = chartPoints.map(p => `${p.x},${p.y}`).join(' ');
+            const lastX = chartPoints[chartPoints.length - 1]?.x ?? (padL + chartW);
+            const firstX = chartPoints[0]?.x ?? padL;
+            const areaPoints = `${firstX},${padT + chartH} ${points} ${lastX},${padT + chartH}`;
 
             return (
-              <div className="space-y-2">
+              <div className="space-y-2 overflow-hidden">
                 {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
-                <div className="relative w-full" style={{ height: `${height}px` }}>
-                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <div className="relative w-full" style={{ height: `${height}px`, marginBottom: '22px' }}>
+                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="overflow-visible">
                     {yTicks.map((tick, i) => (
-                      <line key={i} x1={padL} y1={tick.y} x2="100" y2={tick.y} stroke="rgba(255,255,255,0.06)" strokeWidth="0.15" />
+                      <line key={i} x1={padL} y1={tick.y} x2={padL + chartW} y2={tick.y} stroke="rgba(255,255,255,0.06)" strokeWidth="0.15" />
                     ))}
                     <polygon points={areaPoints} fill={`${color}20`} />
                     <polyline points={points} fill="none" stroke={color} strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round" />
-                    {values.map((value, index) => (
-                      <circle key={index} cx={padL + (index / (values.length - 1 || 1)) * chartW} cy={100 - ((value - minValue) / range) * 100} r="1" fill={color} />
+                    {chartPoints.map((pt, index) => (
+                      <circle key={index} cx={pt.x} cy={pt.y} r="1" fill={color} />
                     ))}
                   </svg>
                   {/* Y-axis labels */}
-                  <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '9%' }}>
+                  <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '7%', paddingTop: `${padT}%`, paddingBottom: `${padB}%` }}>
                     {[...yTicks].reverse().map((tick, i) => (
                       <span key={i} className="text-[9px] text-white/40 text-right pr-0.5 leading-none">{formatVal(tick.val)}</span>
                     ))}
                   </div>
                   {/* X-axis labels */}
-                  <div className="absolute left-[10%] right-0 flex justify-between text-[10px] text-white/50" style={{ bottom: '-18px' }}>
-                    {labels.length <= 7 ? labels.map((label, i) => (
-                      <span key={i} className="truncate max-w-[80px]">{label}</span>
-                    )) : (
-                      <><span>{labels[0]}</span><span>{labels[Math.floor(labels.length / 2)]}</span><span>{labels[labels.length - 1]}</span></>
-                    )}
+                  <div className="absolute flex justify-between text-[10px] text-white/50" style={{ left: `${padL}%`, right: `${padR}%`, bottom: '-20px' }}>
+                    {labels.map((label, i) => (
+                      <span key={i} className="text-center truncate" style={{ maxWidth: `${Math.floor(90 / labels.length)}%` }}>{label}</span>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1432,13 +1437,55 @@ const MarketingDashboard = () => {
                                 <ChartIcon className="h-4 w-4" />
                               </div>
                               <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2">
                                 <CardTitle className="text-sm font-semibold line-clamp-2 leading-snug">
                                   {prompt.title}
                                 </CardTitle>
+                                 <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-white/30 hover:text-red-400 hover:bg-red-400/10 transition-colors shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteGraphPrompt(prompt.id);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                                </div>
+                                <div className='flex items-center justify-between gap-2'>
                                 <span className={`inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium uppercase tracking-wider ${chartColor}`}>
                                   <ChartIcon className="h-2.5 w-2.5" />
                                   {chartType} chart
                                 </span>
+                                 {prompt.tags && prompt.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2.5">
+                                {prompt.tags.map((tag) => {
+                                  const TAG_COLORS = [
+                                    'bg-blue-500/15 text-blue-400 border-blue-500/25',
+                                    'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
+                                    'bg-purple-500/15 text-purple-400 border-purple-500/25',
+                                    'bg-amber-500/15 text-amber-400 border-amber-500/25',
+                                    'bg-rose-500/15 text-rose-400 border-rose-500/25',
+                                    'bg-cyan-500/15 text-cyan-400 border-cyan-500/25',
+                                    'bg-pink-500/15 text-pink-400 border-pink-500/25',
+                                    'bg-indigo-500/15 text-indigo-400 border-indigo-500/25',
+                                  ];
+                                  const hash = [...tag].reduce((acc, c) => acc + c.charCodeAt(0), 0);
+                                  const colorClass = TAG_COLORS[hash % TAG_COLORS.length];
+                                  return (
+                                    <Badge
+                                      key={tag}
+                                      variant="outline"
+                                      className={`text-[10px] px-1.5 py-0 h-4 ${colorClass}`}
+                                    >
+                                      {tag}
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                            )}
+                                </div>
                               </div>
                             </div>
                           </CardHeader>
@@ -1447,19 +1494,7 @@ const MarketingDashboard = () => {
                             <p className="text-xs text-white/50 line-clamp-2 leading-relaxed">
                               {prompt.prompt}
                             </p>
-                            {prompt.tags && prompt.tags.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-2.5">
-                                {prompt.tags.map((tag) => (
-                                  <Badge
-                                    key={tag}
-                                    variant="secondary"
-                                    className="text-[10px] px-1.5 py-0 h-4 bg-white/5 text-white/60 border-white/10 hover:bg-white/10"
-                                  >
-                                    {tag}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
+                           
                           </CardContent>
 
                           <div className="px-4 pb-3 pt-2 mt-auto">
@@ -1487,17 +1522,7 @@ const MarketingDashboard = () => {
                                   </>
                                 )}
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-white/30 hover:text-red-400 hover:bg-red-400/10 transition-colors shrink-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteGraphPrompt(prompt.id);
-                                }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                             
                             </div>
                           </div>
                         </Card>
@@ -1557,14 +1582,14 @@ const MarketingDashboard = () => {
                       <CardContent className="pt-0">
                         <div className="bg-black/20 rounded-xl p-6 border border-white/5">
                           {viewingGraphResult.chart ? (
-                            <div className="w-full overflow-x-auto">
+                            <div className="w-full overflow-hidden">
                               {viewingGraphResult.chart.type === 'pie' && (
                                 <div className="flex justify-center">
                                   {renderChart(viewingGraphResult.chart)}
                                 </div>
                               )}
                               {['bar', 'line', 'area'].includes(viewingGraphResult.chart.type) && (
-                                <div className="w-full">
+                                <div className="w-full pb-6">
                                   {renderChart(viewingGraphResult.chart)}
                                 </div>
                               )}

@@ -2894,11 +2894,9 @@ def api_marketing_save_prompt(request):
                 'message': 'Prompt is required.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        chart_title = data.get('chart_title', '') or title
         saved_prompt = SavedGraphPrompt.objects.create(
             created_by=user,
             title=title,
-            chart_title=chart_title,
             prompt=prompt,
             tags=tags if isinstance(tags, list) else [],
             chart_type=chart_type,
