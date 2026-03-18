@@ -1,42 +1,108 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #FF9800; color: white; padding: 20px; text-align: center; }
-        .content { padding: 20px; background-color: #f9f9f9; }
-        .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #FF9800; }
-        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Scheduled - Recruiter Notification</title>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Interview Scheduled</h1>
-        </div>
-        <div class="content">
-            <p>Hello {{ recruiter_name }},</p>
-            
-            <p>An interview has been scheduled:</p>
-            
-            <div class="info-box">
-                <p><strong>Candidate:</strong> {{ candidate_name }}</p>
-                <p><strong>Email:</strong> {{ candidate_email }}</p>
-                <p><strong>Position:</strong> {{ job_title }}</p>
-                <p><strong>Interview Type:</strong> {{ interview_type }}</p>
-                <p><strong>Scheduled Date & Time:</strong> {{ scheduled_datetime|date:"F d, Y" }} at {{ scheduled_datetime|time:"g:i A" }}</p>
-            </div>
-            
-            <p>Please ensure you are available at this time.</p>
-            
-            <p>Best regards,<br>Interview Scheduling System</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated notification email.</p>
-        </div>
-    </div>
+<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+    <!-- Wrapper -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background:linear-gradient(135deg,#1e293b,#0f172a);padding:36px 40px 28px;text-align:center;">
+                            <div style="width:56px;height:56px;background:rgba(99,102,241,0.2);border-radius:14px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;">
+                                <img src="https://img.icons8.com/fluency/48/conference-call.png" alt="" width="32" height="32" style="display:block;" />
+                            </div>
+                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.3px;">New Interview Scheduled</h1>
+                            <p style="margin:6px 0 0;color:rgba(255,255,255,0.6);font-size:13px;">A candidate has confirmed their interview slot</p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding:32px 40px 20px;">
+                            <p style="margin:0 0 20px;font-size:15px;color:#1a1a2e;line-height:1.6;">Hello <strong>{{ recruiter_name }}</strong>,</p>
+                            <p style="margin:0 0 24px;font-size:14px;color:#555;line-height:1.7;">An interview has been confirmed. Here are the details:</p>
+                        </td>
+                    </tr>
+
+                    <!-- Details Card -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;">
+                                <tr>
+                                    <td style="padding:20px 24px;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
+                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Candidate</span>
+                                                    <span style="font-size:15px;color:#1e293b;font-weight:600;display:block;margin-top:3px;">{{ candidate_name }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
+                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Email</span>
+                                                    <span style="font-size:14px;color:#6366f1;font-weight:500;display:block;margin-top:3px;">{{ candidate_email }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
+                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Position</span>
+                                                    <span style="font-size:15px;color:#1e293b;font-weight:600;display:block;margin-top:3px;">{{ job_title }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
+                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Interview Type</span>
+                                                    <span style="font-size:15px;color:#1e293b;font-weight:600;display:block;margin-top:3px;">{{ interview_type }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:10px 0;">
+                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Scheduled Date & Time</span>
+                                                    <span style="font-size:16px;color:#059669;font-weight:700;display:block;margin-top:3px;">{{ scheduled_datetime|date:"F d, Y" }} at {{ scheduled_datetime|time:"g:i A" }}</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Note -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <p style="margin:0;font-size:13px;color:#888;line-height:1.6;background:#fafafa;padding:14px 18px;border-radius:10px;border-left:3px solid #6366f1;">
+                                Please ensure you are available at this time. The candidate has been sent a confirmation email with interview preparation instructions.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Sign-off -->
+                    <tr>
+                        <td style="padding:0 40px 32px;">
+                            <p style="margin:0;font-size:14px;color:#444;">Best regards,<br><strong style="color:#1a1a2e;">Interview Scheduling System</strong></p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background:#fafafa;padding:18px 40px;text-align:center;border-top:1px solid #f0f0f0;">
+                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated notification email.</p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+
 </body>
 </html>
-

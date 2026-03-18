@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target } from 'lucide-react';
+import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target, ChevronsUpDown, Check, Search } from 'lucide-react';
 import { 
   getEmailSettings, 
   updateEmailSettings, 
@@ -59,6 +59,29 @@ const RecruiterSettings = () => {
   const [selectedJobId, setSelectedJobId] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [jobSearchOpen, setJobSearchOpen] = useState(false);
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
+  const jobDropdownRef = useRef(null);
+
+  // Close job dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (jobDropdownRef.current && !jobDropdownRef.current.contains(e.target)) {
+        setJobSearchOpen(false);
+        setJobSearchQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredJobs = jobs.filter((job) =>
+    job.title.toLowerCase().includes(jobSearchQuery.toLowerCase())
+  );
+
+  const selectedJobTitle = selectedJobId
+    ? jobs.find((j) => j.id === selectedJobId)?.title
+    : null;
 
   useEffect(() => {
     // Fetch jobs and initial settings (email & qualification don't need jobs)
@@ -756,36 +779,68 @@ const RecruiterSettings = () => {
                   </div>
                 ) : (
                   <>
-                    <Select
-                      value={selectedJobId?.toString() || ''}
-                      onValueChange={(value) => {
-                        setSelectedJobId(value ? parseInt(value) : null);
-                        // Reset settings when job changes
-                        setInterviewSettings({
-                          schedule_from_date: '',
-                          schedule_to_date: '',
-                          start_time: '09:00',
-                          end_time: '17:00',
-                          interview_time_gap: 30,
-                          default_interview_type: 'ONLINE',
-                        });
-                        setScheduleFromDate(null);
-                        setScheduleToDate(null);
-                        setTimeSlots([]);
-                      }}
-                      disabled={loadingJobs}
-                    >
-                      <SelectTrigger id="job-select" className="border-white/20">
-                        <SelectValue placeholder={loadingJobs ? "Loading jobs..." : "Select a job"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {jobs.map((job) => (
-                          <SelectItem key={job.id} value={job.id.toString()}>
-                            {job.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="relative" ref={jobDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => { if (!loadingJobs) { setJobSearchOpen(!jobSearchOpen); setJobSearchQuery(''); } }}
+                        className="w-full flex items-center justify-between text-sm bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-black/40 transition-colors disabled:opacity-50"
+                        disabled={loadingJobs}
+                      >
+                        <span className={selectedJobTitle ? 'text-white' : 'text-white/50'}>
+                          {loadingJobs ? 'Loading jobs...' : (selectedJobTitle || 'Select a job')}
+                        </span>
+                        <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
+                      </button>
+                      {jobSearchOpen && (
+                        <div className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
+                          <div className="flex items-center border-b border-white/10 px-3">
+                            <Search className="h-4 w-4 text-white/40 shrink-0" />
+                            <input
+                              type="text"
+                              autoFocus
+                              value={jobSearchQuery}
+                              onChange={(e) => setJobSearchQuery(e.target.value)}
+                              placeholder="Search jobs..."
+                              className="w-full bg-transparent text-sm text-white py-2.5 px-2 outline-none placeholder:text-white/40"
+                            />
+                          </div>
+                          <div className="max-h-[200px] overflow-y-auto">
+                            {filteredJobs.length === 0 ? (
+                              <div className="px-3 py-3 text-sm text-white/40 text-center">No jobs found</div>
+                            ) : (
+                              filteredJobs.map((job) => (
+                                <button
+                                  key={job.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedJobId(job.id);
+                                    setInterviewSettings({
+                                      schedule_from_date: '',
+                                      schedule_to_date: '',
+                                      start_time: '09:00',
+                                      end_time: '17:00',
+                                      interview_time_gap: 30,
+                                      default_interview_type: 'ONLINE',
+                                    });
+                                    setScheduleFromDate(null);
+                                    setScheduleToDate(null);
+                                    setTimeSlots([]);
+                                    setJobSearchOpen(false);
+                                    setJobSearchQuery('');
+                                  }}
+                                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors hover:bg-white/10 ${
+                                    selectedJobId === job.id ? 'bg-white/5 text-purple-400' : 'text-white/80'
+                                  }`}
+                                >
+                                  <Check className={`h-4 w-4 shrink-0 ${selectedJobId === job.id ? 'opacity-100 text-purple-400' : 'opacity-0'}`} />
+                                  {job.title}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     {!selectedJobId && jobs.length > 0 && (
                       <p className="text-xs text-muted-foreground">
                         Please select a job to configure its interview settings

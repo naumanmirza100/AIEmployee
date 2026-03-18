@@ -1272,7 +1272,11 @@ def get_available_slots_for_interview(request, token):
         ).get(confirmation_token=token, status='PENDING')
     except Interview.DoesNotExist:
         return JsonResponse({"error": "Invalid or expired interview link"}, status=404)
-    
+
+    # Check if job's scheduling date range has expired
+    if interview.is_job_schedule_expired():
+        return JsonResponse({"error": "The scheduling period for this position has ended. Please contact the recruiter."}, status=410)
+
     # Resolve job for this interview (from CV record)
     job = None
     if interview.cv_record and interview.cv_record.job_description_id:
@@ -1424,7 +1428,14 @@ def candidate_select_slot(request, token):
             'error': 'Invalid or expired interview link. Please contact the recruiter.',
             'invalid_token': True,
         })
-    
+
+    # Check if job's scheduling date range has expired
+    if interview.is_job_schedule_expired():
+        return render(request, 'recruitment_agent/candidate_slot_selection.html', {
+            'error': 'The scheduling period for this position has ended. Please contact the recruiter.',
+            'invalid_token': True,
+        })
+
     if request.method == 'POST':
         selected_slot_datetime = request.POST.get('selected_slot_datetime')
         if not selected_slot_datetime:

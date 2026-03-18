@@ -583,7 +583,8 @@
                 // Days of the month
                 for (let day = 1; day <= daysInMonth; day++) {
                     const date = new Date(year, month, day);
-                    const dateStr = date.toISOString().split('T')[0];
+                    // Use local date formatting to avoid UTC timezone shift
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     const isAvailable = availableDates.includes(dateStr);
                     const isSelected = dateStr === availableDates[0];
                     
