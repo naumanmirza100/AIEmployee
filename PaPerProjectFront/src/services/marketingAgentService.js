@@ -429,6 +429,48 @@ export const marketResearch = async (researchType, topic, context = {}) => {
   }
 };
 
+// ── Marketing QA Chat CRUD ──
+export const listQAChats = async () => {
+  const response = await companyApi.get('/marketing/qa/chats');
+  return response;
+};
+
+export const createQAChat = async (data) => {
+  const response = await companyApi.post('/marketing/qa/chats/create', data);
+  return response;
+};
+
+export const updateQAChat = async (chatId, data) => {
+  const response = await companyApi.patch(`/marketing/qa/chats/${chatId}/update`, data);
+  return response;
+};
+
+export const deleteQAChat = async (chatId) => {
+  const response = await companyApi.delete(`/marketing/qa/chats/${chatId}/delete`);
+  return response;
+};
+
+// ── Market Research Chat CRUD ──
+export const listResearchChats = async () => {
+  const response = await companyApi.get('/marketing/market-research/chats');
+  return response;
+};
+
+export const createResearchChat = async (data) => {
+  const response = await companyApi.post('/marketing/market-research/chats/create', data);
+  return response;
+};
+
+export const updateResearchChat = async (chatId, data) => {
+  const response = await companyApi.patch(`/marketing/market-research/chats/${chatId}/update`, data);
+  return response;
+};
+
+export const deleteResearchChat = async (chatId) => {
+  const response = await companyApi.delete(`/marketing/market-research/chats/${chatId}/delete`);
+  return response;
+};
+
 /**
  * Outreach Campaign Agent
  * API: POST /api/marketing/outreach-campaign
@@ -747,7 +789,15 @@ export default {
   uploadCampaignLeads,
   getExportLeadsUrl,
   marketingQA,
+  listQAChats,
+  createQAChat,
+  updateQAChat,
+  deleteQAChat,
   marketResearch,
+  listResearchChats,
+  createResearchChat,
+  updateResearchChat,
+  deleteResearchChat,
   outreachCampaign,
   listDocuments,
   getDocument,

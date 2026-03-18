@@ -39,7 +39,7 @@ import marketingAgentService from '@/services/marketingAgentService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
-const STORAGE_KEY = 'marketing_research_chats';
+const STORAGE_KEY = 'marketing_research_chats'; // kept for one-time migration
 
 /** Research types matching backend. General = verify/question fits any type; others = must match selected type. */
 const RESEARCH_TYPES = [
@@ -269,21 +269,41 @@ const OFF_TOPIC_RESPONSE = {
 
 /** Normalize chat to { id, messages: [{ role, topic?, researchType?, context?, response? }], timestamp } */
 function normalizeChat(c) {
-  if (c.messages && Array.isArray(c.messages)) return c;
-  if (c.topic != null) {
-    return {
-      id: c.id,
-      messages: [
-        { role: 'user', topic: c.topic, researchType: c.researchType, context: c.context },
-        { role: 'assistant', response: c.response },
-      ],
-      timestamp: c.timestamp || new Date().toISOString(),
-    };
+  if (!c.messages || !Array.isArray(c.messages)) {
+    if (c.topic != null) {
+      return {
+        id: c.id,
+        messages: [
+          { role: 'user', topic: c.topic, researchType: c.researchType, context: c.context },
+          { role: 'assistant', response: c.response },
+        ],
+        timestamp: c.timestamp || c.updatedAt || new Date().toISOString(),
+      };
+    }
+    return { id: c.id || Date.now().toString(), messages: [], timestamp: c.timestamp || c.updatedAt || new Date().toISOString() };
   }
-  return { id: c.id || Date.now().toString(), messages: [], timestamp: c.timestamp || new Date().toISOString() };
+  // Convert DB format (content/responseData) back to component format (topic/response)
+  const msgs = c.messages.map((m) => {
+    if (m.role === 'user' && m.content && !m.topic) {
+      return {
+        role: 'user',
+        topic: m.content,
+        researchType: m.responseData?.researchType || 'general',
+        context: m.responseData?.context || {},
+      };
+    }
+    if (m.role === 'assistant' && !m.response) {
+      return {
+        role: 'assistant',
+        response: m.responseData || { insights: m.content || '', opportunities: [], risks: [], recommendations: [] },
+      };
+    }
+    return m;
+  });
+  return { id: String(c.id), messages: msgs, timestamp: c.timestamp || c.updatedAt || new Date().toISOString() };
 }
 
-function loadChats() {
+function loadChatsFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const list = raw ? JSON.parse(raw) : [];
@@ -291,12 +311,6 @@ function loadChats() {
   } catch {
     return [];
   }
-}
-
-function saveChats(chats) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.slice(-50)));
-  } catch { }
 }
 
 // Animation variants
@@ -373,8 +387,45 @@ const MarketResearch = () => {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Load chats from API on mount; migrate localStorage data if present
   useEffect(() => {
-    setChats(loadChats());
+    const loadFromApi = async () => {
+      try {
+        const res = await marketingAgentService.listResearchChats();
+        if (res?.status === 'success' && Array.isArray(res.data)) {
+          setChats(res.data.map(normalizeChat));
+
+          // One-time migration: push any localStorage chats that aren't in the DB
+          const localChats = loadChatsFromStorage();
+          if (localChats.length > 0) {
+            const dbIds = new Set(res.data.map((c) => String(c.id)));
+            const toMigrate = localChats.filter((c) => !dbIds.has(String(c.id)));
+            for (const lc of toMigrate) {
+              try {
+                const title = (lc.messages?.[0]?.topic || lc.messages?.[0]?.content || 'Chat').slice(0, 100);
+                // Convert research messages to content-based format for DB storage
+                const msgs = (lc.messages || []).map((m) => ({
+                  role: m.role,
+                  content: m.role === 'user' ? (m.topic || m.content || '') : (m.response?.insights || m.content || ''),
+                  responseData: m.role === 'assistant' ? m.response : (m.role === 'user' ? { topic: m.topic, researchType: m.researchType, context: m.context } : undefined),
+                }));
+                await marketingAgentService.createResearchChat({ title, messages: msgs });
+              } catch { /* skip */ }
+            }
+            localStorage.removeItem(STORAGE_KEY);
+            if (toMigrate.length > 0) {
+              const res2 = await marketingAgentService.listResearchChats();
+              if (res2?.status === 'success' && Array.isArray(res2.data)) {
+                setChats(res2.data.map(normalizeChat));
+              }
+            }
+          }
+        }
+      } catch {
+        setChats(loadChatsFromStorage());
+      }
+    };
+    loadFromApi();
   }, []);
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
@@ -476,28 +527,36 @@ const MarketResearch = () => {
     }
   };
 
-  const handleResponse = (userMsg, assistantMsg) => {
-    const now = new Date().toISOString();
-    
+  // Convert research-specific message format to DB-compatible format
+  const toDbMessages = (msgs) =>
+    msgs.map((m) => ({
+      role: m.role,
+      content: m.role === 'user' ? (m.topic || m.content || '') : (m.response?.insights || m.content || ''),
+      responseData: m.role === 'assistant' ? m.response : { topic: m.topic, researchType: m.researchType, context: m.context },
+    }));
+
+  const handleResponse = async (userMsg, assistantMsg) => {
+    const newMessages = [userMsg, assistantMsg];
+
     if (selectedChatId) {
       const chat = chats.find((c) => c.id === selectedChatId);
       if (chat) {
         const updatedChat = {
           ...chat,
-          messages: [...(chat.messages || []), userMsg, assistantMsg],
-          timestamp: now,
+          messages: [...(chat.messages || []), ...newMessages],
+          timestamp: new Date().toISOString(),
         };
-        const updated = chats.map((c) => (c.id === selectedChatId ? updatedChat : c));
-        setChats(updated);
-        saveChats(updated);
+        setChats((prev) => prev.map((c) => (c.id === selectedChatId ? updatedChat : c)));
+        try {
+          await marketingAgentService.updateResearchChat(selectedChatId, { messages: toDbMessages(newMessages) });
+        } catch { /* optimistic stays */ }
       } else {
-        createNewChat(userMsg, assistantMsg, now);
+        await createNewChat(userMsg, assistantMsg);
       }
     } else {
-      createNewChat(userMsg, assistantMsg, now);
+      await createNewChat(userMsg, assistantMsg);
     }
-    
-    // Clear form
+
     setTopic('');
     setCompetitors('');
     setIndustry('');
@@ -506,16 +565,23 @@ const MarketResearch = () => {
     inputRef.current?.focus();
   };
 
-  const createNewChat = (userMsg, assistantMsg, now) => {
-    const newChat = {
-      id: Date.now().toString(),
-      messages: [userMsg, assistantMsg],
-      timestamp: now,
-    };
-    const updated = [newChat, ...chats];
-    setChats(updated);
-    saveChats(updated);
-    setSelectedChatId(newChat.id);
+  const createNewChat = async (userMsg, assistantMsg) => {
+    const title = (userMsg.topic || 'Research').slice(0, 100);
+    const messages = [userMsg, assistantMsg];
+
+    const tempId = Date.now().toString();
+    const tempChat = { id: tempId, messages, timestamp: new Date().toISOString() };
+    setChats((prev) => [tempChat, ...prev]);
+    setSelectedChatId(tempId);
+
+    try {
+      const res = await marketingAgentService.createResearchChat({ title, messages: toDbMessages(messages) });
+      if (res?.status === 'success' && res.data) {
+        const realChat = normalizeChat(res.data);
+        setChats((prev) => prev.map((c) => (c.id === tempId ? realChat : c)));
+        setSelectedChatId(realChat.id);
+      }
+    } catch { /* temp stays */ }
   };
 
   const newChat = () => {
@@ -530,16 +596,17 @@ const MarketResearch = () => {
     inputRef.current?.focus();
   };
 
-  const deleteChat = (e, chatId) => {
+  const deleteChat = async (e, chatId) => {
     e.stopPropagation();
-    const updated = chats.filter((c) => c.id !== chatId);
-    setChats(updated);
-    saveChats(updated);
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
     if (selectedChatId === chatId) setSelectedChatId(null);
-    toast({ 
-      title: 'Deleted', 
+    toast({
+      title: 'Deleted',
       description: 'Research conversation removed.',
     });
+    try {
+      await marketingAgentService.deleteResearchChat(chatId);
+    } catch { /* already removed from UI */ }
   };
 
   const truncate = (s, n = 45) => (s.length <= n ? s : s.slice(0, n) + '…');

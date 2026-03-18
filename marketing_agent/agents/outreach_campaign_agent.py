@@ -6,7 +6,7 @@ social, paid ads, and partnerships, ensuring consistent messaging and timely exe
 
 from .marketing_base_agent import MarketingBaseAgent
 from typing import Dict, Optional, List
-from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, Lead
+from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, Lead, EmailSendHistory, Reply
 from django.contrib.auth.models import User
 from datetime import datetime, timedelta
 import json
@@ -1140,17 +1140,49 @@ Focus ONLY on email marketing launch activities."""
         return checklist[:15]  # Top 15 items
     
     def _initialize_performance_tracking(self, campaign: Campaign):
-        """Initialize performance tracking metrics for campaign"""
-        # Create placeholder metrics for tracking
+        """Initialize performance tracking metrics for campaign with target and actual values."""
+        # Build target values from campaign fields
+        target_map = {}
+        if campaign.target_leads:
+            target_map['impressions'] = campaign.target_leads  # leads ≈ impressions target
+        if campaign.target_conversions:
+            target_map['conversions'] = campaign.target_conversions
+
+        # Compute actual values from EmailSendHistory + Reply tables
+        email_sends = EmailSendHistory.objects.filter(campaign=campaign)
+        actual_impressions = email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
+        actual_clicks = email_sends.filter(status='clicked').count()
+        actual_conversions = campaign.leads.filter(status='converted').count()
+        total_opened = email_sends.filter(status__in=['opened', 'clicked']).count()
+        engagement_rate = round((total_opened / actual_impressions) * 100, 2) if actual_impressions > 0 else 0
+
+        actual_map = {
+            'impressions': actual_impressions,
+            'clicks': actual_clicks,
+            'conversions': actual_conversions,
+            'engagement': engagement_rate,
+        }
+
         metrics = ['impressions', 'clicks', 'conversions', 'engagement']
         for metric in metrics:
-            CampaignPerformance.objects.get_or_create(
+            obj, created = CampaignPerformance.objects.get_or_create(
                 campaign=campaign,
                 metric_name=metric,
                 date=datetime.now().date(),
                 channel='all',
-                defaults={'metric_value': 0}
+                defaults={
+                    'metric_value': actual_map.get(metric, 0),
+                    'target_value': target_map.get(metric),
+                    'actual_value': actual_map.get(metric, 0),
+                }
             )
+            if not created:
+                # Update existing record with latest actual data
+                obj.metric_value = actual_map.get(metric, 0)
+                obj.actual_value = actual_map.get(metric, 0)
+                if metric in target_map and obj.target_value is None:
+                    obj.target_value = target_map[metric]
+                obj.save(update_fields=['metric_value', 'actual_value', 'target_value'])
     
     def _get_campaign_performance(self, campaign: Campaign) -> Dict:
         """Get current campaign performance metrics"""

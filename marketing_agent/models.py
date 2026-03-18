@@ -181,6 +181,104 @@ class MarketResearch(models.Model):
         return f"{self.get_research_type_display()}: {self.topic}"
 
 
+class MarketingQAChat(models.Model):
+    """QA chat sessions for marketing users. Each chat contains multiple messages."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='marketing_qa_chats',
+        help_text='Company user who owns this chat',
+    )
+    title = models.CharField(max_length=255, default='Chat', help_text='Chat title (e.g. first question snippet)')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_marketingqachat'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"Marketing QA Chat: {self.title[:40]}... ({self.id})"
+
+
+class MarketingQAChatMessage(models.Model):
+    """Individual messages in a Marketing QA chat."""
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('assistant', 'Assistant'),
+    ]
+    chat = models.ForeignKey(
+        MarketingQAChat,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        help_text='Chat this message belongs to',
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField(help_text='Message content')
+    response_data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='For assistant: full API response { answer, insights }',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_marketingqachatmessage'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.role}: {self.content[:50]}..."
+
+
+class MarketResearchChat(models.Model):
+    """Market Research chat sessions. Each chat contains multiple messages."""
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='marketing_research_chats',
+        help_text='Company user who owns this chat',
+    )
+    title = models.CharField(max_length=255, default='Chat', help_text='Chat title (e.g. first topic snippet)')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_marketresearchchat'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"Market Research Chat: {self.title[:40]}... ({self.id})"
+
+
+class MarketResearchChatMessage(models.Model):
+    """Individual messages in a Market Research chat."""
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('assistant', 'Assistant'),
+    ]
+    chat = models.ForeignKey(
+        MarketResearchChat,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        help_text='Chat this message belongs to',
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField(help_text='Message content')
+    response_data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='For assistant: full API response',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_marketresearchchatmessage'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.role}: {self.content[:50]}..."
+
+
 class CampaignPerformance(models.Model):
     """Campaign Performance Metrics Model"""
     METRIC_TYPE_CHOICES = [

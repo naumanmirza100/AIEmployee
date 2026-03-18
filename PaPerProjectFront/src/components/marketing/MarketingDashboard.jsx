@@ -459,6 +459,7 @@ const MarketingDashboard = () => {
 
   const getPayloadFromChatHistory = (prompt) => {
     try {
+      // Try localStorage first (legacy), then fall through – chats are now in DB
       const chats = JSON.parse(localStorage.getItem('marketing_qa_chats') || '[]');
       const target = normalizePromptText(prompt?.prompt);
       if (!target) return null;

@@ -34,29 +34,13 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         super().__init__()
         self.agent_name = "DocumentAuthoringAgent"
         self.system_prompt = """You are a Document Authoring Agent for a marketing system.
-        Your role is to create professional, structured marketing documents including:
-        1. Marketing Strategies
-        2. Campaign Proposals
-        3. Performance Reports
-        4. Campaign Briefs
-        5. Presentations
-        
-        Always create well-structured, professional documents with clear sections, proper formatting, and actionable insights.
-        Use the provided campaign data and context to create accurate, relevant documents.
-        
-        ⚠️ CRITICAL ANTI-REPETITION RULES (HIGHEST PRIORITY):
-        
-        1. **NEVER REPEAT CONTENT**: Do not write the same sentence, paragraph, bullet point, table, or metric twice anywhere in the document. Each piece of information appears ONCE only.
-        
-        2. **NO DUPLICATE TABLES**: Each table (leads, metrics, timeline, etc.) appears in ONE section only. Do not show the same table data twice.
-        
-        3. **NO DUPLICATE SECTIONS**: After writing a "Key Achievements" section, do NOT write another "Key Achievements" section later. Same for Issues, Recommendations, Timeline, etc.
-        
-        4. **CONCLUSION RULE**: The Conclusion section should summarize in NEW words—never copy-paste the same bullet lists, tables, achievements, or challenges from earlier sections. Write a fresh summary paragraph.
-        
-        5. **DOCUMENT END RULE**: Documents have a designated FINAL section. After that section, STOP writing—do not add any more sections, tables, summaries, or content. End the document cleanly.
-        
-        6. **REACH LENGTH WITH NEW CONTENT ONLY**: If you need more words, add NEW analysis, implications, recommendations, or insights—never repeat or rephrase existing content.
+        Create professional marketing documents (Strategies, Proposals, Reports, Briefs, Presentations).
+        Use provided campaign data for accurate, relevant content with clear sections and actionable insights.
+
+        KEY RULES:
+        1. NEVER repeat content—each data point, table, section appears ONCE only.
+        2. Documents end at their designated final section. STOP writing after it.
+        3. Conclusion: summarize in NEW words—never copy earlier tables/lists.
         
         Focus on writing concise, unique, high-value content. Quality over quantity. No filler."""
     
@@ -599,195 +583,97 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         doc_instructions = self._get_document_type_instructions(document_type, target_tables)
         
         user_notes = (requirements or '').strip() or (key_points or '').strip()
+
+        # --- Document end markers (stated once, referenced everywhere) ---
+        end_markers = {
+            'strategy': '## Conclusion and Next Steps',
+            'proposal': '## Next Steps',
+            'report': '## Future Outlook',
+            'brief': '## Conclusion',
+            'presentation': 'Conclusion/Next Steps slide',
+        }
+        final_section = end_markers.get(document_type, '## Conclusion')
+
         prompt = f"""Create a professional {document_type} document.
 
-DOCUMENT TITLE (use this): {title}
+DOCUMENT TITLE: {title}
 
-DOCUMENT REQUIREMENTS:
-{requirements if requirements else 'Create a comprehensive, professional document.'}
+REQUIREMENTS: {requirements if requirements else 'Create a comprehensive, professional document.'}
+KEY POINTS: {key_points if key_points else 'None provided'}
 
-ADDITIONAL KEY POINTS (what the user wants in this document - YOU MUST ADDRESS THESE):
-{key_points if key_points else 'None provided'}
+CORE RULES:
+1. Document ENDS at {final_section}. No content after that.
+2. NO duplication: each piece of data appears ONCE in ONE format. No repeated sections, tables, or metrics.
+3. Use REAL data only—no placeholders like [insert date]. Write "Not specified" for missing data.
+4. Use ## for section headings (no ### or ####). No bold around headings (write "## Section" not "**## Section**").
+5. Write detailed, in-depth analysis with specific numbers and metrics. Every sentence adds value.
+6. Conclusion: summarize in NEW words (2-3 paragraphs)—never copy-paste earlier tables/lists.
+7. Phases must be sequential (Phase 1, Phase 2, Phase 3—never skip Phase 2).
 
-CONTENT QUALITY REQUIREMENTS:
-
-**WRITE THOROUGH, CONCISE CONTENT:** Cover all topics completely with unique insights, analysis, and recommendations. Write as much as needed to thoroughly address each section—no arbitrary length targets. Stop naturally when you've fully covered all key points. Quality and completeness over word count.
-
-**DOCUMENT STRUCTURE (ALL TYPES):** Every document has a fixed structure and MUST end at the designated final section. Do NOT add any section, table, or list after that final section.
-- **Strategy:** END at ## Conclusion and Next Steps. No content after that.
-- **Proposal:** END at ## Next Steps. No content after that.
-- **Report:** END at ## Future Outlook. No content after that. Charts go inside Performance Metrics and KPIs only.
-- **Brief:** END at ## Conclusion. No content after that.
-- **Presentation:** END at Conclusion/Next Steps slide. No repeat slides (objectives, metrics, recommendations appear on one slide only).
-
-**WRITING APPROACH:** Write comprehensive, detailed analysis for each section. Include all relevant insights, metrics, and recommendations. Continue writing until each topic is fully addressed, then move to the next section naturally. Do not pad or fill space—every sentence should add value.
-
-**TABLES:** {"User requested ZERO tables. You MUST NOT include any markdown tables (no | column | format). Present ALL metrics, lead data, timelines, and information using bullet lists (•) or numbered lists or paragraphs ONLY. Do NOT use pipe characters (|) to create tables. This overrides any other instruction." if target_tables == 0 else f"Include exactly {target_tables} markdown table(s). Table types: {table_types_str}. Create tables in | col | col | format."}
-{f'''- CHARTS (MANDATORY): Include exactly {target_charts} chart(s) using [CHART]...[/CHART] blocks. Chart type: {chart_type}. You MUST insert these chart blocks—do NOT skip them.
-  Exact format for each chart block:
-  [CHART]
-  type: {chart_type if chart_type in ('bar', 'pie') else 'bar'}
-  title: [Chart title, e.g. "Campaign Email Metrics"]
-  labels: [comma-separated labels FROM CAMPAIGN DATA ONLY, e.g. Open Rate, Click Rate, Reply Rate, Bounce Rate]
-  values: [comma-separated NUMBERS ONLY from campaign data—e.g. 50, 16.67, 50, 0. NO % sign or text; use raw numbers so 50% becomes 50]
-  [/CHART]
-  CRITICAL—CHARTS: (1) Use REAL data only from CAMPAIGN DATA above. (2) values: must be numbers only (e.g. 50, 16.67, 50, 0)—never "50.0%" or "50%"; use 50 not 50%. (3) No placeholder data (no Jan/Feb/Mar/Apr, no 25,30,28,32). Place chart inside Performance Metrics and KPIs. For "line" use "bar".''' if target_charts > 0 and document_type == 'report' else ''}
+TABLES: {"ZERO tables. Use bullet lists and paragraphs only—no | column | format." if target_tables == 0 else f"Include exactly {target_tables} markdown table(s) ({table_types_str}) in | col | col | format."}
+{f'''CHARTS (MANDATORY): Include exactly {target_charts} chart(s). Format:
+[CHART]
+type: {chart_type if chart_type in ("bar", "pie") else "bar"}
+title: [descriptive title]
+labels: [comma-separated labels from campaign data]
+values: [comma-separated NUMBERS ONLY—no % signs, e.g. 50 not 50%]
+[/CHART]
+Use REAL campaign data only. Place inside Performance Metrics section.''' if target_charts > 0 and document_type == 'report' else ''}
 
 """
         if user_notes:
-            # For brief/report: user often asks for specific focus (issues, improvement, engagement) — address that.
-            # For strategy/proposal: keep full professional structure; use title/notes as theme only.
             if document_type in ('brief', 'report'):
-                prompt += f"""
-USER REQUEST (for this brief/report): "{user_notes}"
-Address what the user asked for (e.g. issues, improvement, engagement) while still using the campaign data and full structure.
-
-"""
+                prompt += f'USER REQUEST: "{user_notes}"\nAddress this while using campaign data and full structure.\n\n'
             else:
-                prompt += f"""
-USER PROMPT (incorporate in strategy/proposal): The user provided: "{user_notes}"
-
-You MUST cater to this in the document:
-- Use it as the theme/focus (e.g. "help in marketing", "lead generation") and weave it into the Executive Summary and relevant sections.
-- If the user gave specific details, put them in the right sections: budget or cost → Resource Breakdown; timeline or dates → Timeline; target audience, industry, or geography → Target Audience and Campaign Strategy; product/campaign name → Campaign Overview; goals or metrics → Objectives and Goals; channels (e.g. "focus on email") → Tactics and Channels. Do not ignore or genericize what the user asked for.
-- Keep the full, professional document structure with all standard sections—do not shorten or replace the structure. Just incorporate the user's details where they fit.
+                prompt += f"""USER PROMPT: "{user_notes}"
+Incorporate in the document: use as theme/focus, place specific details in relevant sections (budget→Resource Breakdown, timeline→Timeline, audience→Target Audience, channels→Tactics). Keep full professional structure.
 
 """
-        
+
         # Add campaign data if available
         if campaign_data:
-            # Hint when campaign has no email/lead data so report/brief don't invent or look wrong
             has_email_data = campaign_data.get('emails_sent') is not None or campaign_data.get('emails_sent') == 0
             has_lead_data = (campaign_data.get('leads_count') or 0) > 0 or (campaign_data.get('leads') or [])
             sparse_hint = ''
             if document_type in ('report', 'brief'):
                 if not has_email_data and not campaign_data.get('open_rate') is not None:
-                    sparse_hint = '\nNOTE: This campaign has NO email sending activity in the database yet (no emails sent, no open/click rates). In the document, state that clearly (e.g. "Email campaign not yet launched" or "No email metrics available yet") in the Email Performance section and focus on campaign setup, targets, timeline, and recommendations for launch. Do NOT invent email metrics or fake numbers.\n'
+                    sparse_hint = 'NOTE: No email activity yet. State "Email campaign not yet launched" in Email Performance section. Do NOT invent metrics.\n'
                 elif not has_lead_data:
-                    sparse_hint = '\nNOTE: This campaign has NO leads in the database yet. In the document, state that clearly (e.g. "No leads added yet" or "Lead list pending") in the Lead section and focus on campaign objectives, target audience, and how to add leads. Do NOT invent or list fake leads.\n'
-            strategy_campaign_hint = ''
+                    sparse_hint = 'NOTE: No leads yet. State "No leads added yet" in Lead section. Do NOT invent leads.\n'
+            strategy_hint = ''
             if document_type == 'strategy':
-                strategy_campaign_hint = '\nFOR MARKETING STRATEGY: Use the campaign data above only for context and targets (campaign name, dates, target leads/conversions, and if present open/click rates as target KPIs in Success Metrics and KPIs). Do NOT add "Lead Details", "Email Performance Metrics", or "Lead Engagement" sections or tables—no lead list table, no email metrics table. Strategy is a plan document; those sections belong in Performance Reports only. The strategy must END after ## Conclusion and Next Steps with no content after that.\n'
-            prompt += f"""
-═══════════════════════════════════════════════════════════════
-CAMPAIGN DATA (REAL DATA FROM DATABASE - USE ALL OF THIS):
-═══════════════════════════════════════════════════════════════
+                strategy_hint = 'STRATEGY: Use campaign data for context/targets only. No Lead Details, Email Metrics, or Lead Engagement sections.\n'
+            prompt += f"""CAMPAIGN DATA (REAL - USE ALL):
 {self._format_campaign_data(campaign_data)}
-═══════════════════════════════════════════════════════════════
-When a campaign is linked, you MUST include the campaign's current status (from the data above: e.g. Active, Paused, Draft, Scheduled) in the document—in Campaign Overview, Executive Summary, or the first section that describes the campaign. Use the exact status label from the data (e.g. "The campaign is currently Paused" or "Campaign status: Active").
-{"ANTI-DUPLICATION RULE (BRIEF/REPORT): (A) Lead list, email metrics table, and objectives/targets table each appear ONCE in their section. Do NOT add any repeat section or table after ## Conclusion (brief) or after ## Future Outlook (report). (B) Both Report and Brief use a markdown table for leads with header row | Email | Name | Company | Status | and one row per lead. (C) Every table MUST have a header row over the columns; do NOT use '1. Email: ... Name: ...' for lead details." if document_type in ('brief', 'report') else ''}
-{"CAMPAIGN BRIEF - PRIORITY RULE: This document has a FIXED structure and ENDS at ## Conclusion. Do NOT add any section, table, or list after ## Conclusion—not Lead Details, not Email Campaign Performance Metrics, not Timeline, not Success Criteria, not Target Audience, not Key Messaging, not Recommendations. STOP after Conclusion. Write thorough, detailed analysis within the allowed sections only." if document_type == 'brief' else ''}
-{"PERFORMANCE REPORT - PRIORITY RULE: This document ENDS at ## Future Outlook. Do NOT add any section, table, or list after Future Outlook—no Lead Details table, no Performance Metrics table, no summary section. STOP after Future Outlook. Write comprehensive analysis within the allowed sections only (e.g. detailed paragraphs in Key Achievements, Challenges and Issues, or Recommendations)." if document_type == 'report' else ''}
-{strategy_campaign_hint}
-{sparse_hint}
-CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
-0. NO DUPLICATION OF SECTIONS OR DATA: For ALL document types (strategy, proposal, report, brief, presentation): do NOT present the same information in paragraph (or prose) form and then repeat it in a table or bullet list elsewhere—each piece of data or topic appears in ONE place and ONE format only. For Campaign Brief and Performance Report ONLY: (a) Each piece of data must appear in exactly ONE place. Do NOT show Lead Details (email, name, company, status) in more than one section or table—include it ONCE only (e.g. in "Lead Details" or "Lead Engagement"). (b) Do NOT show Email Performance metrics (sent, open rate, click rate, reply rate, bounce rate) twice—include them ONCE (e.g. in "Email Campaign Performance" or "Performance Metrics"). (c) Do NOT add any extra section at the end such as "Lead Details Table", "Performance Metrics Table", "Summary Table", or similar—that would duplicate data already shown. The report must END after Future Outlook (and any chart that belongs in Performance Metrics). (d) Do NOT repeat Success Criteria, Objectives, or Timeline in another section or table. (e) For Campaign Brief specifically: do NOT present the same information twice—once in paragraph form and then again in a table or bullet list (e.g. do NOT write leads in "Lead Engagement Data" and then add a "Lead Details" table; do NOT write email metrics in prose and then add an "Email Campaign Performance Metrics" table; do NOT add a "Timeline" or "Success Criteria" or "Target Audience" section after Conclusion). (f) Conclusion: write 2–3 NEW paragraphs that summarize key takeaways in your own words—do NOT copy-paste or re-list the same metrics table, lead table, achievements list, or challenges list. Call to Action: only concrete next steps (who does what, when)—do NOT repeat the Recommendations section. Future Outlook: only forward-looking content (trends, risks, opportunities ahead)—do NOT repeat Conclusion, do NOT re-show the Lead Status table or metrics, do NOT re-list achievements/challenges/recommendations. (g) If more detail is needed, add NEW unique content only (e.g. deeper analysis, implications, examples)—never duplicate or rephrase the same section, table, list, or phrase. (h) Avoid repeating the same sentence template (e.g. "indicating that the campaign's content resonated with the target audience")—vary wording and say each point once.
-1. For briefs/reports: address what the user asked for (e.g. issues, improvement, engagement). For strategy/proposal: produce a full, professional document with all sections; if the user gave a title or notes (or specific details like budget, timeline, audience), incorporate those in the relevant sections—budget in Resource Breakdown, timeline in Timeline, audience/industry in Target Audience, etc. Do not ignore or genericize user-provided details.
-2. ALL data above is REAL data fetched from the database for this specific campaign
-3. You MUST include ALL performance metrics, statistics, and data points provided above
-4. Create DETAILED sections with actual numbers, percentages, and specific data points
-5. Use the actual values provided above - do NOT use placeholder, generic, or invented data
-6. NEVER write [insert date], [insert duration], or any [insert ...] placeholder. If Start Date or End Date are "Not set" in the data, write "Not specified" or "To be determined"
-7. If a field is missing from the data above, write "Not specified" or "Not available" - do NOT make up values or placeholders
-8. Base ALL analysis, metrics, and recommendations on the REAL campaign data provided. For briefs/reports: "Target conversions" in the data means the number of conversions (e.g. 10), not a percentage—do not write "10% conversion rate" unless the data explicitly says so. If the data shows a lead count (e.g. 3 leads), say "the campaign has 3 leads" or "Total leads: 3"—do not say "has not yet generated any leads" when leads are present in the data. For Marketing Strategy: use campaign data only for targets and context in the right sections (e.g. Success Metrics and KPIs); do NOT create Lead Details, Email Performance Metrics, or Lead Engagement sections or tables.
-""" + ("""
-9. For email campaigns: Create a detailed "Email Performance Metrics" section with:
-   - Total emails sent (actual number)
-   - Open rate (actual percentage)
-   - Click rate (actual percentage)
-   - Reply rate (actual percentage)
-   - Bounce rate (actual percentage)
-   - Analysis of what these metrics mean
-10. For leads: Create a detailed "Lead Engagement" section with:
-   - Total leads count (actual number)
-   - Lead details: in both Performance Report and Campaign Brief use a markdown table with header row | Email | Name | Company | Status | and one row per lead (do NOT use "1. Email: ... Name: ..." format).
-   - Lead status breakdown and engagement analysis
-""" if document_type in ('report', 'brief') else "") + """
-11. For Performance Reports: (a) {"Campaign metrics and Lead Details (every lead) as bullet lists—NO tables (user requested 0 tables)." if target_tables == 0 else f"Campaign metrics table (with header row) and Lead Details table with columns Email | Name | Company | Status and one row per lead. Include {target_tables} tables total. Every table MUST have a header row over the columns."} (b) Use ## for main sections only—do NOT use ### (H3). (c) Charts: you MUST add the chart(s) requested in CONTENT QUALITY REQUIREMENTS using [CHART]...[/CHART] blocks—do NOT omit them. (d) Key Achievements and Challenges and Issues: each point must have a full paragraph with detailed analysis. (e) Always include ## Call to Action and ## Future Outlook.
-12. Make the document VERY DETAILED and SPECIFIC to this campaign using ALL the real data above
-13. {"Do NOT use markdown tables. Use bullet lists and paragraphs for all data." if target_tables == 0 else f"Include {target_tables} markdown tables of the types specified."} Charts and detailed breakdowns where appropriate.
-14. Write in-depth analysis, not just surface-level information
+
+Include campaign status in Campaign Overview/Executive Summary.
+{sparse_hint}{strategy_hint}"""
+
+            if document_type in ('report', 'brief'):
+                prompt += f"""
+BRIEF/REPORT RULES:
+- Lead table (| Email | Name | Company | Status |) appears ONCE only.
+- Email metrics appear ONCE only.
+- Include Email Performance section (sent, open/click/reply/bounce rates with analysis).
+- Include Lead Engagement section (count, details table, status breakdown).
+- {"Use bullet lists for all data—no tables." if target_tables == 0 else f"Include {target_tables} tables with header rows."}
+- Use ## only (no ###). Include Key Achievements and Challenges with detailed paragraphs.
+{"- Report: include ## Call to Action and ## Future Outlook." if document_type == 'report' else ""}
 """
         else:
-            prompt += """
-NO CAMPAIGN LINKED: This document is not tied to a specific campaign.
-- Create a full, professional document with all standard sections (e.g. Executive Summary, Market Analysis, Target Audience, Objectives, Marketing Channels, Resource Allocation, Timeline, Success Metrics, Risk Assessment, Conclusion).
-- Use the DOCUMENT TITLE and ADDITIONAL KEY POINTS as the theme/focus. If the user gave specific details (e.g. budget $10k, launch Q2, B2B SaaS, UK market, "focus on email"), incorporate them in the right sections: budget → Resource Breakdown; timeline → Timeline; audience/industry → Target Audience; channels → Tactics. Do not ignore user-provided details.
-- You may use illustrative examples and typical industry metrics where helpful. Do not invent a specific campaign name; keep it general and reusable.
+            prompt += """NO CAMPAIGN LINKED: Create a full professional document with standard sections.
+Use DOCUMENT TITLE and KEY POINTS as theme. Place user details in relevant sections.
 """
-        
-        prompt += f"""
 
+        prompt += f"""
 {doc_instructions}
 
-FORMATTING - KEEP DOCUMENT CLEAN:
-- Section headings: use ONLY "## Section Name" on its own line. Do NOT wrap headings in bold: never write "**## Executive Summary**" or "**Strategy Document**". Never put asterisks around ## (e.g. write "## Executive Summary" not "**## Executive Summary**"). Start the document with the first section (e.g. ## Executive Summary) or one plain title line; do not add a bold document-type line like "**Strategy Document**" at the top.
-- Within paragraphs use **text** for bold (e.g. **Brand Awareness**: description). For Performance Reports: {'You MUST include ' + str(target_charts) + ' chart(s) using [CHART] blocks. Each chart MUST use REAL data from CAMPAIGN DATA only (actual open rate, click rate, reply rate, bounce rate, or counts)—NO placeholder data (no Jan/Feb/Mar/Apr, no 25/30/28/32). Place charts inside Performance Metrics and KPIs.' if target_charts > 0 else 'Do NOT add [CHART] blocks—charts are not used in this report.'} For strategy/proposal/brief you may optionally include charts using [CHART] blocks.
+FORMATTING:
+- Headings: "## Section Name" only. No bold wrapping. No "**Strategy Document**" title line.
+- Use **bold** for sub-items within paragraphs only.
+{f'- Include {target_charts} [CHART] block(s) with REAL campaign data in Performance Metrics section.' if target_charts > 0 else ''}
 
-DOCUMENT STRUCTURE REQUIREMENTS:
-- Use ## for main sections only (e.g. ## Executive Summary). Do NOT use ### or ####. Do NOT write "**## Section**" or "**Strategy Document**"—headings must be clean "## Section Name" with no asterisks around the ## or the heading. Use **bold** only for sub-items within paragraphs, not for section titles.
-- When listing numbered phases (Phase 1, Phase 2, Phase 3) or steps, do NOT skip numbers—include every phase in sequence (e.g. Phase 1, then Phase 2, then Phase 3; never Phase 1 then Phase 3). In Marketing Strategy Timeline and Milestones, you MUST include Phase 2 (e.g. Phase 2: Month 3–4); never output only Phase 1 and Phase 3.
-- Professional language and tone throughout
-- VERY DETAILED content - write comprehensive, in-depth sections
-- Include ALL performance metrics, statistics, and data points provided
-- {"Use bullet lists and paragraphs for metrics—NO markdown tables." if target_tables == 0 else f"Create {target_tables} detailed markdown tables (| col | format) for metrics, plus formatted lists where appropriate."}
-- Actionable insights and recommendations based on REAL data
-- Proper markdown formatting for structure
-- A comprehensive, professional CONCLUSION section (see below)
-
-DETAIL AND DEPTH REQUIREMENTS:
-1. Write DETAILED paragraphs, not short bullet points
-2. Include specific numbers, percentages, and metrics throughout
-3. Provide in-depth analysis and explanations
-4. Create dedicated sections for performance metrics with full breakdowns
-5. Include multiple paragraphs per section explaining the data
-6. Add context and interpretation for all metrics
-7. Write comprehensive, thorough content covering all relevant aspects. Expand with NEW unique insights, analysis, implications, and recommendations—never repeat or rephrase the same content to fill space.
-""" + ("""
-PERFORMANCE METRICS SECTION REQUIREMENTS (for Performance Report and Campaign Brief ONLY—do NOT use this section in Strategy or Proposal):
-If campaign data includes performance metrics, you MUST create a detailed section like:
-
-## Performance Metrics and Analysis
-
-**Email Campaign Performance**
-- **Total Emails Sent**: [actual number from data]
-- **Open Rate**: [actual percentage]% - [analysis of what this means]
-- **Click Rate**: [actual percentage]% - [analysis of what this means]
-- **Reply Rate**: [actual percentage]% - [analysis of what this means]
-- **Bounce Rate**: [actual percentage]% - [analysis of what this means]
-
-[Detailed paragraph analyzing these metrics, comparing to industry standards, identifying trends, etc.]
-
-**Lead Engagement Metrics**
-- **Total Leads**: [actual number]
-- **Lead Status Breakdown**: [detailed breakdown]
-- **Engagement Analysis**: [detailed analysis]
-
-[Detailed paragraph analyzing lead engagement, conversion potential, etc.]
-""" if document_type in ('report', 'brief') else """
-FOR MARKETING STRATEGY: Do NOT add a "Performance Metrics and Analysis" section—that belongs in Performance Reports only. Strategy has "Success Metrics and KPIs" once; do not repeat it. Do NOT add any section after ## Conclusion and Next Steps (no duplicate Timeline, no duplicate Success Metrics, no Performance Metrics and Analysis).
-""") + """
-CONCLUSION SECTION REQUIREMENTS:
-The conclusion MUST be a proper, professional ending that:
-1. Summarizes key points in your own words (at least 2-3 paragraphs)—do NOT copy-paste or re-list the same tables, bullet lists, or metrics that already appear earlier in the document.
-2. Provides a concise summary of findings and next steps—not a full re-enumeration of every section.
-3. Ends with a strong, professional closing statement.
-4. For reports: Conclusion = summary + takeaways only; do NOT re-show Lead Status table, metrics table, or achievements/challenges lists. Future Outlook (separate section) covers trends and what's ahead.
-5. For proposals: Include a compelling summary, call to action, and clear next steps.
-6. For briefs: Include a summary of campaign readiness and what is needed next. The document ENDS here—no sections or tables after Conclusion.
-7. For strategies: Include a comprehensive summary of strategic priorities and expected outcomes.
-8. DO NOT end abruptly—but also DO NOT repeat the same content (tables, lists, phrases) that appeared earlier.
-
-**FINAL REMINDERS BEFORE YOU WRITE:**
-- Write thorough, complete content that fully addresses each section. Cover all key points naturally without artificial length targets.
-- Document MUST end at the designated final section—do NOT add any section, table, or list after it. Expand length only within the allowed sections. (Strategy: end at ## Conclusion and Next Steps. Proposal: end at ## Next Steps. Report: end at ## Future Outlook. Brief: end at ## Conclusion. Presentation: end at Conclusion/Next Steps slide.)
-- NO REPETITION: Every paragraph and bullet must be unique. Add NEW campaign-related insights (e.g. analysis, implications, recommendations)—never duplicate or rephrase existing content.
-- Tables: {"ZERO. Use lists and paragraphs only—no | table | format." if target_tables == 0 else f"Exactly {target_tables} markdown tables."}
-- Use ALL REAL campaign data provided above
-- Write in DETAIL with comprehensive analysis
-- Include ALL performance metrics in dedicated sections
-- End with a proper, detailed conclusion
-- Make it professional, thorough, and data-driven:"""
+Write a detailed, professional, data-driven document. End at {final_section}—nothing after it:"""
         
         return prompt
     
