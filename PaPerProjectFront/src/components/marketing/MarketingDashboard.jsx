@@ -41,10 +41,15 @@ import {
   ChevronLeft,
   ChevronRight,
   BarChart3 as BarChartIcon,
+  PieChart,
+  LineChart,
+  AreaChart,
+  Eye,
 } from 'lucide-react';
 import marketingAgentService, {
   getSavedGraphPrompts,
   isGraphPromptOnDashboard,
+  generateGraph,
 } from '@/services/marketingAgentService';
 import MarketingQA from './MarketingQA';
 import MarketResearch from './MarketResearch';
@@ -158,6 +163,7 @@ const MarketingDashboard = () => {
   const [savedGraphsLoading, setSavedGraphsLoading] = useState(false);
   const [viewingGraphId, setViewingGraphId] = useState(null);
   const [viewingGraphResult, setViewingGraphResult] = useState(null);
+  const [viewingGraphLoading, setViewingGraphLoading] = useState(false);
 
   useEffect(() => {
     fetchStats();
@@ -435,106 +441,36 @@ const MarketingDashboard = () => {
     }
   };
 
-  const normalizePromptText = (text) =>
-    String(text || '')
-      .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
-
-  const getPayloadFromLocalCache = (prompt) => {
-    try {
-      const cache = JSON.parse(localStorage.getItem('marketing_saved_graph_payloads') || '{}');
-      const byId = cache[String(prompt?.id)];
-      if (byId?.chart) {
-        return {
-          chart: byId.chart,
-          title: byId.title || prompt?.title || 'Saved Graph',
-          insights: byId.insights || [],
-        };
-      }
-    } catch {}
-    return null;
-  };
-
-  const getPayloadFromChatHistory = (prompt) => {
-    try {
-      // Try localStorage first (legacy), then fall through – chats are now in DB
-      const chats = JSON.parse(localStorage.getItem('marketing_qa_chats') || '[]');
-      const target = normalizePromptText(prompt?.prompt);
-      if (!target) return null;
-
-      for (const chat of chats) {
-        const messages = Array.isArray(chat?.messages) ? chat.messages : [];
-        for (let i = 0; i < messages.length - 1; i++) {
-          const userMsg = messages[i];
-          const assistantMsg = messages[i + 1];
-          if (
-            userMsg?.role === 'user' &&
-            assistantMsg?.role === 'assistant' &&
-            assistantMsg?.responseData?.isGraph &&
-            normalizePromptText(userMsg?.content) === target &&
-            assistantMsg?.responseData?.chart
-          ) {
-            return {
-              chart: assistantMsg.responseData.chart,
-              title: assistantMsg.responseData.chartTitle || prompt?.title || 'Saved Graph',
-              insights: assistantMsg.responseData.insights || [],
-            };
-          }
-        }
-      }
-    } catch {}
-    return null;
-  };
-
-  const getSavedGraphPayload = (prompt) => {
-    const chart =
-      prompt?.chart ||
-      prompt?.chart_data ||
-      prompt?.graph_data ||
-      prompt?.generated_chart ||
-      prompt?.result?.chart ||
-      prompt?.data?.chart ||
-      null;
-
-    const title =
-      prompt?.graph_title ||
-      prompt?.generated_title ||
-      prompt?.result?.title ||
-      prompt?.data?.title ||
-      prompt?.title ||
-      'Saved Graph';
-
-    const insights =
-      prompt?.insights ||
-      prompt?.result?.insights ||
-      prompt?.data?.insights ||
-      null;
-
-    if (chart) return { chart, title, insights };
-
-    const cached = getPayloadFromLocalCache(prompt);
-    if (cached) return cached;
-
-    const fromChat = getPayloadFromChatHistory(prompt);
-    if (fromChat) return fromChat;
-
-    return null;
-  };
-
-  const handleViewGraph = (prompt) => {
+  const handleViewGraph = async (prompt) => {
     setViewingGraphId(prompt.id);
-    const savedPayload = getSavedGraphPayload(prompt);
-    if (!savedPayload) {
+    setViewingGraphResult(null);
+    setViewingGraphLoading(true);
+    try {
+      const response = await generateGraph(prompt.prompt);
+      if (response?.status === 'success' && response?.data) {
+        const d = response.data;
+        setViewingGraphResult({
+          chart: d.chart || null,
+          title: d.chart?.title || d.chartTitle || d.title || prompt?.title || 'Saved Graph',
+          insights: d.insights || [],
+        });
+      } else {
+        setViewingGraphResult({
+          title: prompt?.title || 'Saved Graph',
+          insights: [],
+          chart: null,
+        });
+      }
+    } catch (error) {
+      console.error('Error generating graph:', error);
       setViewingGraphResult({
         title: prompt?.title || 'Saved Graph',
         insights: [],
         chart: null,
       });
-      return;
+    } finally {
+      setViewingGraphLoading(false);
     }
-    setViewingGraphResult(savedPayload);
   };
 
   const openTestEmailAccount = (account) => {
@@ -668,30 +604,60 @@ const MarketingDashboard = () => {
           };
           
           // SimpleLineChart
-          const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
+          const SimpleLineChart = ({ data, color = '#3b82f6', height = 220, title }) => {
             if (!data || data.length === 0) return null;
             const values = data.map(d => d.value ?? d.count ?? 0);
             const maxValue = Math.max(...values, 1);
+            const minValue = Math.min(...values, 0);
             const labels = data.map(d => d.label ?? d.date ?? d.month ?? '');
+            const range = maxValue - minValue || 1;
+
+            const formatVal = (v) => {
+              const n = Number(v);
+              if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+              if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+              return Number.isInteger(n) ? String(n) : n.toFixed(1);
+            };
+
+            const padL = 10;
+            const chartW = 100 - padL;
+            const yTicks = [0, 1, 2, 3].map(i => ({
+              val: minValue + (range * i) / 3,
+              y: 100 - (i / 3) * 100,
+            }));
+
             const points = values.map((value, index) => {
-              const x = (index / (values.length - 1 || 1)) * 100;
-              const y = 100 - (value / maxValue) * 100;
+              const x = padL + (index / (values.length - 1 || 1)) * chartW;
+              const y = 100 - ((value - minValue) / range) * 100;
               return `${x},${y}`;
             }).join(' ');
-            const areaPoints = `0,100 ${points} 100,100`;
+            const areaPoints = `${padL},100 ${points} ${padL + chartW},100`;
+
             return (
               <div className="space-y-2">
                 {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
                 <div className="relative w-full" style={{ height: `${height}px` }}>
                   <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    {yTicks.map((tick, i) => (
+                      <line key={i} x1={padL} y1={tick.y} x2="100" y2={tick.y} stroke="rgba(255,255,255,0.06)" strokeWidth="0.15" />
+                    ))}
                     <polygon points={areaPoints} fill={`${color}20`} />
                     <polyline points={points} fill="none" stroke={color} strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round" />
                     {values.map((value, index) => (
-                      <circle key={index} cx={(index / (values.length - 1 || 1)) * 100} cy={100 - (value / maxValue) * 100} r="1" fill={color} />
+                      <circle key={index} cx={padL + (index / (values.length - 1 || 1)) * chartW} cy={100 - ((value - minValue) / range) * 100} r="1" fill={color} />
                     ))}
                   </svg>
-                  <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[10px] text-muted-foreground px-1">
-                    {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate">{label}</span>) : (
+                  {/* Y-axis labels */}
+                  <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '9%' }}>
+                    {[...yTicks].reverse().map((tick, i) => (
+                      <span key={i} className="text-[9px] text-white/40 text-right pr-0.5 leading-none">{formatVal(tick.val)}</span>
+                    ))}
+                  </div>
+                  {/* X-axis labels */}
+                  <div className="absolute left-[10%] right-0 flex justify-between text-[10px] text-white/50" style={{ bottom: '-18px' }}>
+                    {labels.length <= 7 ? labels.map((label, i) => (
+                      <span key={i} className="truncate max-w-[80px]">{label}</span>
+                    )) : (
                       <><span>{labels[0]}</span><span>{labels[Math.floor(labels.length / 2)]}</span><span>{labels[labels.length - 1]}</span></>
                     )}
                   </div>
@@ -986,9 +952,7 @@ const MarketingDashboard = () => {
                             className="cursor-pointer hover:bg-muted/50 transition-colors"
                             onClick={() => {
                               setActiveTab('saved-graphs');
-                              setViewingGraphId(p.id);
-                              const payload = getSavedGraphPayload(p);
-                              setViewingGraphResult(payload);
+                              handleViewGraph(p);
                             }}
                           >
                             <CardContent className="p-3 flex items-center gap-3">
@@ -1440,86 +1404,147 @@ const MarketingDashboard = () => {
               ) : (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {savedGraphPrompts.map((prompt) => (
-                      <Card 
-                        key={prompt.id} 
-                        className={`flex flex-col cursor-pointer transition-all ${
-                          viewingGraphId === prompt.id 
-                            ? 'ring-2 ring-primary/50 bg-primary/5' 
-                            : 'hover:border-primary/20'
-                        }`}
-                      >
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              <CardTitle className="text-sm line-clamp-2">{prompt.title}</CardTitle>
-                              {prompt.tags && prompt.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                  {prompt.tags.map((tag) => (
-                                    <Badge key={tag} variant="secondary" className="text-xs">
-                                      {tag}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
+                    {savedGraphPrompts.map((prompt) => {
+                      const chartType = prompt.chart_type?.toLowerCase() || 'bar';
+                      const ChartIcon = chartType === 'pie' ? PieChart
+                        : chartType === 'line' ? LineChart
+                        : chartType === 'area' ? AreaChart
+                        : BarChart3;
+                      const chartColor = chartType === 'pie' ? 'text-pink-400'
+                        : chartType === 'line' ? 'text-cyan-400'
+                        : chartType === 'area' ? 'text-emerald-400'
+                        : 'text-violet-400';
+                      const isActive = viewingGraphId === prompt.id;
+                      const isLoading = viewingGraphLoading && isActive;
+
+                      return (
+                        <Card
+                          key={prompt.id}
+                          className={`group flex flex-col transition-all duration-200 border-white/10 bg-white/[0.03] backdrop-blur-sm ${
+                            isActive
+                              ? 'ring-2 ring-primary/60 bg-primary/10 border-primary/30'
+                              : 'hover:bg-white/[0.06] hover:border-white/20'
+                          }`}
+                        >
+                          <CardHeader className="pb-2 pt-4 px-4">
+                            <div className="flex items-start gap-3">
+                              <div className={`shrink-0 p-2 rounded-lg bg-white/5 border border-white/10 ${chartColor}`}>
+                                <ChartIcon className="h-4 w-4" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <CardTitle className="text-sm font-semibold line-clamp-2 leading-snug">
+                                  {prompt.title}
+                                </CardTitle>
+                                <span className={`inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium uppercase tracking-wider ${chartColor}`}>
+                                  <ChartIcon className="h-2.5 w-2.5" />
+                                  {chartType} chart
+                                </span>
+                              </div>
+                            </div>
+                          </CardHeader>
+
+                          <CardContent className="flex-1 px-4 pb-2">
+                            <p className="text-xs text-white/50 line-clamp-2 leading-relaxed">
+                              {prompt.prompt}
+                            </p>
+                            {prompt.tags && prompt.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2.5">
+                                {prompt.tags.map((tag) => (
+                                  <Badge
+                                    key={tag}
+                                    variant="secondary"
+                                    className="text-[10px] px-1.5 py-0 h-4 bg-white/5 text-white/60 border-white/10 hover:bg-white/10"
+                                  >
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </CardContent>
+
+                          <div className="px-4 pb-3 pt-2 mt-auto">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant={isActive ? "default" : "secondary"}
+                                className={`flex-1 text-xs h-8 font-medium transition-all ${
+                                  isActive
+                                    ? ''
+                                    : 'bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:text-white'
+                                }`}
+                                disabled={isLoading}
+                                onClick={() => handleViewGraph(prompt)}
+                              >
+                                {isLoading ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                                    Generating...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="h-3 w-3 mr-1.5" />
+                                    {isActive ? 'Viewing' : 'View Chart'}
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-white/30 hover:text-red-400 hover:bg-red-400/10 transition-colors shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteGraphPrompt(prompt.id);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                           </div>
-                        </CardHeader>
-                        <CardContent className="flex-1 pb-3">
-                          <p className="text-xs text-muted-foreground line-clamp-3">{prompt.prompt}</p>
-                          {prompt.chart_type && (
-                            <p className="text-xs mt-2 text-primary font-medium">
-                              Chart Type: {prompt.chart_type}
-                            </p>
-                          )}
-                        </CardContent>
-                        <div className="flex gap-2 pt-3 border-t flex-wrap">
-                          <Button
-                            size="sm"
-                            variant={viewingGraphId === prompt.id ? "default" : "outline"}
-                            className="flex-1 text-xs h-8"
-                            onClick={() => handleViewGraph(prompt)}
-                          >
-                            <>
-                              <BarChart3 className="h-3 w-3 mr-1" />
-                              View
-                            </>
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-xs h-8 px-2"
-                            onClick={() => handleDeleteGraphPrompt(prompt.id)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </Card>
-                    ))}
+                        </Card>
+                      );
+                    })}
                   </div>
 
+                  {/* Loading state while generating graph */}
+                  {viewingGraphLoading && (
+                    <Card className="border-primary/20 bg-primary/5 backdrop-blur-sm">
+                      <CardContent className="flex flex-col items-center justify-center py-16">
+                        <div className="relative">
+                          <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+                          <Loader2 className="h-8 w-8 animate-spin text-primary relative" />
+                        </div>
+                        <p className="text-sm text-white/60 mt-4">Generating graph from saved prompt...</p>
+                      </CardContent>
+                    </Card>
+                  )}
+
                   {/* Show saved graph preview */}
-                  {viewingGraphResult && (
-                    <Card className="border-primary/30 bg-primary/5">
+                  {!viewingGraphLoading && viewingGraphResult && (
+                    <Card className="border-primary/20 bg-gradient-to-b from-primary/5 to-transparent backdrop-blur-sm">
                       <CardHeader>
                         <div className="flex items-center justify-between">
-                          <div>
-                            <CardTitle className="flex items-center gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
                               <BarChart3 className="h-5 w-5 text-primary" />
-                              {viewingGraphResult.title || 'Saved Graph'}
-                            </CardTitle>
-                            {viewingGraphResult.insights && (
-                              <CardDescription className="mt-2">
-                                {Array.isArray(viewingGraphResult.insights) 
-                                  ? viewingGraphResult.insights.join(' • ')
-                                  : viewingGraphResult.insights
-                                }
-                              </CardDescription>
-                            )}
+                            </div>
+                            <div>
+                              <CardTitle className="text-base">
+                                {viewingGraphResult.title || 'Saved Graph'}
+                              </CardTitle>
+                              {viewingGraphResult.insights && viewingGraphResult.insights.length > 0 && (
+                                <CardDescription className="mt-1 text-white/50">
+                                  {Array.isArray(viewingGraphResult.insights)
+                                    ? viewingGraphResult.insights.join(' • ')
+                                    : viewingGraphResult.insights
+                                  }
+                                </CardDescription>
+                              )}
+                            </div>
                           </div>
                           <Button
                             variant="ghost"
                             size="icon"
+                            className="h-8 w-8 text-white/40 hover:text-white hover:bg-white/10"
                             onClick={() => {
                               setViewingGraphId(null);
                               setViewingGraphResult(null);
@@ -1530,7 +1555,7 @@ const MarketingDashboard = () => {
                         </div>
                       </CardHeader>
                       <CardContent className="pt-0">
-                        <div className="bg-card rounded-lg p-6 border">
+                        <div className="bg-black/20 rounded-xl p-6 border border-white/5">
                           {viewingGraphResult.chart ? (
                             <div className="w-full overflow-x-auto">
                               {viewingGraphResult.chart.type === 'pie' && (
@@ -1544,13 +1569,13 @@ const MarketingDashboard = () => {
                                 </div>
                               )}
                               {!['pie', 'bar', 'line', 'area'].includes(viewingGraphResult.chart.type) && (
-                                <div className="text-center text-muted-foreground py-4">
+                                <div className="text-center text-white/40 py-4">
                                   Chart type '{viewingGraphResult.chart.type}' not supported
                                 </div>
                               )}
                             </div>
                           ) : (
-                            <div className="text-center text-muted-foreground py-8">No chart data available</div>
+                            <div className="text-center text-white/40 py-8">Failed to generate chart. Please try again.</div>
                           )}
                         </div>
                       </CardContent>

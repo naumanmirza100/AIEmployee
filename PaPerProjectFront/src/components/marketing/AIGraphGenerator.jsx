@@ -144,34 +144,60 @@ const SimplePieChart = ({ data, colors, title }) => {
   );
 };
 
-const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title }) => {
+const SimpleLineChart = ({ data, color = '#3b82f6', height = 220, title }) => {
   if (!data || data.length === 0) {
     return <div className="flex items-center justify-center h-48 text-muted-foreground">No data available</div>;
   }
   const values = data.map(d => d.value ?? d.count ?? 0);
   const maxValue = Math.max(...values, 1);
+  const minValue = Math.min(...values, 0);
   const labels = data.map(d => d.label ?? d.date ?? d.month ?? '');
+  const range = maxValue - minValue || 1;
+
+  const formatVal = (v) => {
+    const n = Number(v);
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  };
+
+  const padL = 10;
+  const chartW = 100 - padL;
+  const yTicks = [0, 1, 2, 3].map(i => ({
+    val: minValue + (range * i) / 3,
+    y: 100 - (i / 3) * 100,
+  }));
+
   const points = values.map((value, index) => {
-    const x = (index / (values.length - 1 || 1)) * 100;
-    const y = 100 - (value / maxValue) * 80;
+    const x = padL + (index / (values.length - 1 || 1)) * chartW;
+    const y = 100 - ((value - minValue) / range) * 100;
     return `${x},${y}`;
   }).join(' ');
-  const areaPoints = `0,100 ${points} 100,100`;
+  const areaPoints = `${padL},100 ${points} ${padL + chartW},100`;
+
   return (
     <div className="space-y-2">
       {title && <h4 className="font-medium text-sm text-muted-foreground">{title}</h4>}
       <div className="relative w-full" style={{ height: `${height}px` }}>
         <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {yTicks.map((tick, i) => (
+            <line key={i} x1={padL} y1={tick.y} x2="100" y2={tick.y} stroke="rgba(255,255,255,0.06)" strokeWidth="0.15" />
+          ))}
           <polygon points={areaPoints} fill={`${color}20`} />
           <polyline points={points} fill="none" stroke={color} strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round" />
-          {values.map((value, index) => {
-            const x = (index / (values.length - 1 || 1)) * 100;
-            const y = 100 - (value / maxValue) * 80;
-            return <circle key={index} cx={x} cy={y} r="1.5" fill={color} />;
-          })}
+          {values.map((value, index) => (
+            <circle key={index} cx={padL + (index / (values.length - 1 || 1)) * chartW} cy={100 - ((value - minValue) / range) * 100} r="1.5" fill={color} />
+          ))}
         </svg>
-        <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[10px] text-muted-foreground px-1">
-          {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate">{label}</span>) : (
+        <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '9%' }}>
+          {[...yTicks].reverse().map((tick, i) => (
+            <span key={i} className="text-[9px] text-muted-foreground/60 text-right pr-0.5 leading-none">{formatVal(tick.val)}</span>
+          ))}
+        </div>
+        <div className="absolute left-[10%] right-0 flex justify-between text-[10px] text-muted-foreground px-1" style={{ bottom: '-18px' }}>
+          {labels.length <= 7 ? labels.map((label, i) => (
+            <span key={i} className="truncate max-w-[80px]">{label}</span>
+          )) : (
             <><span>{labels[0]}</span><span>{labels[Math.floor(labels.length / 2)]}</span><span>{labels[labels.length - 1]}</span></>
           )}
         </div>

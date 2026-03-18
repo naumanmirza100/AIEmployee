@@ -3,7 +3,12 @@
     "allow": [
       "Bash(find /c/Study/Others/Projectsss/AIEmploees/AIEmployee/PaPerProjectFront/src -type f \\\\\\(-name *pilot* -o -name *project* \\\\\\))",
       "Bash(grep -r \"openai\\\\|OpenAI\\\\|gpt\\\\|claude\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee --include=*.py)",
-      "Bash(grep -l \"knowledge_qa\\\\|KnowledgeQA\" *.py)"
+      "Bash(grep -l \"knowledge_qa\\\\|KnowledgeQA\" *.py)",
+      "Bash(python manage.py makemigrations marketing_agent --name add_chart_data_to_savedgraphprompt)",
+      "Bash(source .venv/Scripts/activate)",
+      "Bash(.venv/Scripts/python.exe manage.py makemigrations marketing_agent --name add_chart_data_to_savedgraphprompt)",
+      "Bash(.venv/Scripts/pip.exe list:*)",
+      "Bash(python manage.py makemigrations marketing_agent --name add_chart_title_to_savedgraphprompt)"
     ]
   }
 }
