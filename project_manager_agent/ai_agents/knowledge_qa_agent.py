@@ -60,6 +60,84 @@ def _is_count_or_aggregate_question(question: str) -> bool:
     return False
 
 
+def _is_comparison_question(question: str) -> bool:
+    """Detect questions asking for comparisons across projects, users, or time periods."""
+    q = question.lower().strip()
+    comparison_indicators = [
+        "compare", "comparison", "versus", "vs", "vs.",
+        "which project has the most", "which project has the least",
+        "which user has the most", "which user has the least",
+        "who has the most", "who has the least", "who is the most",
+        "most productive", "least productive", "most tasks", "least tasks",
+        "best performing", "worst performing", "highest", "lowest",
+        "more than", "less than", "better", "worse",
+        "rank", "ranking", "top", "bottom",
+        "difference between", "compared to",
+    ]
+    return any(phrase in q for phrase in comparison_indicators)
+
+
+def _is_trend_question(question: str) -> bool:
+    """Detect questions asking about trends, changes over time, or progress."""
+    q = question.lower().strip()
+    trend_indicators = [
+        "trend", "trending", "over time", "over the last", "past week",
+        "past month", "last week", "last month", "this week", "this month",
+        "improving", "getting worse", "progress", "velocity",
+        "how fast", "rate of", "average time", "time to complete",
+        "history", "historical", "changed since", "since last",
+        "growing", "declining", "increasing", "decreasing",
+    ]
+    return any(phrase in q for phrase in trend_indicators)
+
+
+def _build_comparison_context(context: Dict, available_users: Optional[List[Dict]] = None) -> str:
+    """Build context optimized for comparison questions - include all projects with their stats."""
+    lines = ["\n📊 COMPARISON DATA:\n"]
+
+    projects = context.get("all_projects") or []
+    if projects:
+        lines.append(f"Total Projects: {len(projects)}\n")
+        for p in projects:
+            name = p.get("name", "Unknown")
+            tasks_count = p.get("tasks_count", 0)
+            status = p.get("status", "Unknown")
+            priority = p.get("priority", "Unknown")
+            lines.append(f"- {name}: {tasks_count} tasks, Status: {status}, Priority: {priority}")
+
+    # Per-project task breakdown from context
+    tasks = context.get("tasks") or []
+    if not tasks and context.get("project") and context["project"].get("tasks"):
+        tasks = context["project"]["tasks"]
+
+    if tasks:
+        # Status breakdown
+        by_status = Counter(t.get("status") for t in tasks if t.get("status"))
+        lines.append(f"\nTask Status Distribution: {dict(by_status)}")
+
+        # Per-user workload
+        user_tasks = {}
+        for t in tasks:
+            user = t.get("assignee_username") or "Unassigned"
+            if user not in user_tasks:
+                user_tasks[user] = {"total": 0, "completed": 0, "in_progress": 0}
+            user_tasks[user]["total"] += 1
+            if t.get("status") in ["done", "completed"]:
+                user_tasks[user]["completed"] += 1
+            elif t.get("status") == "in_progress":
+                user_tasks[user]["in_progress"] += 1
+
+        lines.append("\nUser Workload Comparison:")
+        for user, stats in sorted(user_tasks.items(), key=lambda x: x[1]["total"], reverse=True):
+            rate = round((stats["completed"] / stats["total"] * 100), 1) if stats["total"] > 0 else 0
+            lines.append(f"- {user}: {stats['total']} tasks ({stats['completed']} done, {rate}% completion)")
+
+    if available_users:
+        lines.append(f"\nTotal Users: {len(available_users)}")
+
+    return "\n".join(lines)
+
+
 def _build_aggregates_context(context: Dict, available_users: Optional[List[Dict]] = None) -> str:
     """
     Build a compact, aggregates-only context for count/aggregate questions.
@@ -648,7 +726,9 @@ class KnowledgeQAAgent(BaseAgent):
         if re.search(r"\bassign\b", question_lower) and not re.search(r"\bassigned\b", question_lower):
             is_action_request = True
         is_count_question = _is_count_or_aggregate_question(question)
-        
+        is_comparison_question = _is_comparison_question(question)
+        is_trend_question = _is_trend_question(question)
+
         if is_action_request:
             # Redirect to Project Pilot agent
             prompt = f"""The user is asking you to perform an action (like creating a project or task).
@@ -694,6 +774,43 @@ Question: {question}
 
 Answer briefly with the requested number(s)."""
             max_tokens = 250
+            relevant_results = []
+        elif is_comparison_question and context:
+            # Comparison path: "which project has most tasks?", "who is most productive?", etc.
+            comparison_ctx = _build_comparison_context(context, available_users)
+            prompt = f"""Answer the following COMPARISON question using the data below.
+
+{comparison_ctx}
+
+{context_str}
+
+Question: {question}
+
+INSTRUCTIONS:
+- Rank or compare the items requested (projects, users, etc.)
+- Use specific numbers from the data
+- Present as a clear ranking or comparison table using markdown
+- Bold the "winner" or top item
+- Keep it concise - show the comparison, don't add extra commentary
+- Use bullet points or a table for clarity"""
+            max_tokens = 600
+            relevant_results = []
+        elif is_trend_question and context:
+            # Trend path: "is completion rate improving?", "what's our velocity?", etc.
+            prompt = f"""Answer the following TREND/PROGRESS question using the data below.
+
+{context_str}
+
+Question: {question}
+
+INSTRUCTIONS:
+- Analyze the available data for patterns and trends
+- If activity logs are available, use them to show changes over time
+- If exact trend data is not available, provide the current snapshot and explain what data would be needed for trend analysis
+- Use specific numbers and dates where available
+- Be honest if historical data is limited - say "Based on current data..." rather than guessing
+- Keep it concise and data-driven"""
+            max_tokens = 600
             relevant_results = []
         else:
             # Full context path for list/detail questions
