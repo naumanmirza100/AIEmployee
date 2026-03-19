@@ -41,6 +41,8 @@ import {
   RefreshCw,
   Copy,
   LayoutDashboard,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   generateGraph,
@@ -310,9 +312,13 @@ const AIGraphGenerator = () => {
   const [loadingPrompts, setLoadingPrompts] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterFavorites, setFilterFavorites] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
-    if (activeTab === 'saved') fetchSavedPrompts();
+    if (activeTab === 'saved') fetchSavedPrompts(1);
   }, [activeTab]);
 
   useEffect(() => {
@@ -343,11 +349,18 @@ const AIGraphGenerator = () => {
     run();
   }, [runPromptIdFromUrl]);
 
-  const fetchSavedPrompts = async () => {
+  const fetchSavedPrompts = async (page = currentPage) => {
     try {
       setLoadingPrompts(true);
-      const response = await getSavedGraphPrompts();
-      if (response.status === 'success') setSavedPrompts(response.data || []);
+      const response = await getSavedGraphPrompts({ page, page_size: PAGE_SIZE });
+      if (response.status === 'success') {
+        setSavedPrompts(response.data || []);
+        if (response.pagination) {
+          setCurrentPage(response.pagination.page);
+          setTotalPages(response.pagination.total_pages);
+          setTotalItems(response.pagination.total);
+        }
+      }
     } catch (error) {
       console.error('Error fetching saved prompts:', error);
       toast({ title: 'Error', description: 'Failed to load saved prompts', variant: 'destructive' });
@@ -398,7 +411,7 @@ const AIGraphGenerator = () => {
         setSaveModalOpen(false);
         setSaveTitle('');
         setSaveTags('');
-        if (activeTab === 'saved') fetchSavedPrompts();
+        if (activeTab === 'saved') fetchSavedPrompts(1);
       } else throw new Error(response.message || 'Failed to save prompt');
     } catch (error) {
       console.error('Error saving prompt:', error);
@@ -434,8 +447,9 @@ const AIGraphGenerator = () => {
     try {
       const response = await deleteGraphPrompt(promptId);
       if (response.status === 'success') {
-        setSavedPrompts(prev => prev.filter(p => p.id !== promptId));
         toast({ title: 'Prompt deleted', description: 'The prompt has been removed' });
+        const nextPage = savedPrompts.length === 1 && currentPage > 1 ? currentPage - 1 : currentPage;
+        fetchSavedPrompts(nextPage);
       }
     } catch (error) {
       console.error('Error deleting prompt:', error);
@@ -660,6 +674,32 @@ const AIGraphGenerator = () => {
                       </CardContent>
                     </Card>
                   ))}
+                </div>
+              )}
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    Page {currentPage} of {totalPages} ({totalItems} total)
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage <= 1 || loadingPrompts}
+                      onClick={() => fetchSavedPrompts(currentPage - 1)}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage >= totalPages || loadingPrompts}
+                      onClick={() => fetchSavedPrompts(currentPage + 1)}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>

@@ -630,6 +630,13 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 86400.0,  # Daily (86400 seconds = 24 hours)
         'options': {'expires': 172800}  # Expires after 2 days
     },
+
+    # Sync CampaignPerformance table with live email/reply data - every 30 minutes
+    'sync-campaign-performance': {
+        'task': 'marketing_agent.tasks.sync_campaign_performance_task',
+        'schedule': 1800.0,  # Every 30 minutes
+        'options': {'expires': 3600}
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
@@ -653,6 +660,7 @@ print("  - Retry failed: Every 15 minutes")
 print("  - Auto-start campaigns: Every hour")
 print("  - Monitor campaigns & notifications: Every 30 minutes (FULLY AUTOMATED)")
 print("  - Auto-pause campaigns: Daily")
+print("  - Sync performance metrics: Every 30 minutes")
 print("="*60 + "\n")
 
 # --------------------

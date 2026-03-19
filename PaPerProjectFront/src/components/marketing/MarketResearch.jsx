@@ -982,15 +982,21 @@ const MarketResearch = () => {
                               </div>
                               <p className="text-sm font-medium">{msg.topic}</p>
                               {msg.context && Object.values(msg.context).some(Boolean) && (
-                                <div className="mt-2 text-xs opacity-70 flex flex-wrap gap-2">
+                                <div className="mt-2 flex flex-wrap gap-1.5">
                                   {msg.context.competitors && (
-                                    <span>🎯 {msg.context.competitors}</span>
+                                    <Badge variant="outline" className="text-[11px] font-normal bg-blue-500/10 border-blue-500/20 text-blue-300">
+                                      🎯 Competitors: {Array.isArray(msg.context.competitors) ? msg.context.competitors.join(', ') : msg.context.competitors}
+                                    </Badge>
                                   )}
                                   {msg.context.industry && (
-                                    <span>🏭 {msg.context.industry}</span>
+                                    <Badge variant="outline" className="text-[11px] font-normal bg-emerald-500/10 border-emerald-500/20 text-emerald-300">
+                                      🏭 Industry: {msg.context.industry}
+                                    </Badge>
                                   )}
                                   {msg.context.geographicRegion && (
-                                    <span>🌍 {msg.context.geographicRegion}</span>
+                                    <Badge variant="outline" className="text-[11px] font-normal bg-amber-500/10 border-amber-500/20 text-amber-300">
+                                      🌍 Region: {msg.context.geographicRegion}
+                                    </Badge>
                                   )}
                                 </div>
                               )}
@@ -1002,11 +1008,7 @@ const MarketResearch = () => {
                                   <Bot className="h-3 w-3 text-primary" />
                                 </div>
                                 <span className="text-xs font-medium">Research Assistant</span>
-                                {msg.response?.research_id != null && (
-                                  <Badge variant="outline" className="text-[10px] h-4 rounded-full bg-primary/10 border-primary/20">
-                                    ID: {String(msg.response.research_id).slice(0, 6)}
-                                  </Badge>
-                                )}
+                               
                               </div>
                               
                               {msg.response?.insights && (

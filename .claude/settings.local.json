@@ -11,7 +11,10 @@
       "Bash(python manage.py makemigrations marketing_agent --name add_chart_title_to_savedgraphprompt)",
       "Bash(python manage.py migrate marketing_agent)",
       "Bash(python manage.py migrate marketing_agent 0030_add_chart_title_to_savedgraphprompt --fake)",
-      "Bash(ls d:/University/work/AI_Employyes/AIEmployee/marketing_agent/migrations/0030*)"
+      "Bash(ls d:/University/work/AI_Employyes/AIEmployee/marketing_agent/migrations/0030*)",
+      "Bash(npx -y acorn-jsx --ecma2020 src/components/marketing/MarketingDashboard.jsx)",
+      "Bash(node -e \"try { require\\(''@babel/parser''\\).parse\\(require\\(''fs''\\).readFileSync\\(''src/components/marketing/MarketingQA.jsx'',''utf8''\\), {sourceType:''module'',plugins:[''jsx'']}\\); console.log\\(''MarketingQA.jsx: OK''\\) } catch\\(e\\) { console.log\\(''MarketingQA.jsx:'', e.message\\) }\")",
+      "Bash(grep -r \"SavedGraphPrompt\\\\|saved_graph_prompts\" . --include=*.py)"
     ]
   }
 }

@@ -2149,104 +2149,286 @@ const SimplePieChart = ({ data, colors, title }) => {
   );
 };
 
-const SimpleLineChart = ({ data, color = '#3b82f6', height = 220, title, variant = 'line' }) => {
+const SimpleLineChart = ({ data, color = '#3b82f6', height = 280, title, variant = 'line' }) => {
+  const [hoveredIndex, setHoveredIndex] = useState(null);
+
   if (!data || data.length === 0) return <div className="text-sm text-muted-foreground">No data available</div>;
   const isArea = variant === 'area';
-  const values = data.map(d => d.value ?? d.count ?? 0);
-  const maxValue = Math.max(...values, 1);
-  const minValue = Math.min(...values, 0);
-  const labels = data.map(d => d.label ?? d.date ?? d.month ?? '');
+  const values = data.map(d => Number(d.value ?? d.count ?? 0));
+  const rawLabels = data.map(d => d.label ?? d.date ?? d.month ?? d.name ?? '');
+
+  // Strict date pattern – only YYYY-MM-DD or ISO 8601 or MM/DD/YYYY
+  const isDateString = (str) => {
+    if (!str || typeof str !== 'string') return false;
+    const s = str.trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s);
+  };
+
+  const formatDateShort = (str) => {
+    if (!str) return '';
+    const d = new Date(String(str).trim());
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const formatDateFull = (str) => {
+    if (!str) return '';
+    const d = new Date(String(str).trim());
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  // Check if ALL labels are pure dates (time-series axis)
+  const allDates = rawLabels.length > 0 && rawLabels.every(l => isDateString(String(l).trim()));
+
+  // Check if data points have campaign dates (start_date / end_date)
+  const hasCampaignDates = data.some(d => d.start_date || d.end_date);
+
+  // Short label for x-axis
+  const formatLabel = (label) => {
+    if (!label) return '';
+    const str = String(label).trim();
+    if (allDates && isDateString(str)) return formatDateShort(str);
+    // Campaign name – truncate if long
+    return str.length > 16 ? str.slice(0, 14) + '…' : str;
+  };
+
+  // Full label for tooltip
+  const formatFullLabel = (label) => {
+    if (!label) return '';
+    const str = String(label).trim();
+    if (allDates && isDateString(str)) return formatDateFull(str);
+    return str;
+  };
+
+  // Build date range string for campaign (e.g. "Mar 5 – Mar 20")
+  const getCampaignDateRange = (item) => {
+    const s = item.start_date ? formatDateShort(item.start_date) : '';
+    const e = item.end_date ? formatDateShort(item.end_date) : '';
+    if (s && e) return `${s} – ${e}`;
+    if (s) return `From ${s}`;
+    if (e) return `Until ${e}`;
+    return '';
+  };
+
+  const labels = rawLabels.map(formatLabel);
+  const fullLabels = rawLabels.map(formatFullLabel);
+  const dateRanges = data.map(d => hasCampaignDates ? getCampaignDateRange(d) : '');
+
+  // Compute nice Y-axis range with padding
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const minValue = dataMin >= 0 ? 0 : dataMin;
+  const maxValue = dataMax <= 0 ? 1 : dataMax + (dataMax - minValue) * 0.1;
   const range = maxValue - minValue || 1;
 
   const formatVal = (v) => {
     const n = Number(v);
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    if (n === 0) return '0';
     return Number.isInteger(n) ? String(n) : n.toFixed(1);
   };
 
-  // Y-axis ticks (4 values)
-  const yTicks = [0, 1, 2, 3].map(i => {
-    const val = minValue + (range * i) / 3;
-    return { val, y: 100 - (i / 3) * 100 };
+  // SVG dimensions (pixel-based for crisp rendering)
+  const svgW = 600;
+  const svgH = 260;
+  const padTop = 20;
+  const padBottom = 10;
+  const padLeft = 55;
+  const padRight = 20;
+  const chartW = svgW - padLeft - padRight;
+  const chartH = svgH - padTop - padBottom;
+
+  // Y-axis ticks (5 values for cleaner grid)
+  const yTickCount = 5;
+  const yTicks = Array.from({ length: yTickCount }, (_, i) => {
+    const val = minValue + (range * i) / (yTickCount - 1);
+    const y = padTop + chartH - (chartH * i) / (yTickCount - 1);
+    return { val, y };
   });
 
-  // Offset chart area to leave room for Y-axis labels
-  const padL = 10;
-  const chartW = 100 - padL;
-  const points = values.map((value, index) => {
-    const x = padL + (index / (values.length - 1 || 1)) * chartW;
-    const y = 100 - ((value - minValue) / range) * 100;
-    return `${x},${y}`;
-  }).join(' ');
-  const areaPoints = `${padL},100 ${points} ${padL + chartW},100`;
+  // Data points in pixel coords
+  const dataPoints = values.map((value, index) => ({
+    x: padLeft + (index / (values.length - 1 || 1)) * chartW,
+    y: padTop + chartH - ((value - minValue) / range) * chartH,
+    value,
+    label: labels[index],
+    fullLabel: fullLabels[index],
+    dateRange: dateRanges[index],
+  }));
+
+  const linePath = dataPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+  const areaPath = `${linePath} L${dataPoints[dataPoints.length - 1].x},${padTop + chartH} L${dataPoints[0].x},${padTop + chartH} Z`;
+
+  // Pick which X labels to show (avoid overlap)
+  const maxXLabels = Math.min(labels.length, 8);
+  const xLabelStep = labels.length <= maxXLabels ? 1 : Math.ceil(labels.length / maxXLabels);
+  const visibleXIndices = labels.map((_, i) => i).filter(i =>
+    i === 0 || i === labels.length - 1 || i % xLabelStep === 0
+  );
 
   return (
     <div className={cn(
-      'space-y-2 p-4 rounded-xl border',
+      'space-y-3 p-4 rounded-xl border',
       isArea
-        ? 'bg-gradient-to-b from-primary/15 via-primary/5 to-transparent border-primary/25'
+        ? 'bg-gradient-to-b from-primary/10 via-primary/5 to-transparent border-primary/20'
         : 'bg-gradient-to-b from-muted/5 to-transparent border-white/10'
     )}>
       {title && (
-        <h4 className={cn('font-medium text-sm', isArea ? 'text-primary' : 'text-muted-foreground')}>
+        <h4 className={cn('font-semibold text-sm mb-1', isArea ? 'text-primary' : 'text-white/80')}>
           {title}
         </h4>
       )}
       <div className="relative w-full" style={{ height: `${height}px` }}>
-        <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {/* Grid lines with Y values */}
+        <svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${svgW} ${svgH + (hasCampaignDates ? 55 : 40)}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="overflow-visible"
+          onMouseLeave={() => setHoveredIndex(null)}
+        >
+          {/* Horizontal grid lines */}
           {yTicks.map((tick, i) => (
-            <line key={i} x1={padL} y1={tick.y} x2="100" y2={tick.y} stroke="currentColor" strokeWidth="0.2" strokeDasharray="1.5 1.5" className="text-muted-foreground/20" />
+            <g key={`y-${i}`}>
+              <line
+                x1={padLeft}
+                y1={tick.y}
+                x2={svgW - padRight}
+                y2={tick.y}
+                stroke="currentColor"
+                strokeWidth="0.5"
+                strokeDasharray={i === 0 ? 'none' : '4 3'}
+                className="text-white/[0.08]"
+              />
+              <text
+                x={padLeft - 10}
+                y={tick.y + 4}
+                textAnchor="end"
+                className="fill-white/40"
+                fontSize="11"
+                fontFamily="inherit"
+              >
+                {formatVal(tick.val)}
+              </text>
+            </g>
           ))}
-          <motion.polygon
-            initial={{ opacity: 0 }}
-            animate={{ opacity: isArea ? 1 : 0 }}
-            transition={{ duration: 0.5 }}
-            points={areaPoints}
-            fill={color}
-            fillOpacity={isArea ? 0.35 : 0}
-          />
-          <motion.polyline
+
+          {/* Area fill with gradient */}
+          {isArea && (
+            <>
+              <defs>
+                <linearGradient id={`area-grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+                  <stop offset="100%" stopColor={color} stopOpacity="0.03" />
+                </linearGradient>
+              </defs>
+              <motion.path
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.6 }}
+                d={areaPath}
+                fill={`url(#area-grad-${color.replace('#', '')})`}
+              />
+            </>
+          )}
+
+          {/* Line */}
+          <motion.path
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 1 }}
-            transition={{ duration: 1, ease: "easeInOut" }}
-            points={points}
+            transition={{ duration: 0.8, ease: 'easeOut' }}
+            d={linePath}
             fill="none"
             stroke={color}
-            strokeWidth={isArea ? '2.1' : '2.8'}
-            strokeDasharray={isArea ? '0' : '3 2'}
+            strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          {values.map((value, index) => (
+
+          {/* Data points */}
+          {dataPoints.map((p, index) => (
             <motion.circle
               key={index}
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.8 + index * 0.1, type: "spring" }}
-              cx={padL + (index / (values.length - 1 || 1)) * chartW}
-              cy={100 - ((value - minValue) / range) * 100}
-              r={isArea ? '1.2' : '1.9'}
-              fill={color}
-              stroke={isArea ? 'none' : '#ffffff'}
-              strokeWidth={isArea ? 0 : 0.35}
-              className="cursor-pointer"
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.4 + index * 0.05, type: 'spring', stiffness: 200, damping: 15 }}
+              cx={p.x}
+              cy={p.y}
+              r={hoveredIndex === index ? 6 : 4}
+              fill={hoveredIndex === index ? '#ffffff' : color}
+              stroke={hoveredIndex === index ? color : 'rgba(255,255,255,0.3)'}
+              strokeWidth={hoveredIndex === index ? 2.5 : 1.5}
+              className="cursor-pointer transition-all duration-150"
+              onMouseEnter={() => setHoveredIndex(index)}
             />
           ))}
-        </svg>
-        {/* Y-axis labels */}
-        <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '9%' }}>
-          {[...yTicks].reverse().map((tick, i) => (
-            <span key={i} className="text-[9px] text-muted-foreground/60 text-right pr-0.5 leading-none">{formatVal(tick.val)}</span>
-          ))}
-        </div>
-        {/* X-axis labels */}
-        <div className="absolute left-[10%] right-0 flex justify-between text-[10px] text-muted-foreground px-1" style={{ bottom: '-18px' }}>
-          {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate max-w-[90px] font-medium">{label}</span>) : (
-            <><span className="font-medium">{labels[0]}</span><span className="font-medium">{labels[Math.floor(labels.length / 2)]}</span><span className="font-medium">{labels[labels.length - 1]}</span></>
+
+          {/* Hover vertical guide line */}
+          {hoveredIndex !== null && dataPoints[hoveredIndex] && (
+            <line
+              x1={dataPoints[hoveredIndex].x}
+              y1={padTop}
+              x2={dataPoints[hoveredIndex].x}
+              y2={padTop + chartH}
+              stroke={color}
+              strokeWidth="1"
+              strokeDasharray="4 3"
+              opacity="0.4"
+            />
           )}
-        </div>
+
+          {/* X-axis labels */}
+          {visibleXIndices.map((i) => (
+            <g key={`x-${i}`}>
+              <text
+                x={dataPoints[i].x}
+                y={svgH + 14}
+                textAnchor={allDates ? 'middle' : 'end'}
+                transform={allDates ? undefined : `rotate(-30, ${dataPoints[i].x}, ${svgH + 14})`}
+                className="fill-white/50"
+                fontSize="11"
+                fontWeight="500"
+                fontFamily="inherit"
+              >
+                {labels[i]}
+              </text>
+              {/* Campaign date range below the name */}
+              {!allDates && dataPoints[i].dateRange && (
+                <text
+                  x={dataPoints[i].x}
+                  y={svgH + 28}
+                  textAnchor={allDates ? 'middle' : 'end'}
+                  transform={allDates ? undefined : `rotate(-30, ${dataPoints[i].x}, ${svgH + 28})`}
+                  className="fill-white/30"
+                  fontSize="9"
+                  fontFamily="inherit"
+                >
+                  {dataPoints[i].dateRange}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
+
+        {/* Tooltip */}
+        {hoveredIndex !== null && dataPoints[hoveredIndex] && (
+          <div
+            className="absolute pointer-events-none z-10 px-3 py-2 rounded-lg border border-white/15 bg-black/90 backdrop-blur-md shadow-xl"
+            style={{
+              left: `${(dataPoints[hoveredIndex].x / svgW) * 100}%`,
+              top: `${(dataPoints[hoveredIndex].y / (svgH + (hasCampaignDates ? 55 : 40))) * 100}%`,
+              transform: 'translate(-50%, -120%)',
+            }}
+          >
+            <p className="text-[11px] font-medium text-white/70 mb-0.5">{dataPoints[hoveredIndex].fullLabel}</p>
+            {dataPoints[hoveredIndex].dateRange && (
+              <p className="text-[10px] text-white/40 mb-0.5">{dataPoints[hoveredIndex].dateRange}</p>
+            )}
+            <p className="text-sm font-semibold" style={{ color }}>{formatVal(dataPoints[hoveredIndex].value)}</p>
+          </div>
+        )}
       </div>
     </div>
   );
