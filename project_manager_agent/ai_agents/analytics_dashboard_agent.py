@@ -203,6 +203,7 @@ Always back up your analysis with data and provide specific recommendations."""
                     upcoming.append({
                         "title": t.get('title'),
                         "due_date": t['due_date'],
+                        "deadline": t['due_date'],
                         "days_left": (due - now).days,
                         "priority": t.get('priority'),
                     })
@@ -450,6 +451,7 @@ Use markdown formatting. Keep it concise."""
             'priority': t.priority,
             'priority_score': getattr(t, 'priority_score', None),
             'due_date': t.due_date.isoformat() if t.due_date else None,
+            'deadline': t.due_date.isoformat() if t.due_date else None,
             'assignee_id': t.assignee.id if t.assignee else None,
             'assignee_name': (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
         } for t in tasks_qs]

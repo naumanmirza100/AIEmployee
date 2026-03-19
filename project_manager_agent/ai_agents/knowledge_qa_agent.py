@@ -582,6 +582,8 @@ class KnowledgeQAAgent(BaseAgent):
                     context_str += f"\nTasks in Selected Project:\n"
                     for task in project['tasks']:
                         task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                        if task.get('due_date'):
+                            task_line += f" [Deadline: {task.get('due_date')}]"
                         if task.get('assignee_username'):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
@@ -598,6 +600,8 @@ class KnowledgeQAAgent(BaseAgent):
                 context_str += f"\nCurrent Tasks:\n"
                 for task in context['tasks'][:20]:
                     task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                    if task.get('due_date'):
+                        task_line += f" [Deadline: {task.get('due_date')}]"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
@@ -688,7 +692,7 @@ class KnowledgeQAAgent(BaseAgent):
                 if ms.get('project'):
                     line += f" [Project: {ms['project']}]"
                 if ms.get('due_date'):
-                    line += f" Due: {ms['due_date']}"
+                    line += f" Deadline: {ms['due_date']}"
                 if ms.get('completed_at'):
                     line += f" Completed: {ms['completed_at']}"
                 context_str += line + "\n"

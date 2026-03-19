@@ -250,9 +250,9 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
               </Select>
             </div>
 
-            {/* Due Date */}
+            {/* Deadline */}
             <div>
-              <Label htmlFor="due_date">Due Date</Label>
+              <Label htmlFor="due_date">Deadline</Label>
               <Input
                 id="due_date"
                 type="datetime-local"
