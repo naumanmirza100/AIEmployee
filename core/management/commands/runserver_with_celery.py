@@ -33,6 +33,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # Prevent CoreConfig.ready() from also spawning Celery
+        os.environ['CELERY_AUTO_STARTED'] = '1'
         addrport = options.get('addrport', '127.0.0.1:8000')
         noreload = options.get('noreload', False)
 

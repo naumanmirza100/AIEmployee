@@ -164,16 +164,23 @@ ROUTER_CONFIG = {
     },
 
     QuestionCategory.GENERAL_DEFINITION: {
-        "contains": (
+        # Strong definition signals — always treated as definition regardless of topic
+        "contains_strong": (
             'full form of', 'full form', 'what is the full form', 'fullform of',
-            'meaning of', 'what do you mean by', 'define ', 'definition of',
-            'abbreviation of', 'stand for',
+            'meaning of', 'what do you mean by', 'what is meant by',
+            'what does it mean', 'what does that mean',
+            'define ', 'definition of', 'abbreviation of', 'stand for',
+            'explain what', 'explain the term', 'what do we mean by',
+        ),
+        # Weak signals — only match when no data-context words present
+        "contains": (
+            'meaning of', 'define ', 'definition of',
         ),
         # These prefixes only when question is short (no "our/my" data context)
         "startswith_short": ('what does ', 'what is '),
         "exclude_if_contains": (
             'our ', 'my ', 'this campaign', 'the campaign', 'the active',
-            'lead conversion', 'conversion rate', 'our lead', 'campaign',
+            'lead conversion', 'our lead',
         ),
         "max_len": 100,
     },
@@ -255,7 +262,15 @@ class MarketingQAAgent(MarketingBaseAgent):
                 if matched is not None:
                     return QuestionCategory.DB_CAMPAIGN_DETAIL
 
-        # ── 7. DB: analytics / performance summary ────────────
+        # ── 7. General definition (strong signals) ─────────────
+        #    Check BEFORE analytics so "what is meant by conversion rate"
+        #    is treated as a definition, not a stats query
+        cfg = ROUTER_CONFIG[QuestionCategory.GENERAL_DEFINITION]
+        if len(q) <= cfg["max_len"]:
+            if any(p in q for p in cfg.get("contains_strong", ())):
+                return QuestionCategory.GENERAL_DEFINITION
+
+        # ── 8. DB: analytics / performance summary ────────────
         cfg = ROUTER_CONFIG[QuestionCategory.DB_ANALYTICS]
         if len(q) <= cfg["max_len"]:
             has_exclude = any(x in q for x in cfg["exclude_if_contains"])
@@ -267,7 +282,7 @@ class MarketingQAAgent(MarketingBaseAgent):
                 if any(p in q for p in cfg["contains"]):
                     return QuestionCategory.DB_ANALYTICS
 
-        # ── 8. DB: best channel ───────────────────────────────
+        # ── 9. DB: best channel ───────────────────────────────
         cfg = ROUTER_CONFIG[QuestionCategory.DB_BEST_CHANNEL]
         if len(q) <= cfg["max_len"]:
             has_trigger = any(x in q for x in cfg["requires_any"])
@@ -276,7 +291,7 @@ class MarketingQAAgent(MarketingBaseAgent):
             if (has_trigger and has_channel) or has_phrase:
                 return QuestionCategory.DB_BEST_CHANNEL
 
-        # ── 9. General definition / full form ─────────────────
+        # ── 10. General definition (weak signals) ─────────────
         cfg = ROUTER_CONFIG[QuestionCategory.GENERAL_DEFINITION]
         if len(q) <= cfg["max_len"]:
             has_exclude = any(x in q for x in cfg["exclude_if_contains"])
@@ -636,7 +651,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         typos = [
             (r'\bcaomaphin\b', 'campaign'),  (r'\bcaompagin\b', 'campaign'),
             (r'\bcampagin\b',  'campaign'),  (r'\bcompagin\b',  'campaign'),
-            (r'\bcamapgin\b',  'campaign'),
+            (r'\bcamapgin\b',  'campaign'),  (r'\bcamapagin\b', 'campaign'),
             (r'\bcomapgin\b',  'campaign'),  (r'\bcampagins\b', 'campaigns'),
             (r'\bcaampaign\b', 'campaign'),  (r'\bcampain\b',   'campaign'),
             (r'\bcampagn\b',   'campaign'),
