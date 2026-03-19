@@ -199,7 +199,19 @@ urlpatterns = [
     re_path(r'^project-manager/projects/create/?$', pm_agent.create_project_manual, name='pm_create_project_manual'),
     re_path(r'^project-manager/tasks/create/?$', pm_agent.create_task_manual, name='pm_create_task_manual'),
     re_path(r'^project-manager/users/?$', pm_agent.get_available_users, name='pm_get_available_users'),
-    
+    # New PM Agent endpoints
+    re_path(r'^project-manager/ai/daily-standup/?$', pm_agent.daily_standup, name='pm_daily_standup'),
+    re_path(r'^project-manager/ai/project-health/?$', pm_agent.project_health_score, name='pm_project_health'),
+    re_path(r'^project-manager/ai/status-report/?$', pm_agent.project_status_report, name='pm_status_report'),
+    re_path(r'^project-manager/ai/meeting-notes/?$', pm_agent.meeting_notes, name='pm_meeting_notes'),
+    re_path(r'^project-manager/ai/workflow-suggest/?$', pm_agent.workflow_suggest, name='pm_workflow_suggest'),
+    re_path(r'^project-manager/ai/calendar-schedule/?$', pm_agent.calendar_schedule, name='pm_calendar_schedule'),
+    re_path(r'^project-manager/ai/notifications/scan/?$', pm_agent.scan_notifications, name='pm_scan_notifications'),
+    re_path(r'^project-manager/ai/notifications/?$', pm_agent.list_notifications, name='pm_list_notifications'),
+    re_path(r'^project-manager/ai/notifications/read/?$', pm_agent.mark_notifications_read, name='pm_mark_notifications_read'),
+    re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
+    re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),
+
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST
     re_path(r'^chatbot/messages/?$', chatbot.send_chatbot_message, name='send_chatbot_message'),  # POST

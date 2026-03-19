@@ -11,7 +11,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User } from 'lucide-react';
-import { getInterviews, updateInterview, rescheduleInterview } from '@/services/recruitmentAgentService';
+import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions } from '@/services/recruitmentAgentService';
+import SearchableSelect from '@/components/ui/searchable-select';
 
 const Interviews = ({ onUpdate }) => {
   const { toast } = useToast();
@@ -19,6 +20,8 @@ const Interviews = ({ onUpdate }) => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [decisionFilter, setDecisionFilter] = useState('');
+  const [jobFilter, setJobFilter] = useState('');
+  const [jobs, setJobs] = useState([]);
   const [updatingId, setUpdatingId] = useState(null);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleInterviewObj, setRescheduleInterviewObj] = useState(null);
@@ -29,7 +32,19 @@ const Interviews = ({ onUpdate }) => {
 
   useEffect(() => {
     fetchInterviews();
+    fetchJobs();
   }, [statusFilter, decisionFilter]);
+
+  const fetchJobs = async () => {
+    try {
+      const response = await getJobDescriptions();
+      if (response.status === 'success') {
+        setJobs(response.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+    }
+  };
 
   const fetchInterviews = async () => {
     try {
@@ -182,6 +197,10 @@ const Interviews = ({ onUpdate }) => {
     );
   }
 
+  const filteredInterviews = jobFilter
+    ? interviews.filter(i => (i.job_title || i.job_role || '') === jobFilter)
+    : interviews;
+
   return (
     <div className="space-y-4 w-full">
       {/* Header and Filters */}
@@ -193,35 +212,44 @@ const Interviews = ({ onUpdate }) => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
-          <Select value={statusFilter || "all"} onValueChange={(value) => setStatusFilter(value === "all" ? "" : value)}>
-            <SelectTrigger className="w-[140px] sm:w-[160px] border-white/20">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="PENDING">Pending</SelectItem>
-              <SelectItem value="SCHEDULED">Scheduled</SelectItem>
-              <SelectItem value="COMPLETED">Completed</SelectItem>
-              <SelectItem value="CANCELLED">Cancelled</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={decisionFilter === '' ? "all" : decisionFilter} onValueChange={(value) => setDecisionFilter(value === "all" ? "" : value)}>
-            <SelectTrigger className="w-[140px] sm:w-[160px] border-white/20">
-              <SelectValue placeholder="Decision" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Decisions</SelectItem>
-              <SelectItem value="NOT_SET">Not set</SelectItem>
-              <SelectItem value="ONSITE_INTERVIEW">Onsite Interview</SelectItem>
-              <SelectItem value="HIRED">Hired</SelectItem>
-              <SelectItem value="PASSED">Passed</SelectItem>
-              <SelectItem value="REJECTED">Rejected</SelectItem>
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={statusFilter || 'all'}
+            onValueChange={(value) => setStatusFilter(value === 'all' ? '' : value)}
+            options={[
+              { value: 'all', label: 'All Statuses' },
+              { value: 'PENDING', label: 'Pending' },
+              { value: 'SCHEDULED', label: 'Scheduled' },
+              { value: 'COMPLETED', label: 'Completed' },
+              { value: 'CANCELLED', label: 'Cancelled' },
+            ]}
+            placeholder="All Statuses"
+            triggerClassName="w-[140px] sm:w-[160px]"
+          />
+          <SearchableSelect
+            value={decisionFilter === '' ? 'all' : decisionFilter}
+            onValueChange={(value) => setDecisionFilter(value === 'all' ? '' : value)}
+            options={[
+              { value: 'all', label: 'All Decisions' },
+              { value: 'NOT_SET', label: 'Not set' },
+              { value: 'ONSITE_INTERVIEW', label: 'Onsite Interview' },
+              { value: 'HIRED', label: 'Hired' },
+              { value: 'PASSED', label: 'Passed' },
+              { value: 'REJECTED', label: 'Rejected' },
+            ]}
+            placeholder="All Decisions"
+            triggerClassName="w-[140px] sm:w-[160px]"
+          />
+          <SearchableSelect
+            value={jobFilter || 'all'}
+            onValueChange={(value) => setJobFilter(value === 'all' ? '' : value)}
+            options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.title, label: j.title }))]}
+            placeholder="All Jobs"
+            triggerClassName="w-[140px] sm:w-[180px]"
+          />
         </div>
       </div>
 
-      {interviews.length === 0 ? (
+      {filteredInterviews.length === 0 ? (
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
@@ -233,7 +261,7 @@ const Interviews = ({ onUpdate }) => {
         </Card>
       ) : (
         <div className="space-y-3 sm:space-y-4">
-          {interviews.map((interview) => (
+          {filteredInterviews.map((interview) => (
             <Card key={interview.id} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">

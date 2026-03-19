@@ -219,6 +219,177 @@ export const projectPilotFromFile = async (file, projectId = null, chatHistory =
   }
 };
 
+/**
+ * Daily Standup - Generate daily or weekly standup reports
+ */
+export const dailyStandup = async (projectId = null, action = 'daily') => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/daily-standup', {
+      project_id: projectId || null,
+      action,
+    });
+    return response;
+  } catch (error) {
+    console.error('Daily Standup error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Project Health Score
+ */
+export const projectHealth = async (projectId, action = 'health') => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/project-health', {
+      project_id: projectId,
+      action,
+    });
+    return response;
+  } catch (error) {
+    console.error('Project Health error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Project Status Report
+ */
+export const statusReport = async (projectId) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/status-report', {
+      project_id: projectId,
+    });
+    return response;
+  } catch (error) {
+    console.error('Status Report error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Meeting Notes - Summarize meeting text and extract action items
+ */
+export const meetingNotes = async (meetingText, projectId = null, action = 'summarize') => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/meeting-notes', {
+      meeting_text: meetingText,
+      project_id: projectId || null,
+      action,
+    });
+    return response;
+  } catch (error) {
+    console.error('Meeting Notes error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Workflow Suggestions
+ */
+export const workflowSuggest = async (projectId, action = 'suggest', phase = 'development') => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/workflow-suggest', {
+      project_id: projectId,
+      action,
+      phase,
+    });
+    return response;
+  } catch (error) {
+    console.error('Workflow Suggest error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Calendar Schedule
+ */
+export const calendarSchedule = async (projectId, action = 'schedule') => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/calendar-schedule', {
+      project_id: projectId,
+      action,
+    });
+    return response;
+  } catch (error) {
+    console.error('Calendar Schedule error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Smart Notifications - Scan for issues
+ */
+export const scanNotifications = async (projectId = null) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/notifications/scan', {
+      project_id: projectId || null,
+    });
+    return response;
+  } catch (error) {
+    console.error('Scan Notifications error:', error);
+    throw error;
+  }
+};
+
+/**
+ * List Notifications
+ */
+export const listNotifications = async (unreadOnly = false, limit = 50) => {
+  try {
+    const response = await companyApi.get(`/project-manager/ai/notifications?unread_only=${unreadOnly}&limit=${limit}`);
+    return response;
+  } catch (error) {
+    console.error('List Notifications error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Mark Notifications Read
+ */
+export const markNotificationsRead = async (notificationIds = [], markAll = false) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/notifications/read', {
+      notification_ids: notificationIds,
+      mark_all: markAll,
+    });
+    return response;
+  } catch (error) {
+    console.error('Mark Notifications Read error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Team Performance
+ */
+export const teamPerformance = async (projectId) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/team-performance', {
+      project_id: projectId,
+    });
+    return response;
+  } catch (error) {
+    console.error('Team Performance error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Time Estimation
+ */
+export const timeEstimation = async (projectId) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/time-estimation', {
+      project_id: projectId,
+    });
+    return response;
+  } catch (error) {
+    console.error('Time Estimation error:', error);
+    throw error;
+  }
+};
+
 export default {
   projectPilot,
   projectPilotFromFile,
@@ -235,6 +406,17 @@ export default {
   deleteProjectPilotChat,
   timelineGantt,
   generateSubtasks,
+  dailyStandup,
+  projectHealth,
+  statusReport,
+  meetingNotes,
+  workflowSuggest,
+  calendarSchedule,
+  scanNotifications,
+  listNotifications,
+  markNotificationsRead,
+  teamPerformance,
+  timeEstimation,
 };
 
 

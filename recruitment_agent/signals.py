@@ -37,6 +37,11 @@ def _check_and_send_followup_async(interview_id):
         agent = get_interview_agent()
         now = timezone.now()
         
+        # Skip if job's scheduling date range has expired
+        if interview.is_job_schedule_expired():
+            logger.info(f"Skipping email check for interview #{interview.id} - job schedule date range expired")
+            return
+
         # Check for PENDING interviews that need follow-up
         if interview.status == 'PENDING' and interview.invitation_sent_at:
             time_since_invitation = now - interview.invitation_sent_at

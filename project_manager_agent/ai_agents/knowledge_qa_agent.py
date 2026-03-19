@@ -60,6 +60,84 @@ def _is_count_or_aggregate_question(question: str) -> bool:
     return False
 
 
+def _is_comparison_question(question: str) -> bool:
+    """Detect questions asking for comparisons across projects, users, or time periods."""
+    q = question.lower().strip()
+    comparison_indicators = [
+        "compare", "comparison", "versus", "vs", "vs.",
+        "which project has the most", "which project has the least",
+        "which user has the most", "which user has the least",
+        "who has the most", "who has the least", "who is the most",
+        "most productive", "least productive", "most tasks", "least tasks",
+        "best performing", "worst performing", "highest", "lowest",
+        "more than", "less than", "better", "worse",
+        "rank", "ranking", "top", "bottom",
+        "difference between", "compared to",
+    ]
+    return any(phrase in q for phrase in comparison_indicators)
+
+
+def _is_trend_question(question: str) -> bool:
+    """Detect questions asking about trends, changes over time, or progress."""
+    q = question.lower().strip()
+    trend_indicators = [
+        "trend", "trending", "over time", "over the last", "past week",
+        "past month", "last week", "last month", "this week", "this month",
+        "improving", "getting worse", "progress", "velocity",
+        "how fast", "rate of", "average time", "time to complete",
+        "history", "historical", "changed since", "since last",
+        "growing", "declining", "increasing", "decreasing",
+    ]
+    return any(phrase in q for phrase in trend_indicators)
+
+
+def _build_comparison_context(context: Dict, available_users: Optional[List[Dict]] = None) -> str:
+    """Build context optimized for comparison questions - include all projects with their stats."""
+    lines = ["\n📊 COMPARISON DATA:\n"]
+
+    projects = context.get("all_projects") or []
+    if projects:
+        lines.append(f"Total Projects: {len(projects)}\n")
+        for p in projects:
+            name = p.get("name", "Unknown")
+            tasks_count = p.get("tasks_count", 0)
+            status = p.get("status", "Unknown")
+            priority = p.get("priority", "Unknown")
+            lines.append(f"- {name}: {tasks_count} tasks, Status: {status}, Priority: {priority}")
+
+    # Per-project task breakdown from context
+    tasks = context.get("tasks") or []
+    if not tasks and context.get("project") and context["project"].get("tasks"):
+        tasks = context["project"]["tasks"]
+
+    if tasks:
+        # Status breakdown
+        by_status = Counter(t.get("status") for t in tasks if t.get("status"))
+        lines.append(f"\nTask Status Distribution: {dict(by_status)}")
+
+        # Per-user workload
+        user_tasks = {}
+        for t in tasks:
+            user = t.get("assignee_username") or "Unassigned"
+            if user not in user_tasks:
+                user_tasks[user] = {"total": 0, "completed": 0, "in_progress": 0}
+            user_tasks[user]["total"] += 1
+            if t.get("status") in ["done", "completed"]:
+                user_tasks[user]["completed"] += 1
+            elif t.get("status") == "in_progress":
+                user_tasks[user]["in_progress"] += 1
+
+        lines.append("\nUser Workload Comparison:")
+        for user, stats in sorted(user_tasks.items(), key=lambda x: x[1]["total"], reverse=True):
+            rate = round((stats["completed"] / stats["total"] * 100), 1) if stats["total"] > 0 else 0
+            lines.append(f"- {user}: {stats['total']} tasks ({stats['completed']} done, {rate}% completion)")
+
+    if available_users:
+        lines.append(f"\nTotal Users: {len(available_users)}")
+
+    return "\n".join(lines)
+
+
 def _build_aggregates_context(context: Dict, available_users: Optional[List[Dict]] = None) -> str:
     """
     Build a compact, aggregates-only context for count/aggregate questions.
@@ -425,9 +503,14 @@ class KnowledgeQAAgent(BaseAgent):
         You have READ-ONLY access to user information (users added by the company user, their roles, and their task assignments).
         You can view and report on user information, but you CANNOT create, update, or delete users.
         For action requests (creating projects, tasks, etc.), users should use the Project Pilot agent.
-        You should be conversational, accurate, and provide context-aware responses.
 
-        IMPORTANT - Count and aggregate questions: When the user asks for a count, total, or aggregate (e.g. "how many tasks", "how many users", "breakdown by status"), answer with ONLY the number(s) and at most one short sentence. Do NOT list individual tasks, projects, or users unless the question explicitly asks for a list. Use the AGGREGATES section when provided."""
+        CRITICAL RESPONSE RULES:
+        1. Answer ONLY what the user asked. Do NOT add extra information they did not request.
+        2. If they ask about users, only provide user info. Do NOT include task assignments unless they specifically ask about tasks or assignments.
+        3. If they ask about tasks, only provide task info. Do NOT add user details unless relevant to the question.
+        4. If they ask for a count, give the number and one short sentence. Do NOT list items unless asked.
+        5. Keep responses concise and well-structured. Use markdown formatting (bold, lists, headings) for readability.
+        6. Be conversational but direct — no filler text or unnecessary preamble."""
     
     def answer_question(self, question: str, context: Optional[Dict] = None,
                        available_users: Optional[List[Dict]] = None,
@@ -503,18 +586,28 @@ class KnowledgeQAAgent(BaseAgent):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
                             task_line += f" [Unassigned]"
+                        subtasks = task.get('subtasks', [])
+                        if subtasks:
+                            task_line += f" [{len(subtasks)} subtask(s)]"
                         context_str += task_line + "\n"
+                        for st in subtasks:
+                            context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
 
             # Show tasks
             if 'tasks' in context:
                 context_str += f"\nCurrent Tasks:\n"
-                for task in context['tasks'][:20]:  # Show more tasks
+                for task in context['tasks'][:20]:
                     task_line = f"- ID: {task.get('id', 'N/A')}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
                         task_line += f" [Project: {task.get('project_name')}]"
+                    subtasks = task.get('subtasks', [])
+                    if subtasks:
+                        task_line += f" [{len(subtasks)} subtask(s)]"
                     context_str += task_line + "\n"
+                    for st in subtasks:
+                        context_str += f"    - Subtask ID: {st.get('id', 'N/A')}, Title: {st.get('title', '')} (Status: {st.get('status', '')})\n"
         
         # Add available users information to context string
         if available_users:
@@ -548,7 +641,80 @@ class KnowledgeQAAgent(BaseAgent):
                     assignments_str += f"\n👤 {assignment.get('name', assignment.get('username', 'Unknown'))} (Username: {assignment.get('username', 'Unknown')}) - No tasks assigned\n"
         
         context_str += assignments_str
-        
+
+        # --- Rich context: activity logs, comments, team members, time entries, milestones, risks, issues ---
+        if context.get('activity_logs'):
+            context_str += f"\n\n📝 ACTIVITY LOGS ({len(context['activity_logs'])} recent entries):\n"
+            for log in context['activity_logs']:
+                line = f"- [{log.get('timestamp', 'N/A')}] {log.get('user', 'Unknown')} "
+                line += f"performed '{log.get('action_type', 'action')}' on task \"{log.get('task_title', 'Unknown')}\""
+                if log.get('old_value') and log.get('new_value'):
+                    line += f" (changed from '{log['old_value']}' to '{log['new_value']}')"
+                elif log.get('new_value'):
+                    line += f" (set to '{log['new_value']}')"
+                if log.get('details'):
+                    line += f" - {log['details']}"
+                context_str += line + "\n"
+
+        if context.get('comments'):
+            context_str += f"\n\n💬 TASK COMMENTS ({len(context['comments'])} recent):\n"
+            for c in context['comments']:
+                context_str += f"- [{c.get('timestamp', 'N/A')}] {c.get('user', 'Unknown')} on \"{c.get('task_title', 'Unknown')}\": {c.get('comment', '')}\n"
+
+        if context.get('team_members'):
+            context_str += f"\n\n👥 TEAM MEMBERS ({len(context['team_members'])} members):\n"
+            for m in context['team_members']:
+                line = f"- {m.get('user', 'Unknown')} (Role: {m.get('role', 'N/A')})"
+                if m.get('project'):
+                    line += f" [Project: {m['project']}]"
+                if m.get('joined_at'):
+                    line += f" (Joined: {m['joined_at']})"
+                context_str += line + "\n"
+
+        if context.get('time_entries'):
+            context_str += f"\n\n⏱️ TIME ENTRIES ({len(context['time_entries'])} recent):\n"
+            for e in context['time_entries']:
+                line = f"- [{e.get('date', 'N/A')}] {e.get('user', 'Unknown')} logged {e.get('hours', 0)}h on \"{e.get('task_title', 'Unknown')}\""
+                if e.get('description'):
+                    line += f" - {e['description']}"
+                if e.get('billable'):
+                    line += " (billable)"
+                context_str += line + "\n"
+
+        if context.get('milestones'):
+            context_str += f"\n\n🎯 MILESTONES ({len(context['milestones'])} total):\n"
+            for ms in context['milestones']:
+                line = f"- {ms.get('title', 'Unknown')} (Status: {ms.get('status', 'N/A')})"
+                if ms.get('project'):
+                    line += f" [Project: {ms['project']}]"
+                if ms.get('due_date'):
+                    line += f" Due: {ms['due_date']}"
+                if ms.get('completed_at'):
+                    line += f" Completed: {ms['completed_at']}"
+                context_str += line + "\n"
+
+        if context.get('risks'):
+            context_str += f"\n\n⚠️ PROJECT RISKS ({len(context['risks'])} total):\n"
+            for r in context['risks']:
+                line = f"- {r.get('title', 'Unknown')} (Severity: {r.get('severity', 'N/A')}, Status: {r.get('status', 'N/A')})"
+                if r.get('project'):
+                    line += f" [Project: {r['project']}]"
+                if r.get('mitigation'):
+                    line += f" Mitigation: {r['mitigation']}"
+                context_str += line + "\n"
+
+        if context.get('issues'):
+            context_str += f"\n\n🔴 PROJECT ISSUES ({len(context['issues'])} total):\n"
+            for iss in context['issues']:
+                line = f"- {iss.get('title', 'Unknown')} (Severity: {iss.get('severity', 'N/A')}, Status: {iss.get('status', 'N/A')})"
+                if iss.get('project'):
+                    line += f" [Project: {iss['project']}]"
+                if iss.get('reported_by'):
+                    line += f" Reported by: {iss['reported_by']}"
+                if iss.get('created_at'):
+                    line += f" on {iss['created_at']}"
+                context_str += line + "\n"
+
         # Classify question: count/aggregate vs list/detail. Count questions use compact context and short answers.
         question_lower = question.lower()
         # Action detection: avoid false positives from words like "assigned".
@@ -560,7 +726,9 @@ class KnowledgeQAAgent(BaseAgent):
         if re.search(r"\bassign\b", question_lower) and not re.search(r"\bassigned\b", question_lower):
             is_action_request = True
         is_count_question = _is_count_or_aggregate_question(question)
-        
+        is_comparison_question = _is_comparison_question(question)
+        is_trend_question = _is_trend_question(question)
+
         if is_action_request:
             # Redirect to Project Pilot agent
             prompt = f"""The user is asking you to perform an action (like creating a project or task).
@@ -607,6 +775,43 @@ Question: {question}
 Answer briefly with the requested number(s)."""
             max_tokens = 250
             relevant_results = []
+        elif is_comparison_question and context:
+            # Comparison path: "which project has most tasks?", "who is most productive?", etc.
+            comparison_ctx = _build_comparison_context(context, available_users)
+            prompt = f"""Answer the following COMPARISON question using the data below.
+
+{comparison_ctx}
+
+{context_str}
+
+Question: {question}
+
+INSTRUCTIONS:
+- Rank or compare the items requested (projects, users, etc.)
+- Use specific numbers from the data
+- Present as a clear ranking or comparison table using markdown
+- Bold the "winner" or top item
+- Keep it concise - show the comparison, don't add extra commentary
+- Use bullet points or a table for clarity"""
+            max_tokens = 600
+            relevant_results = []
+        elif is_trend_question and context:
+            # Trend path: "is completion rate improving?", "what's our velocity?", etc.
+            prompt = f"""Answer the following TREND/PROGRESS question using the data below.
+
+{context_str}
+
+Question: {question}
+
+INSTRUCTIONS:
+- Analyze the available data for patterns and trends
+- If activity logs are available, use them to show changes over time
+- If exact trend data is not available, provide the current snapshot and explain what data would be needed for trend analysis
+- Use specific numbers and dates where available
+- Be honest if historical data is limited - say "Based on current data..." rather than guessing
+- Keep it concise and data-driven"""
+            max_tokens = 600
+            relevant_results = []
         else:
             # Full context path for list/detail questions
             relevant_results = []
@@ -623,23 +828,22 @@ Answer briefly with the requested number(s)."""
                     self.log_action("Error in semantic search", {"error": str(e)})
             
             prompt = f"""Answer the following question about the project management system.
-        
+
 {context_str}
 {users_str}
 {conversation_context}
 
 Question: {question}
 
-IMPORTANT INSTRUCTIONS:
-- You have READ-ONLY access to user information. You can view and report on users, their roles, and their task assignments, but you CANNOT create, update, or delete users.
-- If the question asks ONLY for a count or total (e.g. "how many"), give the number(s) and one short sentence; do not list individual items unless asked.
-- If the question asks about users (e.g., "how many users do I have", "what are their roles"), use the "USERS ADDED BY COMPANY USER" section above to provide detailed information.
-- If the question asks for a list or details: list all users with their roles, email addresses, and status; use "USER-TASK ASSIGNMENTS" for task assignments; include task titles, status, priority, and project.
-- If a user has no tasks assigned, mention that clearly.
-- Provide a clear, organized answer that's easy to read.
-
-Provide a helpful, accurate answer. If the question is about specific data that isn't in the context, mention that.
-Be conversational and clear."""
+CRITICAL INSTRUCTIONS:
+- Answer ONLY what the user asked. Do NOT volunteer extra information they did not request.
+- If the question is about users (names, roles, etc.), provide ONLY user info. Do NOT include task assignments or task counts unless specifically asked.
+- If the question is about tasks, provide ONLY task info. Do NOT add unrelated user or project details.
+- If the question is about assignments, then include task-user mapping details.
+- Keep the response concise and well-structured. Use markdown (bold for names, bullet lists for details).
+- Do NOT add disclaimers, notes, or "please note" sections unless the data is missing.
+- If the question is about specific data that isn't in the context, say so briefly.
+- Use clear formatting: headings for sections, bold for key names, sub-bullets for attributes."""
             max_tokens = 800
         
         try:

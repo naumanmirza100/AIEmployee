@@ -257,7 +257,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
           'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
       }}
     >
-      <div className="flex w-full max-w-full relative">
+      <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         <div
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
@@ -274,9 +274,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
             overflow: 'hidden',
           }}
         >
-          <div className="w-64">
+          <div className="w-64 h-full flex flex-col">
             <div
-              className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2"
+              className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
               style={{
                 background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)',
                 borderTopLeftRadius: 16,
@@ -376,7 +376,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                 </div>
               )}
             </div>
-            <div>
+            <div className="flex-1 min-h-0 overflow-y-auto custom-sidebar-scroll">
               {loadingChats ? (
                 <div className="p-4 flex justify-center">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -643,76 +643,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                 borderTop: '1px solid rgba(255,255,255,0.08)',
               }}
             >
-            {/* Form: file upload + project + text request */}
-            <div className="mx-4 my-4 space-y-3 rounded-2xl px-4 py-4" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
-            {/* File upload */}
-            <div className="p-3 border rounded-lg bg-background/50 space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Upload className="h-4 w-4" />
-                Upload document (txt, pdf, docx)
-              </label>
-              {!selectedFile ? (
-                <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".txt,.pdf,.docx"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                    id="pilot-file-upload"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Choose file
-                  </Button>
-                </>
-              ) : (
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText className="h-4 w-4 shrink-0 text-primary" />
-                    <span className="text-sm truncate">{selectedFile.name}</span>
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={fileLoading}
-                      onClick={handleFileUpload}
-                    >
-                      {fileLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      <span className="ml-1">{fileLoading ? 'Processing...' : 'Process file'}</span>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-muted/30 px-2 text-muted-foreground">Or type a request</span>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium mb-1 block">Select project (optional)</label>
+            {/* Compact input area: project select + file upload + textarea */}
+            <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+            {/* Top row: project select + file upload side by side */}
+            <div className="flex items-center gap-2 mb-2">
               <Select value={selectedProjectId || 'all'} onValueChange={(v) => setSelectedProjectId(v === 'all' ? '' : v)}>
-                <SelectTrigger className="mb-2">
+                <SelectTrigger className="h-8 text-xs flex-1 min-w-0">
                   <SelectValue placeholder="All projects" />
                 </SelectTrigger>
                 <SelectContent>
@@ -728,8 +664,53 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                   )}
                 </SelectContent>
               </Select>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.pdf,.docx"
+                onChange={handleFileSelect}
+                className="hidden"
+                id="pilot-file-upload"
+              />
+              {!selectedFile ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs shrink-0"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                  Upload
+                </Button>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span className="text-xs truncate max-w-[80px]">{selectedFile.name}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 text-xs px-2"
+                    disabled={fileLoading}
+                    onClick={handleFileUpload}
+                  >
+                    {fileLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
             </div>
 
+            {/* Textarea + send */}
             <form onSubmit={handleSubmit} className="flex gap-2">
               <Textarea
                 placeholder="e.g., Create a new project 'Website Redesign' with high priority..."
@@ -741,12 +722,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                     handleSubmit(e);
                   }
                 }}
-                rows={2}
+                rows={1}
                 disabled={loading || fileLoading}
-                className="min-h-[60px] resize-none flex-1"
+                className="min-h-[40px] resize-none flex-1 text-sm"
               />
-              <Button type="submit" disabled={loading || fileLoading} size="icon" className="h-[60px] w-12 shrink-0">
-                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              <Button type="submit" disabled={loading || fileLoading} size="icon" className="h-[40px] w-10 shrink-0">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
             </form>
             </div>

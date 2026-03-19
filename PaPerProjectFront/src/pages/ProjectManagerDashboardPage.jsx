@@ -37,6 +37,7 @@ import {
   Lock,
   Menu,
   Check,
+  Workflow,
 } from 'lucide-react';
 import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
@@ -44,6 +45,7 @@ import KnowledgeQAAgent from '@/components/pm-agent/KnowledgeQAAgent';
 import TimelineGanttAgent from '@/components/pm-agent/TimelineGanttAgent';
 import ManualProjectCreation from '@/components/pm-agent/ManualProjectCreation';
 import ManualTaskCreation from '@/components/pm-agent/ManualTaskCreation';
+import PMToolsHub from '@/components/pm-agent/PMToolsHub';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 
 const PM_TAB_ITEMS = [
@@ -54,6 +56,7 @@ const PM_TAB_ITEMS = [
   { value: 'task-prioritization', label: 'Task Prioritization', icon: ListChecks },
   { value: 'knowledge-qa', label: 'Knowledge Q&A', icon: MessageSquare },
   { value: 'timeline-gantt', label: 'Timeline & Gantt', icon: Calendar },
+  { value: 'ai-tools', label: 'AI Tools', icon: Workflow },
 ];
 
 const ProjectManagerDashboardPage = () => {
@@ -370,7 +373,7 @@ const ProjectManagerDashboardPage = () => {
         {/* Main Content */}
         <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full max-w-full overflow-x-hidden">
           <div
-            className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
+            className="w-full rounded-2xl border border-white/[0.06] p-0"
             style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
           >
           <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
@@ -564,6 +567,15 @@ const ProjectManagerDashboardPage = () => {
                         bgColor: 'rgba(251,191,36,0.15)',
                         borderHover: 'rgba(251,191,36,0.4)',
                       },
+                      {
+                        title: 'AI Tools',
+                        desc: 'Standup reports, health scores, meeting notes, team analytics & more',
+                        icon: Workflow,
+                        tab: 'ai-tools',
+                        color: '#2dd4bf',
+                        bgColor: 'rgba(45,212,191,0.15)',
+                        borderHover: 'rgba(45,212,191,0.4)',
+                      },
                     ].map((card) => (
                       <button
                         key={card.title}
@@ -606,6 +618,10 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="timeline-gantt" className="mt-6">
                   <TimelineGanttAgent projects={projects || []} />
+                </TabsContent>
+
+                <TabsContent value="ai-tools" className="mt-6">
+                  <PMToolsHub />
                 </TabsContent>
               </Tabs>
           </div>
