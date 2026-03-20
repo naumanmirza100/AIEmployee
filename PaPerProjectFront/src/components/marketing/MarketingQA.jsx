@@ -1808,7 +1808,7 @@ import marketingAgentService from '@/services/marketingAgentService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
-const STORAGE_KEY = 'marketing_qa_chats';
+const STORAGE_KEY = 'marketing_qa_chats'; // kept for one-time migration
 
 /** Normalize question for comparison: trim, lower, collapse spaces, remove trailing punctuation */
 function normalizeQuestion(text) {
@@ -2149,18 +2149,38 @@ const SimplePieChart = ({ data, colors, title }) => {
   );
 };
 
-const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title, variant = 'line' }) => {
+const SimpleLineChart = ({ data, color = '#3b82f6', height = 220, title, variant = 'line' }) => {
   if (!data || data.length === 0) return <div className="text-sm text-muted-foreground">No data available</div>;
   const isArea = variant === 'area';
   const values = data.map(d => d.value ?? d.count ?? 0);
   const maxValue = Math.max(...values, 1);
+  const minValue = Math.min(...values, 0);
   const labels = data.map(d => d.label ?? d.date ?? d.month ?? '');
+  const range = maxValue - minValue || 1;
+
+  const formatVal = (v) => {
+    const n = Number(v);
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  };
+
+  // Y-axis ticks (4 values)
+  const yTicks = [0, 1, 2, 3].map(i => {
+    const val = minValue + (range * i) / 3;
+    return { val, y: 100 - (i / 3) * 100 };
+  });
+
+  // Offset chart area to leave room for Y-axis labels
+  const padL = 10;
+  const chartW = 100 - padL;
   const points = values.map((value, index) => {
-    const x = (index / (values.length - 1 || 1)) * 100;
-    const y = 100 - (value / maxValue) * 100;
+    const x = padL + (index / (values.length - 1 || 1)) * chartW;
+    const y = 100 - ((value - minValue) / range) * 100;
     return `${x},${y}`;
   }).join(' ');
-  const areaPoints = `0,100 ${points} 100,100`;
+  const areaPoints = `${padL},100 ${points} ${padL + chartW},100`;
+
   return (
     <div className={cn(
       'space-y-2 p-4 rounded-xl border',
@@ -2175,18 +2195,9 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title, variant
       )}
       <div className="relative w-full" style={{ height: `${height}px` }}>
         <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {!isArea && [20, 40, 60, 80].map((y) => (
-            <line
-              key={y}
-              x1="0"
-              y1={y}
-              x2="100"
-              y2={y}
-              stroke="currentColor"
-              strokeWidth="0.35"
-              strokeDasharray="2 2"
-              className="text-muted-foreground/30"
-            />
+          {/* Grid lines with Y values */}
+          {yTicks.map((tick, i) => (
+            <line key={i} x1={padL} y1={tick.y} x2="100" y2={tick.y} stroke="currentColor" strokeWidth="0.2" strokeDasharray="1.5 1.5" className="text-muted-foreground/20" />
           ))}
           <motion.polygon
             initial={{ opacity: 0 }}
@@ -2214,18 +2225,25 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 200, title, variant
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.8 + index * 0.1, type: "spring" }}
-              cx={(index / (values.length - 1 || 1)) * 100}
-              cy={100 - (value / maxValue) * 100}
+              cx={padL + (index / (values.length - 1 || 1)) * chartW}
+              cy={100 - ((value - minValue) / range) * 100}
               r={isArea ? '1.2' : '1.9'}
               fill={color}
               stroke={isArea ? 'none' : '#ffffff'}
               strokeWidth={isArea ? 0 : 0.35}
-              className="cursor-pointer hover:r-2 transition-all"
+              className="cursor-pointer"
             />
           ))}
         </svg>
-        <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[10px] text-muted-foreground px-1 mt-2">
-          {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate font-medium">{label}</span>) : (
+        {/* Y-axis labels */}
+        <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '9%' }}>
+          {[...yTicks].reverse().map((tick, i) => (
+            <span key={i} className="text-[9px] text-muted-foreground/60 text-right pr-0.5 leading-none">{formatVal(tick.val)}</span>
+          ))}
+        </div>
+        {/* X-axis labels */}
+        <div className="absolute left-[10%] right-0 flex justify-between text-[10px] text-muted-foreground px-1" style={{ bottom: '-18px' }}>
+          {labels.length <= 7 ? labels.map((label, i) => <span key={i} className="truncate max-w-[90px] font-medium">{label}</span>) : (
             <><span className="font-medium">{labels[0]}</span><span className="font-medium">{labels[Math.floor(labels.length / 2)]}</span><span className="font-medium">{labels[labels.length - 1]}</span></>
           )}
         </div>
@@ -2268,21 +2286,23 @@ const renderChart = (chartData) => {
 
 /** Normalize chat to { id, messages: [{ role, content, responseData? }], timestamp } */
 function normalizeChat(c) {
-  if (c.messages && Array.isArray(c.messages)) return c;
+  if (c.messages && Array.isArray(c.messages)) {
+    return { ...c, id: String(c.id), timestamp: c.timestamp || c.updatedAt || new Date().toISOString() };
+  }
   if (c.question != null) {
     return {
-      id: c.id,
+      id: String(c.id),
       messages: [
         { role: 'user', content: c.question },
         { role: 'assistant', content: c.response || '', responseData: c.responseData },
       ],
-      timestamp: c.timestamp || new Date().toISOString(),
+      timestamp: c.timestamp || c.updatedAt || new Date().toISOString(),
     };
   }
-  return { id: c.id || Date.now().toString(), messages: [], timestamp: c.timestamp || new Date().toISOString() };
+  return { id: String(c.id || Date.now()), messages: [], timestamp: c.timestamp || c.updatedAt || new Date().toISOString() };
 }
 
-function loadChats() {
+function loadChatsFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const list = raw ? JSON.parse(raw) : [];
@@ -2290,12 +2310,6 @@ function loadChats() {
   } catch {
     return [];
   }
-}
-
-function saveChats(chats) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.slice(-50))); // Keep last 50
-  } catch { }
 }
 
 // Animation variants
@@ -2382,8 +2396,41 @@ const MarketingQA = () => {
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
+  // Load chats from API on mount; migrate localStorage data if present
   useEffect(() => {
-    setChats(loadChats());
+    const loadFromApi = async () => {
+      try {
+        const res = await marketingAgentService.listQAChats();
+        if (res?.status === 'success' && Array.isArray(res.data)) {
+          setChats(res.data.map(normalizeChat));
+
+          // One-time migration: push any localStorage chats that aren't in the DB yet
+          const localChats = loadChatsFromStorage();
+          if (localChats.length > 0) {
+            const dbIds = new Set(res.data.map((c) => String(c.id)));
+            const toMigrate = localChats.filter((c) => !dbIds.has(String(c.id)));
+            for (const lc of toMigrate) {
+              try {
+                const title = (lc.messages?.[0]?.content || 'Chat').slice(0, 100);
+                await marketingAgentService.createQAChat({ title, messages: lc.messages || [] });
+              } catch { /* skip failed migrations */ }
+            }
+            localStorage.removeItem(STORAGE_KEY);
+            // Reload from API to get migrated chats
+            if (toMigrate.length > 0) {
+              const res2 = await marketingAgentService.listQAChats();
+              if (res2?.status === 'success' && Array.isArray(res2.data)) {
+                setChats(res2.data.map(normalizeChat));
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback to localStorage if API fails
+        setChats(loadChatsFromStorage());
+      }
+    };
+    loadFromApi();
   }, []);
 
 
@@ -2556,8 +2603,8 @@ const MarketingQA = () => {
             responseData: {
               isGraph: true,
               chart: response.chart,
-              chartTitle: response.title || 'Chart',
-              chartType: response.type,
+              chartTitle: response.chart?.title || response.title || 'Chart',
+              chartType: response.chart?.type || 'bar',
               insights: response.insights || []
             }
           };
@@ -2597,25 +2644,28 @@ const MarketingQA = () => {
   };
 
 
-  const handleResponse = (q, userMsg, assistantMsg, response) => {
-    const now = new Date().toISOString();
+  const handleResponse = async (q, userMsg, assistantMsg, response) => {
+    const newMessages = [userMsg, assistantMsg];
 
     if (selectedChatId) {
       const chat = chats.find((c) => c.id === selectedChatId);
       if (chat) {
+        // Optimistic update
         const updatedChat = {
           ...chat,
-          messages: [...(chat.messages || []), userMsg, assistantMsg],
-          timestamp: now,
+          messages: [...(chat.messages || []), ...newMessages],
+          timestamp: new Date().toISOString(),
         };
-        const updated = chats.map((c) => (c.id === selectedChatId ? updatedChat : c));
-        setChats(updated);
-        saveChats(updated);
+        setChats((prev) => prev.map((c) => (c.id === selectedChatId ? updatedChat : c)));
+        // Persist to API
+        try {
+          await marketingAgentService.updateQAChat(selectedChatId, { messages: newMessages });
+        } catch { /* optimistic update stays */ }
       } else {
-        createNewChat(q, response, userMsg, assistantMsg, now);
+        await createNewChat(q, response, userMsg, assistantMsg);
       }
     } else {
-      createNewChat(q, response, userMsg, assistantMsg, now);
+      await createNewChat(q, response, userMsg, assistantMsg);
     }
 
     setQuestion('');
@@ -2623,16 +2673,25 @@ const MarketingQA = () => {
     textareaRef.current?.focus();
   };
 
-  const createNewChat = (q, response, userMsg, assistantMsg, now) => {
-    const newChat = {
-      id: Date.now().toString(),
-      messages: [userMsg, assistantMsg],
-      timestamp: now,
-    };
-    const updated = [newChat, ...chats];
-    setChats(updated);
-    saveChats(updated);
-    setSelectedChatId(newChat.id);
+  const createNewChat = async (q, response, userMsg, assistantMsg) => {
+    const title = (q || 'Chat').slice(0, 100);
+    const messages = [userMsg, assistantMsg];
+
+    // Optimistic: show immediately with temp id
+    const tempId = Date.now().toString();
+    const tempChat = { id: tempId, messages, timestamp: new Date().toISOString() };
+    setChats((prev) => [tempChat, ...prev]);
+    setSelectedChatId(tempId);
+
+    // Persist to API and replace temp with real id
+    try {
+      const res = await marketingAgentService.createQAChat({ title, messages });
+      if (res?.status === 'success' && res.data) {
+        const realChat = normalizeChat(res.data);
+        setChats((prev) => prev.map((c) => (c.id === tempId ? realChat : c)));
+        setSelectedChatId(realChat.id);
+      }
+    } catch { /* temp chat stays in state */ }
   };
 
   const newChat = () => {
@@ -2642,16 +2701,19 @@ const MarketingQA = () => {
     textareaRef.current?.focus();
   };
 
-  const deleteChat = (e, chatId) => {
+  const deleteChat = async (e, chatId) => {
     e.stopPropagation();
-    const updated = chats.filter((c) => c.id !== chatId);
-    setChats(updated);
-    saveChats(updated);
+    // Optimistic removal
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
     if (selectedChatId === chatId) setSelectedChatId(null);
     toast({
       title: 'Deleted',
       description: 'Conversation removed.'
     });
+    // Persist to API
+    try {
+      await marketingAgentService.deleteQAChat(chatId);
+    } catch { /* already removed from UI */ }
   };
 
   const openSaveModal = (prompt, chartTitle, chartType, chart = null, insights = []) => {

@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent } from 'lucide-react';
+import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search } from 'lucide-react';
 import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
@@ -22,10 +21,33 @@ const CVProcessing = ({ onProcessComplete }) => {
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState(null);
   const [displayedKeywords, setDisplayedKeywords] = useState([]);
+  const [jobSearchOpen, setJobSearchOpen] = useState(false);
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
+  const jobDropdownRef = useRef(null);
 
   React.useEffect(() => {
     fetchJobDescriptions();
   }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (jobDropdownRef.current && !jobDropdownRef.current.contains(e.target)) {
+        setJobSearchOpen(false);
+        setJobSearchQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredJobs = jobDescriptions.filter((job) =>
+    job.title.toLowerCase().includes(jobSearchQuery.toLowerCase())
+  );
+
+  const selectedJobTitle = selectedJobId
+    ? jobDescriptions.find((j) => j.id.toString() === selectedJobId.toString())?.title
+    : null;
 
   const fetchJobDescriptions = async () => {
     try {
@@ -245,18 +267,56 @@ const CVProcessing = ({ onProcessComplete }) => {
               <Label htmlFor="job-description" className="text-sm font-medium text-white">
                 Select Job Description <span className="text-destructive">*</span>
               </Label>
-              <Select value={selectedJobId || ''} onValueChange={handleJobSelection}>
-                <SelectTrigger className="w-full text-sm bg-black/30 border-white/20 text-white">
-                  <SelectValue placeholder="Select a job (required)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {jobDescriptions.map((job) => (
-                    <SelectItem key={job.id} value={job.id.toString()}>
-                      {job.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="relative" ref={jobDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => { setJobSearchOpen(!jobSearchOpen); setJobSearchQuery(''); }}
+                  className="w-full flex items-center justify-between text-sm bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-black/40 transition-colors"
+                >
+                  <span className={selectedJobTitle ? 'text-white' : 'text-white/50'}>
+                    {selectedJobTitle || 'Select a job (required)'}
+                  </span>
+                  <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
+                </button>
+                {jobSearchOpen && (
+                  <div className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
+                    <div className="flex items-center border-b border-white/10 px-3">
+                      <Search className="h-4 w-4 text-white/40 shrink-0" />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={jobSearchQuery}
+                        onChange={(e) => setJobSearchQuery(e.target.value)}
+                        placeholder="Search jobs..."
+                        className="w-full bg-transparent text-sm text-white py-2.5 px-2 outline-none placeholder:text-white/40"
+                      />
+                    </div>
+                    <div className="max-h-[200px] overflow-y-auto">
+                      {filteredJobs.length === 0 ? (
+                        <div className="px-3 py-3 text-sm text-white/40 text-center">No jobs found</div>
+                      ) : (
+                        filteredJobs.map((job) => (
+                          <button
+                            key={job.id}
+                            type="button"
+                            onClick={() => {
+                              handleJobSelection(job.id.toString());
+                              setJobSearchOpen(false);
+                              setJobSearchQuery('');
+                            }}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors hover:bg-white/10 ${
+                              selectedJobId === job.id.toString() ? 'bg-white/5 text-purple-400' : 'text-white/80'
+                            }`}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${selectedJobId === job.id.toString() ? 'opacity-100 text-purple-400' : 'opacity-0'}`} />
+                            {job.title}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <p className="text-[10px] sm:text-xs text-white/60">
                 Job selection is required to process CVs. Ensure interview settings are complete for the selected job.
               </p>

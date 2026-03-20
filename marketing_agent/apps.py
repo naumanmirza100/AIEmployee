@@ -7,6 +7,7 @@ class MarketingAgentConfig(AppConfig):
     
     def ready(self):
         """Register marketing agents when app is ready"""
+        import marketing_agent.signals  # noqa - register signals
         from project_manager_agent.ai_agents.agents_registry import AgentRegistry
         
         try:

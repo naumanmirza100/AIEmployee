@@ -1,72 +1,150 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #4CAF50; color: white; padding: 20px; text-align: center; }
-        .content { padding: 20px; background-color: #f9f9f9; }
-        .slots { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #4CAF50; }
-        .slot-item { padding: 10px; margin: 5px 0; background-color: #f0f0f0; }
-        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Invitation</title>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Interview Invitation</h1>
-        </div>
-        <div class="content">
-            <p>Dear {{ candidate_name }},</p>
-            
-            <p>Thank you for your interest in the <strong>{{ job_title }}</strong> position. We are pleased to invite you for an interview.</p>
-            
-            <h3>Interview Details:</h3>
-            <ul>
-                <li><strong>Position:</strong> {{ job_title }}</li>
-                <li><strong>Interview Type:</strong> {{ interview_type }}</li>
-            </ul>
-            
-            <p>Please select your preferred date and time for the interview using our scheduling system:</p>
-            
-            <div style="background-color: #e8f5e9; padding: 15px; margin: 15px 0; border-left: 4px solid #4CAF50; border-radius: 4px;">
-                <p style="margin: 0; font-weight: 600; color: #2e7d32;">📅 How to Schedule:</p>
-                <ol style="margin: 10px 0 0 20px; padding: 0;">
-                    <li>Click the button below to access the scheduling page</li>
-                    <li>Select your preferred date and time from the date-time picker</li>
-                    <li>The system will only show available time slots based on our schedule</li>
-                    <li>Confirm your selection to complete the booking</li>
-                </ol>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                {% if slot_selection_url %}
-                <a href="{{ slot_selection_url }}" target="_blank" rel="noopener noreferrer" style="background-color: #4CAF50; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
-                    📅 Select Your Interview Date & Time
-                </a>
-                {% else %}
-                <p style="color: #d32f2f;">Scheduling link is not configured. Please contact the recruiter for the slot selection link.</p>
-                {% endif %}
-            </div>
-            
-            <p style="text-align: center; color: #666; font-size: 14px;">
-                Click the button above to select your preferred interview date and time.{% if slot_selection_url %}<br>
-                Or copy this link: <a href="{{ slot_selection_url }}" target="_blank">{{ slot_selection_url }}</a>{% endif %}
-            </p>
-            
-            <p style="color: #666; font-size: 13px; margin-top: 20px;">
-                <strong>Note:</strong> Time slots are available on a first-come, first-served basis. Once a slot is selected by another candidate, it will no longer be available.
-            </p>
-            
-            <p>We look forward to speaking with you!</p>
-            
-            <p>Best regards,<br>Recruitment Team</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated email. Please do not reply directly to this message.</p>
-        </div>
-    </div>
+<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+    <!-- Wrapper -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background:linear-gradient(135deg,#6366f1,#4f46e5);padding:40px 40px 32px;text-align:center;">
+                            <div style="width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">
+                                <img src="https://img.icons8.com/fluency/48/calendar-plus.png" alt="" width="36" height="36" style="display:block;" />
+                            </div>
+                            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.3px;">Interview Invitation</h1>
+                            <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:14px;">You've been invited to interview with us</p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding:36px 40px 20px;">
+                            <p style="margin:0 0 20px;font-size:16px;color:#1a1a2e;line-height:1.6;">Dear <strong>{{ candidate_name }}</strong>,</p>
+                            <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.7;">Thank you for your interest in the <strong style="color:#4f46e5;">{{ job_title }}</strong> position. We are pleased to invite you for an interview and would love to learn more about your experience.</p>
+                        </td>
+                    </tr>
+
+                    <!-- Details Card -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8f7ff;border-radius:12px;border:1px solid #e8e5ff;">
+                                <tr>
+                                    <td style="padding:20px 24px 8px;">
+                                        <p style="margin:0;font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.8px;">Interview Details</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:12px 24px;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="padding:8px 0;border-bottom:1px solid #ede9fe;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Position</span>
+                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ job_title }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:8px 0;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Interview Type</span>
+                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ interview_type }}</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- How to Schedule -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border-radius:12px;border:1px solid #d1fae5;">
+                                <tr>
+                                    <td style="padding:20px 24px;">
+                                        <p style="margin:0 0 12px;font-size:14px;font-weight:700;color:#059669;">How to Schedule Your Interview</p>
+                                        <table role="presentation" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="padding:4px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:22px;height:22px;background:#059669;color:#fff;border-radius:50%;text-align:center;line-height:22px;font-size:12px;font-weight:700;margin-right:10px;">1</span>
+                                                    Click the button below to open the scheduling page
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:22px;height:22px;background:#059669;color:#fff;border-radius:50%;text-align:center;line-height:22px;font-size:12px;font-weight:700;margin-right:10px;">2</span>
+                                                    Select your preferred date and time
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:22px;height:22px;background:#059669;color:#fff;border-radius:50%;text-align:center;line-height:22px;font-size:12px;font-weight:700;margin-right:10px;">3</span>
+                                                    Confirm your selection to complete the booking
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- CTA Button -->
+                    <tr>
+                        <td style="padding:0 40px 12px;text-align:center;">
+                            {% if slot_selection_url %}
+                            <a href="{{ slot_selection_url }}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;padding:16px 48px;border-radius:12px;letter-spacing:0.3px;">
+                                Select Your Interview Slot
+                            </a>
+                            {% else %}
+                            <p style="color:#dc2626;font-size:14px;">Scheduling link is not configured. Please contact the recruiter.</p>
+                            {% endif %}
+                        </td>
+                    </tr>
+
+                    {% if slot_selection_url %}
+                    <tr>
+                        <td style="padding:8px 40px 28px;text-align:center;">
+                            <p style="margin:0;font-size:12px;color:#999;line-height:1.5;">Or copy this link: <a href="{{ slot_selection_url }}" target="_blank" style="color:#6366f1;text-decoration:underline;">{{ slot_selection_url }}</a></p>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Note -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <p style="margin:0;font-size:13px;color:#888;line-height:1.6;background:#fafafa;padding:14px 18px;border-radius:10px;border-left:3px solid #e5e5e5;">
+                                Time slots are available on a first-come, first-served basis. Once a slot is selected by another candidate, it will no longer be available.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Sign-off -->
+                    <tr>
+                        <td style="padding:0 40px 36px;">
+                            <p style="margin:0 0 4px;font-size:15px;color:#444;line-height:1.6;">We look forward to speaking with you!</p>
+                            <p style="margin:16px 0 0;font-size:15px;color:#444;">Best regards,<br><strong style="color:#1a1a2e;">Recruitment Team</strong></p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background:#fafafa;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
+                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated email. Please do not reply directly to this message.</p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+
 </body>
 </html>
-

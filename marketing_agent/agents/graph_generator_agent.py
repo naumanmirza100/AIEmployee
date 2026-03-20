@@ -310,66 +310,27 @@ class GraphGeneratorAgent(MarketingBaseAgent):
                 'status': c['status'],
                 'emails_sent': c['emails_sent'],
                 'open_rate': c.get('open_rate'),
-                'click_rate': c.get('click_rate'),
-                'reply_rate': c.get('reply_rate'),
-                'bounce_rate': c.get('bounce_rate'),
                 'leads_count': c['leads_count'],
                 'emails_replied': c['emails_replied'],
-                'conversion_progress': c.get('conversion_progress'),
-                'leads_progress': c.get('leads_progress'),
             }
-            for c in marketing_data['campaigns'][:20]
+            for c in marketing_data['campaigns'][:15]
         ]
-        campaigns_summary_json = json.dumps(campaigns_summary, indent=2)
+        campaigns_summary_json = json.dumps(campaigns_summary, separators=(',', ':'))
 
         data_summary = f"""
-CAMPAIGNS DATA:
-- Total campaigns: {marketing_data['stats']['total_campaigns']}
-- Active campaigns: {marketing_data['stats']['active_campaigns']}
-- Campaigns by status: {json.dumps(marketing_data['by_status'])}
-
-Per-campaign (name, status, emails_sent, open_rate, click_rate, reply_rate, bounce_rate, leads_count, emails_replied, conversion_progress, leads_progress):
-{campaigns_summary_json}
-
-Aggregates for charts:
-- Emails sent by campaign: {json.dumps(marketing_data['by_campaign_emails_sent'])}
-- Open rate by campaign (percent): {json.dumps(marketing_data['by_campaign_open_rate'])}
-- Leads by campaign: {json.dumps(marketing_data['by_campaign_leads'])}
-- Replies by campaign: {json.dumps(marketing_data['by_campaign_replies'])}
-
-RESEARCH DATA (recent): {json.dumps(marketing_data['research'][:5])}
+CAMPAIGNS: {marketing_data['stats']['total_campaigns']} total, {marketing_data['stats']['active_campaigns']} active
+By status: {json.dumps(marketing_data['by_status'], separators=(',', ':'))}
+Per-campaign: {campaigns_summary_json}
+Emails sent: {json.dumps(marketing_data['by_campaign_emails_sent'], separators=(',', ':'))}
+Open rate%: {json.dumps(marketing_data['by_campaign_open_rate'], separators=(',', ':'))}
+Leads: {json.dumps(marketing_data['by_campaign_leads'], separators=(',', ':'))}
+Replies: {json.dumps(marketing_data['by_campaign_replies'], separators=(',', ':'))}
 """
 
-        system_prompt = f"""You are an AI assistant that generates chart configurations for a marketing dashboard.
-Your task is to interpret the user's natural language request and return a JSON configuration for a chart.
-
-Available data from the database:
+        system_prompt = f"""Generate chart JSON from marketing data. Respond with ONLY valid JSON, no markdown.
 {data_summary}
-
-You must respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
-{{
-    "chart_type": "bar" | "pie" | "line" | "area",
-    "title": "Chart title",
-    "data": {{ "label1": value1, "label2": value2 }} for bar/pie OR [{{ "label": "x", "value": y }}] for line/area,
-    "insights": "Brief insight about the data (1-2 sentences)",
-    "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
-}}
-
-Rules:
-1. For pie charts: use object format {{ "Category": count }}
-2. For bar charts: use object format {{ "Category": count }}
-3. For line/area charts: use array format [{{ "label": "date/period", "value": count }}]
-4. Only include categories with count > 0 (or non-null rates)
-5. Use the actual data values from the database
-6. Choose the most appropriate chart type for the request
-7. For "campaigns by status", use by_status
-8. For "emails sent by campaign" or "top campaigns by volume", use by_campaign_emails_sent
-9. For "open rate by campaign" or "click rate", use by_campaign_open_rate or per-campaign open_rate/click_rate
-10. For "leads by campaign", use by_campaign_leads
-11. For "replies by campaign", use by_campaign_replies
-12. If user asks for "top N" campaigns, take the N campaigns with highest values, sorted descending
-13. Always sort bar chart data by value (highest first) unless user asks for alphabetical or chronological order
-"""
+Format: {{"chart_type":"bar"|"pie"|"line"|"area","title":"...","data":{{"label":value}} for bar/pie OR [{{"label":"x","value":y}}] for line/area,"insights":"1-2 sentences","colors":["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6"]}}
+Rules: Use actual data values. Only include non-zero values. Sort bar data by value descending. Choose best chart type for the request. For "top N", take N highest."""
 
         try:
             user_message = f"Generate a chart for: {prompt}"

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"class PMKnowledgeQAChat\\\\|class PMProjectPilotChat\" /d/University/work/AI_Employyes/AIEmployee/*/models.py 2>/dev/null | head -5)",
+      "Bash(cd D:/University/work/AI_Employyes/AIEmployee && python manage.py migrate marketing_agent 2>&1)",
+      "Bash(cd D:/University/work/AI_Employyes/AIEmployee && python -c \"import py_compile; py_compile.compile\\('api/views/marketing_agent.py', doraise=True\\); py_compile.compile\\('marketing_agent/models.py', doraise=True\\); print\\('OK'\\)\" 2>&1)",
+      "Bash(cd D:/University/work/AI_Employyes/AIEmployee && python -c \"import py_compile; py_compile.compile\\('marketing_agent/agents/outreach_campaign_agent.py', doraise=True\\); print\\('OK'\\)\" 2>&1)"
+    ]
+  }
+}

@@ -4,8 +4,20 @@
       "Bash(find /c/Study/Others/Projectsss/AIEmploees/AIEmployee/PaPerProjectFront/src -type f \\\\\\(-name *pilot* -o -name *project* \\\\\\))",
       "Bash(grep -r \"openai\\\\|OpenAI\\\\|gpt\\\\|claude\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee --include=*.py)",
       "Bash(grep -l \"knowledge_qa\\\\|KnowledgeQA\" *.py)",
+<<<<<<< HEAD
       "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/project_pilot_agent.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
       "Bash(npx -y acorn --ecma2020 --module --allow-import-export-everywhere src/components/pm-agent/TimelineGanttAgent.jsx)"
+=======
+      "Bash(python manage.py makemigrations marketing_agent --name add_chart_data_to_savedgraphprompt)",
+      "Bash(source .venv/Scripts/activate)",
+      "Bash(.venv/Scripts/python.exe manage.py makemigrations marketing_agent --name add_chart_data_to_savedgraphprompt)",
+      "Bash(.venv/Scripts/pip.exe list:*)",
+      "Bash(python manage.py makemigrations marketing_agent --name add_chart_title_to_savedgraphprompt)",
+      "Bash(python manage.py migrate marketing_agent)",
+      "Bash(python manage.py migrate marketing_agent 0030_add_chart_title_to_savedgraphprompt --fake)",
+      "Bash(ls d:/University/work/AI_Employyes/AIEmployee/marketing_agent/migrations/0030*)"
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/project_pilot_agent.py''\\).read\\(\\)\\); print\\(''OK''\\)\")"
+>>>>>>> 1328c8629ad51caec4cedd015a07d8a4040285db
     ]
   }
 }
