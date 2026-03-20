@@ -171,6 +171,7 @@ urlpatterns = [
     # Project Manager Dashboard endpoint
     re_path(r'^project-manager/dashboard/?$', company_dashboard.project_manager_dashboard, name='pm_dashboard'),
     # Company User Projects endpoint
+    re_path(r'^company/projects/list/?$', company_dashboard.get_company_user_projects_list, name='get_company_user_projects_list'),
     re_path(r'^company/projects/?$', company_dashboard.get_company_user_projects, name='get_company_user_projects'),
     re_path(r'^company/projects/(?P<project_id>\d+)/update/?$', company_projects_tasks.update_company_project, name='update_company_project'),
     

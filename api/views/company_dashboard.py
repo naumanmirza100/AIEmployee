@@ -141,6 +141,33 @@ def project_manager_dashboard(request):
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def get_company_user_projects_list(request):
+    """
+    Lightweight endpoint: returns only id, name, status for combo boxes / dropdowns.
+    No nested tasks or subtasks — single query, fast response.
+    """
+    try:
+        company_user = request.user
+        projects = Project.objects.filter(
+            created_by_company_user=company_user
+        ).order_by('-created_at').values('id', 'name', 'status')
+
+        return Response({
+            'status': 'success',
+            'data': list(projects)
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception(f"Error in get_company_user_projects_list: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': 'Failed to fetch projects list',
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def get_company_user_projects(request):
     """
     Get all projects created by the logged-in company user with tasks and subtasks

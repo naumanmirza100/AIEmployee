@@ -3586,11 +3586,18 @@ def meeting_notes(request):
         if project_id:
             try:
                 project = Project.objects.get(id=project_id, created_by_company_user=company_user)
-                tasks = Task.objects.filter(project=project)
+                tasks = Task.objects.filter(project=project).select_related('assignee')
+                # Collect unique team members assigned to tasks in this project
+                team_members = set()
+                for t in tasks:
+                    if t.assignee:
+                        display_name = t.assignee.get_full_name() or t.assignee.username
+                        team_members.add(display_name)
                 project_context = {
                     "name": project.name,
                     "status": project.status,
-                    "tasks": [{"title": t.title, "status": t.status} for t in tasks[:20]],
+                    "tasks": [{"title": t.title, "status": t.status, "assignee": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None} for t in tasks[:20]],
+                    "team_members": list(team_members),
                 }
             except Project.DoesNotExist:
                 pass

@@ -46,6 +46,35 @@ You produce structured, actionable summaries that help teams stay aligned."""
         if not meeting_text or len(meeting_text.strip()) < 10:
             return {"success": False, "error": "Meeting text is too short to analyze."}
 
+        # Validate that the text resembles meeting notes before processing
+        validation_prompt = f"""Determine if the following text is meeting notes, a meeting transcript, or meeting-related content.
+
+TEXT:
+---
+{meeting_text[:500]}
+---
+
+Reply with ONLY "yes" or "no". Answer "yes" if the text contains any of: discussions between people, decisions, action items, task updates, agenda items, or anything that could reasonably come from a meeting. Answer "no" if the text is completely unrelated (e.g. a recipe, a poem, random gibberish, song lyrics, a story)."""
+
+        try:
+            validation = self._call_llm(validation_prompt, "You are a text classifier. Reply with only 'yes' or 'no'.", temperature=0.0, max_tokens=10)
+            if validation.strip().lower().startswith("no"):
+                return {
+                    "success": False,
+                    "error": "The text you entered doesn't appear to be meeting notes.",
+                    "instructions": (
+                        "Please paste actual meeting notes or a transcript. Here's what works well:\n\n"
+                        "• Raw notes from a meeting (e.g. 'Ahmed said the API is delayed. We decided to push the demo to Friday.')\n"
+                        "• Copy-pasted Zoom/Teams/Slack chat logs from a meeting\n"
+                        "• Bullet-point summaries (e.g. '- Discussed timeline. - Sara will fix the frontend by Wed.')\n"
+                        "• Transcripts from recorded meetings\n"
+                        "• Email threads summarizing a meeting\n\n"
+                        "The AI will extract: summary, action items, key decisions, risks, and follow-ups."
+                    )
+                }
+        except Exception:
+            pass  # If validation fails, proceed with analysis anyway
+
         context_str = ""
         if meeting_info:
             context_str += f"\nMeeting Info:\n"
@@ -116,6 +145,36 @@ Return ONLY the JSON."""
                     cleaned = cleaned.split("```")[1].split("```")[0].strip()
 
                 result = json.loads(cleaned)
+
+                # Validate detected participants against project team members
+                if project_context and project_context.get('team_members'):
+                    team = project_context['team_members']
+                    team_lower = [m.lower() for m in team]
+                    detected = result.get('participants_detected', [])
+
+                    unrecognized = []
+                    for person in detected:
+                        person_lower = person.lower()
+                        # Check if any team member name contains or matches the detected name
+                        matched = any(
+                            person_lower in member or member in person_lower
+                            for member in team_lower
+                        )
+                        if not matched:
+                            unrecognized.append(person)
+
+                    if unrecognized:
+                        result['warnings'] = [
+                            f"The following people mentioned in the notes are not assigned to any task in project \"{project_context.get('name', '')}\": {', '.join(unrecognized)}. "
+                            f"Current project members: {', '.join(team) if team else 'None'}. "
+                            f"Action items assigned to unrecognized names may not be trackable."
+                        ]
+                    if not team:
+                        result['warnings'] = [
+                            f"No team members are assigned to any tasks in project \"{project_context.get('name', '')}\". "
+                            f"Please assign team members to tasks first so action items can be linked to the right people."
+                        ]
+
                 return {"success": True, **result}
             except (json.JSONDecodeError, IndexError):
                 return {"success": True, "answer": response}
