@@ -75,6 +75,58 @@ Reply with ONLY "yes" or "no". Answer "yes" if the text contains any of: discuss
         except Exception:
             pass  # If validation fails, proceed with analysis anyway
 
+        # Validate mentioned people against project team members (only if a project is selected)
+        if project_context and project_context.get('team_members') is not None:
+            team = project_context.get('team_members', [])
+            team_lower = [m.lower() for m in team]
+
+            # Extract names from the meeting text using LLM
+            name_prompt = f"""Extract all person names mentioned in this text. Return ONLY a JSON array of names, nothing else.
+
+TEXT:
+---
+{meeting_text[:1500]}
+---
+
+Example output: ["Ahmed", "Sara", "John"]
+If no names found, return: []"""
+
+            try:
+                name_response = self._call_llm(name_prompt, "You extract person names from text. Return only a JSON array.", temperature=0.0, max_tokens=200)
+                cleaned_names = name_response.strip()
+                if "```json" in cleaned_names:
+                    cleaned_names = cleaned_names.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned_names:
+                    cleaned_names = cleaned_names.split("```")[1].split("```")[0].strip()
+
+                detected_names = json.loads(cleaned_names)
+                if isinstance(detected_names, list) and detected_names:
+                    unrecognized = []
+                    for person in detected_names:
+                        person_lower = person.lower()
+                        matched = any(
+                            person_lower in member or member in person_lower
+                            for member in team_lower
+                        )
+                        if not matched:
+                            unrecognized.append(person)
+
+                    if unrecognized:
+                        team_display = ', '.join(team) if team else 'No members assigned yet'
+                        return {
+                            "success": False,
+                            "error": f"The following people are not part of project \"{project_context.get('name', '')}\":",
+                            "instructions": (
+                                f"Unrecognized members: {', '.join(unrecognized)}\n\n"
+                                f"Current project team members (people with assigned tasks):\n"
+                                f"{team_display}\n\n"
+                                f"Please make sure the people mentioned in your meeting notes are assigned to tasks in this project, "
+                                f"or select a different project that these members belong to."
+                            )
+                        }
+            except (json.JSONDecodeError, Exception):
+                pass  # If name extraction fails, proceed with analysis
+
         context_str = ""
         if meeting_info:
             context_str += f"\nMeeting Info:\n"
@@ -145,36 +197,6 @@ Return ONLY the JSON."""
                     cleaned = cleaned.split("```")[1].split("```")[0].strip()
 
                 result = json.loads(cleaned)
-
-                # Validate detected participants against project team members
-                if project_context and project_context.get('team_members'):
-                    team = project_context['team_members']
-                    team_lower = [m.lower() for m in team]
-                    detected = result.get('participants_detected', [])
-
-                    unrecognized = []
-                    for person in detected:
-                        person_lower = person.lower()
-                        # Check if any team member name contains or matches the detected name
-                        matched = any(
-                            person_lower in member or member in person_lower
-                            for member in team_lower
-                        )
-                        if not matched:
-                            unrecognized.append(person)
-
-                    if unrecognized:
-                        result['warnings'] = [
-                            f"The following people mentioned in the notes are not assigned to any task in project \"{project_context.get('name', '')}\": {', '.join(unrecognized)}. "
-                            f"Current project members: {', '.join(team) if team else 'None'}. "
-                            f"Action items assigned to unrecognized names may not be trackable."
-                        ]
-                    if not team:
-                        result['warnings'] = [
-                            f"No team members are assigned to any tasks in project \"{project_context.get('name', '')}\". "
-                            f"Please assign team members to tasks first so action items can be linked to the right people."
-                        ]
-
                 return {"success": True, **result}
             except (json.JSONDecodeError, IndexError):
                 return {"success": True, "answer": response}

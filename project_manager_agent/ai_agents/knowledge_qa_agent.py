@@ -22,8 +22,13 @@ def _is_count_or_aggregate_question(question: str) -> bool:
     q = question.lower().strip()
     # If the question asks for a list/detail alongside a count, treat it as detail (not count-only)
     list_indicators = ["list all", "list the", "list every", "list them", "which tasks", "which users",
-                        "what are the tasks", "name of each", "names of all", "show them", "show all",
-                        "show me all", "show me the", "tell me all", "tell me the"]
+                        "what are the tasks", "what tasks are", "what tasks", "what are their tasks",
+                        "name of each", "names of all", "show them", "show all",
+                        "show me all", "show me the", "tell me all", "tell me the",
+                        "assigned to him", "assigned to her", "assigned to them", "assigned to each",
+                        "assigned to who", "who is working", "who are working",
+                        "and what", "and which", "and their", "and his", "and her",
+                        "along with", "details of", "detail about"]
     if any(phrase in q for phrase in list_indicators):
         return False
 
@@ -324,8 +329,12 @@ def _try_answer_count_question_locally(question: str, context: Dict) -> Optional
     if not tasks and context.get("project") and context["project"].get("tasks"):
         tasks = context["project"]["tasks"]
 
-    # Handle assigned/unassigned count questions
-    if ("assigned" in q or "unassigned" in q) and ("how many" in q or "count" in q or "number" in q):
+    # Handle assigned/unassigned count questions (only pure count, not mixed with detail asks)
+    detail_signals = ["what tasks", "which tasks", "what are", "assigned to him", "assigned to her",
+                      "assigned to them", "assigned to each", "and what", "and which", "and their",
+                      "who is working", "who are working", "how many users"]
+    is_mixed_detail = any(d in q for d in detail_signals)
+    if not is_mixed_detail and ("assigned" in q or "unassigned" in q) and ("how many" in q or "count" in q or "number" in q):
         assigned = [t for t in tasks if t.get("assignee_id") or t.get("assignee_username")]
         unassigned = [t for t in tasks if not t.get("assignee_id") and not t.get("assignee_username")]
         project_name = ""
