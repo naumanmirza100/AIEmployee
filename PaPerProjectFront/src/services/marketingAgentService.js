@@ -700,9 +700,9 @@ export const generateGraph = async (prompt) => {
   }
 };
 
-export const getSavedGraphPrompts = async () => {
+export const getSavedGraphPrompts = async (params = {}) => {
   try {
-    const response = await companyApi.get('/marketing/ai/graph-prompts');
+    const response = await companyApi.get('/marketing/ai/graph-prompts', params);
     return response;
   } catch (error) {
     console.error('Get saved graph prompts error:', error);

@@ -2951,9 +2951,9 @@ def api_get_saved_prompts(request):
     try:
         from recruitment_agent.models import SavedGraphPrompt
         company_user = request.user
-        
+
         prompts = SavedGraphPrompt.objects.filter(company_user=company_user)
-        
+
         data = [{
             'id': p.id,
             'title': p.title,
@@ -2966,12 +2966,12 @@ def api_get_saved_prompts(request):
             'created_at': p.created_at.isoformat(),
             'updated_at': p.updated_at.isoformat(),
         } for p in prompts]
-        
+
         return Response({
             'status': 'success',
             'data': data,
         })
-        
+
     except Exception as e:
         logger.exception("api_get_saved_prompts error")
         return Response({

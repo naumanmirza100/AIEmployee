@@ -10,6 +10,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -32,7 +33,6 @@ import {
   Download,
   Rocket,
   Calendar as CalendarIcon,
-  Zap,
   Pause,
   ListOrdered,
   FileText,
@@ -226,6 +226,8 @@ const CampaignDetail = () => {
   const [uploadMessage, setUploadMessage] = useState('');
   const [editingLead, setEditingLead] = useState(null);
   const [editLeadForm, setEditLeadForm] = useState({});
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteLeadConfirm, setDeleteLeadConfirm] = useState(null);
 
   const fetchDetail = useCallback(async (silent = false) => {
     if (!id) return;
@@ -337,19 +339,6 @@ const CampaignDetail = () => {
     }
   };
 
-  const handleOptimize = async () => {
-    setActionLoading('optimize');
-    try {
-      await marketingAgentService.outreachCampaign('optimize', {}, id);
-      toast({ title: 'Success', description: 'Optimization requested' });
-      fetchDetail();
-    } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Optimize failed', variant: 'destructive' });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleStop = async () => {
     if (!window.confirm('Are you sure you want to stop this campaign?')) return;
     setActionLoading('stop');
@@ -365,7 +354,7 @@ const CampaignDetail = () => {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this campaign? This cannot be undone.')) return;
+    setDeleteConfirmOpen(false);
     setActionLoading('delete');
     try {
       await marketingAgentService.campaignDelete(id);
@@ -428,8 +417,10 @@ const CampaignDetail = () => {
     }
   };
 
-  const handleDeleteLead = async (leadId, email) => {
-    if (!window.confirm(`Remove "${email}" from this campaign?`)) return;
+  const handleDeleteLead = async () => {
+    if (!deleteLeadConfirm) return;
+    const { leadId } = deleteLeadConfirm;
+    setDeleteLeadConfirm(null);
     try {
       await marketingAgentService.deleteCampaignLead(id, leadId);
       toast({ title: 'Success', description: 'Lead removed' });
@@ -568,12 +559,6 @@ const CampaignDetail = () => {
               Schedule
             </Button>
           )}
-          {(isScheduled || isActive) && (
-            <Button size="sm" variant="outline" onClick={handleOptimize} disabled={!!actionLoading}>
-              <Zap className="mr-2 h-4 w-4" />
-              Optimize
-            </Button>
-          )}
           {isActive && (
             <Button size="sm" variant="outline" onClick={handleStop} disabled={!!actionLoading}>
               <Pause className="mr-2 h-4 w-4" />
@@ -584,7 +569,7 @@ const CampaignDetail = () => {
             <Pencil className="mr-2 h-4 w-4" />
             Edit
           </Button>
-          <Button size="sm" variant="destructive" onClick={handleDelete} disabled={!!actionLoading}>
+          <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={!!actionLoading}>
             <Trash2 className="mr-2 h-4 w-4" />
             Delete
           </Button>
@@ -921,7 +906,7 @@ const CampaignDetail = () => {
                             <Button size="sm" variant="ghost" className="h-8" onClick={() => openEditLead(lead)}>
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="ghost" className="h-8 text-destructive" onClick={() => handleDeleteLead(lead.id, lead.email)}>
+                            <Button size="sm" variant="ghost" className="h-8 text-destructive" onClick={() => setDeleteLeadConfirm({ leadId: lead.id, email: lead.email })}>
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </td>
@@ -1187,6 +1172,48 @@ const CampaignDetail = () => {
             <Button onClick={handleUpdateLead} disabled={actionLoading === 'editLead'}>
               {actionLoading === 'editLead' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Campaign Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Campaign</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this campaign? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Lead Confirmation Dialog */}
+      <Dialog open={!!deleteLeadConfirm} onOpenChange={(open) => !open && setDeleteLeadConfirm(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Lead</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove &quot;{deleteLeadConfirm?.email}&quot; from this campaign?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteLeadConfirm(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteLead}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>
