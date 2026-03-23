@@ -50,7 +50,7 @@ class SmartNotificationsAgent(BaseAgent):
                     "type": "overdue_task",
                     "severity": severity,
                     "title": f"Task overdue by {days_overdue} day(s)",
-                    "message": f'"{task.get("title", "Unknown")}" was due on {task.get("due_date")} ({days_overdue} days ago). '
+                    "message": f'"{task.get("title", "Unknown")}" deadline was {task.get("due_date")} ({days_overdue} days ago). '
                                f'Status: {task.get("status")}. Assignee: {task.get("assignee_name") or "Unassigned"}.',
                     "data": {"task_id": task.get("id"), "days_overdue": days_overdue},
                 })
@@ -65,8 +65,8 @@ class SmartNotificationsAgent(BaseAgent):
                 notifications.append({
                     "type": "deadline_approaching",
                     "severity": "warning",
-                    "title": f"Task due in {days_left} day(s)" if days_left > 0 else "Task due today",
-                    "message": f'"{task.get("title", "Unknown")}" is due on {task.get("due_date")}. '
+                    "title": f"Task deadline in {days_left} day(s)" if days_left > 0 else "Task deadline today",
+                    "message": f'"{task.get("title", "Unknown")}" deadline is {task.get("due_date")}. '
                                f'Status: {task.get("status")}. Assignee: {task.get("assignee_name") or "Unassigned"}.',
                     "data": {"task_id": task.get("id"), "days_left": days_left},
                 })

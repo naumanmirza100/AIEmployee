@@ -36,7 +36,7 @@ export default function TeamPerformanceDashboard() {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const res = await companyApi.get('/company/projects');
+        const res = await companyApi.get('/company/projects/list');
         const data = res?.data?.data || res?.data?.results || res?.data || [];
         setProjects(Array.isArray(data) ? data : []);
       } catch (e) { console.error(e); }

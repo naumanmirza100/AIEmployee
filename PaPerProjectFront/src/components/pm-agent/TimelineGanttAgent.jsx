@@ -31,6 +31,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
   const [result, setResult] = useState(null);
   const [hoveredMarker, setHoveredMarker] = useState(null); // Track hovered marker: { taskIndex, markerIdx }
   const [expandedTasks, setExpandedTasks] = useState(new Set()); // Track expanded tasks
+  const [timelineScale, setTimelineScale] = useState('auto'); // 'auto', 'days', 'weeks', 'months'
   const { toast } = useToast();
   
   // Ensure projects is always an array
@@ -370,10 +371,34 @@ const TimelineGanttAgent = ({ projects = [] }) => {
           {action === 'create_timeline' && result.data?.timeline && result.data.timeline.tasks && result.data.timeline.tasks.length > 0 && (
             <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader>
-                <CardTitle className="text-lg">Project Timeline Visualization</CardTitle>
-                <CardDescription>
-                  All tasks displayed on a unified timeline showing start dates, status changes, deadlines, and completions
-                </CardDescription>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <CardTitle className="text-lg">Project Timeline Visualization</CardTitle>
+                    <CardDescription>
+                      All tasks displayed on a unified timeline showing start dates, status changes, deadlines, and completions
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
+                    {[
+                      { value: 'auto', label: 'Auto' },
+                      { value: 'days', label: 'Days' },
+                      { value: 'weeks', label: 'Weeks' },
+                      { value: 'months', label: 'Months' },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setTimelineScale(opt.value)}
+                        className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                          timelineScale === opt.value
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -399,54 +424,88 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                     const totalHours = totalMinutes / 60;
                     const totalDays = totalMinutes / (60 * 24);
                     
-                    // Generate calendar scale with days and hours
+                    // Determine effective scale mode
+                    const effectiveScale = (() => {
+                      if (timelineScale !== 'auto') return timelineScale;
+                      if (totalDays <= 14) return 'days';
+                      if (totalDays <= 90) return 'weeks';
+                      return 'months';
+                    })();
+
+                    // Generate calendar scale based on selected mode
                     const generateCalendarScale = () => {
                       const scale = [];
-                      const currentDate = new Date(projectStart);
-                      const endDate = new Date(projectEnd);
-                      
-                      // Add day markers
-                      while (currentDate <= endDate) {
-                        const dayStart = new Date(currentDate);
-                        dayStart.setHours(0, 0, 0, 0);
-                        const dayEnd = new Date(dayStart);
-                        dayEnd.setHours(23, 59, 59, 999);
-                        
-                        // Only add if within project range
-                        if (dayEnd >= projectStart && dayStart <= projectEnd) {
-                          const dayMinutes = (dayStart - projectStart) / (1000 * 60);
-                          const dayPosition = (dayMinutes / totalMinutes) * 100;
-                          
-                          scale.push({
-                            type: 'day',
-                            date: new Date(dayStart),
-                            position: dayPosition,
-                            label: dayStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                          });
-                          
-                          // Add hour markers for this day (every 12 hours for better spacing, or every 6 if timeline is short)
-                          const hourInterval = totalDays > 7 ? 12 : 6;
-                          for (let hour = 0; hour < 24; hour += hourInterval) {
-                            const hourDate = new Date(dayStart);
-                            hourDate.setHours(hour, 0, 0, 0);
-                            
-                            if (hourDate >= projectStart && hourDate <= projectEnd) {
-                              const hourMinutes = (hourDate - projectStart) / (1000 * 60);
-                              const hourPosition = (hourMinutes / totalMinutes) * 100;
-                              
-                              scale.push({
-                                type: 'hour',
-                                date: new Date(hourDate),
-                                position: hourPosition,
-                                label: hourDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-                              });
-                            }
+
+                      if (effectiveScale === 'days') {
+                        // Day-by-day markers
+                        const current = new Date(projectStart);
+                        current.setHours(0, 0, 0, 0);
+                        const end = new Date(projectEnd);
+
+                        while (current <= end) {
+                          const dayMinutes = (current - projectStart) / (1000 * 60);
+                          const position = Math.max(0, (dayMinutes / totalMinutes) * 100);
+
+                          if (position <= 100) {
+                            scale.push({
+                              type: 'day',
+                              date: new Date(current),
+                              position,
+                              label: current.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            });
                           }
+                          current.setDate(current.getDate() + 1);
                         }
-                        
-                        currentDate.setDate(currentDate.getDate() + 1);
+                      } else if (effectiveScale === 'weeks') {
+                        // Week markers (every Monday)
+                        const current = new Date(projectStart);
+                        current.setHours(0, 0, 0, 0);
+                        // Move to previous or current Monday
+                        const dayOfWeek = current.getDay();
+                        const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 1 ? 0 : 8 - dayOfWeek);
+                        // If projectStart is not Monday, start from the Monday before or on projectStart
+                        if (dayOfWeek !== 1) {
+                          // Go back to previous Monday
+                          current.setDate(current.getDate() - ((dayOfWeek + 6) % 7));
+                        }
+                        const end = new Date(projectEnd);
+
+                        while (current <= end) {
+                          const weekMinutes = (current - projectStart) / (1000 * 60);
+                          const position = Math.max(0, Math.min(100, (weekMinutes / totalMinutes) * 100));
+
+                          // Get week end (Sunday)
+                          const weekEnd = new Date(current);
+                          weekEnd.setDate(weekEnd.getDate() + 6);
+
+                          scale.push({
+                            type: 'week',
+                            date: new Date(current),
+                            position,
+                            label: `${current.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+                            sublabel: `W${Math.ceil(((current - new Date(current.getFullYear(), 0, 1)) / 86400000 + 1) / 7)}`
+                          });
+                          current.setDate(current.getDate() + 7);
+                        }
+                      } else {
+                        // Month markers (1st of each month)
+                        const current = new Date(projectStart.getFullYear(), projectStart.getMonth(), 1);
+                        const end = new Date(projectEnd);
+
+                        while (current <= end) {
+                          const monthMinutes = (current - projectStart) / (1000 * 60);
+                          const position = Math.max(0, Math.min(100, (monthMinutes / totalMinutes) * 100));
+
+                          scale.push({
+                            type: 'month',
+                            date: new Date(current),
+                            position,
+                            label: current.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                          });
+                          current.setMonth(current.getMonth() + 1);
+                        }
                       }
-                      
+
                       return scale.sort((a, b) => a.position - b.position);
                     };
                     
@@ -705,78 +764,41 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                                 })()}
                               </div>
                               
-                              {/* Detailed Calendar Scale - Below the timeline bar */}
-                              <div className="relative border-t pt-2 mt-2 min-h-[80px]">
-                                {/* Project start and end labels - Bottom row */}
-                                <div className="absolute top-6 left-0 text-[10px] font-semibold text-violet-400 whitespace-nowrap bg-background px-1 rounded z-20">
-                                  {projectStart.toLocaleString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric', 
-                                    hour: '2-digit', 
-                                    minute: '2-digit',
-                                    hour12: false 
-                                  })}
-                                </div>
-                                <div className="absolute top-6 right-0 text-[10px] font-semibold text-violet-400 whitespace-nowrap bg-background px-1 rounded z-20">
-                                  {projectEnd.toLocaleString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric', 
-                                    hour: '2-digit', 
-                                    minute: '2-digit',
-                                    hour12: false 
-                                  })}
-                                </div>
-                                
-                                {/* Day markers - Second row with shorter lines */}
-                                {calendarScale.filter(m => m.type === 'day').map((marker, idx) => {
-                                  // Check if this day marker would overlap with previous ones
-                                  const dayMarkers = calendarScale.filter(m => m.type === 'day');
-                                  const prevMarker = idx > 0 ? dayMarkers[idx - 1] : null;
-                                  const minSpacing = totalDays > 14 ? 4 : 6; // Minimum spacing in percentage
-                                  const shouldShow = !prevMarker || (marker.position - prevMarker.position) >= minSpacing;
-                                  
-                                  return shouldShow ? (
+                              {/* Calendar Scale - Below the timeline bar */}
+                              <div className="relative border-t pt-2 mt-2 min-h-[50px]">
+                                {/* Scale markers */}
+                                {calendarScale.map((marker, idx) => {
+                                  // Skip markers that would overlap (less than 3% apart)
+                                  const prevMarker = idx > 0 ? calendarScale[idx - 1] : null;
+                                  if (prevMarker && (marker.position - prevMarker.position) < 3) return null;
+                                  // Don't render if too close to the right edge (would overlap end label)
+                                  if (marker.position > 97) return null;
+
+                                  return (
                                     <div
-                                      key={`day-${idx}`}
+                                      key={`scale-${idx}`}
                                       className="absolute top-0 z-10"
                                       style={{ left: `${marker.position}%` }}
                                     >
-                                      {/* Shorter vertical line - only 20px tall, pointing down */}
-                                      <div className="absolute top-0 h-5 border-l-2 border-primary/30"></div>
-                                      <div className="absolute top-6 left-0 transform -translate-x-1/2 text-[10px] font-medium text-foreground whitespace-nowrap bg-background px-1 rounded z-20">
+                                      <div className="absolute top-0 h-4 border-l border-primary/40"></div>
+                                      <div className="absolute top-5 left-0 transform -translate-x-1/2 text-[10px] font-medium text-foreground whitespace-nowrap bg-background px-1 rounded">
                                         {marker.label}
                                       </div>
+                                      {marker.sublabel && (
+                                        <div className="absolute top-[34px] left-0 transform -translate-x-1/2 text-[9px] text-muted-foreground whitespace-nowrap bg-background px-0.5 rounded">
+                                          {marker.sublabel}
+                                        </div>
+                                      )}
                                     </div>
-                                  ) : null;
+                                  );
                                 })}
-                                
-                                {/* Hour markers - Third row with shorter lines and always show labels */}
-                                {calendarScale.filter(m => m.type === 'hour').map((marker, idx) => {
-                                  // Check if this hour is too close to any day marker (more lenient)
-                                  const dayMarkers = calendarScale.filter(m => m.type === 'day');
-                                  const tooCloseToDay = dayMarkers.some(dayMarker => Math.abs(marker.position - dayMarker.position) < 1);
-                                  
-                                  // Check if this hour is too close to previous hour markers (more lenient)
-                                  const hourMarkers = calendarScale.filter(m => m.type === 'hour');
-                                  const prevHourMarkers = hourMarkers.slice(0, idx);
-                                  const minHourSpacing = totalDays > 7 ? 1 : 2; // Very lenient to show more hours
-                                  const tooCloseToHour = prevHourMarkers.some(prevHour => Math.abs(marker.position - prevHour.position) < minHourSpacing);
-                                  
-                                  // Show hour marker if not too close to day or other hours
-                                  return !tooCloseToDay && !tooCloseToHour ? (
-                                    <div
-                                      key={`hour-${idx}`}
-                                      className="absolute top-0 z-5"
-                                      style={{ left: `${marker.position}%` }}
-                                    >
-                                      {/* Shorter vertical line - only 12px tall, pointing down */}
-                                      <div className="absolute top-0 h-3 border-l border-muted-foreground/40"></div>
-                                      <div className="absolute top-3.5 left-0 transform -translate-x-1/2 text-[9px] text-muted-foreground whitespace-nowrap bg-background px-0.5 rounded z-15">
-                                        {marker.label}
-                                      </div>
-                                    </div>
-                                  ) : null;
-                                })}
+                                {/* End date label */}
+                                <div className="absolute top-0 right-0 z-10">
+                                  <div className="absolute top-0 h-4 border-l border-primary/40"></div>
+                                  <div className="absolute top-5 right-0 text-[10px] font-medium text-violet-400 whitespace-nowrap bg-background px-1 rounded">
+                                    {projectEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </div>
+                                </div>
                               </div>
                               
                               {/* Status Change Tooltips - Positioned outside overflow-hidden container */}

@@ -870,6 +870,7 @@ def project_pilot(request):
                             "assignee_username": task.assignee.username if task.assignee else None,
                             "assignee_name": _assignee_display(task.assignee),
                             "due_date": task.due_date.isoformat() if task.due_date else None,
+                            "deadline": task.due_date.isoformat() if task.due_date else None,
                             "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
                         }
                     )
@@ -1040,6 +1041,7 @@ def project_pilot(request):
                             "assignee_username": task_to_update.assignee.username if task_to_update.assignee else None,
                             "assignee_name": _assignee_display(task_to_update.assignee),
                             "due_date": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
+                            "deadline": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
                             "created_at": task_to_update.created_at.isoformat() if getattr(task_to_update, "created_at", None) else None,
                         }
                     )
@@ -1129,6 +1131,7 @@ def task_prioritization(request):
                 "status": t.status,
                 "priority": t.priority,
                 "due_date": t.due_date.isoformat() if t.due_date else None,
+                "deadline": t.due_date.isoformat() if t.due_date else None,
                 "estimated_hours": float(t.estimated_hours) if t.estimated_hours else None,
                 "actual_hours": float(t.actual_hours) if t.actual_hours else None,
                 "assignee_id": t.assignee.id if t.assignee else None,
@@ -1510,6 +1513,7 @@ def timeline_gantt(request):
                     "status": t.status,
                     "priority": t.priority,
                     "due_date": t.due_date.isoformat() if t.due_date else None,
+                    "deadline": t.due_date.isoformat() if t.due_date else None,
                     "estimated_hours": float(t.estimated_hours) if t.estimated_hours else None,
                     "actual_hours": float(t.actual_hours) if t.actual_hours else None,
                     "dependencies": [dep.id for dep in t.depends_on.all()],
@@ -2730,6 +2734,7 @@ def create_task_manual(request):
                 'project_name': project.name,
                 'assignee_id': task.assignee.id if task.assignee else None,
                 'due_date': task.due_date.isoformat() if task.due_date else None,
+                'deadline': task.due_date.isoformat() if task.due_date else None,
                 'estimated_hours': task.estimated_hours,
                 'created_at': task.created_at.isoformat(),
             }
@@ -2936,6 +2941,7 @@ def project_pilot_from_file(request):
                         "priority": t.priority,
                         "description": t.description,
                         "due_date": t.due_date.isoformat() if t.due_date else None,
+                        "deadline": t.due_date.isoformat() if t.due_date else None,
                     }
                     for t in tasks
                 ],
@@ -3356,6 +3362,7 @@ def project_pilot_from_file(request):
                         "assignee_username": task.assignee.username if task.assignee else None,
                         "assignee_name": _assignee_display(task.assignee),
                         "due_date": task.due_date.isoformat() if task.due_date else None,
+                        "deadline": task.due_date.isoformat() if task.due_date else None,
                         "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
                     })
                 except Exception as e:
@@ -3421,6 +3428,7 @@ def daily_standup(request):
                 "assignee_username": t.assignee.username if t.assignee else None,
                 "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
                 "due_date": t.due_date.isoformat() if t.due_date else None,
+                "deadline": t.due_date.isoformat() if t.due_date else None,
                 "project_name": t.project.name if hasattr(t, 'project') and t.project else None,
             })
 
@@ -3578,11 +3586,18 @@ def meeting_notes(request):
         if project_id:
             try:
                 project = Project.objects.get(id=project_id, created_by_company_user=company_user)
-                tasks = Task.objects.filter(project=project)
+                tasks = Task.objects.filter(project=project).select_related('assignee')
+                # Collect unique team members assigned to tasks in this project
+                team_members = set()
+                for t in tasks:
+                    if t.assignee:
+                        display_name = t.assignee.get_full_name() or t.assignee.username
+                        team_members.add(display_name)
                 project_context = {
                     "name": project.name,
                     "status": project.status,
-                    "tasks": [{"title": t.title, "status": t.status} for t in tasks[:20]],
+                    "tasks": [{"title": t.title, "status": t.status, "assignee": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None} for t in tasks[:20]],
+                    "team_members": list(team_members),
                 }
             except Project.DoesNotExist:
                 pass
@@ -3701,6 +3716,7 @@ def calendar_schedule(request):
             "assignee_username": t.assignee.username if t.assignee else None,
             "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
             "due_date": t.due_date.isoformat() if t.due_date else None,
+            "deadline": t.due_date.isoformat() if t.due_date else None,
         } for t in tasks]
 
         available_users = _build_available_users(company_user=company_user)
@@ -3761,6 +3777,7 @@ def scan_notifications(request):
                 "assignee_username": t.assignee.username if t.assignee else None,
                 "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
                 "due_date": t.due_date.isoformat() if t.due_date else None,
+                "deadline": t.due_date.isoformat() if t.due_date else None,
             } for t in tasks]
 
             project_info = {
@@ -3937,6 +3954,7 @@ def time_estimation(request):
             "description": t.description[:300] if t.description else "",
             "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
             "due_date": t.due_date.isoformat() if t.due_date else None,
+            "deadline": t.due_date.isoformat() if t.due_date else None,
         } for t in tasks]
 
         # Get completed tasks for historical reference

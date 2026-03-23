@@ -46,6 +46,87 @@ You produce structured, actionable summaries that help teams stay aligned."""
         if not meeting_text or len(meeting_text.strip()) < 10:
             return {"success": False, "error": "Meeting text is too short to analyze."}
 
+        # Validate that the text resembles meeting notes before processing
+        validation_prompt = f"""Determine if the following text is meeting notes, a meeting transcript, or meeting-related content.
+
+TEXT:
+---
+{meeting_text[:500]}
+---
+
+Reply with ONLY "yes" or "no". Answer "yes" if the text contains any of: discussions between people, decisions, action items, task updates, agenda items, or anything that could reasonably come from a meeting. Answer "no" if the text is completely unrelated (e.g. a recipe, a poem, random gibberish, song lyrics, a story)."""
+
+        try:
+            validation = self._call_llm(validation_prompt, "You are a text classifier. Reply with only 'yes' or 'no'.", temperature=0.0, max_tokens=10)
+            if validation.strip().lower().startswith("no"):
+                return {
+                    "success": False,
+                    "error": "The text you entered doesn't appear to be meeting notes.",
+                    "instructions": (
+                        "Please paste actual meeting notes or a transcript. Here's what works well:\n\n"
+                        "• Raw notes from a meeting (e.g. 'Ahmed said the API is delayed. We decided to push the demo to Friday.')\n"
+                        "• Copy-pasted Zoom/Teams/Slack chat logs from a meeting\n"
+                        "• Bullet-point summaries (e.g. '- Discussed timeline. - Sara will fix the frontend by Wed.')\n"
+                        "• Transcripts from recorded meetings\n"
+                        "• Email threads summarizing a meeting\n\n"
+                        "The AI will extract: summary, action items, key decisions, risks, and follow-ups."
+                    )
+                }
+        except Exception:
+            pass  # If validation fails, proceed with analysis anyway
+
+        # Validate mentioned people against project team members (only if a project is selected)
+        if project_context and project_context.get('team_members') is not None:
+            team = project_context.get('team_members', [])
+            team_lower = [m.lower() for m in team]
+
+            # Extract names from the meeting text using LLM
+            name_prompt = f"""Extract all person names mentioned in this text. Return ONLY a JSON array of names, nothing else.
+
+TEXT:
+---
+{meeting_text[:1500]}
+---
+
+Example output: ["Ahmed", "Sara", "John"]
+If no names found, return: []"""
+
+            try:
+                name_response = self._call_llm(name_prompt, "You extract person names from text. Return only a JSON array.", temperature=0.0, max_tokens=200)
+                cleaned_names = name_response.strip()
+                if "```json" in cleaned_names:
+                    cleaned_names = cleaned_names.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned_names:
+                    cleaned_names = cleaned_names.split("```")[1].split("```")[0].strip()
+
+                detected_names = json.loads(cleaned_names)
+                if isinstance(detected_names, list) and detected_names:
+                    unrecognized = []
+                    for person in detected_names:
+                        person_lower = person.lower()
+                        matched = any(
+                            person_lower in member or member in person_lower
+                            for member in team_lower
+                        )
+                        if not matched:
+                            unrecognized.append(person)
+
+                    if unrecognized:
+                        team_display = ', '.join(team) if team else 'No members assigned yet'
+                        return {
+                            "success": False,
+                            "error": f"The following people are not part of project \"{project_context.get('name', '')}\":",
+                            "instructions": (
+                                f"Unrecognized members: {', '.join(unrecognized)}\n\n"
+                                f"Current project team members (people with assigned tasks):\n"
+                                f"{team_display}\n\n"
+                                f"Please make sure the people mentioned in your meeting notes are assigned to tasks in this project, "
+                                f"or select a different project that these members belong to."
+                            )
+                        }
+            except (json.JSONDecodeError, Exception):
+                pass  # If name extraction fails, proceed with analysis
+
         context_str = ""
         if meeting_info:
             context_str += f"\nMeeting Info:\n"
