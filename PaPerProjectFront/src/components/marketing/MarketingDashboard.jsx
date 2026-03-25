@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2,
@@ -142,6 +143,9 @@ const MarketingDashboard = () => {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignsPage, setCampaignsPage] = useState(1);
   const [campaignsTotal, setCampaignsTotal] = useState(0);
+  const [selectedCampaigns, setSelectedCampaigns] = useState(new Set());
+  const [dashboardDeleting, setDashboardDeleting] = useState(false);
+  const [dashboardDeleteConfirmOpen, setDashboardDeleteConfirmOpen] = useState(false);
   const DASHBOARD_CAMPAIGNS_PAGE_SIZE = 10;
 
   // Email tab: sidebar and modals
@@ -161,6 +165,10 @@ const MarketingDashboard = () => {
   const [dashboardGraphPrompts, setDashboardGraphPrompts] = useState([]);
   const [savedGraphPrompts, setSavedGraphPrompts] = useState([]);
   const [savedGraphsLoading, setSavedGraphsLoading] = useState(false);
+  const [savedGraphsPage, setSavedGraphsPage] = useState(1);
+  const [savedGraphsTotalPages, setSavedGraphsTotalPages] = useState(1);
+  const [savedGraphsTotal, setSavedGraphsTotal] = useState(0);
+  const SAVED_GRAPHS_PAGE_SIZE = 9;
   const [viewingGraphId, setViewingGraphId] = useState(null);
   const [viewingGraphResult, setViewingGraphResult] = useState(null);
   const [viewingGraphLoading, setViewingGraphLoading] = useState(false);
@@ -169,12 +177,17 @@ const MarketingDashboard = () => {
     fetchStats();
   }, []);
 
-  const fetchSavedGraphPrompts = async () => {
+  const fetchSavedGraphPrompts = async (page = savedGraphsPage) => {
     try {
       setSavedGraphsLoading(true);
-      const response = await getSavedGraphPrompts();
+      const response = await getSavedGraphPrompts({ page, page_size: SAVED_GRAPHS_PAGE_SIZE });
       if (response?.status === 'success' && Array.isArray(response.data)) {
         setSavedGraphPrompts(response.data);
+        if (response.pagination) {
+          setSavedGraphsPage(response.pagination.page);
+          setSavedGraphsTotalPages(response.pagination.total_pages);
+          setSavedGraphsTotal(response.pagination.total);
+        }
       } else {
         setSavedGraphPrompts([]);
       }
@@ -223,7 +236,7 @@ const MarketingDashboard = () => {
     } else if (activeTab === 'email') {
       fetchEmailAccounts();
     } else if (activeTab === 'saved-graphs') {
-      fetchSavedGraphPrompts();
+      fetchSavedGraphPrompts(1);
     }
   }, [activeTab, campaignsPage]);
 
@@ -262,6 +275,56 @@ const MarketingDashboard = () => {
     } finally {
       setCampaignsLoading(false);
     }
+  };
+
+  // Clear campaign selection when campaigns list changes
+  useEffect(() => {
+    setSelectedCampaigns(new Set());
+  }, [campaigns]);
+
+  const selectableDashCampaigns = campaigns.filter((c) => c.status !== 'active');
+  const allDashSelectableChecked = selectableDashCampaigns.length > 0 && selectableDashCampaigns.every((c) => selectedCampaigns.has(c.id));
+
+  const toggleDashSelect = (id) => {
+    setSelectedCampaigns((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleDashSelectAll = () => {
+    if (allDashSelectableChecked) {
+      setSelectedCampaigns(new Set());
+    } else {
+      setSelectedCampaigns(new Set(selectableDashCampaigns.map((c) => c.id)));
+    }
+  };
+
+  const handleDashBulkDelete = async () => {
+    setDashboardDeleteConfirmOpen(false);
+    setDashboardDeleting(true);
+    let successCount = 0;
+    let failCount = 0;
+    for (const cid of selectedCampaigns) {
+      try {
+        await marketingAgentService.campaignDelete(cid);
+        successCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setDashboardDeleting(false);
+    setSelectedCampaigns(new Set());
+    if (successCount > 0) {
+      toast({ title: 'Deleted', description: `${successCount} campaign${successCount > 1 ? 's' : ''} deleted successfully` });
+    }
+    if (failCount > 0) {
+      toast({ title: 'Error', description: `${failCount} campaign${failCount > 1 ? 's' : ''} failed to delete`, variant: 'destructive' });
+    }
+    fetchCampaigns(campaignsPage);
+    fetchDashboardData();
   };
 
   const fetchEmailAccounts = async () => {
@@ -426,7 +489,8 @@ const MarketingDashboard = () => {
       const res = await marketingAgentService.deleteGraphPrompt(promptId);
       if (res?.status === 'success') {
         toast({ title: 'Success', description: 'Graph prompt deleted.' });
-        fetchSavedGraphPrompts();
+        const nextPage = savedGraphPrompts.length === 1 && savedGraphsPage > 1 ? savedGraphsPage - 1 : savedGraphsPage;
+        fetchSavedGraphPrompts(nextPage);
         // Clear viewing if deleted prompt
         if (viewingGraphId === promptId) {
           setViewingGraphId(null);
@@ -654,12 +718,12 @@ const MarketingDashboard = () => {
                       <circle key={index} cx={pt.x} cy={pt.y} r="1" fill={color} />
                     ))}
                   </svg>
-                  {/* Y-axis labels */}
-                  <div className="absolute top-0 left-0 bottom-0 flex flex-col justify-between" style={{ width: '7%', paddingTop: `${padT}%`, paddingBottom: `${padB}%` }}>
-                    {[...yTicks].reverse().map((tick, i) => (
-                      <span key={i} className="text-[9px] text-white/40 text-right pr-0.5 leading-none">{formatVal(tick.val)}</span>
-                    ))}
-                  </div>
+                  {/* Y-axis labels — positioned to match SVG grid lines */}
+                  {yTicks.map((tick, i) => (
+                    <span key={i} className="absolute text-[9px] text-white/40 leading-none" style={{ top: `${tick.y}%`, left: 0, width: '7%', textAlign: 'right', transform: 'translateY(-50%)' }}>
+                      {formatVal(tick.val)}
+                    </span>
+                  ))}
                   {/* X-axis labels */}
                   <div className="absolute flex justify-between text-[10px] text-white/50" style={{ left: `${padL}%`, right: `${padR}%`, bottom: '-20px' }}>
                     {labels.map((label, i) => (
@@ -852,7 +916,20 @@ const MarketingDashboard = () => {
 
                   {/* Campaigns list (like backend campaigns_list.html) */}
                   <div>
-                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Your Campaigns</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Campaigns</h3>
+                      {selectedCampaigns.size > 0 && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={dashboardDeleting}
+                          onClick={() => setDashboardDeleteConfirmOpen(true)}
+                        >
+                          {dashboardDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                          Delete ({selectedCampaigns.size})
+                        </Button>
+                      )}
+                    </div>
                     {campaignsLoading ? (
                       <div className="flex justify-center py-6">
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -872,6 +949,13 @@ const MarketingDashboard = () => {
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="bg-muted/50 border-b">
+                                <th className="p-3 w-10">
+                                  <Checkbox
+                                    checked={allDashSelectableChecked}
+                                    onCheckedChange={toggleDashSelectAll}
+                                    disabled={selectableDashCampaigns.length === 0}
+                                  />
+                                </th>
                                 <th className="text-left font-semibold p-3">Campaign Name</th>
                                 <th className="text-left font-semibold p-3">Status</th>
                                 <th className="text-left font-semibold p-3">Type</th>
@@ -882,8 +966,18 @@ const MarketingDashboard = () => {
                               </tr>
                             </thead>
                             <tbody>
-                              {campaigns.map((campaign) => (
-                                <tr key={campaign.id} className="border-b last:border-0 hover:bg-muted/30">
+                              {campaigns.map((campaign) => {
+                                const isActive = campaign.status === 'active';
+                                return (
+                                <tr key={campaign.id} className={`border-b last:border-0 hover:bg-muted/30 ${selectedCampaigns.has(campaign.id) ? 'bg-primary/5' : ''}`}>
+                                  <td className="p-3 w-10">
+                                    <Checkbox
+                                      checked={selectedCampaigns.has(campaign.id)}
+                                      onCheckedChange={() => toggleDashSelect(campaign.id)}
+                                      disabled={isActive}
+                                      title={isActive ? 'Active campaigns cannot be deleted' : undefined}
+                                    />
+                                  </td>
                                   <td className="p-3">
                                     <div className="font-medium">{campaign.name}</div>
                                     {campaign.description && (
@@ -911,7 +1005,8 @@ const MarketingDashboard = () => {
                                     </Button>
                                   </td>
                                 </tr>
-                              ))}
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -1530,6 +1625,33 @@ const MarketingDashboard = () => {
                     })}
                   </div>
 
+                  {/* Pagination */}
+                  {savedGraphsTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-2">
+                      <p className="text-xs text-white/50">
+                        Page {savedGraphsPage} of {savedGraphsTotalPages} ({savedGraphsTotal} total)
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={savedGraphsPage <= 1 || savedGraphsLoading}
+                          onClick={() => fetchSavedGraphPrompts(savedGraphsPage - 1)}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={savedGraphsPage >= savedGraphsTotalPages || savedGraphsLoading}
+                          onClick={() => fetchSavedGraphPrompts(savedGraphsPage + 1)}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Loading state while generating graph */}
                   {viewingGraphLoading && (
                     <Card className="border-primary/20 bg-primary/5 backdrop-blur-sm">
@@ -1613,6 +1735,27 @@ const MarketingDashboard = () => {
         </TabsContent>
       </Tabs>
     </div>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={dashboardDeleteConfirmOpen} onOpenChange={setDashboardDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {selectedCampaigns.size} Campaign{selectedCampaigns.size > 1 ? 's' : ''}</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the selected campaign{selectedCampaigns.size > 1 ? 's' : ''}? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDashboardDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDashBulkDelete}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

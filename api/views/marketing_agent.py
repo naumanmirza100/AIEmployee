@@ -2834,13 +2834,29 @@ def api_marketing_generate_graph(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def api_marketing_get_saved_prompts(request):
-    """Get all saved graph prompts for the current company user (mapped to User)."""
+    """Get saved graph prompts for the current company user (mapped to User) with pagination."""
     try:
         from marketing_agent.models import SavedGraphPrompt
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
 
         prompts = SavedGraphPrompt.objects.filter(created_by=user)
+
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('page_size', 10))
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 100:
+            page_size = 10
+
+        total = prompts.count()
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_prompts = prompts[start:end]
 
         data = [{
             'id': p.id,
@@ -2853,11 +2869,17 @@ def api_marketing_get_saved_prompts(request):
             'last_run_at': p.last_run_at.isoformat() if p.last_run_at else None,
             'created_at': p.created_at.isoformat(),
             'updated_at': p.updated_at.isoformat(),
-        } for p in prompts]
+        } for p in paginated_prompts]
 
         return Response({
             'status': 'success',
             'data': data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total': total,
+                'total_pages': total_pages,
+            },
         })
     except Exception as e:
         logger.exception("api_marketing_get_saved_prompts error")

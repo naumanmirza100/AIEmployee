@@ -251,3 +251,20 @@ def monitor_campaigns_task():
     except Exception as e:
         print(f'Error in campaign monitoring task: {str(e)}')
         return {'status': 'error', 'error': str(e)}
+
+
+@shared_task
+def sync_campaign_performance_task():
+    """
+    Sync CampaignPerformance table with live email/reply data.
+    Keeps the performance table in sync with what the dashboard shows.
+
+    Scheduled: Every 30 minutes via Celery Beat
+    """
+    try:
+        from marketing_agent.performance_sync import sync_all_campaigns_performance
+        synced = sync_all_campaigns_performance()
+        return {'status': 'success', 'campaigns_synced': synced}
+    except Exception as e:
+        print(f'Error in performance sync task: {str(e)}')
+        return {'status': 'error', 'error': str(e)}
