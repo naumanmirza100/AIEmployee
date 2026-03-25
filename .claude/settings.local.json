@@ -14,7 +14,7 @@
       "Bash(ls d:/University/work/AI_Employyes/AIEmployee/marketing_agent/migrations/0030*)",
       "Bash(npx -y acorn-jsx --ecma2020 src/components/marketing/MarketingDashboard.jsx)",
       "Bash(node -e \"try { require\\(''@babel/parser''\\).parse\\(require\\(''fs''\\).readFileSync\\(''src/components/marketing/MarketingQA.jsx'',''utf8''\\), {sourceType:''module'',plugins:[''jsx'']}\\); console.log\\(''MarketingQA.jsx: OK''\\) } catch\\(e\\) { console.log\\(''MarketingQA.jsx:'', e.message\\) }\")",
-      "Bash(grep -r \"SavedGraphPrompt\\\\|saved_graph_prompts\" . --include=*.py)"
+      "Bash(grep -r \"SavedGraphPrompt\\\\|saved_graph_prompts\" . --include=*.py)",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/project_pilot_agent.py''\\).read\\(\\)\\); print\\(''OK''\\)\")"
     ]
   }
