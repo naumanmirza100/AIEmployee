@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/analytics_dashboard_agent.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Backend OK''\\)\")"
+    ]
+  }
+}
