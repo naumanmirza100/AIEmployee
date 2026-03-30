@@ -1,24 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Outlet } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
-import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
-import { UserCheck, Loader2, Lock } from 'lucide-react';
+import { FileSearch, Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
-const RecruitmentAgentPage = () => {
+const OperationsAgentPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [companyUser, setCompanyUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [activeSection] = useState('recruitment');
+  const [activeSection] = useState('operations');
   const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
   useEffect(() => {
@@ -26,7 +25,7 @@ const RecruitmentAgentPage = () => {
     if (!companyUserStr) {
       toast({
         title: 'Not logged in',
-        description: 'Please log in to access the recruitment agent',
+        description: 'Please log in to access the operations agent',
         variant: 'destructive',
       });
       navigate('/company/login');
@@ -48,13 +47,13 @@ const RecruitmentAgentPage = () => {
   const checkModuleAccessForUser = async () => {
     try {
       setCheckingAccess(true);
-      const response = await checkModuleAccess('recruitment_agent');
+      const response = await checkModuleAccess('operations_agent');
       if (response.status === 'success') {
         setHasAccess(response.has_access);
         if (!response.has_access) {
           toast({
             title: 'Module Not Purchased',
-            description: 'Please purchase the Recruitment Agent module to access this dashboard',
+            description: 'Please purchase the Operations Agent module to access this dashboard',
             variant: 'default',
           });
         }
@@ -99,7 +98,7 @@ const RecruitmentAgentPage = () => {
               </div>
               <CardTitle className="text-center">Module Not Purchased</CardTitle>
               <CardDescription className="text-center">
-                You need to purchase the Recruitment Agent module to access this dashboard.
+                You need to purchase the Operations Agent module to access this dashboard.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -126,7 +125,7 @@ const RecruitmentAgentPage = () => {
   return (
     <>
       <Helmet>
-        <title>Recruitment Agent | Pay Per Project</title>
+        <title>Operations Agent | Pay Per Project</title>
       </Helmet>
       <div
         className="min-h-screen"
@@ -135,23 +134,23 @@ const RecruitmentAgentPage = () => {
         }}
       >
         <DashboardNavbar
-          icon={UserCheck}
-          title={companyUser.companyName || 'Recruitment Agent'}
+          icon={FileSearch}
+          title={companyUser.companyName || 'Operations Agent'}
           subtitle={companyUser.fullName}
           user={companyUser}
           userRole="Company User"
           showNavTabs={true}
           activeSection={activeSection}
           onLogout={handleLogout}
-          navItems={getAgentNavItems(purchasedModules, 'recruitment', navigate)}
+          navItems={getAgentNavItems(purchasedModules, 'operations', navigate)}
         />
 
-        <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-full overflow-x-hidden">
-          <RecruitmentDashboard />
+        <div className="container mx-auto px-4 py-8">
+          <Outlet />
         </div>
       </div>
     </>
   );
 };
 
-export default RecruitmentAgentPage;
+export default OperationsAgentPage;

@@ -1,11 +1,12 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import ModuleCard from './ModuleCard';
-import { 
-  Users, 
-  Megaphone, 
+import {
+  Users,
+  Megaphone,
   FolderKanban,
-  Headphones
+  Headphones,
+  FileSearch
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -16,7 +17,9 @@ const ModuleCardsSection = () => {
     'purple-500': '#a855f7',
     'pink-500': '#ec4899',
     'green-500': '#22c55e',
-    'emerald-500': '#10b981'
+    'emerald-500': '#10b981',
+    'amber-500': '#f59e0b',
+    'orange-500': '#f97316'
   };
 
   const modules = [
@@ -97,6 +100,26 @@ const ModuleCardsSection = () => {
         'Multi-channel support (chat, email, web)',
         'Proactive notifications & follow-ups',
         'Analytics & performance tracking'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'Operations Agent',
+      moduleName: 'operations_agent',
+      description: 'Internal ops and analysis workhorse for document processing, summarization, analytics dashboards, and knowledge Q&A.',
+      icon: FileSearch,
+      iconColor: 'text-amber-500',
+      gradientFrom: gradientColors['amber-500'],
+      gradientTo: gradientColors['orange-500'],
+      price: 179,
+      pricePeriod: 'month',
+      features: [
+        'Document processing & parsing (PDF, DOCX, Excel)',
+        'AI-powered document summarization & insights',
+        'Analytics dashboards & trend detection',
+        'Knowledge base Q&A with source citations',
+        'Automated report & memo generation',
+        'Proactive anomaly & threshold alerts'
       ],
       highlight: false,
     }

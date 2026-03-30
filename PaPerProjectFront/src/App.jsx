@@ -49,6 +49,8 @@ import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
+import OperationsAgentPage from '@/pages/OperationsAgentPage';
+import OperationsDashboard from '@/components/operations/OperationsDashboard';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
@@ -136,6 +138,11 @@ import { useTranslation } from 'react-i18next';
             {/* Frontline Agent routes without header/footer */}
             <Route path="/frontline/dashboard" element={<FrontlineAgentPage />}>
               <Route index element={<FrontlineDashboard />} />
+            </Route>
+
+            {/* Operations Agent routes without header/footer */}
+            <Route path="/operations/dashboard" element={<OperationsAgentPage />}>
+              <Route index element={<OperationsDashboard />} />
             </Route>
 
             {/* Embeddable chat widget & web form (public, no auth) */}
