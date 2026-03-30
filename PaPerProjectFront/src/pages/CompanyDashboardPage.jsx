@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
 import { companyApi } from '@/services/companyAuthService';
-import { getPurchasedModules } from '@/services/modulePurchaseService';
+import { getPurchasedModules, createCheckoutSession } from '@/services/modulePurchaseService';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
 import frontlineAgentService from '@/services/frontlineAgentService';
@@ -28,7 +28,8 @@ import {
   ChevronDown, ChevronRight, ListTodo, UserCheck, Megaphone, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
   Headphones,
-  Ticket
+  Ticket,
+  RotateCcw
 } from 'lucide-react';
 
 const CompanyDashboardPage = () => {
@@ -49,6 +50,8 @@ const CompanyDashboardPage = () => {
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
   const [purchasedModules, setPurchasedModules] = useState([]);
+  const [allPurchases, setAllPurchases] = useState([]);
+  const [purchasingModule, setPurchasingModule] = useState(null);
   
   // User management state
   const [users, setUsers] = useState([]);
@@ -67,6 +70,8 @@ const CompanyDashboardPage = () => {
     location: '',
   });
   
+  const [userSubmitting, setUserSubmitting] = useState(false);
+
   // All users tasks state
   const [allUsersTasks, setAllUsersTasks] = useState([]);
   const [allUsersTasksLoading, setAllUsersTasksLoading] = useState(false);
@@ -107,6 +112,7 @@ const CompanyDashboardPage = () => {
     description: '',
     requirements: '',
   });
+  const [jobSubmitting, setJobSubmitting] = useState(false);
 
   // Ticket Tasks (Frontline KB-gap tasks) - only relevant when frontline_agent is purchased
   const [ticketTasks, setTicketTasks] = useState([]);
@@ -130,6 +136,7 @@ const CompanyDashboardPage = () => {
       if (response.status === 'success') {
         const moduleNames = response.module_names || [];
         setPurchasedModules(moduleNames);
+        setAllPurchases(response.all_purchases || []);
         // Cache in localStorage
         localStorage.setItem('company_purchased_modules', JSON.stringify(moduleNames));
       }
@@ -260,6 +267,43 @@ const CompanyDashboardPage = () => {
 
   const handleCreateJob = async (e) => {
     e.preventDefault();
+    if (jobSubmitting) return; // Prevent duplicate submissions
+
+    // Validate required fields have meaningful content (at least 2 alphanumeric chars)
+    const validateField = (value, fieldName) => {
+      const alnumCount = (value.match(/[a-zA-Z0-9]/g) || []).length;
+      if (alnumCount < 2) {
+        toast({
+          title: 'Validation Error',
+          description: `${fieldName} must contain at least 2 alphanumeric characters.`,
+          variant: 'destructive',
+        });
+        return false;
+      }
+      return true;
+    };
+
+    if (!validateField(jobForm.title, 'Job Title')) return;
+    if (!validateField(jobForm.location, 'Location')) return;
+    if (!validateField(jobForm.department, 'Department')) return;
+
+    // Description must have at least 20 alphanumeric characters
+    const descAlnum = (jobForm.description.match(/[a-zA-Z0-9]/g) || []).length;
+    if (descAlnum < 20) {
+      toast({ title: 'Validation Error', description: 'Job description must contain at least 20 alphanumeric characters. Please provide a meaningful description.', variant: 'destructive' });
+      return;
+    }
+
+    // Requirements validation (if provided) - at least 10 alphanumeric characters
+    if (jobForm.requirements?.trim()) {
+      const reqAlnum = (jobForm.requirements.match(/[a-zA-Z0-9]/g) || []).length;
+      if (reqAlnum < 10) {
+        toast({ title: 'Validation Error', description: 'Requirements must contain at least 10 alphanumeric characters if provided.', variant: 'destructive' });
+        return;
+      }
+    }
+
+    setJobSubmitting(true);
     try {
       const response = await companyJobsService.createJobPosition(jobForm);
       if (response.status === 'success') {
@@ -279,6 +323,8 @@ const CompanyDashboardPage = () => {
         description: error.message || 'Failed to create job',
         variant: 'destructive',
       });
+    } finally {
+      setJobSubmitting(false);
     }
   };
 
@@ -498,6 +544,28 @@ const CompanyDashboardPage = () => {
     }
   };
 
+  const handlePurchaseAgain = async (moduleName) => {
+    setPurchasingModule(moduleName);
+    try {
+      const response = await createCheckoutSession(moduleName);
+      if (response.status === 'success' && response.url) {
+        window.location.href = response.url;
+      } else {
+        toast({ title: 'Error', description: response.message || 'Failed to start purchase', variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: error.message || 'Failed to start purchase', variant: 'destructive' });
+    } finally {
+      setPurchasingModule(null);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   useEffect(() => {
     if (activeTab === 'projects' && companyUser) {
       fetchProjects();
@@ -522,6 +590,9 @@ const CompanyDashboardPage = () => {
     }
     if (activeTab === 'ticket-tasks' && companyUser && purchasedModules.includes('frontline_agent')) {
       loadTicketTasks();
+    }
+    if (activeTab === 'ai-agents' && companyUser) {
+      fetchPurchasedModules();
     }
   }, [activeTab, companyUser, taskStatusFilter, taskUserFilter, taskProjectFilter, usersPagination.page, usersPagination.limit, tasksPagination.page, tasksPagination.limit]);
   
@@ -597,16 +668,92 @@ const CompanyDashboardPage = () => {
   };
   
   const handleCreateUser = async () => {
-    try {
-      if (!userForm.email || !userForm.password) {
-        toast({
-          title: 'Validation Error',
-          description: 'Email and password are required',
-          variant: 'destructive',
-        });
+    if (userSubmitting) return;
+
+    // Required fields check
+    if (!userForm.email || !userForm.password || !userForm.fullName?.trim() || !userForm.phoneNumber?.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Email, password, full name, and phone number are required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Full name validation - only letters and spaces, at least 2 alphabetic characters, no digits
+    const trimmedName = userForm.fullName.trim();
+    if (/[0-9]/.test(trimmedName)) {
+      toast({ title: 'Validation Error', description: 'Full name must not contain numbers.', variant: 'destructive' });
+      return;
+    }
+    if (!/^[a-zA-Z\s.'-]+$/.test(trimmedName)) {
+      toast({ title: 'Validation Error', description: 'Full name can only contain letters, spaces, dots, hyphens, and apostrophes.', variant: 'destructive' });
+      return;
+    }
+    const nameAlphaCount = (trimmedName.match(/[a-zA-Z]/g) || []).length;
+    if (nameAlphaCount < 2) {
+      toast({ title: 'Validation Error', description: 'Full name must contain at least 2 alphabetic characters.', variant: 'destructive' });
+      return;
+    }
+
+    // Phone number validation - digits, optional +, spaces, hyphens, min 7 digits
+    const phoneDigits = (userForm.phoneNumber.match(/[0-9]/g) || []).length;
+    const phoneRegex = /^[+]?[\d\s\-()]{7,20}$/;
+    if (!phoneRegex.test(userForm.phoneNumber.trim()) || phoneDigits < 7) {
+      toast({ title: 'Validation Error', description: 'Enter a valid phone number (at least 7 digits, e.g., +1234567890).', variant: 'destructive' });
+      return;
+    }
+
+    // Location validation (if provided)
+    if (userForm.location?.trim()) {
+      const locAlpha = (userForm.location.match(/[a-zA-Z]/g) || []).length;
+      if (locAlpha < 2) {
+        toast({ title: 'Validation Error', description: 'Location must contain at least 2 alphabetic characters.', variant: 'destructive' });
         return;
       }
-      
+    }
+
+    // Bio validation (if provided)
+    if (userForm.bio?.trim()) {
+      const bioAlnum = (userForm.bio.match(/[a-zA-Z0-9]/g) || []).length;
+      if (bioAlnum < 10) {
+        toast({ title: 'Validation Error', description: 'Bio must contain at least 10 alphanumeric characters.', variant: 'destructive' });
+        return;
+      }
+    }
+
+    // Strict email validation
+    const emailRegex = /^[a-zA-Z0-9][a-zA-Z0-9._%+-]*@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(userForm.email.trim())) {
+      toast({ title: 'Validation Error', description: 'Please enter a valid email address (e.g., user@example.com).', variant: 'destructive' });
+      return;
+    }
+
+    // Password strength validation
+    const pwd = userForm.password;
+    if (pwd.length < 8) {
+      toast({ title: 'Validation Error', description: 'Password must be at least 8 characters long.', variant: 'destructive' });
+      return;
+    }
+    if (!/[A-Z]/.test(pwd)) {
+      toast({ title: 'Validation Error', description: 'Password must contain at least one uppercase letter.', variant: 'destructive' });
+      return;
+    }
+    if (!/[a-z]/.test(pwd)) {
+      toast({ title: 'Validation Error', description: 'Password must contain at least one lowercase letter.', variant: 'destructive' });
+      return;
+    }
+    if (!/[0-9]/.test(pwd)) {
+      toast({ title: 'Validation Error', description: 'Password must contain at least one digit.', variant: 'destructive' });
+      return;
+    }
+    if (!/[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]/.test(pwd)) {
+      toast({ title: 'Validation Error', description: 'Password must contain at least one special character (!@#$%^&* etc.).', variant: 'destructive' });
+      return;
+    }
+
+    setUserSubmitting(true);
+    try {
       const response = await companyUserManagementService.createUser(userForm);
       if (response.status === 'success') {
         toast({
@@ -626,6 +773,8 @@ const CompanyDashboardPage = () => {
         description: error.message || 'Failed to create user',
         variant: 'destructive',
       });
+    } finally {
+      setUserSubmitting(false);
     }
   };
   
@@ -689,6 +838,29 @@ const CompanyDashboardPage = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to deactivate user',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReactivateUser = async (userId) => {
+    if (!window.confirm('Are you sure you want to reactivate this user?')) {
+      return;
+    }
+
+    try {
+      const response = await companyUserManagementService.reactivateUser(userId);
+      if (response.status === 'success') {
+        toast({
+          title: 'Success!',
+          description: 'User reactivated successfully',
+        });
+        fetchUsers();
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to reactivate user',
         variant: 'destructive',
       });
     }
@@ -873,6 +1045,7 @@ const CompanyDashboardPage = () => {
                   { value: 'users', icon: UserCheck, label: 'Users' },
                   { value: 'all-tasks', icon: ListTodo, label: 'All Users Tasks' },
                   ...(purchasedModules.includes('frontline_agent') ? [{ value: 'ticket-tasks', icon: Ticket, label: 'Ticket Tasks' }] : []),
+                  { value: 'ai-agents', icon: BrainCircuit, label: 'AI Agents' },
                 ].map(({ value, icon: TabIcon, label }) => (
                   <TabsTrigger
                     key={value}
@@ -1333,14 +1506,27 @@ const CompanyDashboardPage = () => {
                                   >
                                     <Edit className="h-4 w-4" />
                                   </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleDeleteUser(user.id)}
-                                    className="h-8 w-8 p-0 border-red-500/30 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                                  {user.is_active === false ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleReactivateUser(user.id)}
+                                      className="h-8 w-8 p-0 border-green-500/30 text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                                      title="Reactivate user"
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleDeleteUser(user.id)}
+                                      className="h-8 w-8 p-0 border-red-500/30 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                      title="Deactivate user"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1649,6 +1835,238 @@ const CompanyDashboardPage = () => {
                 </Card>
               </TabsContent>
             )}
+
+            {/* AI Agents Tab */}
+            <TabsContent value="ai-agents" className="space-y-4">
+              <Card className="bg-[#120d22] border border-[#2d2342]">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-white">
+                    <BrainCircuit className="h-5 w-5 text-violet-400" />
+                    Your AI Agents
+                  </CardTitle>
+                  <CardDescription className="text-white/50">
+                    View all your AI agent purchases, their current status, and timeline
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {allPurchases.length === 0 ? (
+                    <div className="text-center py-12">
+                      <BrainCircuit className="h-12 w-12 mx-auto text-white/20 mb-4" />
+                      <p className="text-lg font-medium text-white/60">No AI Agents Purchased Yet</p>
+                      <p className="text-sm text-white/40 mt-2 mb-4">
+                        Explore our AI agents to supercharge your workflow
+                      </p>
+                      <Button
+                        onClick={() => navigate('/value-and-pricing')}
+                        className="bg-violet-600 hover:bg-violet-700 text-white"
+                      >
+                        Browse AI Agents
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {allPurchases.map((agent) => {
+                        const isActive = agent.status === 'active' && !agent.is_expired;
+                        const isDeactivatedByAdmin = agent.deactivated_by_admin;
+                        const isExpired = agent.is_expired || agent.status === 'expired';
+                        const isCancelled = agent.status === 'cancelled' && !isDeactivatedByAdmin;
+                        const canRepurchase = !isActive;
+
+                        return (
+                          <motion.div
+                            key={agent.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className={`rounded-xl border p-5 transition-all ${
+                              isActive
+                                ? 'bg-white/[0.04] border-green-500/30'
+                                : isDeactivatedByAdmin
+                                ? 'bg-red-500/[0.04] border-red-500/30'
+                                : isExpired
+                                ? 'bg-yellow-500/[0.04] border-yellow-500/30'
+                                : 'bg-white/[0.02] border-white/10'
+                            }`}
+                          >
+                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                              {/* Left: Agent Info */}
+                              <div className="flex-1">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <div className={`p-2 rounded-lg ${
+                                    isActive ? 'bg-green-500/20' : isDeactivatedByAdmin ? 'bg-red-500/20' : isExpired ? 'bg-yellow-500/20' : 'bg-white/10'
+                                  }`}>
+                                    <BrainCircuit className={`h-5 w-5 ${
+                                      isActive ? 'text-green-400' : isDeactivatedByAdmin ? 'text-red-400' : isExpired ? 'text-yellow-400' : 'text-white/40'
+                                    }`} />
+                                  </div>
+                                  <div>
+                                    <h3 className="text-lg font-semibold text-white">{agent.module_display_name}</h3>
+                                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                      {isActive && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
+                                          <CheckCircle2 className="h-3 w-3" /> Active
+                                        </span>
+                                      )}
+                                      {agent.active_label && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                                          <Clock className="h-3 w-3" /> {agent.active_label}
+                                          {agent.time_remaining && <>&nbsp;&middot;&nbsp;{agent.time_remaining}</>}
+                                        </span>
+                                      )}
+                                      {isDeactivatedByAdmin && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
+                                          <AlertCircle className="h-3 w-3" /> Deactivated by Admin
+                                        </span>
+                                      )}
+                                      {isExpired && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                                          <Clock className="h-3 w-3" /> Time Ended
+                                        </span>
+                                      )}
+                                      {isExpired && agent.time_ended_ago && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/20">
+                                          <Clock className="h-3 w-3" /> {agent.time_ended_ago}
+                                        </span>
+                                      )}
+                                      {isCancelled && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-500/20 text-gray-300 border border-gray-500/30">
+                                          <Circle className="h-3 w-3" /> Cancelled
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Deactivated by Admin Banner */}
+                                {isDeactivatedByAdmin && (
+                                  <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                                    <p className="text-sm text-red-300 font-medium flex items-center gap-2">
+                                      <AlertCircle className="h-4 w-4 shrink-0" />
+                                      This agent has been deactivated by the administrator
+                                    </p>
+                                    <p className="text-xs text-red-300/60 mt-1 ml-6">
+                                      Please contact support or purchase again to reactivate this agent.
+                                    </p>
+                                  </div>
+                                )}
+
+                                {/* Expired Banner */}
+                                {isExpired && !isDeactivatedByAdmin && (
+                                  <div className="mt-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                                    <p className="text-sm text-yellow-300 font-medium flex items-center gap-2">
+                                      <Clock className="h-4 w-4 shrink-0" />
+                                      Your subscription for this agent has ended
+                                    </p>
+                                    <p className="text-xs text-yellow-300/60 mt-1 ml-6">
+                                      {agent.expires_at ? `Expired on ${formatDate(agent.expires_at)}` : 'Subscription period has ended'}.
+                                      {agent.time_ended_ago && <span className="font-semibold text-yellow-300/80"> ({agent.time_ended_ago})</span>}
+                                      {' '}Purchase again to continue using this agent.
+                                    </p>
+                                  </div>
+                                )}
+
+                                {/* Timeline */}
+                                <div className="mt-4 ml-1">
+                                  <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Timeline</p>
+                                  <div className="relative border-l-2 border-white/10 ml-2 pl-4 space-y-3">
+                                    {/* Purchase event */}
+                                    <div className="relative">
+                                      <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-green-500 border-2 border-[#120d22]"></div>
+                                      <p className="text-sm text-white/80 font-medium">Purchased</p>
+                                      <p className="text-xs text-white/40">{formatDate(agent.purchased_at)}</p>
+                                      {agent.purchased_by_name && (
+                                        <p className="text-xs text-white/30">By: {agent.purchased_by_name}</p>
+                                      )}
+                                      {agent.price_paid != null && (
+                                        <p className="text-xs text-white/30">Amount: ${agent.price_paid}</p>
+                                      )}
+                                      {agent.active_label && (
+                                        <p className="text-xs text-blue-400 font-medium">
+                                          {agent.active_label}
+                                          {agent.time_remaining && <span> &middot; {agent.time_remaining}</span>}
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    {/* Expiry event */}
+                                    {agent.expires_at && (
+                                      <div className="relative">
+                                        <div className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full border-2 border-[#120d22] ${isExpired ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                                        <p className="text-sm text-white/80 font-medium">{isExpired ? 'Subscription Ended' : 'Expires'}</p>
+                                        <p className="text-xs text-white/40">{formatDate(agent.expires_at)}</p>
+                                        {agent.time_remaining && (
+                                          <p className="text-xs text-green-400 font-medium mt-0.5">{agent.time_remaining}</p>
+                                        )}
+                                        {agent.time_ended_ago && (
+                                          <p className="text-xs text-red-400 font-medium mt-0.5">{agent.time_ended_ago}</p>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Cancelled / Deactivated event */}
+                                    {agent.cancelled_at && (
+                                      <div className="relative">
+                                        <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-red-500 border-2 border-[#120d22]"></div>
+                                        <p className="text-sm text-white/80 font-medium">
+                                          {isDeactivatedByAdmin ? 'Deactivated by Admin' : 'Cancelled'}
+                                        </p>
+                                        <p className="text-xs text-white/40">{formatDate(agent.cancelled_at)}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Current status */}
+                                    <div className="relative flex items-baseline gap-2">
+                                      <div className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full border-2 border-[#120d22] ${
+                                        isActive ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-gray-500'
+                                      }`}></div>
+                                      <p className="text-sm text-white/80 font-medium">Current Status</p>
+                                      <p className={`text-xs font-semibold ${
+                                        isActive ? 'text-green-400' : isDeactivatedByAdmin ? 'text-red-400' : isExpired ? 'text-yellow-400' : 'text-gray-400'
+                                      }`}>
+                                        {isActive ? 'Active' : isDeactivatedByAdmin ? 'Deactivated by Admin' : isExpired ? 'Expired' : 'Cancelled'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Right: Actions */}
+                              <div className="flex flex-col gap-2 lg:min-w-[160px]">
+                                {isActive && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="border-green-500/30 text-green-400 hover:bg-green-500/10 w-full"
+                                    disabled
+                                  >
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                    Active
+                                  </Button>
+                                )}
+                                {canRepurchase && (
+                                  <Button
+                                    onClick={() => handlePurchaseAgain(agent.module_name)}
+                                    disabled={purchasingModule === agent.module_name}
+                                    className="bg-violet-600 hover:bg-violet-700 text-white w-full"
+                                    size="sm"
+                                  >
+                                    {purchasingModule === agent.module_name ? (
+                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    ) : (
+                                      <RotateCcw className="h-4 w-4 mr-2" />
+                                    )}
+                                    Purchase Again
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
           </Tabs>
         )}
 
@@ -1682,6 +2100,7 @@ const CompanyDashboardPage = () => {
                   value={jobForm.title}
                   onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })}
                   required
+                  placeholder="e.g., Senior Software Engineer"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1692,6 +2111,7 @@ const CompanyDashboardPage = () => {
                     value={jobForm.location}
                     onChange={(e) => setJobForm({ ...jobForm, location: e.target.value })}
                     required
+                    placeholder="e.g., Remote, New York, London"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1701,6 +2121,7 @@ const CompanyDashboardPage = () => {
                     value={jobForm.department}
                     onChange={(e) => setJobForm({ ...jobForm, department: e.target.value })}
                     required
+                    placeholder="e.g., Engineering, Marketing, HR"
                   />
                 </div>
               </div>
@@ -1726,6 +2147,7 @@ const CompanyDashboardPage = () => {
                   onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
                   required
                   className="min-h-[100px]"
+                  placeholder="e.g., We are looking for a skilled developer to join our team. The role involves building scalable web applications..."
                 />
               </div>
               <div className="space-y-2">
@@ -1735,13 +2157,14 @@ const CompanyDashboardPage = () => {
                   value={jobForm.requirements}
                   onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })}
                   className="min-h-[100px]"
+                  placeholder="e.g., 3+ years experience with React, Node.js, strong communication skills, Bachelor's degree in CS..."
                 />
               </div>
               <div className="flex gap-2 pt-4">
-                <Button type="submit" className="flex-1">
-                  Post Job
+                <Button type="submit" className="flex-1" disabled={jobSubmitting}>
+                  {jobSubmitting ? 'Posting...' : 'Post Job'}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setShowCreateJobModal(false)}>
+                <Button type="button" variant="outline" onClick={() => setShowCreateJobModal(false)} disabled={jobSubmitting}>
                   Cancel
                 </Button>
               </div>
@@ -1782,6 +2205,7 @@ const CompanyDashboardPage = () => {
                     onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
                     required
                     disabled={!!editingUser}
+                    placeholder="e.g., john.doe@example.com"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1804,7 +2228,8 @@ const CompanyDashboardPage = () => {
                     value={userForm.password}
                     onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
                     required
-                    minLength={6}
+                    minLength={8}
+                    placeholder="Min 8 chars: uppercase, lowercase, digit, special char"
                   />
                 </div>
               )}
@@ -1824,11 +2249,13 @@ const CompanyDashboardPage = () => {
               
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name</Label>
+                  <Label htmlFor="fullName">Full Name *</Label>
                   <Input
                     id="fullName"
                     value={userForm.fullName}
                     onChange={(e) => setUserForm({ ...userForm, fullName: e.target.value })}
+                    required
+                    placeholder="e.g., John Doe"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1854,11 +2281,13 @@ const CompanyDashboardPage = () => {
               
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phoneNumber">Phone Number</Label>
+                  <Label htmlFor="phoneNumber">Phone Number *</Label>
                   <Input
                     id="phoneNumber"
                     value={userForm.phoneNumber}
                     onChange={(e) => setUserForm({ ...userForm, phoneNumber: e.target.value })}
+                    required
+                    placeholder="e.g., +1 (555) 123-4567"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1867,6 +2296,7 @@ const CompanyDashboardPage = () => {
                     id="location"
                     value={userForm.location}
                     onChange={(e) => setUserForm({ ...userForm, location: e.target.value })}
+                    placeholder="e.g., New York, Remote"
                   />
                 </div>
               </div>
@@ -1878,6 +2308,7 @@ const CompanyDashboardPage = () => {
                   value={userForm.bio}
                   onChange={(e) => setUserForm({ ...userForm, bio: e.target.value })}
                   rows={3}
+                  placeholder="e.g., Full-stack developer with 5 years of experience in React and Node.js..."
                 />
               </div>
               
@@ -1896,8 +2327,8 @@ const CompanyDashboardPage = () => {
                 >
                   Cancel
                 </Button>
-                <Button type="submit">
-                  {editingUser ? 'Update User' : 'Create User'}
+                <Button type="submit" disabled={userSubmitting}>
+                  {userSubmitting ? (editingUser ? 'Updating...' : 'Creating...') : (editingUser ? 'Update User' : 'Create User')}
                 </Button>
               </div>
             </form>

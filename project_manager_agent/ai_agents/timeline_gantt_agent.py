@@ -196,6 +196,7 @@ class TimelineGanttAgent(BaseAgent):
                 'updated_at': task.updated_at.isoformat(),
                 'completed_at': task.completed_at.isoformat() if task.completed_at else None,
                 'due_date': task.due_date.isoformat() if task.due_date else None,
+                'deadline': task.due_date.isoformat() if task.due_date else None,
                 'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
                 'actual_hours': float(task.actual_hours) if task.actual_hours else None,
                 'dependencies': [dep.id for dep in task.depends_on.all()],
@@ -296,6 +297,7 @@ class TimelineGanttAgent(BaseAgent):
                 'status': task.status,
                 'priority': task.priority,
                 'due_date': task.due_date.isoformat() if task.due_date else None,
+                'deadline': task.due_date.isoformat() if task.due_date else None,
                 'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
                 'actual_hours': float(task.actual_hours) if task.actual_hours else None,
                 'assignee': task.assignee.username if task.assignee else None,
@@ -328,7 +330,7 @@ Rules:
 - If task has estimated_hours, duration = max(1, ceil(estimated_hours / 8)) days
 - If no estimated_hours, estimate based on task complexity (default: 3 days for medium, 5 for high priority, 2 for low)
 - end_date = start_date + duration - 1 (inclusive)
-- If task has due_date, respect it but ensure it's after start_date
+- If task has a deadline (due_date), respect it as a hard constraint but ensure it's after start_date
 - Add 10-20% buffer for high-priority or complex tasks
 
 Return JSON array with optimized dates:
@@ -819,6 +821,7 @@ Return JSON array with optimized dates:
                     'description': task.description,
                     'status': milestone_status,
                     'due_date': task.due_date.isoformat() if task.due_date else None,
+                    'deadline': task.due_date.isoformat() if task.due_date else None,
                     'days_until_due': days_until_due,
                     'priority': task.priority,
                     'assignee': task.assignee.username if task.assignee else None,
@@ -1142,6 +1145,7 @@ Return JSON:
                 'status': task.status,
                 'priority': task.priority,
                 'due_date': task.due_date.isoformat() if task.due_date else None,
+                'deadline': task.due_date.isoformat() if task.due_date else None,
                 'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
                 'actual_hours': float(task.actual_hours) if task.actual_hours else None,
                 'days_overdue': days_overdue,
@@ -1680,7 +1684,8 @@ CALCULATE AND RETURN JSON:
                     'id': t.id,
                     'title': t.title,
                     'priority': t.priority,
-                    'due_date': t.due_date.isoformat() if t.due_date else None
+                    'due_date': t.due_date.isoformat() if t.due_date else None,
+                    'deadline': t.due_date.isoformat() if t.due_date else None
                 } for t in phase_tasks[:10]]  # Limit to 10 tasks per phase
             })
 
@@ -1754,6 +1759,7 @@ CALCULATE AND RETURN JSON:
                     'task_title': task.title,
                     'title': task.title,
                     'due_date': task_due_datetime.isoformat(),
+                    'deadline': task_due_datetime.isoformat(),
                     'days_overdue': days_overdue,
                     'urgency': 'critical',
                     'status': task.status,
@@ -1801,6 +1807,7 @@ CALCULATE AND RETURN JSON:
                         'task_title': task.title,
                         'title': task.title,
                         'due_date': task_due_datetime.isoformat(),
+                        'deadline': task_due_datetime.isoformat(),
                         'days_until': days_until,
                         'urgency': urgency,
                         'status': task.status,
@@ -1821,6 +1828,7 @@ CALCULATE AND RETURN JSON:
                     'project_id': project.id,
                     'project_name': project.name,
                     'due_date': project.end_date.isoformat(),
+                    'deadline': project.end_date.isoformat(),
                     'days_until': project_days_until,
                     'urgency': 'high' if project_days_until <= 3 else 'medium'
                 })
@@ -1887,6 +1895,7 @@ CALCULATE AND RETURN JSON:
                     'status': task.status,
                     'priority': task.priority,
                     'due_date': task.due_date.isoformat() if task.due_date else None,
+                    'deadline': task.due_date.isoformat() if task.due_date else None,
                     'assignee': task.assignee.username if task.assignee else None,
                     'depends_on': [],
                     'dependent_tasks': [],
@@ -1902,7 +1911,8 @@ CALCULATE AND RETURN JSON:
                         'id': dep.id,
                         'title': dep.title,
                         'status': dep.status,
-                        'due_date': dep.due_date.isoformat() if dep.due_date else None
+                        'due_date': dep.due_date.isoformat() if dep.due_date else None,
+                        'deadline': dep.due_date.isoformat() if dep.due_date else None
                     })
                 
                 # Map dependent tasks
@@ -1911,7 +1921,8 @@ CALCULATE AND RETURN JSON:
                         'id': dep_task.id,
                         'title': dep_task.title,
                         'status': dep_task.status,
-                        'due_date': dep_task.due_date.isoformat() if dep_task.due_date else None
+                        'due_date': dep_task.due_date.isoformat() if dep_task.due_date else None,
+                        'deadline': dep_task.due_date.isoformat() if dep_task.due_date else None
                     })
                 
                 # Identify critical path tasks (tasks with many dependents)
@@ -2257,6 +2268,7 @@ Return JSON:
                 'description': task.description,
                 'priority': task.priority,
                 'due_date': task.due_date.isoformat() if task.due_date else None,
+                'deadline': task.due_date.isoformat() if task.due_date else None,
                 'assignee': task.assignee.username if task.assignee else None,
                 'assignee_id': task.assignee.id if task.assignee else None,
                 'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
@@ -2287,7 +2299,8 @@ Return JSON:
                     'title': t.title,
                     'status': t.status,
                     'priority': t.priority,
-                    'due_date': t.due_date.isoformat() if t.due_date else None
+                    'due_date': t.due_date.isoformat() if t.due_date else None,
+                    'deadline': t.due_date.isoformat() if t.due_date else None
                 } for t in active_tasks[:10]]  # Limit to 10 tasks per member
             })
         
@@ -2307,7 +2320,8 @@ Return JSON:
                     'title': t.title,
                     'status': t.status,
                     'priority': t.priority,
-                    'due_date': t.due_date.isoformat() if t.due_date else None
+                    'due_date': t.due_date.isoformat() if t.due_date else None,
+                    'deadline': t.due_date.isoformat() if t.due_date else None
                 } for t in active_tasks[:10]]
             })
         
@@ -2438,6 +2452,7 @@ Return JSON:
                     'id': t.id,
                     'title': t.title,
                     'due_date': t.due_date.isoformat(),
+                    'deadline': t.due_date.isoformat(),
                     'assignee': t.assignee.username if t.assignee else None,
                     'priority': t.priority
                 } for t in upcoming_deadlines],
@@ -2489,8 +2504,9 @@ Return JSON:
             'status': t.status,
             'dependencies': [dep.id for dep in t.depends_on.all()],
             'due_date': t.due_date.isoformat() if t.due_date else None,
+            'deadline': t.due_date.isoformat() if t.due_date else None,
         } for t in tasks]
-        
+
         optimization_result = TimelineGanttEnhancements.optimize_schedule(tasks_data, resources)
         
         return {
@@ -2576,8 +2592,9 @@ Return JSON:
             'status': t.status,
             'dependencies': [dep.id for dep in t.depends_on.all()],
             'due_date': t.due_date.isoformat() if t.due_date else None,
+            'deadline': t.due_date.isoformat() if t.due_date else None,
         } for t in tasks]
-        
+
         scenarios_result = TimelineGanttEnhancements.generate_what_if_scenarios(tasks_data, scenarios)
         
         return {
@@ -2619,8 +2636,9 @@ Return JSON:
             'status': t.status,
             'dependencies': [dep.id for dep in t.depends_on.all()],
             'due_date': t.due_date.isoformat() if t.due_date else None,
+            'deadline': t.due_date.isoformat() if t.due_date else None,
         } for t in tasks]
-        
+
         optimization_result = TimelineGanttEnhancements.optimize_schedule_genetic_algorithm(
             tasks_data, generations=generations, population_size=population_size
         )
@@ -2663,8 +2681,9 @@ Return JSON:
             'status': t.status,
             'dependencies': [dep.id for dep in t.depends_on.all()],
             'due_date': t.due_date.isoformat() if t.due_date else None,
+            'deadline': t.due_date.isoformat() if t.due_date else None,
         } for t in tasks]
-        
+
         optimization_result = TimelineGanttEnhancements.optimize_schedule_simulated_annealing(
             tasks_data, iterations=iterations
         )

@@ -111,17 +111,23 @@ Be concise, factual, and highlight anything that needs attention."""
 
         for name, data in member_summaries.items():
             standup_context += f"\n--- {name} ---\n"
-            standup_context += f"Total assigned: {len(data['tasks_assigned'])}\n"
+            standup_context += f"Total assigned ({len(data['tasks_assigned'])}): {', '.join(f'\"{t}\"' for t in data['tasks_assigned'])}\n"
             if data['tasks_in_progress']:
-                standup_context += f"In Progress: {', '.join(data['tasks_in_progress'][:5])}\n"
+                standup_context += f"In Progress: {', '.join(f'\"{t}\"' for t in data['tasks_in_progress'])}\n"
+            else:
+                standup_context += "In Progress: None\n"
             if data['tasks_completed_recently']:
-                standup_context += f"Completed: {', '.join(data['tasks_completed_recently'][:5])}\n"
+                standup_context += f"Completed: {', '.join(f'\"{t}\"' for t in data['tasks_completed_recently'])}\n"
+            else:
+                standup_context += "Completed: None\n"
             if data['tasks_blocked']:
-                standup_context += f"BLOCKED: {', '.join(data['tasks_blocked'][:5])}\n"
+                standup_context += f"BLOCKED: {', '.join(f'\"{t}\"' for t in data['tasks_blocked'])}\n"
+            if not data['tasks_in_progress'] and not data['tasks_completed_recently'] and not data['recent_activity']:
+                standup_context += "STATUS: No recent activity\n"
             if data['recent_activity']:
                 standup_context += f"Recent Activity ({len(data['recent_activity'])} actions):\n"
-                for act in data['recent_activity'][:5]:
-                    standup_context += f"  - {act['action']} on '{act['task']}'"
+                for act in data['recent_activity'][:10]:
+                    standup_context += f"  - {act['action']} on \"{act['task']}\""
                     if act.get('old_value') and act.get('new_value'):
                         standup_context += f" ({act['old_value']} → {act['new_value']})"
                     standup_context += "\n"
@@ -140,27 +146,32 @@ Be concise, factual, and highlight anything that needs attention."""
                 all_blockers.append({"member": name, "task": task})
 
         # Use LLM to generate a polished standup report
-        prompt = f"""Generate a daily standup report from this data.
+        prompt = f"""Generate a daily standup report using ONLY the exact data below. Do NOT invent, guess, or generalize any task names — use the exact task titles in quotes from the data.
 
 {standup_context}
 
 INACTIVE MEMBERS (have tasks but no recent progress): {', '.join(inactive_members) if inactive_members else 'None'}
 BLOCKERS: {json.dumps(all_blockers) if all_blockers else 'None'}
 
-Generate a standup report with this structure:
-1. **Team Summary** - 2-3 sentence overview
-2. **Per-Member Update** - For each active member:
-   - What they completed/worked on (Done)
-   - What they're working on (Today)
-   - Any blockers
-3. **Blockers & Risks** - Highlight blockers that need PM attention
-4. **Action Items** - What the PM should follow up on
+STRICT RULES:
+- Use the EXACT task titles from the data above (the text in quotes). Never say "task 1", "task 2", or make up names.
+- If a member has no completed tasks, say "No completed tasks" — do not fabricate any.
+- If a member has no in-progress tasks, say "No tasks in progress" — do not fabricate any.
+- Only report what the data explicitly shows. Do not assume or infer activity that is not in the data.
 
-Use markdown formatting. Be concise - each member update should be 2-3 lines max.
-If a member has no activity, note it briefly."""
+Generate a standup report with this structure:
+1. **Team Summary** - 2-3 sentence overview with actual numbers from the data
+2. **Per-Member Update** - For each member:
+   - **Done**: List exact task titles from Completed data, or "None" if empty
+   - **In Progress**: List exact task titles from In Progress data, or "None" if empty
+   - **Blocked**: List exact task titles from BLOCKED data, or "None"
+3. **Blockers & Risks** - Only list blockers that exist in the data above
+4. **Action Items** - What the PM should follow up on based on actual data
+
+Use markdown formatting. Be concise. If a member has no activity, note it briefly with their assigned task count."""
 
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=1500)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=1500)
 
             return {
                 "success": True,
@@ -225,18 +236,20 @@ TEAM ({len(team_members)} members):
 {chr(10).join(f'- {m.get("name", m.get("username", "Unknown"))}' for m in team_members)}
 
 COMPLETED TASKS:
-{chr(10).join(f'- {t}' for t in completed_this_week[:15]) if completed_this_week else '- None'}
+{chr(10).join(f'- "{t}"' for t in completed_this_week[:15]) if completed_this_week else '- None'}
+
+STRICT RULES: Use ONLY the exact task titles and numbers from the data above. Never invent or generalize task names.
 
 Generate a brief weekly summary with:
-1. **Week Overview** - Key accomplishments and metrics
-2. **Highlights** - Notable completions
-3. **Concerns** - Blockers, slow progress areas
+1. **Week Overview** - Key accomplishments using exact numbers from STATS above
+2. **Highlights** - List exact completed task titles from COMPLETED TASKS above
+3. **Concerns** - Blockers, slow progress areas based on actual data
 4. **Next Week Focus** - Recommended priorities
 
 Use markdown. Keep it under 300 words."""
 
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=1000)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=1000)
             return {
                 "success": True,
                 "report": response,

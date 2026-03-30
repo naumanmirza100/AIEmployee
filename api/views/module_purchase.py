@@ -2,6 +2,7 @@
 Module Purchase API Views
 """
 import logging
+from datetime import timedelta
 from django.conf import settings
 from django.http import JsonResponse
 from django.utils import timezone
@@ -37,6 +38,9 @@ MODULE_DISPLAY_NAMES = {
     'frontline_agent': 'Frontline Agent',
 }
 
+# Subscription duration (30 days per purchase)
+SUBSCRIPTION_DAYS = 30
+
 
 def _fulfill_purchase_from_metadata(metadata):
     """Create or update CompanyModulePurchase from Stripe metadata. Idempotent."""
@@ -56,14 +60,16 @@ def _fulfill_purchase_from_metadata(metadata):
         except (CompanyUser.DoesNotExist, ValueError, TypeError):
             pass
     price = MODULE_PRICES[module_name]
+    expires_at = timezone.now() + timedelta(days=SUBSCRIPTION_DAYS)
     existing = CompanyModulePurchase.objects.filter(company=company, module_name=module_name).first()
     if existing:
         existing.status = 'active'
         existing.price_paid = price
         existing.purchased_by = purchased_by
         existing.purchased_at = timezone.now()
-        existing.expires_at = None
+        existing.expires_at = expires_at
         existing.cancelled_at = None
+        existing.cancelled_reason = None
         existing.save()
         logger.info('Module %s re-activated for company %s (ID: %s)', module_name, company.name, company.id)
     else:
@@ -73,7 +79,7 @@ def _fulfill_purchase_from_metadata(metadata):
             status='active',
             price_paid=price,
             purchased_by=purchased_by,
-            expires_at=None,
+            expires_at=expires_at,
         )
         logger.info('Module %s purchased for company %s (ID: %s)', module_name, company.name, company.id)
     return True, module_name
@@ -87,31 +93,103 @@ def get_purchased_modules(request):
     try:
         company_user = request.user
         company = company_user.company
-        
-        purchases = CompanyModulePurchase.objects.filter(
+
+        now = timezone.now()
+
+        # Auto-expire: update DB status for any purchase past its expires_at
+        CompanyModulePurchase.objects.filter(
+            company=company, status='active',
+            expires_at__isnull=False, expires_at__lt=now
+        ).update(status='expired')
+
+        # Get ALL purchases (not just active) so the company can see full history
+        all_purchases = CompanyModulePurchase.objects.filter(
             company=company,
-            status='active'
-        ).select_related('purchased_by')
-        
-        # Filter out expired purchases
+        ).select_related('purchased_by').order_by('-purchased_at')
         active_purchases = []
-        for purchase in purchases:
-            if purchase.is_active():
-                active_purchases.append({
-                    'module_name': purchase.module_name,
-                    'module_display_name': purchase.get_module_name_display(),
-                    'status': purchase.status,
-                    'purchased_at': purchase.purchased_at.isoformat(),
-                    'expires_at': purchase.expires_at.isoformat() if purchase.expires_at else None,
-                    'price_paid': float(purchase.price_paid) if purchase.price_paid else None,
-                })
-        
+        all_purchases_data = []
+
+        for purchase in all_purchases:
+            # Determine effective status
+            effective_status = purchase.status
+            is_expired = purchase.status == 'expired'
+
+            # Compute time remaining or time since expired
+            time_remaining = None
+            time_ended_ago = None
+            if purchase.expires_at:
+                if effective_status == 'active':
+                    diff = purchase.expires_at - now
+                    if diff.total_seconds() > 0:
+                        days = diff.days
+                        hours = diff.seconds // 3600
+                        time_remaining = f"{days}d {hours}h remaining" if days > 0 else f"{hours}h remaining"
+                    else:
+                        # Edge case: still active in DB but actually expired
+                        is_expired = True
+                        effective_status = 'expired'
+                if effective_status in ('expired',):
+                    ended = now - purchase.expires_at
+                    if ended.total_seconds() > 0:
+                        days = ended.days
+                        hours = ended.seconds // 3600
+                        time_ended_ago = f"Ended {days}d {hours}h ago" if days > 0 else f"Ended {hours}h ago"
+
+            # For active: time since purchase. For expired/cancelled: how long it was active.
+            if effective_status == 'active':
+                delta = now - purchase.purchased_at
+                days_val = delta.days
+            elif purchase.expires_at and is_expired:
+                delta = purchase.expires_at - purchase.purchased_at
+                days_val = delta.days
+            elif purchase.cancelled_at:
+                delta = purchase.cancelled_at - purchase.purchased_at
+                days_val = delta.days
+            else:
+                delta = now - purchase.purchased_at
+                days_val = delta.days
+
+            if days_val > 365:
+                active_duration = f"{days_val // 365}y {(days_val % 365) // 30}m"
+            elif days_val > 30:
+                active_duration = f"{days_val // 30}m {days_val % 30}d"
+            else:
+                active_duration = f"{days_val}d"
+
+            if effective_status == 'active':
+                active_label = f"Active since: {active_duration}"
+            else:
+                active_label = f"Was active for {active_duration}"
+
+            purchase_data = {
+                'id': purchase.id,
+                'module_name': purchase.module_name,
+                'module_display_name': purchase.get_module_name_display(),
+                'status': effective_status,
+                'purchased_at': purchase.purchased_at.isoformat(),
+                'expires_at': purchase.expires_at.isoformat() if purchase.expires_at else None,
+                'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
+                'cancelled_reason': purchase.cancelled_reason,
+                'price_paid': float(purchase.price_paid) if purchase.price_paid else None,
+                'purchased_by_name': purchase.purchased_by.full_name if purchase.purchased_by else None,
+                'is_expired': is_expired,
+                'deactivated_by_admin': purchase.cancelled_reason == 'admin_deactivated',
+                'time_remaining': time_remaining,
+                'time_ended_ago': time_ended_ago,
+                'active_label': active_label,
+            }
+            all_purchases_data.append(purchase_data)
+
+            if purchase.is_active() and not is_expired:
+                active_purchases.append(purchase_data)
+
         return Response({
             'status': 'success',
             'purchased_modules': active_purchases,
+            'all_purchases': all_purchases_data,
             'module_names': [p['module_name'] for p in active_purchases]
         }, status=status.HTTP_200_OK)
-    
+
     except Exception as e:
         logger.error(f"Error getting purchased modules: {str(e)}", exc_info=True)
         return Response({
@@ -286,13 +364,15 @@ def purchase_module(request):
         # and only create purchase after successful payment
         
         # Create or update purchase
+        expires_at = timezone.now() + timedelta(days=SUBSCRIPTION_DAYS)
         if existing_purchase:
             existing_purchase.status = 'active'
             existing_purchase.price_paid = price
             existing_purchase.purchased_by = company_user
             existing_purchase.purchased_at = timezone.now()
-            existing_purchase.expires_at = None  # Lifetime access for now
+            existing_purchase.expires_at = expires_at
             existing_purchase.cancelled_at = None
+            existing_purchase.cancelled_reason = None
             existing_purchase.save()
             purchase = existing_purchase
         else:
@@ -302,7 +382,7 @@ def purchase_module(request):
                 status='active',
                 price_paid=price,
                 purchased_by=company_user,
-                expires_at=None,  # Lifetime access for now (can be changed to subscription)
+                expires_at=expires_at,
             )
         
         logger.info(f"Module {module_name} purchased by company {company.name} (ID: {company.id})")

@@ -637,6 +637,14 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 1800.0,  # Every 30 minutes
         'options': {'expires': 3600}
     },
+
+    # Auto-expire module purchases - runs every hour
+    # Checks active purchases whose expires_at has passed and marks them expired
+    'expire-module-purchases': {
+        'task': 'core.tasks.expire_module_purchases',
+        'schedule': 3600.0,  # Every hour (3600 seconds)
+        'options': {'expires': 7200}
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)

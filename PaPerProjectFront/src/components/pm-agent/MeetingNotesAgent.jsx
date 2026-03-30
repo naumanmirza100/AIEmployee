@@ -19,7 +19,7 @@ export default function MeetingNotesAgent() {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const res = await companyApi.get('/company/projects');
+        const res = await companyApi.get('/company/projects/list');
         const data = res?.data?.data || res?.data?.results || res?.data || [];
         setProjects(Array.isArray(data) ? data : []);
       } catch (e) { console.error(e); }
@@ -95,9 +95,37 @@ export default function MeetingNotesAgent() {
         </div>
       )}
 
+      {/* Validation Error with Instructions */}
+      {!loading && result && result.success === false && result.instructions && (
+        <Card className="bg-gray-800 border-yellow-600/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-yellow-400 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" /> {result.error}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-300 whitespace-pre-wrap">{result.instructions}</p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Results */}
-      {!loading && result && (
+      {!loading && result && result.success !== false && (
         <div className="space-y-4">
+          {/* Warnings (unrecognized participants) */}
+          {result.warnings?.length > 0 && (
+            <Card className="bg-yellow-900/20 border-yellow-600/50">
+              <CardContent className="pt-4">
+                {result.warnings.map((w, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm text-yellow-300">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>{w}</span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Summary */}
           {result.summary && (
             <Card className="bg-gray-800 border-gray-700">

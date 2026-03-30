@@ -203,6 +203,7 @@ Always back up your analysis with data and provide specific recommendations."""
                     upcoming.append({
                         "title": t.get('title'),
                         "due_date": t['due_date'],
+                        "deadline": t['due_date'],
                         "days_left": (due - now).days,
                         "priority": t.get('priority'),
                     })
@@ -233,6 +234,7 @@ Always back up your analysis with data and provide specific recommendations."""
 
         tasks = Task.objects.filter(project=project).select_related('assignee')
         tasks_data = self._tasks_to_data(tasks)
+        now = timezone.now().date()
 
         # Build per-member stats
         member_stats = {}
@@ -241,37 +243,128 @@ Always back up your analysis with data and provide specific recommendations."""
             if name not in member_stats:
                 member_stats[name] = {
                     "total": 0, "completed": 0, "in_progress": 0,
-                    "blocked": 0, "overdue": 0, "high_priority": 0
+                    "todo": 0, "review": 0,
+                    "blocked": 0, "overdue": 0, "high_priority": 0,
+                    "task_titles": []
                 }
             stats = member_stats[name]
             stats["total"] += 1
+            stats["task_titles"].append(t.get('title', 'Untitled'))
             if t['status'] in ['done', 'completed']:
                 stats["completed"] += 1
             elif t['status'] == 'in_progress':
                 stats["in_progress"] += 1
+            elif t['status'] == 'todo':
+                stats["todo"] += 1
+            elif t['status'] == 'review':
+                stats["review"] += 1
             elif t['status'] == 'blocked':
                 stats["blocked"] += 1
             if t.get('priority') == 'high':
                 stats["high_priority"] += 1
 
-            now = timezone.now().date()
             if t.get('due_date') and t['status'] not in ['done', 'completed']:
                 due = self._parse_date(t['due_date'])
                 if due and due < now:
                     stats["overdue"] += 1
 
-        # Calculate completion rates per member
+        # Build members array (frontend expects this shape)
+        members = []
+        total_tasks_all = len(tasks_data)
+        avg_tasks = total_tasks_all / max(len([m for m in member_stats if m != 'Unassigned']), 1)
+
         for name, stats in member_stats.items():
-            stats["completion_rate"] = round(
+            if name == 'Unassigned':
+                continue
+            completion_rate = round(
                 (stats["completed"] / stats["total"] * 100) if stats["total"] > 0 else 0, 1
             )
+            # Score: weighted combination of completion rate, no overdue, no blocked
+            overdue_penalty = min(stats["overdue"] * 10, 30)
+            blocked_penalty = min(stats["blocked"] * 5, 15)
+            score = max(0, min(100, round(completion_rate - overdue_penalty - blocked_penalty)))
+
+            # Workload assessment
+            if stats["total"] > avg_tasks * 1.5:
+                workload = "Overloaded"
+            elif stats["total"] < avg_tasks * 0.5 and avg_tasks > 1:
+                workload = "Underloaded"
+            else:
+                workload = "Balanced"
+
+            members.append({
+                "name": name,
+                "score": score,
+                "total_tasks": stats["total"],
+                "tasks_completed": stats["completed"],
+                "tasks_in_progress": stats["in_progress"],
+                "tasks_todo": stats["todo"],
+                "tasks_review": stats["review"],
+                "overdue": stats["overdue"],
+                "blocked": stats["blocked"],
+                "high_priority": stats["high_priority"],
+                "completion_rate": completion_rate,
+                "workload": workload,
+                "task_titles": stats["task_titles"],
+            })
+
+        # Sort by score descending
+        members.sort(key=lambda m: m["score"], reverse=True)
+
+        # Generate insights
+        insights = []
+        total_completed = sum(s["completed"] for s in member_stats.values())
+        total_overdue = sum(s["overdue"] for s in member_stats.values())
+        total_blocked = sum(s["blocked"] for s in member_stats.values())
+        overall_completion = round((total_completed / total_tasks_all * 100) if total_tasks_all else 0, 1)
+
+        insights.append(f"Overall completion rate: {overall_completion}% ({total_completed}/{total_tasks_all} tasks)")
+        if total_overdue > 0:
+            insights.append(f"⚠️ {total_overdue} task(s) are overdue and need attention")
+        if total_blocked > 0:
+            insights.append(f"🚫 {total_blocked} task(s) are blocked — resolve blockers to unblock progress")
+        unassigned_count = member_stats.get('Unassigned', {}).get('total', 0)
+        if unassigned_count > 0:
+            insights.append(f"📋 {unassigned_count} task(s) are unassigned — assign them to team members")
+
+        # Workload balance insight
+        overloaded = [m["name"] for m in members if m["workload"] == "Overloaded"]
+        underloaded = [m["name"] for m in members if m["workload"] == "Underloaded"]
+        if overloaded and underloaded:
+            insights.append(f"⚖️ Workload imbalance: {', '.join(overloaded)} overloaded, {', '.join(underloaded)} underloaded — consider redistributing tasks")
+        elif overloaded:
+            insights.append(f"⚖️ {', '.join(overloaded)} may be overloaded — consider redistributing some tasks")
+
+        # Top performer
+        if members and members[0]["score"] > 0:
+            top = members[0]
+            insights.append(f"🏆 Top performer: {top['name']} with {top['completion_rate']}% completion rate")
+
+        # Generate recommendations
+        recommendations = []
+        if total_overdue > 0:
+            recommendations.append("Review overdue tasks and either extend deadlines or reprioritize them")
+        if total_blocked > 0:
+            recommendations.append("Schedule a quick sync to resolve blocked tasks — they may be holding up dependent work")
+        if unassigned_count > 0:
+            recommendations.append(f"Assign the {unassigned_count} unassigned task(s) to balance workload")
+        if overloaded:
+            recommendations.append(f"Redistribute tasks from {', '.join(overloaded)} to less loaded members")
+        if overall_completion < 30 and total_tasks_all > 5:
+            recommendations.append("Completion rate is low — consider breaking large tasks into smaller ones for quicker wins")
+        if not recommendations:
+            recommendations.append("Team is performing well — maintain current pace and keep tasks up to date")
 
         return {
             "success": True,
             "project_name": project.name,
-            "team_productivity": member_stats,
-            "total_members": len([m for m in member_stats if m != 'Unassigned']),
-            "unassigned_tasks": member_stats.get('Unassigned', {}).get('total', 0),
+            "members": members,
+            "total_members": len(members),
+            "total_tasks": total_tasks_all,
+            "unassigned_tasks": unassigned_count,
+            "overall_completion_rate": overall_completion,
+            "insights": insights,
+            "recommendations": recommendations,
         }
 
     def identify_risks(self, project_id: int, company_user=None) -> Dict:
@@ -450,6 +543,7 @@ Use markdown formatting. Keep it concise."""
             'priority': t.priority,
             'priority_score': getattr(t, 'priority_score', None),
             'due_date': t.due_date.isoformat() if t.due_date else None,
+            'deadline': t.due_date.isoformat() if t.due_date else None,
             'assignee_id': t.assignee.id if t.assignee else None,
             'assignee_name': (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
         } for t in tasks_qs]

@@ -36,7 +36,7 @@ export default function TeamPerformanceDashboard() {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const res = await companyApi.get('/company/projects');
+        const res = await companyApi.get('/company/projects/list');
         const data = res?.data?.data || res?.data?.results || res?.data || [];
         setProjects(Array.isArray(data) ? data : []);
       } catch (e) { console.error(e); }
@@ -101,62 +101,129 @@ export default function TeamPerformanceDashboard() {
       {/* Results */}
       {!loading && performance && (
         <div className="space-y-4">
+          {/* Summary Stats Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card className="bg-gray-800/60 border-gray-700">
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-violet-300">{performance.total_members || 0}</div>
+                <div className="text-xs text-gray-400">Team Members</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-gray-800/60 border-gray-700">
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-blue-300">{performance.total_tasks || 0}</div>
+                <div className="text-xs text-gray-400">Total Tasks</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-gray-800/60 border-gray-700">
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-green-400">{performance.overall_completion_rate || 0}%</div>
+                <div className="text-xs text-gray-400">Completion Rate</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-gray-800/60 border-gray-700">
+              <CardContent className="p-3 text-center">
+                <div className="text-2xl font-bold text-yellow-400">{performance.unassigned_tasks || 0}</div>
+                <div className="text-xs text-gray-400">Unassigned</div>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Member Cards */}
           {performance.members?.length > 0 && (
             <div className="space-y-3">
-              {performance.members.map((member, i) => (
-                <Card key={i} className="bg-gray-800 border-gray-700">
-                  <CardContent className="pt-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-violet-600/30 flex items-center justify-center text-sm font-bold text-violet-300">
-                          {(member.name || member.member || 'U')[0].toUpperCase()}
+              {performance.members.map((member, i) => {
+                const workloadColor = member.workload === 'Overloaded' ? 'text-red-400 bg-red-500/10' :
+                                      member.workload === 'Underloaded' ? 'text-yellow-400 bg-yellow-500/10' :
+                                      'text-green-400 bg-green-500/10';
+                return (
+                  <Card key={i} className="bg-gray-800 border-gray-700">
+                    <CardContent className="pt-4">
+                      {/* Header: Avatar, Name, Score, Workload Badge */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-violet-600/30 flex items-center justify-center text-sm font-bold text-violet-300">
+                            {(member.name || 'U')[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-sm font-medium text-white">{member.name || 'Unknown'}</div>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${workloadColor}`}>
+                              {member.workload || 'Balanced'}
+                            </span>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-sm font-medium text-white">{member.name || member.member || 'Unknown'}</div>
-                          <div className="text-xs text-gray-400">{member.role || 'Team Member'}</div>
+                        <div className="text-right">
+                          <div className={`text-2xl font-bold ${member.score >= 80 ? 'text-green-400' : member.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                            {member.score ?? 0}
+                          </div>
+                          <div className="text-[10px] text-gray-500">SCORE</div>
                         </div>
                       </div>
-                      {member.score !== undefined && (
-                        <div className={`text-lg font-bold ${member.score >= 80 ? 'text-green-400' : member.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
-                          {member.score}%
-                        </div>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      {member.tasks_completed !== undefined && (
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-xs mb-3">
                         <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-green-400 font-bold">{member.tasks_completed}</div>
-                          <div className="text-gray-500">Completed</div>
+                          <div className="text-white font-bold">{member.total_tasks || 0}</div>
+                          <div className="text-gray-500">Total</div>
                         </div>
-                      )}
-                      {member.tasks_in_progress !== undefined && (
                         <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-blue-400 font-bold">{member.tasks_in_progress}</div>
+                          <div className="text-green-400 font-bold">{member.tasks_completed || 0}</div>
+                          <div className="text-gray-500">Done</div>
+                        </div>
+                        <div className="bg-gray-900 rounded p-2 text-center">
+                          <div className="text-blue-400 font-bold">{member.tasks_in_progress || 0}</div>
                           <div className="text-gray-500">In Progress</div>
                         </div>
-                      )}
-                      {member.overdue !== undefined && (
                         <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-red-400 font-bold">{member.overdue}</div>
+                          <div className="text-gray-300 font-bold">{member.tasks_todo || 0}</div>
+                          <div className="text-gray-500">To Do</div>
+                        </div>
+                        <div className="bg-gray-900 rounded p-2 text-center">
+                          <div className="text-red-400 font-bold">{member.overdue || 0}</div>
                           <div className="text-gray-500">Overdue</div>
                         </div>
-                      )}
-                      {member.workload !== undefined && (
                         <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-violet-400 font-bold">{member.workload}</div>
-                          <div className="text-gray-500">Workload</div>
+                          <div className="text-orange-400 font-bold">{member.blocked || 0}</div>
+                          <div className="text-gray-500">Blocked</div>
+                        </div>
+                      </div>
+
+                      {/* Completion Progress Bar */}
+                      <div className="mb-2">
+                        <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                          <span>Completion</span>
+                          <span>{member.completion_rate || 0}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${member.completion_rate >= 80 ? 'bg-green-500' : member.completion_rate >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            style={{ width: `${member.completion_rate || 0}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Task Titles */}
+                      {member.task_titles?.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-700/50">
+                          <div className="text-[10px] text-gray-500 mb-1">Assigned Tasks:</div>
+                          <div className="flex flex-wrap gap-1">
+                            {member.task_titles.map((title, ti) => (
+                              <span key={ti} className="text-[10px] px-2 py-0.5 bg-gray-900 text-gray-300 rounded">
+                                {title.length > 30 ? title.slice(0, 30) + '...' : title}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
 
-          {/* Summary / Insights */}
-          {(performance.insights || performance.summary) && (
+          {/* Insights */}
+          {performance.insights?.length > 0 && (
             <Card className="bg-gray-800 border-gray-700">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm text-violet-300 flex items-center gap-1">
@@ -164,18 +231,14 @@ export default function TeamPerformanceDashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {Array.isArray(performance.insights) ? (
-                  <div className="space-y-1">
-                    {performance.insights.map((insight, i) => (
-                      <div key={i} className="text-sm text-gray-300 flex items-start gap-2">
-                        <span className="text-violet-400">•</span>
-                        <span>{typeof insight === 'string' ? insight : insight.text || JSON.stringify(insight)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(performance.insights || performance.summary || '') }} />
-                )}
+                <div className="space-y-1.5">
+                  {performance.insights.map((insight, i) => (
+                    <div key={i} className="text-sm text-gray-300 flex items-start gap-2">
+                      <span className="text-violet-400 mt-0.5">•</span>
+                      <span>{typeof insight === 'string' ? insight : insight.text || JSON.stringify(insight)}</span>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}
@@ -188,22 +251,13 @@ export default function TeamPerformanceDashboard() {
                   <Trophy className="w-4 h-4" /> Recommendations
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-1">
+              <CardContent className="space-y-1.5">
                 {performance.recommendations.map((rec, i) => (
                   <div key={i} className="text-sm text-gray-300 flex items-start gap-2">
-                    <span className="text-green-400">•</span>
+                    <span className="text-green-400 mt-0.5">•</span>
                     <span>{typeof rec === 'string' ? rec : rec.text || rec.recommendation || JSON.stringify(rec)}</span>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Fallback markdown */}
-          {(performance.answer || performance.report) && !performance.members && (
-            <Card className="bg-gray-800 border-gray-700">
-              <CardContent className="pt-4">
-                <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(performance.answer || performance.report) }} />
               </CardContent>
             </Card>
           )}

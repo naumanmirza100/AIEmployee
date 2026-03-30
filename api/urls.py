@@ -136,13 +136,18 @@ urlpatterns = [
     re_path(r'^companies/create/?$', company.create_company, name='create_company'),  # POST
     re_path(r'^companies/(?P<companyId>\d+)/tokens/?$', company.get_company_tokens, name='get_company_tokens'),  # GET
     re_path(r'^companies/(?P<companyId>\d+)/tokens/generate/?$', company.generate_company_token, name='generate_company_token'),  # POST
-    
+
+    # Admin - Company AI Agents Management
+    re_path(r'^admin/company-agents/?$', company.list_company_agents, name='list_company_agents'),  # GET
+    re_path(r'^admin/company-agents/(?P<purchaseId>\d+)/toggle-status/?$', company.toggle_company_agent_status, name='toggle_company_agent_status'),  # PATCH
+
     # Company User Management endpoints (for company users to manage regular users)
     re_path(r'^company/users/create/?$', company_users.create_user, name='company_create_user'),  # POST
     re_path(r'^company/users/?$', company_users.list_users, name='company_list_users'),  # GET
     re_path(r'^company/users/(?P<userId>\d+)/?$', company_users.get_user, name='company_get_user'),  # GET
     re_path(r'^company/users/(?P<userId>\d+)/update/?$', company_users.update_user, name='company_update_user'),  # PUT/PATCH
     re_path(r'^company/users/(?P<userId>\d+)/delete/?$', company_users.delete_user, name='company_delete_user'),  # DELETE
+    re_path(r'^company/users/(?P<userId>\d+)/reactivate/?$', company_users.reactivate_user, name='company_reactivate_user'),  # POST
     re_path(r'^company/users/tasks/?$', company_user_tasks.get_all_users_tasks, name='company_get_all_users_tasks'),  # GET
     
     # Company Auth endpoints
@@ -171,6 +176,7 @@ urlpatterns = [
     # Project Manager Dashboard endpoint
     re_path(r'^project-manager/dashboard/?$', company_dashboard.project_manager_dashboard, name='pm_dashboard'),
     # Company User Projects endpoint
+    re_path(r'^company/projects/list/?$', company_dashboard.get_company_user_projects_list, name='get_company_user_projects_list'),
     re_path(r'^company/projects/?$', company_dashboard.get_company_user_projects, name='get_company_user_projects'),
     re_path(r'^company/projects/(?P<project_id>\d+)/update/?$', company_projects_tasks.update_company_project, name='update_company_project'),
     
