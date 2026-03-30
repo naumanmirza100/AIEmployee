@@ -390,6 +390,55 @@ export const timeEstimation = async (projectId) => {
   }
 };
 
+/**
+ * Meeting Scheduler - Send a chat message to schedule a meeting
+ */
+export const meetingSchedule = async (message) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/meetings/schedule', { message });
+    return response;
+  } catch (error) {
+    console.error('Meeting schedule error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Meeting Respond - Accept, reject, counter-propose, or withdraw a meeting
+ */
+export const meetingRespond = async (meetingId, action, reason = '', counterTime = null) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/meetings/respond', {
+      meeting_id: meetingId,
+      action,
+      reason,
+      counter_time: counterTime,
+    });
+    return response;
+  } catch (error) {
+    console.error('Meeting respond error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Meeting List - Get all meetings for current user
+ */
+export const meetingList = async (statusFilter = '', roleFilter = '') => {
+  try {
+    let url = '/project-manager/ai/meetings';
+    const params = [];
+    if (statusFilter) params.push(`status=${statusFilter}`);
+    if (roleFilter) params.push(`role=${roleFilter}`);
+    if (params.length) url += '?' + params.join('&');
+    const response = await companyApi.get(url);
+    return response;
+  } catch (error) {
+    console.error('Meeting list error:', error);
+    throw error;
+  }
+};
+
 export default {
   projectPilot,
   projectPilotFromFile,
@@ -417,6 +466,9 @@ export default {
   markNotificationsRead,
   teamPerformance,
   timeEstimation,
+  meetingSchedule,
+  meetingRespond,
+  meetingList,
 };
 
 

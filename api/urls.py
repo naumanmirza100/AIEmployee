@@ -213,6 +213,11 @@ urlpatterns = [
     re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
     re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),
 
+    # Meeting Scheduler endpoints
+    re_path(r'^project-manager/ai/meetings/schedule/?$', pm_agent.meeting_schedule, name='pm_meeting_schedule'),
+    re_path(r'^project-manager/ai/meetings/respond/?$', pm_agent.meeting_respond, name='pm_meeting_respond'),
+    re_path(r'^project-manager/ai/meetings/?$', pm_agent.meeting_list, name='pm_meeting_list'),
+
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST
     re_path(r'^chatbot/messages/?$', chatbot.send_chatbot_message, name='send_chatbot_message'),  # POST
