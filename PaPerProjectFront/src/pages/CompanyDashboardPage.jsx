@@ -16,21 +16,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
 import { companyApi } from '@/services/companyAuthService';
-import { getPurchasedModules, createCheckoutSession } from '@/services/modulePurchaseService';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
+import { getAgentNavItems } from '@/utils/agentNavItems';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { API_BASE_URL } from '@/config/apiConfig';
-import { 
-  Building2, Plus, Briefcase, Users, Eye, 
+import {
+  Building2, Plus, Briefcase, Users, Eye,
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
-  ChevronDown, ChevronRight, ListTodo, UserCheck, Megaphone, UserPlus, Edit, Trash2, Mail,
+  ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Headphones,
-  Ticket,
-  RotateCcw
+  Ticket, RotateCcw
 } from 'lucide-react';
+import { createCheckoutSession } from '@/services/modulePurchaseService';
 
 const CompanyDashboardPage = () => {
   const navigate = useNavigate();
@@ -49,16 +49,16 @@ const CompanyDashboardPage = () => {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
-  const [purchasedModules, setPurchasedModules] = useState([]);
-  const [allPurchases, setAllPurchases] = useState([]);
+  const { purchasedModules, allPurchases, refetch: refetchModules } = usePurchasedModules();
   const [purchasingModule, setPurchasingModule] = useState(null);
-  
+
   // User management state
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersPagination, setUsersPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [userSubmitting, setUserSubmitting] = useState(false);
   const [userForm, setUserForm] = useState({
     email: '',
     password: '',
@@ -70,8 +70,6 @@ const CompanyDashboardPage = () => {
     location: '',
   });
   
-  const [userSubmitting, setUserSubmitting] = useState(false);
-
   // All users tasks state
   const [allUsersTasks, setAllUsersTasks] = useState([]);
   const [allUsersTasksLoading, setAllUsersTasksLoading] = useState(false);
@@ -119,42 +117,26 @@ const CompanyDashboardPage = () => {
   const [loadingTicketTasks, setLoadingTicketTasks] = useState(false);
   const [resolvingTaskId, setResolvingTaskId] = useState(null);
 
-  const fetchPurchasedModules = async () => {
+  const handlePurchaseAgain = async (moduleName) => {
+    setPurchasingModule(moduleName);
     try {
-      // Try to get from localStorage first (cache)
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-        } catch (e) {
-          // Invalid cache, continue to fetch
-        }
-      }
-
-      const response = await getPurchasedModules();
-      if (response.status === 'success') {
-        const moduleNames = response.module_names || [];
-        setPurchasedModules(moduleNames);
-        setAllPurchases(response.all_purchases || []);
-        // Cache in localStorage
-        localStorage.setItem('company_purchased_modules', JSON.stringify(moduleNames));
+      const response = await createCheckoutSession(moduleName);
+      if (response.status === 'success' && response.url) {
+        window.location.href = response.url;
+      } else {
+        toast({ title: 'Error', description: response.message || 'Failed to start purchase', variant: 'destructive' });
       }
     } catch (error) {
-      console.error('Error fetching purchased modules:', error);
-      // If we have cached modules, use them
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-        } catch (e) {
-          setPurchasedModules([]);
-        }
-      } else {
-        setPurchasedModules([]);
-      }
+      toast({ title: 'Error', description: error.message || 'Failed to start purchase', variant: 'destructive' });
+    } finally {
+      setPurchasingModule(null);
     }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   useEffect(() => {
@@ -188,20 +170,8 @@ const CompanyDashboardPage = () => {
       }
       
       setCompanyUser(user);
-      
-      // Load cached modules immediately
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-        } catch (e) {
-          // Invalid cache
-        }
-      }
-      
+
       fetchJobs();
-      fetchPurchasedModules(); // Will update cache
       if (activeTab === 'projects') {
         fetchProjects();
       }
@@ -544,28 +514,6 @@ const CompanyDashboardPage = () => {
     }
   };
 
-  const handlePurchaseAgain = async (moduleName) => {
-    setPurchasingModule(moduleName);
-    try {
-      const response = await createCheckoutSession(moduleName);
-      if (response.status === 'success' && response.url) {
-        window.location.href = response.url;
-      } else {
-        toast({ title: 'Error', description: response.message || 'Failed to start purchase', variant: 'destructive' });
-      }
-    } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to start purchase', variant: 'destructive' });
-    } finally {
-      setPurchasingModule(null);
-    }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  };
-
   useEffect(() => {
     if (activeTab === 'projects' && companyUser) {
       fetchProjects();
@@ -590,9 +538,6 @@ const CompanyDashboardPage = () => {
     }
     if (activeTab === 'ticket-tasks' && companyUser && purchasedModules.includes('frontline_agent')) {
       loadTicketTasks();
-    }
-    if (activeTab === 'ai-agents' && companyUser) {
-      fetchPurchasedModules();
     }
   }, [activeTab, companyUser, taskStatusFilter, taskUserFilter, taskProjectFilter, usersPagination.page, usersPagination.limit, tasksPagination.page, tasksPagination.limit]);
   
@@ -668,10 +613,10 @@ const CompanyDashboardPage = () => {
   };
   
   const handleCreateUser = async () => {
-    if (userSubmitting) return;
+    if (userSubmitting) return; // Prevent duplicate submissions
 
-    // Required fields check
-    if (!userForm.email || !userForm.password || !userForm.fullName?.trim() || !userForm.phoneNumber?.trim()) {
+    // Validate required fields
+    if (!userForm.email || !userForm.password || !userForm.fullName || !userForm.phoneNumber) {
       toast({
         title: 'Validation Error',
         description: 'Email, password, full name, and phone number are required',
@@ -680,75 +625,76 @@ const CompanyDashboardPage = () => {
       return;
     }
 
-    // Full name validation - only letters and spaces, at least 2 alphabetic characters, no digits
-    const trimmedName = userForm.fullName.trim();
-    if (/[0-9]/.test(trimmedName)) {
-      toast({ title: 'Validation Error', description: 'Full name must not contain numbers.', variant: 'destructive' });
+    // Full name validation: only letters and spaces, at least 2 alpha chars, no digits
+    if (/\d/.test(userForm.fullName)) {
+      toast({ title: 'Validation Error', description: 'Full name must not contain digits.', variant: 'destructive' });
       return;
     }
-    if (!/^[a-zA-Z\s.'-]+$/.test(trimmedName)) {
-      toast({ title: 'Validation Error', description: 'Full name can only contain letters, spaces, dots, hyphens, and apostrophes.', variant: 'destructive' });
+    if (!/^[a-zA-Z\s]+$/.test(userForm.fullName.trim())) {
+      toast({ title: 'Validation Error', description: 'Full name must contain only letters and spaces.', variant: 'destructive' });
       return;
     }
-    const nameAlphaCount = (trimmedName.match(/[a-zA-Z]/g) || []).length;
-    if (nameAlphaCount < 2) {
+    const nameAlpha = (userForm.fullName.match(/[a-zA-Z]/g) || []).length;
+    if (nameAlpha < 2) {
       toast({ title: 'Validation Error', description: 'Full name must contain at least 2 alphabetic characters.', variant: 'destructive' });
       return;
     }
 
-    // Phone number validation - digits, optional +, spaces, hyphens, min 7 digits
-    const phoneDigits = (userForm.phoneNumber.match(/[0-9]/g) || []).length;
-    const phoneRegex = /^[+]?[\d\s\-()]{7,20}$/;
-    if (!phoneRegex.test(userForm.phoneNumber.trim()) || phoneDigits < 7) {
-      toast({ title: 'Validation Error', description: 'Enter a valid phone number (at least 7 digits, e.g., +1234567890).', variant: 'destructive' });
+    // Phone number validation: at least 7 digits, valid format
+    const phoneDigits = (userForm.phoneNumber.match(/\d/g) || []).length;
+    if (phoneDigits < 7) {
+      toast({ title: 'Validation Error', description: 'Phone number must contain at least 7 digits.', variant: 'destructive' });
+      return;
+    }
+    if (!/^[+\d\s\-()]+$/.test(userForm.phoneNumber.trim())) {
+      toast({ title: 'Validation Error', description: 'Phone number contains invalid characters.', variant: 'destructive' });
       return;
     }
 
-    // Location validation (if provided)
+    // Location validation if provided
     if (userForm.location?.trim()) {
-      const locAlpha = (userForm.location.match(/[a-zA-Z]/g) || []).length;
-      if (locAlpha < 2) {
-        toast({ title: 'Validation Error', description: 'Location must contain at least 2 alphabetic characters.', variant: 'destructive' });
+      const locAlnum = (userForm.location.match(/[a-zA-Z0-9]/g) || []).length;
+      if (locAlnum < 2) {
+        toast({ title: 'Validation Error', description: 'Location must contain at least 2 alphanumeric characters if provided.', variant: 'destructive' });
         return;
       }
     }
 
-    // Bio validation (if provided)
+    // Bio validation if provided (at least 10 alphanumeric chars)
     if (userForm.bio?.trim()) {
       const bioAlnum = (userForm.bio.match(/[a-zA-Z0-9]/g) || []).length;
       if (bioAlnum < 10) {
-        toast({ title: 'Validation Error', description: 'Bio must contain at least 10 alphanumeric characters.', variant: 'destructive' });
+        toast({ title: 'Validation Error', description: 'Bio must contain at least 10 alphanumeric characters if provided.', variant: 'destructive' });
         return;
       }
     }
 
     // Strict email validation
-    const emailRegex = /^[a-zA-Z0-9][a-zA-Z0-9._%+-]*@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     if (!emailRegex.test(userForm.email.trim())) {
-      toast({ title: 'Validation Error', description: 'Please enter a valid email address (e.g., user@example.com).', variant: 'destructive' });
+      toast({ title: 'Validation Error', description: 'Please enter a valid email address.', variant: 'destructive' });
       return;
     }
 
-    // Password strength validation
-    const pwd = userForm.password;
-    if (pwd.length < 8) {
+    // Password strength: min 8 chars, uppercase, lowercase, digit, special char
+    if (userForm.password.length < 8) {
       toast({ title: 'Validation Error', description: 'Password must be at least 8 characters long.', variant: 'destructive' });
       return;
     }
-    if (!/[A-Z]/.test(pwd)) {
+    if (!/[A-Z]/.test(userForm.password)) {
       toast({ title: 'Validation Error', description: 'Password must contain at least one uppercase letter.', variant: 'destructive' });
       return;
     }
-    if (!/[a-z]/.test(pwd)) {
+    if (!/[a-z]/.test(userForm.password)) {
       toast({ title: 'Validation Error', description: 'Password must contain at least one lowercase letter.', variant: 'destructive' });
       return;
     }
-    if (!/[0-9]/.test(pwd)) {
+    if (!/\d/.test(userForm.password)) {
       toast({ title: 'Validation Error', description: 'Password must contain at least one digit.', variant: 'destructive' });
       return;
     }
-    if (!/[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]/.test(pwd)) {
-      toast({ title: 'Validation Error', description: 'Password must contain at least one special character (!@#$%^&* etc.).', variant: 'destructive' });
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(userForm.password)) {
+      toast({ title: 'Validation Error', description: 'Password must contain at least one special character.', variant: 'destructive' });
       return;
     }
 
@@ -992,42 +938,7 @@ const CompanyDashboardPage = () => {
           showNavTabs={true}
           activeSection={activeSection}
           onLogout={handleLogout}
-          navItems={[
-            {
-              label: 'Dashboard',
-              icon: Building2,
-              section: 'dashboard',
-              onClick: () => setActiveSection('dashboard'),
-            },
-            // Only show Project Manager Agent if purchased
-            ...(purchasedModules.includes('project_manager_agent') ? [{
-              label: 'Project Manager Agent',
-              icon: BrainCircuit,
-              section: 'project-manager',
-              onClick: () => navigate('/project-manager/dashboard'),
-            }] : []),
-            // Only show Recruitment Agent if purchased
-            ...(purchasedModules.includes('recruitment_agent') ? [{
-              label: 'Recruitment Agent',
-              icon: UserCheck,
-              section: 'recruitment',
-              onClick: () => navigate('/recruitment/dashboard'),
-            }] : []),
-            // Only show Marketing Agent if purchased
-            ...(purchasedModules.includes('marketing_agent') ? [{
-              label: 'Marketing Agent',
-              icon: Megaphone,
-              section: 'marketing',
-              onClick: () => navigate('/marketing/dashboard'),
-            }] : []),
-            // Only show Frontline Agent if purchased
-            ...(purchasedModules.includes('frontline_agent') ? [{
-              label: 'Frontline Agent',
-              icon: Headphones,
-              section: 'frontline',
-              onClick: () => navigate('/frontline/dashboard'),
-            }] : []),
-          ]}
+          navItems={getAgentNavItems(purchasedModules, 'dashboard', navigate)}
         />
 
         <div className="container mx-auto px-4 py-8 max-w-7xl w-full overflow-x-hidden">
@@ -1836,7 +1747,6 @@ const CompanyDashboardPage = () => {
               </TabsContent>
             )}
 
-            {/* AI Agents Tab */}
             <TabsContent value="ai-agents" className="space-y-4">
               <Card className="bg-[#120d22] border border-[#2d2342]">
                 <CardHeader>
@@ -2100,7 +2010,7 @@ const CompanyDashboardPage = () => {
                   value={jobForm.title}
                   onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })}
                   required
-                  placeholder="e.g., Senior Software Engineer"
+                  placeholder="e.g. Senior Software Engineer"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -2111,7 +2021,7 @@ const CompanyDashboardPage = () => {
                     value={jobForm.location}
                     onChange={(e) => setJobForm({ ...jobForm, location: e.target.value })}
                     required
-                    placeholder="e.g., Remote, New York, London"
+                    placeholder="e.g. New York, NY"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2121,7 +2031,7 @@ const CompanyDashboardPage = () => {
                     value={jobForm.department}
                     onChange={(e) => setJobForm({ ...jobForm, department: e.target.value })}
                     required
-                    placeholder="e.g., Engineering, Marketing, HR"
+                    placeholder="e.g. Engineering"
                   />
                 </div>
               </div>
@@ -2147,7 +2057,7 @@ const CompanyDashboardPage = () => {
                   onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
                   required
                   className="min-h-[100px]"
-                  placeholder="e.g., We are looking for a skilled developer to join our team. The role involves building scalable web applications..."
+                  placeholder="Describe the job role, responsibilities, and what you're looking for..."
                 />
               </div>
               <div className="space-y-2">
@@ -2157,14 +2067,14 @@ const CompanyDashboardPage = () => {
                   value={jobForm.requirements}
                   onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })}
                   className="min-h-[100px]"
-                  placeholder="e.g., 3+ years experience with React, Node.js, strong communication skills, Bachelor's degree in CS..."
+                  placeholder="List the required skills, qualifications, and experience..."
                 />
               </div>
               <div className="flex gap-2 pt-4">
                 <Button type="submit" className="flex-1" disabled={jobSubmitting}>
-                  {jobSubmitting ? 'Posting...' : 'Post Job'}
+                  {jobSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Posting...</> : 'Post Job'}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setShowCreateJobModal(false)} disabled={jobSubmitting}>
+                <Button type="button" variant="outline" onClick={() => setShowCreateJobModal(false)}>
                   Cancel
                 </Button>
               </div>
@@ -2205,7 +2115,7 @@ const CompanyDashboardPage = () => {
                     onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
                     required
                     disabled={!!editingUser}
-                    placeholder="e.g., john.doe@example.com"
+                    placeholder="e.g. user@example.com"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2229,7 +2139,7 @@ const CompanyDashboardPage = () => {
                     onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
                     required
                     minLength={8}
-                    placeholder="Min 8 chars: uppercase, lowercase, digit, special char"
+                    placeholder="Min 8 chars, uppercase, lowercase, digit, special"
                   />
                 </div>
               )}
@@ -2242,7 +2152,7 @@ const CompanyDashboardPage = () => {
                     type="password"
                     value={userForm.password}
                     onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                    minLength={6}
+                    minLength={8}
                   />
                 </div>
               )}
@@ -2255,7 +2165,7 @@ const CompanyDashboardPage = () => {
                     value={userForm.fullName}
                     onChange={(e) => setUserForm({ ...userForm, fullName: e.target.value })}
                     required
-                    placeholder="e.g., John Doe"
+                    placeholder="e.g. John Doe"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2287,7 +2197,7 @@ const CompanyDashboardPage = () => {
                     value={userForm.phoneNumber}
                     onChange={(e) => setUserForm({ ...userForm, phoneNumber: e.target.value })}
                     required
-                    placeholder="e.g., +1 (555) 123-4567"
+                    placeholder="e.g. +1 234 567 8900"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2296,7 +2206,7 @@ const CompanyDashboardPage = () => {
                     id="location"
                     value={userForm.location}
                     onChange={(e) => setUserForm({ ...userForm, location: e.target.value })}
-                    placeholder="e.g., New York, Remote"
+                    placeholder="e.g. San Francisco, CA"
                   />
                 </div>
               </div>
@@ -2308,7 +2218,7 @@ const CompanyDashboardPage = () => {
                   value={userForm.bio}
                   onChange={(e) => setUserForm({ ...userForm, bio: e.target.value })}
                   rows={3}
-                  placeholder="e.g., Full-stack developer with 5 years of experience in React and Node.js..."
+                  placeholder="Tell us about this user's background and expertise..."
                 />
               </div>
               
@@ -2328,7 +2238,7 @@ const CompanyDashboardPage = () => {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={userSubmitting}>
-                  {userSubmitting ? (editingUser ? 'Updating...' : 'Creating...') : (editingUser ? 'Update User' : 'Create User')}
+                  {userSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Submitting...</> : (editingUser ? 'Update User' : 'Create User')}
                 </Button>
               </div>
             </form>

@@ -29,6 +29,7 @@ MODULE_PRICES = {
     'marketing_agent': 149,
     'project_manager_agent': 199,
     'frontline_agent': 149,
+    'operations_agent': 179,
 }
 
 MODULE_DISPLAY_NAMES = {
@@ -36,6 +37,7 @@ MODULE_DISPLAY_NAMES = {
     'marketing_agent': 'Marketing Agent',
     'project_manager_agent': 'Project Manager Agent',
     'frontline_agent': 'Frontline Agent',
+    'operations_agent': 'Operations Agent',
 }
 
 # Subscription duration (30 days per purchase)
@@ -212,9 +214,15 @@ def check_module_access(request, module_name):
                 company=company,
                 module_name=module_name
             )
-            
+
+            # Auto-expire if past expires_at but still marked active in DB
+            if (purchase.status == 'active' and purchase.expires_at
+                    and timezone.now() > purchase.expires_at):
+                purchase.status = 'expired'
+                purchase.save(update_fields=['status'])
+
             has_access = purchase.is_active()
-            
+
             return Response({
                 'status': 'success',
                 'has_access': has_access,

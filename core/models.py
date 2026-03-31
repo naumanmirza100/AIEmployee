@@ -523,8 +523,9 @@ class CompanyUser(models.Model):
         ('recruitment_agent', 'Recruitment Agent'),
         ('frontline_agent', 'Frontline Agent'),
         ('marketing_agent', 'Marketing Agent'),
+        ('operations_agent', 'Operations Agent'),
     ]
-    
+
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
     email = models.EmailField()
     password_hash = models.CharField(max_length=255)
@@ -579,6 +580,7 @@ class CompanyModulePurchase(models.Model):
         ('marketing_agent', 'Marketing Agent'),
         ('project_manager_agent', 'Project Manager Agent'),
         ('frontline_agent', 'Frontline Agent'),
+        ('operations_agent', 'Operations Agent'),
     ]
     
     STATUS_CHOICES = [

@@ -22,7 +22,9 @@
       "Bash(xargs grep:*)",
       "Bash(pip show:*)",
       "Bash(python:*)",
-      "Bash(python manage.py shell -c \":*)"
+      "Bash(python manage.py shell -c \":*)",
+      "Bash(ls celerybeat-schedule.*)",
+      "Bash(cd:*)"
     ]
   }
 }

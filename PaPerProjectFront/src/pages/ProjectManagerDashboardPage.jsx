@@ -16,7 +16,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { projectService } from '@/services';
 import pmAgentService from '@/services/pmAgentService';
-import { checkModuleAccess, getPurchasedModules } from '@/services/modulePurchaseService';
+import { checkModuleAccess } from '@/services/modulePurchaseService';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
+import { getAgentNavItems } from '@/utils/agentNavItems';
 import { 
   BrainCircuit, 
   Target, 
@@ -30,10 +32,7 @@ import {
   Clock,
   Building2,
   ArrowLeft,
-  UserCheck,
   Plus,
-  Megaphone,
-  Headphones,
   Lock,
   Menu,
   Check,
@@ -72,60 +71,11 @@ const ProjectManagerDashboardPage = () => {
   const [companyUser, setCompanyUser] = useState(null);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [purchasedModules, setPurchasedModules] = useState([]);
-  const [modulesLoaded, setModulesLoaded] = useState(false);
-  
+  const { purchasedModules, modulesLoaded } = usePurchasedModules();
+
   // Check if user is a company user
   const isCompanyUser = () => {
     return !!companyUser;
-  };
-
-  const fetchPurchasedModules = async (user = null) => {
-    // If user is passed, use it; otherwise check companyUser state
-    const currentUser = user || companyUser;
-    if (!currentUser) {
-      setModulesLoaded(true);
-      return;
-    }
-    try {
-      // Try to get from localStorage first (cache)
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-          setModulesLoaded(true);
-        } catch (e) {
-          // Invalid cache, continue to fetch
-        }
-      }
-
-      const response = await getPurchasedModules();
-      if (response.status === 'success') {
-        const moduleNames = response.module_names || [];
-        setPurchasedModules(moduleNames);
-        // Cache in localStorage
-        localStorage.setItem('company_purchased_modules', JSON.stringify(moduleNames));
-        setModulesLoaded(true);
-      } else {
-        setModulesLoaded(true);
-      }
-    } catch (error) {
-      console.error('Error fetching purchased modules:', error);
-      // If we have cached modules, use them
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-        } catch (e) {
-          setPurchasedModules([]);
-        }
-      } else {
-        setPurchasedModules([]);
-      }
-      setModulesLoaded(true);
-    }
   };
 
   const checkModuleAccessForUser = async (user = null) => {
@@ -165,35 +115,15 @@ const ProjectManagerDashboardPage = () => {
       try {
         const user = JSON.parse(companyUserStr);
         setCompanyUser(user);
-        
-        // Load cached modules immediately
-        const cachedModules = localStorage.getItem('company_purchased_modules');
-        if (cachedModules) {
-          try {
-            const cached = JSON.parse(cachedModules);
-            setPurchasedModules(cached);
-            setModulesLoaded(true);
-          } catch (e) {
-            // Invalid cache
-          }
-        }
-        
-        // Check module access for company users and fetch purchased modules
-        // Pass user to functions since companyUser state might not be updated yet
-        Promise.all([
-          checkModuleAccessForUser(user),
-          fetchPurchasedModules(user)
-        ]);
+        checkModuleAccessForUser(user);
       } catch (error) {
         console.error('Error parsing company user:', error);
         setCheckingAccess(false);
-        setModulesLoaded(true);
       }
     } else {
       // Regular user (not company user) - allow access
       setHasAccess(true);
       setCheckingAccess(false);
-      setModulesLoaded(true);
     }
   }, []);
 
@@ -333,41 +263,7 @@ const ProjectManagerDashboardPage = () => {
           showNavTabs={isCompanyUser()}
           activeSection={activeSection}
           onLogout={handleLogout}
-          navItems={isCompanyUser() ? [
-            {
-              label: 'Dashboard',
-              icon: Building2,
-              section: 'dashboard',
-              onClick: () => navigate('/company/dashboard'),
-            },
-            {
-              label: 'Project Manager Agent',
-              icon: BrainCircuit,
-              section: 'project-manager',
-              onClick: () => navigate('/project-manager/dashboard'),
-            },
-            // Only show Recruitment Agent if purchased
-            ...(purchasedModules.includes('recruitment_agent') ? [{
-              label: 'Recruitment Agent',
-              icon: UserCheck,
-              section: 'recruitment',
-              onClick: () => navigate('/recruitment/dashboard'),
-            }] : []),
-            // Only show Marketing Agent if purchased
-            ...(purchasedModules.includes('marketing_agent') ? [{
-              label: 'Marketing Agent',
-              icon: Megaphone,
-              section: 'marketing',
-              onClick: () => navigate('/marketing/dashboard'),
-            }] : []),
-            // Only show Frontline Agent if purchased
-            ...(purchasedModules.includes('frontline_agent') ? [{
-              label: 'Frontline Agent',
-              icon: Headphones,
-              section: 'frontline',
-              onClick: () => navigate('/frontline/dashboard'),
-            }] : []),
-          ] : []}
+          navItems={isCompanyUser() ? getAgentNavItems(purchasedModules, 'project-manager', navigate) : []}
         />
 
         {/* Main Content */}

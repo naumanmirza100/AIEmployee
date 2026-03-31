@@ -154,3 +154,92 @@ class PMNotification(models.Model):
 
     def __str__(self):
         return f"[{self.severity}] {self.title}"
+
+
+class ScheduledMeeting(models.Model):
+    """
+    Meeting scheduling between a CompanyUser (organizer) and a project User (invitee).
+    The organizer is the logged-in company user. The invitee is a project team member
+    (Django User) that belongs to the organizer's company.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('counter_proposed', 'Counter Proposed'),
+        ('withdrawn', 'Withdrawn'),
+    ]
+
+    organizer = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='organized_scheduled_meetings',
+        help_text='Company user who scheduled the meeting',
+    )
+    invitee = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='invited_scheduled_meetings',
+        help_text='Project user (Django User) invited to the meeting',
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default='')
+    proposed_time = models.DateTimeField(help_text='Currently proposed meeting time')
+    duration_minutes = models.IntegerField(default=30)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        ordering = ['-created_at']
+        verbose_name = 'Scheduled Meeting'
+        verbose_name_plural = 'Scheduled Meetings'
+
+    def __str__(self):
+        invitee_name = self.invitee.get_full_name() or self.invitee.username
+        return f"{self.title} ({self.organizer.full_name} → {invitee_name}) [{self.status}]"
+
+
+class MeetingResponse(models.Model):
+    """
+    Each response in the meeting negotiation chain.
+    responded_by indicates who responded: 'organizer' (CompanyUser) or 'invitee' (project User).
+    """
+    ACTION_CHOICES = [
+        ('proposed', 'Proposed'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('counter_proposed', 'Counter Proposed'),
+        ('withdrawn', 'Withdrawn'),
+    ]
+    RESPONDED_BY_CHOICES = [
+        ('organizer', 'Organizer'),
+        ('invitee', 'Invitee'),
+    ]
+
+    meeting = models.ForeignKey(
+        ScheduledMeeting,
+        on_delete=models.CASCADE,
+        related_name='responses',
+    )
+    responded_by = models.CharField(
+        max_length=20,
+        choices=RESPONDED_BY_CHOICES,
+        default='organizer',
+        help_text='Who responded: organizer (CompanyUser) or invitee (project User)',
+    )
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    proposed_time = models.DateTimeField(
+        null=True, blank=True,
+        help_text='New proposed time (for counter-proposals)',
+    )
+    reason = models.TextField(blank=True, default='', help_text='Reason for rejection or counter-proposal')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.responded_by} → {self.action} ({self.meeting.title})"

@@ -34,6 +34,7 @@ from api.views import recruitment_agent
 from api.views import marketing_agent
 from api.views import frontline_agent
 from api.views import module_purchase
+from api.views import operations_agent
 from api.views.health import health_check
 
 app_name = 'api'
@@ -218,6 +219,11 @@ urlpatterns = [
     re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
     re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),
 
+    # Meeting Scheduler endpoints
+    re_path(r'^project-manager/ai/meetings/schedule/?$', pm_agent.meeting_schedule, name='pm_meeting_schedule'),
+    re_path(r'^project-manager/ai/meetings/respond/?$', pm_agent.meeting_respond, name='pm_meeting_respond'),
+    re_path(r'^project-manager/ai/meetings/?$', pm_agent.meeting_list, name='pm_meeting_list'),
+
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST
     re_path(r'^chatbot/messages/?$', chatbot.send_chatbot_message, name='send_chatbot_message'),  # POST
@@ -387,6 +393,13 @@ urlpatterns = [
     re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/delete/?$', frontline_agent.frontline_graph_prompts_delete, name='frontline_graph_prompts_delete'),  # DELETE
     re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', frontline_agent.frontline_graph_prompts_favorite, name='frontline_graph_prompts_favorite'),  # PATCH
     re_path(r'^frontline/analytics/export/?$', frontline_agent.frontline_analytics_export, name='frontline_analytics_export'),  # GET
+
+    # Operations Agent endpoints
+    re_path(r'^operations/dashboard/?$', operations_agent.dashboard_stats, name='operations_dashboard_stats'),  # GET
+    re_path(r'^operations/documents/upload/?$', operations_agent.upload_document, name='operations_upload_document'),  # POST
+    re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
