@@ -111,17 +111,21 @@ Be concise, factual, and highlight anything that needs attention."""
 
         for name, data in member_summaries.items():
             standup_context += f"\n--- {name} ---\n"
-            standup_context += f"Total assigned ({len(data['tasks_assigned'])}): {', '.join(f'\"{t}\"' for t in data['tasks_assigned'])}\n"
+            assigned_str = ', '.join(f'"{t}"' for t in data['tasks_assigned'])
+            standup_context += f"Total assigned ({len(data['tasks_assigned'])}): {assigned_str}\n"
             if data['tasks_in_progress']:
-                standup_context += f"In Progress: {', '.join(f'\"{t}\"' for t in data['tasks_in_progress'])}\n"
+                ip_str = ', '.join(f'"{t}"' for t in data['tasks_in_progress'])
+                standup_context += f"In Progress: {ip_str}\n"
             else:
                 standup_context += "In Progress: None\n"
             if data['tasks_completed_recently']:
-                standup_context += f"Completed: {', '.join(f'\"{t}\"' for t in data['tasks_completed_recently'])}\n"
+                comp_str = ', '.join(f'"{t}"' for t in data['tasks_completed_recently'])
+                standup_context += f"Completed: {comp_str}\n"
             else:
                 standup_context += "Completed: None\n"
             if data['tasks_blocked']:
-                standup_context += f"BLOCKED: {', '.join(f'\"{t}\"' for t in data['tasks_blocked'])}\n"
+                blocked_str = ', '.join(f'"{t}"' for t in data['tasks_blocked'])
+                standup_context += f"BLOCKED: {blocked_str}\n"
             if not data['tasks_in_progress'] and not data['tasks_completed_recently'] and not data['recent_activity']:
                 standup_context += "STATUS: No recent activity\n"
             if data['recent_activity']:
