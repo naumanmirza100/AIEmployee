@@ -12,7 +12,7 @@ django.setup()
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
 
-email = 'darkknightmughal@gmail.com'
+email = 'darkknightmughal@gmail.com' 
 
 try:
     user = User.objects.get(email=email)
