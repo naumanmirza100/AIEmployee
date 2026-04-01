@@ -119,7 +119,8 @@ db.sqlite3-journal
 /static/
 
     # Django settings (project-specific configurations)
-project_manager_ai/settings.py
+project_m
+anager_ai/settings.py
 **/settings.py
 
 # Logs and log files

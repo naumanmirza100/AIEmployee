@@ -9,7 +9,27 @@ const CACHE_KEY = 'company_purchased_modules';
  */
 const usePurchasedModules = () => {
   const [purchasedModules, setPurchasedModules] = useState([]);
+  const [allPurchases, setAllPurchases] = useState([]);
   const [modulesLoaded, setModulesLoaded] = useState(false);
+
+  const fetchModules = async () => {
+    try {
+      const response = await getPurchasedModules();
+      if (response.status === 'success') {
+        const moduleNames = response.module_names || [];
+        setPurchasedModules(moduleNames);
+        setAllPurchases(response.all_purchases || []);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(moduleNames));
+      }
+    } catch (error) {
+      console.error('Error fetching purchased modules:', error);
+      if (!localStorage.getItem(CACHE_KEY)) {
+        setPurchasedModules([]);
+      }
+    } finally {
+      setModulesLoaded(true);
+    }
+  };
 
   useEffect(() => {
     // Load cache immediately for instant render
@@ -23,30 +43,10 @@ const usePurchasedModules = () => {
       }
     }
 
-    // Fetch fresh data from API
-    const fetchModules = async () => {
-      try {
-        const response = await getPurchasedModules();
-        if (response.status === 'success') {
-          const moduleNames = response.module_names || [];
-          setPurchasedModules(moduleNames);
-          localStorage.setItem(CACHE_KEY, JSON.stringify(moduleNames));
-        }
-      } catch (error) {
-        console.error('Error fetching purchased modules:', error);
-        // If no cache was loaded earlier, set empty
-        if (!localStorage.getItem(CACHE_KEY)) {
-          setPurchasedModules([]);
-        }
-      } finally {
-        setModulesLoaded(true);
-      }
-    };
-
     fetchModules();
   }, []);
 
-  return { purchasedModules, modulesLoaded };
+  return { purchasedModules, allPurchases, modulesLoaded, refetch: fetchModules };
 };
 
 export default usePurchasedModules;

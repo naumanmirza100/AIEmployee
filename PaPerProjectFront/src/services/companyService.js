@@ -60,10 +60,45 @@ export const generateToken = async (companyId) => {
   }
 };
 
+/**
+ * Get all company AI agent purchases (Admin only)
+ */
+export const getCompanyAgents = async (params = {}) => {
+  try {
+    const queryParams = {};
+    if (params.page) queryParams.page = params.page;
+    if (params.limit) queryParams.limit = params.limit;
+    if (params.search) queryParams.search = params.search;
+    if (params.status) queryParams.status = params.status;
+    if (params.module) queryParams.module = params.module;
+
+    const response = await api.get('/admin/company-agents', queryParams);
+    return response;
+  } catch (error) {
+    console.error('Get company agents error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Toggle company AI agent status (Admin only)
+ */
+export const toggleCompanyAgentStatus = async (purchaseId, newStatus) => {
+  try {
+    const response = await api.patch(`/admin/company-agents/${purchaseId}/toggle-status`, { status: newStatus });
+    return response;
+  } catch (error) {
+    console.error('Toggle company agent status error:', error);
+    throw error;
+  }
+};
+
 export default {
   createCompany,
   getAllCompanies,
   getCompanyTokens,
   generateToken,
+  getCompanyAgents,
+  toggleCompanyAgentStatus,
 };
 
