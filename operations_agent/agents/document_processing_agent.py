@@ -95,6 +95,11 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         # 4. Extract entities via LLM
         entities = self._extract_entities(text=extracted_text[:4000])
 
+        # 4b. Generate summary & key insights via LLM
+        summary_result = self._generate_summary(text=extracted_text[:5000])
+        summary = summary_result.get('summary', '') if isinstance(summary_result, dict) else ''
+        key_insights = summary_result.get('key_insights', []) if isinstance(summary_result, dict) else []
+
         # 5. Build metadata
         metadata = {
             'original_filename': original_filename,
@@ -119,6 +124,8 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             file_size=file_size,
             page_count=page_count,
             parsed_text=extracted_text,
+            summary=summary,
+            key_insights=key_insights,
             metadata=metadata,
             entities=entities.get('entities', {}) if isinstance(entities, dict) else {},
             tags=tags,
@@ -157,6 +164,8 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                 'word_count': metadata['word_count'],
                 'chunks_created': len(chunk_objs),
                 'entities': doc.entities,
+                'summary': summary,
+                'key_insights': key_insights,
             },
         }
 
@@ -358,3 +367,43 @@ Return ONLY valid JSON. No explanation."""
         except Exception as e:
             logger.warning(f'Entity extraction failed: {e}')
             return {'entities': {}}
+
+    # ------------------------------------------------------------------
+    # LLM-based summary generation
+    # ------------------------------------------------------------------
+    def _generate_summary(self, text: str = '', **kwargs) -> Dict:
+        """Generate a concise summary and key insights from document text."""
+        if not text:
+            return {'summary': '', 'key_insights': []}
+        try:
+            prompt = f"""Analyze the following document and provide:
+1. A clear, concise summary (3-5 sentences) that captures the main purpose, content, and conclusions.
+2. A list of 3-6 key insights or findings from the document.
+
+Document excerpt:
+\"\"\"
+{text[:4500]}
+\"\"\"
+
+Return ONLY valid JSON in this exact format:
+{{
+  "summary": "Your summary here...",
+  "key_insights": ["Insight 1", "Insight 2", "Insight 3"]
+}}
+
+No explanation outside the JSON."""
+
+            result = self._call_llm_for_reasoning(prompt, temperature=0.2, max_tokens=800)
+
+            import json
+            cleaned = result.strip()
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('\n', 1)[-1].rsplit('```', 1)[0]
+            parsed = json.loads(cleaned)
+            return {
+                'summary': parsed.get('summary', ''),
+                'key_insights': parsed.get('key_insights', []),
+            }
+        except Exception as e:
+            logger.warning(f'Summary generation failed: {e}')
+            return {'summary': '', 'key_insights': []}

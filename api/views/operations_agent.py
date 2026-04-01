@@ -144,8 +144,11 @@ def list_documents(request):
                 'tags': doc.tags,
                 'entities': doc.entities,
                 'metadata': doc.metadata,
+                'summary': doc.summary or '',
+                'key_insights': doc.key_insights or [],
                 'uploaded_by': doc.uploaded_by.full_name if doc.uploaded_by else None,
                 'created_at': doc.created_at.isoformat(),
+                'processed_at': doc.processed_at.isoformat() if doc.processed_at else None,
             })
 
         return Response({
@@ -184,6 +187,8 @@ def get_document(request, document_id):
                 'page_count': doc.page_count,
                 'parsed_text': doc.parsed_text[:5000] if doc.parsed_text else '',
                 'full_text_length': len(doc.parsed_text) if doc.parsed_text else 0,
+                'summary': doc.summary or '',
+                'key_insights': doc.key_insights or [],
                 'metadata': doc.metadata,
                 'entities': doc.entities,
                 'tags': doc.tags,

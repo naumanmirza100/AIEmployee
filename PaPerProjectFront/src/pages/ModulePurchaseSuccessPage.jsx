@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Home, LayoutDashboard, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getCompanyUser } from '@/services/companyAuthService';
-import { verifySession } from '@/services/modulePurchaseService';
+import { verifySession, getPurchasedModules } from '@/services/modulePurchaseService';
+
+const CACHE_KEY = 'company_purchased_modules';
 
 const ModulePurchaseSuccessPage = () => {
   const navigate = useNavigate();
@@ -14,23 +16,33 @@ const ModulePurchaseSuccessPage = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    localStorage.removeItem('company_purchased_modules');
-  }, []);
-
-  useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
     (async () => {
       try {
+        // 1. Verify the Stripe session and activate the module in DB
         await verifySession(sessionId);
-        if (!cancelled) {
-          setVerified(true);
-          setError(null);
+        if (cancelled) return;
+        setVerified(true);
+        setError(null);
+
+        // 2. After successful verification, immediately refresh the purchased modules cache
+        //    so the dashboard has the correct data when the user navigates there.
+        try {
+          const response = await getPurchasedModules();
+          if (response.status === 'success') {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(response.module_names || []));
+          }
+        } catch {
+          // If refetch fails, just clear the cache so the hook will re-fetch fresh on dashboard load
+          localStorage.removeItem(CACHE_KEY);
         }
       } catch (e) {
         if (!cancelled) {
           setError(e?.message || 'Could not verify payment.');
           setVerified(false);
+          // Still clear cache so dashboard fetches fresh on next load
+          localStorage.removeItem(CACHE_KEY);
         }
       } finally {
         if (!cancelled) setVerifying(false);

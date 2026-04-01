@@ -69,6 +69,7 @@ const OperationsAgentPage = () => {
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
     localStorage.removeItem('company_user');
+    localStorage.removeItem('company_purchased_modules');
     navigate('/company/login');
   };
 

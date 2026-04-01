@@ -43,6 +43,8 @@ class OperationsDocument(models.Model):
     file_size = models.PositiveIntegerField(default=0)
     page_count = models.PositiveIntegerField(default=0)
     parsed_text = models.TextField(blank=True)
+    summary = models.TextField(blank=True, help_text='AI-generated document summary')
+    key_insights = models.JSONField(default=list, blank=True, help_text='List of key insights/findings')
     metadata = models.JSONField(default=dict, blank=True)
     entities = models.JSONField(default=dict, blank=True)
     tags = models.CharField(max_length=500, blank=True)
