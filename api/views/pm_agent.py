@@ -16,6 +16,8 @@ from project_manager_agent.models import (
     PMNotification,
     ScheduledMeeting,
     MeetingResponse,
+    PMMeetingSchedulerChat,
+    PMMeetingSchedulerChatMessage,
 )
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
@@ -4160,7 +4162,7 @@ def meeting_schedule(request):
                 organizer=company_user,
                 invitee=invitee_user,
                 title=meeting_title,
-                description=data.get("description", ""),
+                description=data.get("description") or "",
                 proposed_time=proposed_time,
                 duration_minutes=data.get("duration_minutes", 30),
                 status='pending',
@@ -4172,6 +4174,17 @@ def meeting_schedule(request):
                 responded_by='organizer',
                 action='proposed',
                 proposed_time=proposed_time,
+            )
+
+            # Create in-app notification for invitee (project user dashboard)
+            from core.models import Notification as UserNotification
+            UserNotification.objects.create(
+                user=invitee_user,
+                type='meeting_request',
+                notification_type='meeting_request',
+                title=f"Meeting Request from {company_user.full_name}",
+                message=f'{company_user.full_name} wants to schedule "{meeting.title}" on {time_display} ({meeting.duration_minutes} min). Please accept or reject.',
+                action_url=f'/meetings/{meeting.id}/respond',
             )
 
             # Send email to invitee if they have an email
@@ -4290,49 +4303,60 @@ def meeting_respond(request):
             meeting.status = 'withdrawn'
         meeting.save()
 
-        # Notify the invitee (project User) via email
+        # Notify the invitee (project User) via in-app notification + email
+        from core.models import Notification as UserNotification
         invitee_name = meeting.invitee.get_full_name() or meeting.invitee.username
         invitee_email = meeting.invitee.email
-        time_display = meeting.proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
+        time_display = meeting.proposed_time.strftime("%A, %B %d, %Y at %I:%M %p") if meeting.proposed_time else "TBD"
 
         if action == 'accepted':
-            # This shouldn't happen from organizer side normally, but handle it
+            UserNotification.objects.create(
+                user=meeting.invitee, type='meeting_accepted', notification_type='meeting_request',
+                title=f"Meeting Confirmed: {meeting.title}",
+                message=f'{company_user.full_name} confirmed the meeting "{meeting.title}" on {time_display}.',
+                action_url=f'/meetings/{meeting.id}/respond',
+            )
             if invitee_email:
-                _send_meeting_email(
-                    recipient_email=invitee_email,
-                    subject=f"Meeting Confirmed: {meeting.title}",
-                    body_html=f"<p><strong>{company_user.full_name}</strong> has confirmed the meeting <strong>\"{meeting.title}\"</strong> on {time_display}.</p>",
-                )
+                _send_meeting_email(recipient_email=invitee_email, subject=f"Meeting Confirmed: {meeting.title}",
+                    body_html=f"<p><strong>{company_user.full_name}</strong> has confirmed the meeting <strong>\"{meeting.title}\"</strong> on {time_display}.</p>")
 
         elif action == 'rejected':
             reason_text = f" Reason: {reason}" if reason else ""
+            UserNotification.objects.create(
+                user=meeting.invitee, type='meeting_rejected', notification_type='meeting_request',
+                title=f"Meeting Cancelled: {meeting.title}",
+                message=f'{company_user.full_name} cancelled the meeting "{meeting.title}".{reason_text}',
+            )
             if invitee_email:
-                _send_meeting_email(
-                    recipient_email=invitee_email,
-                    subject=f"Meeting Cancelled: {meeting.title}",
-                    body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.{' Reason: ' + reason if reason else ''}</p>",
-                )
+                _send_meeting_email(recipient_email=invitee_email, subject=f"Meeting Cancelled: {meeting.title}",
+                    body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.{' Reason: ' + reason if reason else ''}</p>")
 
         elif action == 'counter_proposed':
             new_time_display = counter_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            reason_text = f" Reason: {reason}" if reason else ""
+            UserNotification.objects.create(
+                user=meeting.invitee, type='meeting_counter_proposed', notification_type='meeting_request',
+                title=f"New Time Proposed: {meeting.title}",
+                message=f'{company_user.full_name} suggested a new time for "{meeting.title}": {new_time_display}.{reason_text}',
+                action_url=f'/meetings/{meeting.id}/respond',
+            )
             if invitee_email:
-                _send_meeting_email(
-                    recipient_email=invitee_email,
-                    subject=f"New Time Proposed: {meeting.title}",
-                    body_html=f"""
-                    <p><strong>{company_user.full_name}</strong> proposed a new time for <strong>\"{meeting.title}\"</strong>.</p>
-                    <p><strong>New proposed time:</strong> {new_time_display}</p>
-                    {'<p><strong>Reason:</strong> ' + reason + '</p>' if reason else ''}
-                    """,
-                )
+                _send_meeting_email(recipient_email=invitee_email, subject=f"New Time Proposed: {meeting.title}",
+                    body_html=f"""<p><strong>{company_user.full_name}</strong> proposed a new time for <strong>\"{meeting.title}\"</strong>.</p>
+                    <p><strong>New proposed time:</strong> {new_time_display}</p>{'<p><strong>Reason:</strong> ' + reason + '</p>' if reason else ''}""")
 
         elif action == 'withdrawn':
+            UserNotification.objects.create(
+                user=meeting.invitee, type='meeting_withdrawn', notification_type='meeting_request',
+                title=f"Meeting Withdrawn: {meeting.title}",
+                message=f'{company_user.full_name} has withdrawn the meeting request "{meeting.title}".',
+            )
             if invitee_email:
                 _send_meeting_email(
                     recipient_email=invitee_email,
                     subject=f"Meeting Cancelled: {meeting.title}",
                     body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.</p>",
-            )
+                )
 
         return Response({
             "status": "success",
@@ -4384,3 +4408,92 @@ def meeting_list(request):
     except Exception as e:
         logger.exception("meeting_list failed")
         return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== MEETING SCHEDULER CHAT CRUD ====================
+
+def _serialize_meeting_chat(chat):
+    messages = []
+    for msg in chat.messages.order_by('created_at'):
+        m = {'role': msg.role, 'content': msg.content}
+        if msg.response_data:
+            m['responseData'] = msg.response_data
+        messages.append(m)
+    return {
+        'id': str(chat.id),
+        'title': chat.title or 'Chat',
+        'messages': messages,
+        'updatedAt': chat.updated_at.isoformat(),
+        'timestamp': chat.updated_at.isoformat(),
+    }
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_meeting_scheduler_chats(request):
+    try:
+        chats = PMMeetingSchedulerChat.objects.filter(company_user=request.user).order_by('-updated_at')[:50]
+        return Response({'status': 'success', 'data': [_serialize_meeting_chat(c) for c in chats]})
+    except Exception as e:
+        logger.exception("list_meeting_scheduler_chats error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_meeting_scheduler_chat(request):
+    try:
+        data = request.data if isinstance(request.data, dict) else {}
+        title = (data.get('title') or 'Chat')[:255]
+        chat = PMMeetingSchedulerChat.objects.create(company_user=request.user, title=title)
+        for m in (data.get('messages') or []):
+            PMMeetingSchedulerChatMessage.objects.create(
+                chat=chat, role=m.get('role', 'user'),
+                content=m.get('content', ''), response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_meeting_chat(chat)})
+    except Exception as e:
+        logger.exception("create_meeting_scheduler_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_meeting_scheduler_chat(request, chat_id):
+    try:
+        chat = PMMeetingSchedulerChat.objects.filter(company_user=request.user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get('title'):
+            chat.title = str(data['title'])[:255]
+            chat.save(update_fields=['title', 'updated_at'])
+        for m in (data.get('messages') or []):
+            PMMeetingSchedulerChatMessage.objects.create(
+                chat=chat, role=m.get('role', 'user'),
+                content=m.get('content', ''), response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_meeting_chat(chat)})
+    except Exception as e:
+        logger.exception("update_meeting_scheduler_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_meeting_scheduler_chat(request, chat_id):
+    try:
+        chat = PMMeetingSchedulerChat.objects.filter(company_user=request.user, id=chat_id).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except Exception as e:
+        logger.exception("delete_meeting_scheduler_chat error")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

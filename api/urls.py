@@ -130,6 +130,10 @@ urlpatterns = [
     re_path(r'^notifications/?$', notification.list_notifications, name='list_notifications'),
     re_path(r'^notifications/(?P<id>\d+)/read/?$', notification.mark_notification_read, name='mark_notification_read'),
     re_path(r'^notifications/read-all/?$', notification.mark_all_notifications_read, name='mark_all_notifications_read'),
+
+    # Meeting endpoints for project users (Django Users)
+    re_path(r'^meetings/?$', notification.meeting_list_for_user, name='user_meeting_list'),
+    re_path(r'^meetings/(?P<meeting_id>\d+)/respond/?$', notification.meeting_respond, name='user_meeting_respond'),
     
     # Company endpoints
     re_path(r'^companies/?$', company.list_companies, name='list_companies'),  # GET
@@ -217,6 +221,11 @@ urlpatterns = [
     re_path(r'^project-manager/ai/meetings/schedule/?$', pm_agent.meeting_schedule, name='pm_meeting_schedule'),
     re_path(r'^project-manager/ai/meetings/respond/?$', pm_agent.meeting_respond, name='pm_meeting_respond'),
     re_path(r'^project-manager/ai/meetings/?$', pm_agent.meeting_list, name='pm_meeting_list'),
+    # Meeting Scheduler Chat CRUD
+    re_path(r'^project-manager/ai/meeting-scheduler/chats/?$', pm_agent.list_meeting_scheduler_chats, name='pm_meeting_scheduler_chats_list'),
+    re_path(r'^project-manager/ai/meeting-scheduler/chats/create/?$', pm_agent.create_meeting_scheduler_chat, name='pm_meeting_scheduler_chats_create'),
+    re_path(r'^project-manager/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_meeting_scheduler_chat, name='pm_meeting_scheduler_chats_update'),
+    re_path(r'^project-manager/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_meeting_scheduler_chat, name='pm_meeting_scheduler_chats_delete'),
 
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST

@@ -1195,6 +1195,7 @@ class Notification(models.Model):
         ('deadline_approaching', 'Deadline Approaching'),
         ('milestone_reached', 'Milestone Reached'),
         ('mention', 'Mention'),
+        ('meeting_request', 'Meeting Request'),
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
