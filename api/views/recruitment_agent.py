@@ -647,6 +647,43 @@ def create_job_description(request):
                 'status': 'error',
                 'message': 'Missing required fields: title, description'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate fields contain meaningful text (at least 2 alphanumeric chars)
+        def _check_meaningful(value, field_name):
+            alnum_count = sum(1 for c in value if c.isalnum())
+            if alnum_count < 2:
+                return f'{field_name} must contain at least 2 alphanumeric characters.'
+            return None
+
+        err = _check_meaningful(title, 'Title')
+        if err:
+            return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Description must have at least 20 alphanumeric chars
+        desc_alnum = sum(1 for c in description if c.isalnum())
+        if desc_alnum < 20:
+            return Response({
+                'status': 'error',
+                'message': 'Description must contain at least 20 alphanumeric characters. Please provide a meaningful description.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Requirements validation (if provided)
+        if requirements:
+            req_alnum = sum(1 for c in requirements if c.isalnum())
+            if req_alnum < 10:
+                return Response({
+                    'status': 'error',
+                    'message': 'Requirements must contain at least 10 alphanumeric characters if provided.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        for val, name in [(location, 'Location'), (department, 'Department')]:
+            if val:
+                err = _check_meaningful(val, name)
+                if err:
+                    return Response({
+                        'status': 'error',
+                        'message': err
+                    }, status=status.HTTP_400_BAD_REQUEST)
         
         # Parse keywords if requested
         keywords_json = None

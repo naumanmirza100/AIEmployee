@@ -598,6 +598,7 @@ class CompanyModulePurchase(models.Model):
     purchased_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(null=True, blank=True, help_text="Subscription expiration date (null for lifetime)")
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_reason = models.CharField(max_length=50, blank=True, null=True, help_text="Reason for cancellation (e.g., 'admin_deactivated', 'user_cancelled')")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
