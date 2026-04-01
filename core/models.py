@@ -523,8 +523,9 @@ class CompanyUser(models.Model):
         ('recruitment_agent', 'Recruitment Agent'),
         ('frontline_agent', 'Frontline Agent'),
         ('marketing_agent', 'Marketing Agent'),
+        ('operations_agent', 'Operations Agent'),
     ]
-    
+
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
     email = models.EmailField()
     password_hash = models.CharField(max_length=255)
@@ -579,6 +580,7 @@ class CompanyModulePurchase(models.Model):
         ('marketing_agent', 'Marketing Agent'),
         ('project_manager_agent', 'Project Manager Agent'),
         ('frontline_agent', 'Frontline Agent'),
+        ('operations_agent', 'Operations Agent'),
     ]
     
     STATUS_CHOICES = [
@@ -596,6 +598,7 @@ class CompanyModulePurchase(models.Model):
     purchased_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(null=True, blank=True, help_text="Subscription expiration date (null for lifetime)")
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_reason = models.CharField(max_length=50, blank=True, null=True, help_text="Reason for cancellation (e.g., 'admin_deactivated', 'user_cancelled')")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

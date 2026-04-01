@@ -6,18 +6,18 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
-import { Headphones, Loader2, Lock } from 'lucide-react';
+import { FileSearch, Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
-const FrontlineAgentPage = () => {
+const OperationsAgentPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [companyUser, setCompanyUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [activeSection] = useState('frontline');
+  const [activeSection] = useState('operations');
   const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
   useEffect(() => {
@@ -25,7 +25,7 @@ const FrontlineAgentPage = () => {
     if (!companyUserStr) {
       toast({
         title: 'Not logged in',
-        description: 'Please log in to access the frontline agent',
+        description: 'Please log in to access the operations agent',
         variant: 'destructive',
       });
       navigate('/company/login');
@@ -47,13 +47,13 @@ const FrontlineAgentPage = () => {
   const checkModuleAccessForUser = async () => {
     try {
       setCheckingAccess(true);
-      const response = await checkModuleAccess('frontline_agent');
+      const response = await checkModuleAccess('operations_agent');
       if (response.status === 'success') {
         setHasAccess(response.has_access);
         if (!response.has_access) {
           toast({
             title: 'Module Not Purchased',
-            description: 'Please purchase the Frontline Agent module to access this dashboard',
+            description: 'Please purchase the Operations Agent module to access this dashboard',
             variant: 'default',
           });
         }
@@ -99,7 +99,7 @@ const FrontlineAgentPage = () => {
               </div>
               <CardTitle className="text-center">Module Not Purchased</CardTitle>
               <CardDescription className="text-center">
-                You need to purchase the Frontline Agent module to access this dashboard.
+                You need to purchase the Operations Agent module to access this dashboard.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -126,7 +126,7 @@ const FrontlineAgentPage = () => {
   return (
     <>
       <Helmet>
-        <title>Frontline Agent | Pay Per Project</title>
+        <title>Operations Agent | Pay Per Project</title>
       </Helmet>
       <div
         className="min-h-screen"
@@ -135,15 +135,15 @@ const FrontlineAgentPage = () => {
         }}
       >
         <DashboardNavbar
-          icon={Headphones}
-          title={companyUser.companyName || 'Frontline Agent'}
+          icon={FileSearch}
+          title={companyUser.companyName || 'Operations Agent'}
           subtitle={companyUser.fullName}
           user={companyUser}
           userRole="Company User"
           showNavTabs={true}
           activeSection={activeSection}
           onLogout={handleLogout}
-          navItems={getAgentNavItems(purchasedModules, 'frontline', navigate)}
+          navItems={getAgentNavItems(purchasedModules, 'operations', navigate)}
         />
 
         <div className="container mx-auto px-4 py-8">
@@ -154,4 +154,4 @@ const FrontlineAgentPage = () => {
   );
 };
 
-export default FrontlineAgentPage;
+export default OperationsAgentPage;

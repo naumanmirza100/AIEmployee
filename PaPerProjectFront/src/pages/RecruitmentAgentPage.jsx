@@ -4,16 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
-import { checkModuleAccess, getPurchasedModules } from '@/services/modulePurchaseService';
-import { 
-  UserCheck, 
-  Building2, 
-  BrainCircuit, 
-  Megaphone,
-  Headphones,
-  Loader2,
-  Lock
-} from 'lucide-react';
+import { checkModuleAccess } from '@/services/modulePurchaseService';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
+import { getAgentNavItems } from '@/utils/agentNavItems';
+import { UserCheck, Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
@@ -24,12 +18,10 @@ const RecruitmentAgentPage = () => {
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [activeSection, setActiveSection] = useState('recruitment');
-  const [purchasedModules, setPurchasedModules] = useState([]);
-  const [modulesLoaded, setModulesLoaded] = useState(false);
+  const [activeSection] = useState('recruitment');
+  const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
   useEffect(() => {
-    // Get company user from localStorage
     const companyUserStr = localStorage.getItem('company_user');
     if (!companyUserStr) {
       toast({
@@ -40,30 +32,11 @@ const RecruitmentAgentPage = () => {
       navigate('/company/login');
       return;
     }
-    
+
     try {
       const user = JSON.parse(companyUserStr);
       setCompanyUser(user);
-      
-      // Load cached modules immediately
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-          setModulesLoaded(true);
-        } catch (e) {
-          // Invalid cache
-        }
-      }
-      
-      // Check module access and fetch purchased modules (will update cache)
-      Promise.all([
-        checkModuleAccessForUser(),
-        fetchPurchasedModules()
-      ]).finally(() => {
-        setLoading(false);
-      });
+      checkModuleAccessForUser().finally(() => setLoading(false));
     } catch (error) {
       console.error('Error parsing company user:', error);
       localStorage.removeItem('company_user');
@@ -71,48 +44,6 @@ const RecruitmentAgentPage = () => {
       setLoading(false);
     }
   }, [navigate, toast]);
-
-  const fetchPurchasedModules = async () => {
-    try {
-      // Try to get from localStorage first (cache)
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-          setModulesLoaded(true);
-        } catch (e) {
-          // Invalid cache, continue to fetch
-        }
-      }
-
-      const response = await getPurchasedModules();
-      if (response.status === 'success') {
-        const moduleNames = response.module_names || [];
-        setPurchasedModules(moduleNames);
-        // Cache in localStorage
-        localStorage.setItem('company_purchased_modules', JSON.stringify(moduleNames));
-        setModulesLoaded(true);
-      } else {
-        setModulesLoaded(true);
-      }
-    } catch (error) {
-      console.error('Error fetching purchased modules:', error);
-      // If we have cached modules, use them
-      const cachedModules = localStorage.getItem('company_purchased_modules');
-      if (cachedModules) {
-        try {
-          const cached = JSON.parse(cachedModules);
-          setPurchasedModules(cached);
-        } catch (e) {
-          setPurchasedModules([]);
-        }
-      } else {
-        setPurchasedModules([]);
-      }
-      setModulesLoaded(true);
-    }
-  };
 
   const checkModuleAccessForUser = async () => {
     try {
@@ -130,7 +61,6 @@ const RecruitmentAgentPage = () => {
       }
     } catch (error) {
       console.error('Error checking module access:', error);
-      // On error, allow access (graceful degradation)
       setHasAccess(true);
     } finally {
       setCheckingAccess(false);
@@ -140,6 +70,7 @@ const RecruitmentAgentPage = () => {
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
     localStorage.removeItem('company_user');
+    localStorage.removeItem('company_purchased_modules');
     navigate('/company/login');
   };
 
@@ -155,7 +86,6 @@ const RecruitmentAgentPage = () => {
     return null;
   }
 
-  // Show access denied if module not purchased
   if (!hasAccess) {
     return (
       <>
@@ -174,14 +104,14 @@ const RecruitmentAgentPage = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button 
-                onClick={() => navigate('/')} 
+              <Button
+                onClick={() => navigate('/')}
                 className="w-full"
               >
                 Go to Home Page to Purchase
               </Button>
-              <Button 
-                onClick={() => navigate('/company/dashboard')} 
+              <Button
+                onClick={() => navigate('/company/dashboard')}
                 variant="outline"
                 className="w-full"
               >
@@ -205,7 +135,6 @@ const RecruitmentAgentPage = () => {
           background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)',
         }}
       >
-        {/* Header */}
         <DashboardNavbar
           icon={UserCheck}
           title={companyUser.companyName || 'Recruitment Agent'}
@@ -215,41 +144,7 @@ const RecruitmentAgentPage = () => {
           showNavTabs={true}
           activeSection={activeSection}
           onLogout={handleLogout}
-          navItems={[
-            {
-              label: 'Dashboard',
-              icon: Building2,
-              section: 'dashboard',
-              onClick: () => navigate('/company/dashboard'),
-            },
-            // Only show Project Manager Agent if purchased
-            ...(purchasedModules.includes('project_manager_agent') ? [{
-              label: 'Project Manager Agent',
-              icon: BrainCircuit,
-              section: 'project-manager',
-              onClick: () => navigate('/project-manager/dashboard'),
-            }] : []),
-            {
-              label: 'Recruitment Agent',
-              icon: UserCheck,
-              section: 'recruitment',
-              onClick: () => navigate('/recruitment/dashboard'),
-            },
-            // Show Marketing Agent if purchased (always show current page's module)
-            ...(purchasedModules.includes('marketing_agent') ? [{
-              label: 'Marketing Agent',
-              icon: Megaphone,
-              section: 'marketing',
-              onClick: () => navigate('/marketing/dashboard'),
-            }] : []),
-            // Show Frontline Agent if purchased
-            ...(purchasedModules.includes('frontline_agent') ? [{
-              label: 'Frontline Agent',
-              icon: Headphones,
-              section: 'frontline',
-              onClick: () => navigate('/frontline/dashboard'),
-            }] : []),
-          ]}
+          navItems={getAgentNavItems(purchasedModules, 'recruitment', navigate)}
         />
 
         <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-full overflow-x-hidden">
@@ -261,4 +156,3 @@ const RecruitmentAgentPage = () => {
 };
 
 export default RecruitmentAgentPage;
-

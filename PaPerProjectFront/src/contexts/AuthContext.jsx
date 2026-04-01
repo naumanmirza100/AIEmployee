@@ -90,6 +90,7 @@ export const AuthProvider = ({ children }) => {
       // Clear company user data
       localStorage.removeItem('company_auth_token');
       localStorage.removeItem('company_user');
+      localStorage.removeItem('company_purchased_modules');
       setUser(null);
       setIsAuthenticated(false);
     }

@@ -1,0 +1,282 @@
+"""
+Operations Agent API Views
+Document Processing, Summarization, Analytics, Knowledge Q&A, Authoring, Notifications
+"""
+
+import os
+import hashlib
+import logging
+from pathlib import Path
+
+from django.conf import settings
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.response import Response
+
+from api.authentication import CompanyUserTokenAuthentication
+from api.permissions import IsCompanyUserOnly
+from operations_agent.models import (
+    OperationsDocument, OperationsDocumentChunk,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────
+# Document Processing Endpoints
+# ──────────────────────────────────────────────
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def upload_document(request):
+    """Upload and process a document (PDF, DOCX, XLSX, CSV, PPTX, TXT)."""
+    try:
+        company_user = request.user
+        company = company_user.company
+
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'status': 'error', 'message': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        title = request.data.get('title', '').strip()
+        tags = request.data.get('tags', '').strip()
+
+        # Validate size
+        if uploaded_file.size > 50 * 1024 * 1024:
+            return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save to disk
+        upload_dir = Path(settings.MEDIA_ROOT) / 'operations' / 'documents' / str(company.id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        # Hash for duplicate detection
+        file_bytes = uploaded_file.read()
+        file_hash = hashlib.sha256(file_bytes).hexdigest()[:16]
+        uploaded_file.seek(0)
+
+        safe_name = f"{file_hash}_{uploaded_file.name}"
+        file_path = upload_dir / safe_name
+
+        with open(file_path, 'wb') as f:
+            for chunk in uploaded_file.chunks():
+                f.write(chunk)
+
+        # Check duplicate
+        existing = OperationsDocument.objects.filter(
+            company=company,
+            original_filename=uploaded_file.name,
+            file_size=uploaded_file.size,
+        ).first()
+        if existing:
+            # Clean up saved file
+            if file_path.exists():
+                os.remove(file_path)
+            return Response({
+                'status': 'error',
+                'message': f'Document "{uploaded_file.name}" already exists',
+                'document_id': existing.id,
+            }, status=status.HTTP_409_CONFLICT)
+
+        # Process with agent
+        from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
+        agent = DocumentProcessingAgent()
+        result = agent.process(
+            action='process_file',
+            file_path=str(file_path),
+            original_filename=uploaded_file.name,
+            company_id=company.id,
+            uploaded_by_id=company_user.id,
+            title=title,
+            tags=tags,
+        )
+
+        if not result.get('success'):
+            # Clean up on failure
+            if file_path.exists():
+                os.remove(file_path)
+            return Response({'status': 'error', 'message': result.get('error', 'Processing failed')}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'success',
+            'message': 'Document uploaded and processed successfully',
+            'document': result['document'],
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f'Upload document error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_documents(request):
+    """List all documents for the company with optional filters."""
+    try:
+        company = request.user.company
+        docs = OperationsDocument.objects.filter(company=company).order_by('-created_at')
+
+        # Optional filters
+        doc_type = request.query_params.get('document_type')
+        file_type = request.query_params.get('file_type')
+        search = request.query_params.get('search', '').strip()
+
+        if doc_type:
+            docs = docs.filter(document_type=doc_type)
+        if file_type:
+            docs = docs.filter(file_type=file_type)
+        if search:
+            docs = docs.filter(title__icontains=search)
+
+        data = []
+        for doc in docs:
+            data.append({
+                'id': doc.id,
+                'title': doc.title,
+                'original_filename': doc.original_filename,
+                'file_type': doc.file_type,
+                'document_type': doc.document_type,
+                'file_size': doc.file_size,
+                'page_count': doc.page_count,
+                'is_processed': doc.is_processed,
+                'tags': doc.tags,
+                'entities': doc.entities,
+                'metadata': doc.metadata,
+                'summary': doc.summary or '',
+                'key_insights': doc.key_insights or [],
+                'uploaded_by': doc.uploaded_by.full_name if doc.uploaded_by else None,
+                'created_at': doc.created_at.isoformat(),
+                'processed_at': doc.processed_at.isoformat() if doc.processed_at else None,
+            })
+
+        return Response({
+            'status': 'success',
+            'documents': data,
+            'total': len(data),
+        })
+
+    except Exception as e:
+        logger.error(f'List documents error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_document(request, document_id):
+    """Get document detail with parsed content."""
+    try:
+        company = request.user.company
+        doc = OperationsDocument.objects.filter(company=company, pk=document_id).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        chunks = OperationsDocumentChunk.objects.filter(document=doc).order_by('chunk_index')
+
+        return Response({
+            'status': 'success',
+            'document': {
+                'id': doc.id,
+                'title': doc.title,
+                'original_filename': doc.original_filename,
+                'file_type': doc.file_type,
+                'document_type': doc.document_type,
+                'file_size': doc.file_size,
+                'page_count': doc.page_count,
+                'parsed_text': doc.parsed_text[:5000] if doc.parsed_text else '',
+                'full_text_length': len(doc.parsed_text) if doc.parsed_text else 0,
+                'summary': doc.summary or '',
+                'key_insights': doc.key_insights or [],
+                'metadata': doc.metadata,
+                'entities': doc.entities,
+                'tags': doc.tags,
+                'is_processed': doc.is_processed,
+                'chunks_count': chunks.count(),
+                'uploaded_by': doc.uploaded_by.full_name if doc.uploaded_by else None,
+                'created_at': doc.created_at.isoformat(),
+                'processed_at': doc.processed_at.isoformat() if doc.processed_at else None,
+            },
+        })
+
+    except Exception as e:
+        logger.error(f'Get document error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_document(request, document_id):
+    """Delete a document and its chunks."""
+    try:
+        company = request.user.company
+        doc = OperationsDocument.objects.filter(company=company, pk=document_id).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        title = doc.title
+
+        # Delete file from disk
+        if doc.file and os.path.exists(str(doc.file)):
+            try:
+                os.remove(str(doc.file))
+            except OSError:
+                pass
+
+        doc.delete()
+
+        return Response({
+            'status': 'success',
+            'message': f'Document "{title}" deleted successfully',
+        })
+
+    except Exception as e:
+        logger.error(f'Delete document error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def dashboard_stats(request):
+    """Get dashboard stats for operations agent."""
+    try:
+        company = request.user.company
+
+        total_docs = OperationsDocument.objects.filter(company=company).count()
+        processed_docs = OperationsDocument.objects.filter(company=company, is_processed=True).count()
+        total_chunks = OperationsDocumentChunk.objects.filter(document__company=company).count()
+
+        # Doc type breakdown
+        from django.db.models import Count
+        type_breakdown = dict(
+            OperationsDocument.objects.filter(company=company)
+            .values_list('document_type')
+            .annotate(count=Count('id'))
+            .values_list('document_type', 'count')
+        )
+
+        # File type breakdown
+        file_breakdown = dict(
+            OperationsDocument.objects.filter(company=company)
+            .values_list('file_type')
+            .annotate(count=Count('id'))
+            .values_list('file_type', 'count')
+        )
+
+        return Response({
+            'status': 'success',
+            'stats': {
+                'total_documents': total_docs,
+                'processed_documents': processed_docs,
+                'total_chunks': total_chunks,
+                'document_types': type_breakdown,
+                'file_types': file_breakdown,
+            },
+        })
+
+    except Exception as e:
+        logger.error(f'Dashboard stats error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

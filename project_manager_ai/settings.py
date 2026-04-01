@@ -294,6 +294,7 @@ INSTALLED_APPS = [
     'recruitment_agent',
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
+    'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app
     'whitenoise.runserver_nostatic',
 ]
@@ -636,6 +637,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'marketing_agent.tasks.sync_campaign_performance_task',
         'schedule': 1800.0,  # Every 30 minutes
         'options': {'expires': 3600}
+    },
+
+    # Auto-expire module purchases - runs every hour
+    # Checks active purchases whose expires_at has passed and marks them expired
+    'expire-module-purchases': {
+        'task': 'core.tasks.expire_module_purchases',
+        'schedule': 3600.0,  # Every hour (3600 seconds)
+        'options': {'expires': 7200}
     },
 }
 

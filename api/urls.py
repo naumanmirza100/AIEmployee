@@ -34,6 +34,7 @@ from api.views import recruitment_agent
 from api.views import marketing_agent
 from api.views import frontline_agent
 from api.views import module_purchase
+from api.views import operations_agent
 from api.views.health import health_check
 
 app_name = 'api'
@@ -140,13 +141,18 @@ urlpatterns = [
     re_path(r'^companies/create/?$', company.create_company, name='create_company'),  # POST
     re_path(r'^companies/(?P<companyId>\d+)/tokens/?$', company.get_company_tokens, name='get_company_tokens'),  # GET
     re_path(r'^companies/(?P<companyId>\d+)/tokens/generate/?$', company.generate_company_token, name='generate_company_token'),  # POST
-    
+
+    # Admin - Company AI Agents Management
+    re_path(r'^admin/company-agents/?$', company.list_company_agents, name='list_company_agents'),  # GET
+    re_path(r'^admin/company-agents/(?P<purchaseId>\d+)/toggle-status/?$', company.toggle_company_agent_status, name='toggle_company_agent_status'),  # PATCH
+
     # Company User Management endpoints (for company users to manage regular users)
     re_path(r'^company/users/create/?$', company_users.create_user, name='company_create_user'),  # POST
     re_path(r'^company/users/?$', company_users.list_users, name='company_list_users'),  # GET
     re_path(r'^company/users/(?P<userId>\d+)/?$', company_users.get_user, name='company_get_user'),  # GET
     re_path(r'^company/users/(?P<userId>\d+)/update/?$', company_users.update_user, name='company_update_user'),  # PUT/PATCH
     re_path(r'^company/users/(?P<userId>\d+)/delete/?$', company_users.delete_user, name='company_delete_user'),  # DELETE
+    re_path(r'^company/users/(?P<userId>\d+)/reactivate/?$', company_users.reactivate_user, name='company_reactivate_user'),  # POST
     re_path(r'^company/users/tasks/?$', company_user_tasks.get_all_users_tasks, name='company_get_all_users_tasks'),  # GET
     
     # Company Auth endpoints
@@ -396,6 +402,13 @@ urlpatterns = [
     re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/delete/?$', frontline_agent.frontline_graph_prompts_delete, name='frontline_graph_prompts_delete'),  # DELETE
     re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', frontline_agent.frontline_graph_prompts_favorite, name='frontline_graph_prompts_favorite'),  # PATCH
     re_path(r'^frontline/analytics/export/?$', frontline_agent.frontline_analytics_export, name='frontline_analytics_export'),  # GET
+
+    # Operations Agent endpoints
+    re_path(r'^operations/dashboard/?$', operations_agent.dashboard_stats, name='operations_dashboard_stats'),  # GET
+    re_path(r'^operations/documents/upload/?$', operations_agent.upload_document, name='operations_upload_document'),  # POST
+    re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
