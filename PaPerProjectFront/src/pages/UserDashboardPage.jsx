@@ -957,6 +957,19 @@ const UserDashboardPage = () => {
 
                     {m.description && <p className="text-xs text-white/40">{m.description}</p>}
 
+                    {/* Agenda */}
+                    {m.agenda?.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-white/30 uppercase tracking-wide">Agenda</span>
+                        {m.agenda.map((a, ai) => (
+                          <div key={ai} className="flex items-start gap-2 text-xs text-white/50">
+                            <span className="text-violet-400 mt-0.5">{a.done ? '✓' : '•'}</span>
+                            <span className={a.done ? 'line-through text-white/30' : ''}>{a.item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Response history */}
                     {m.responses?.length > 0 && (
                       <div className="space-y-1 pt-2 border-t border-white/5">
@@ -972,7 +985,24 @@ const UserDashboardPage = () => {
                     )}
 
                     {/* Action buttons — only for pending or counter_proposed meetings */}
-                    {(m.status === 'pending' || m.status === 'counter_proposed') && (
+                    {/* Participants */}
+                    {m.participants?.length > 1 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {m.participants.map((p, pi) => (
+                          <span key={pi} className={`text-[10px] px-2 py-0.5 rounded-full border border-white/10 ${
+                            p.status === 'accepted' ? 'bg-green-500/20 text-green-400' :
+                            p.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                            p.status === 'counter_proposed' ? 'bg-blue-500/20 text-blue-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {p.name}: {p.status}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Action buttons — use my_status instead of overall meeting status */}
+                    {(m.my_status === 'pending' || m.my_status === 'counter_proposed' || m.status === 'pending' || m.status === 'counter_proposed') && m.my_status !== 'accepted' && m.status !== 'withdrawn' && (
                       <div className="pt-2 border-t border-white/5">
                         {respondingTo === m.id ? (
                           <div className="space-y-2 bg-white/[0.03] rounded-lg p-3">

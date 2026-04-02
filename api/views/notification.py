@@ -113,7 +113,7 @@ def meeting_respond(request, meeting_id):
     Actions: accept, reject, counter_propose
     """
     try:
-        from project_manager_agent.models import ScheduledMeeting, MeetingResponse
+        from project_manager_agent.models import ScheduledMeeting, MeetingResponse, MeetingParticipant
         from django.core.mail import send_mail
         from django.conf import settings as django_settings
 
@@ -125,15 +125,26 @@ def meeting_respond(request, meeting_id):
         if action not in ('accepted', 'rejected', 'counter_proposed'):
             return Response({'status': 'error', 'message': 'Invalid action. Use: accepted, rejected, counter_proposed'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get the meeting — invitee must be this user
+        # Get the meeting — user must be a participant
         try:
-            meeting = ScheduledMeeting.objects.select_related('organizer', 'invitee').get(id=meeting_id, invitee=user)
+            meeting = ScheduledMeeting.objects.select_related('organizer', 'invitee').get(id=meeting_id)
+            participant = MeetingParticipant.objects.get(meeting=meeting, user=user)
         except ScheduledMeeting.DoesNotExist:
-            return Response({'status': 'error', 'message': 'Meeting not found or you are not the invitee.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'status': 'error', 'message': 'Meeting not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except MeetingParticipant.DoesNotExist:
+            # Fallback: check legacy invitee field
+            if meeting.invitee_id != user.id:
+                return Response({'status': 'error', 'message': 'You are not a participant in this meeting.'}, status=status.HTTP_404_NOT_FOUND)
+            # Create participant record for legacy meeting
+            participant = MeetingParticipant.objects.create(meeting=meeting, user=user, status='pending')
 
-        # Can't act on finalized meetings
-        if meeting.status in ('accepted', 'withdrawn'):
-            return Response({'status': 'error', 'message': f'Meeting is already {meeting.status}.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Can't act on withdrawn meetings
+        if meeting.status == 'withdrawn':
+            return Response({'status': 'error', 'message': 'This meeting has been withdrawn.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Can't act if this participant already accepted
+        if participant.status == 'accepted' and action != 'counter_proposed':
+            return Response({'status': 'error', 'message': 'You have already accepted this meeting.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Parse counter time
         counter_time = None
@@ -156,15 +167,19 @@ def meeting_respond(request, meeting_id):
             reason=reason,
         )
 
-        # Update meeting status
-        if action == 'accepted':
-            meeting.status = 'accepted'
-        elif action == 'rejected':
-            meeting.status = 'rejected'
-        elif action == 'counter_proposed':
-            meeting.status = 'counter_proposed'
+        # Update this participant's status
+        participant.status = action
+        participant.reason = reason
+        participant.responded_at = timezone.now()
+        if action == 'counter_proposed':
+            participant.counter_proposed_time = counter_time
+        participant.save()
+
+        # Update overall meeting status based on all participants
+        if action == 'counter_proposed':
             meeting.proposed_time = counter_time
-        meeting.save()
+            meeting.save(update_fields=['proposed_time', 'updated_at'])
+        meeting.update_overall_status()
 
         # Notify the organizer (CompanyUser) via PMNotification
         from project_manager_agent.models import PMNotification
@@ -203,17 +218,31 @@ def meeting_respond(request, meeting_id):
                 data={'meeting_id': meeting.id, 'type': 'meeting_counter_proposed', 'new_time': counter_time.isoformat(), 'reason': reason},
             )
 
+        # Generate .ics for organizer when invitee accepts
+        ics_attachment = None
+        if action == 'accepted':
+            try:
+                from project_manager_agent.ics_generator import generate_meeting_ics
+                ics_attachment = generate_meeting_ics(meeting, action='REQUEST')
+            except Exception:
+                pass
+
         # Also send email to organizer
         try:
+            from django.core.mail import EmailMultiAlternatives
             from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
-            send_mail(
+            email_body = f'<p><strong>{invitee_name}</strong> has {action.replace("_", " ")} the meeting <strong>"{meeting.title}"</strong>.</p>'
+            email_msg = EmailMultiAlternatives(
                 subject=f'Meeting Update: {meeting.title}',
-                message='',
+                body='',
                 from_email=from_email,
-                recipient_list=[organizer.email],
-                html_message=f'<p><strong>{invitee_name}</strong> has {action.replace("_", " ")} the meeting <strong>"{meeting.title}"</strong>.</p>',
-                fail_silently=True,
+                to=[organizer.email],
             )
+            email_msg.attach_alternative(email_body, 'text/html')
+            if ics_attachment:
+                email_msg.attach('meeting.ics', ics_attachment, 'text/calendar; method=REQUEST')
+            email_msg.send(fail_silently=True)
+
         except Exception as e:
             logger.warning(f'Failed to send meeting email to organizer: {e}')
 
@@ -235,16 +264,17 @@ def meeting_respond(request, meeting_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def meeting_list_for_user(request):
-    """List all meetings where the current project user is the invitee."""
+    """List all meetings where the current project user is a participant."""
     try:
-        from project_manager_agent.models import ScheduledMeeting
+        from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
 
         user = request.user
-        logger.info(f"[MEETING LIST] user={user}, id={user.id}, username={user.username}, type={type(user).__name__}")
+        # Find meetings where user is a participant OR legacy invitee
+        participant_meeting_ids = MeetingParticipant.objects.filter(user=user).values_list('meeting_id', flat=True)
+        from django.db.models import Q
         meetings = ScheduledMeeting.objects.filter(
-            invitee=user
-        ).select_related('organizer', 'invitee').prefetch_related('responses').order_by('-created_at')[:50]
-        logger.info(f"[MEETING LIST] Found {meetings.count()} meetings for user {user.id}")
+            Q(id__in=participant_meeting_ids) | Q(invitee=user)
+        ).distinct().select_related('organizer', 'invitee').prefetch_related('responses', 'participants__user').order_by('-created_at')[:50]
 
         data = []
         for m in meetings:
@@ -253,7 +283,7 @@ def meeting_list_for_user(request):
                 if r.responded_by == 'organizer':
                     responder_name = m.organizer.full_name
                 else:
-                    responder_name = m.invitee.get_full_name() or m.invitee.username
+                    responder_name = m.invitee.get_full_name() or m.invitee.username if m.invitee else 'Invitee'
                 responses.append({
                     'id': r.id,
                     'responded_by': r.responded_by,
@@ -264,15 +294,31 @@ def meeting_list_for_user(request):
                     'created_at': r.created_at.isoformat(),
                 })
 
+            # Participants with per-user status
+            participants = []
+            my_status = 'pending'
+            for p in m.participants.all():
+                pname = p.user.get_full_name() or p.user.username
+                participants.append({
+                    'user_id': p.user_id,
+                    'name': pname,
+                    'status': p.status,
+                })
+                if p.user_id == user.id:
+                    my_status = p.status
+
             data.append({
                 'id': m.id,
                 'organizer_name': m.organizer.full_name,
                 'organizer_email': m.organizer.email,
                 'title': m.title,
                 'description': m.description,
+                'agenda': m.agenda or [],
                 'proposed_time': m.proposed_time.isoformat(),
                 'duration_minutes': m.duration_minutes,
                 'status': m.status,
+                'my_status': my_status,
+                'participants': participants,
                 'created_at': m.created_at.isoformat(),
                 'responses': responses,
             })
