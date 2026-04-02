@@ -193,16 +193,26 @@ class PMNotification(models.Model):
 
 class ScheduledMeeting(models.Model):
     """
-    Meeting scheduling between a CompanyUser (organizer) and a project User (invitee).
-    The organizer is the logged-in company user. The invitee is a project team member
-    (Django User) that belongs to the organizer's company.
+    Meeting scheduling between a CompanyUser (organizer) and one or more project Users (participants).
+    The organizer is the logged-in company user. Participants are project team members
+    (Django Users) that belong to the organizer's company.
+    Overall status is derived from participant statuses.
     """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('accepted', 'Accepted'),
+        ('partially_accepted', 'Partially Accepted'),
         ('rejected', 'Rejected'),
         ('counter_proposed', 'Counter Proposed'),
         ('withdrawn', 'Withdrawn'),
+    ]
+    RECURRENCE_CHOICES = [
+        ('none', 'None'),
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('weekly_weekdays', 'Weekdays (Mon-Fri)'),
+        ('biweekly', 'Every 2 Weeks'),
+        ('monthly', 'Monthly'),
     ]
 
     organizer = models.ForeignKey(
@@ -211,17 +221,28 @@ class ScheduledMeeting(models.Model):
         related_name='organized_scheduled_meetings',
         help_text='Company user who scheduled the meeting',
     )
+    # Keep invitee for backward compat with existing single-invitee meetings
     invitee = models.ForeignKey(
         'auth.User',
         on_delete=models.CASCADE,
+        null=True, blank=True,
         related_name='invited_scheduled_meetings',
-        help_text='Project user (Django User) invited to the meeting',
+        help_text='Primary invitee (legacy). Use participants for multi-user meetings.',
     )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
+    agenda = models.JSONField(null=True, blank=True, help_text='Structured agenda items: [{"item": "...", "done": false}]')
     proposed_time = models.DateTimeField(help_text='Currently proposed meeting time')
     duration_minutes = models.IntegerField(default=30)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    # Recurrence fields
+    recurrence = models.CharField(max_length=20, choices=RECURRENCE_CHOICES, default='none')
+    recurrence_end_date = models.DateField(null=True, blank=True, help_text='Stop recurring after this date')
+    parent_meeting = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='occurrences',
+        help_text='Parent meeting for recurring series. Null = standalone or parent itself.',
+    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -232,8 +253,70 @@ class ScheduledMeeting(models.Model):
         verbose_name_plural = 'Scheduled Meetings'
 
     def __str__(self):
-        invitee_name = self.invitee.get_full_name() or self.invitee.username
-        return f"{self.title} ({self.organizer.full_name} → {invitee_name}) [{self.status}]"
+        participant_count = self.participants.count()
+        if participant_count == 1:
+            p = self.participants.first()
+            name = p.user.get_full_name() or p.user.username if p else 'Unknown'
+        elif participant_count > 1:
+            name = f"{participant_count} participants"
+        elif self.invitee:
+            name = self.invitee.get_full_name() or self.invitee.username
+        else:
+            name = 'No participants'
+        return f"{self.title} ({self.organizer.full_name} → {name}) [{self.status}]"
+
+    def update_overall_status(self):
+        """Recalculate meeting status based on all participant statuses."""
+        participants = self.participants.all()
+        if not participants.exists():
+            return
+        statuses = list(participants.values_list('status', flat=True))
+        if all(s == 'accepted' for s in statuses):
+            self.status = 'accepted'
+        elif any(s == 'counter_proposed' for s in statuses):
+            self.status = 'counter_proposed'
+        elif all(s == 'rejected' for s in statuses):
+            self.status = 'rejected'
+        elif any(s == 'accepted' for s in statuses) and any(s == 'pending' for s in statuses):
+            self.status = 'partially_accepted'
+        else:
+            self.status = 'pending'
+        self.save(update_fields=['status', 'updated_at'])
+
+
+class MeetingParticipant(models.Model):
+    """Individual participant in a meeting with their own accept/reject status."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('counter_proposed', 'Counter Proposed'),
+    ]
+
+    meeting = models.ForeignKey(
+        ScheduledMeeting,
+        on_delete=models.CASCADE,
+        related_name='participants',
+    )
+    user = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='meeting_participations',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    reason = models.TextField(blank=True, default='', help_text='Reason for rejection or counter-proposal')
+    counter_proposed_time = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        unique_together = ['meeting', 'user']
+        ordering = ['created_at']
+
+    def __str__(self):
+        name = self.user.get_full_name() or self.user.username
+        return f"{name} → {self.status} ({self.meeting.title})"
 
 
 class MeetingResponse(models.Model):

@@ -16,6 +16,7 @@ from project_manager_agent.models import (
     PMNotification,
     ScheduledMeeting,
     MeetingResponse,
+    MeetingParticipant,
     PMMeetingSchedulerChat,
     PMMeetingSchedulerChatMessage,
 )
@@ -3995,18 +3996,26 @@ def time_estimation(request):
 
 # ==================== MEETING SCHEDULER ENDPOINTS ====================
 
-def _send_meeting_email(recipient_email, subject, body_html):
-    """Send meeting notification email. Fails silently if email is not configured."""
+def _send_meeting_email(recipient_email, subject, body_html, ics_content=None):
+    """Send meeting notification email with optional .ics calendar attachment."""
     try:
+        from django.core.mail import EmailMultiAlternatives
         from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
-        send_mail(
+
+        # Use EmailMultiAlternatives to support attachments
+        email = EmailMultiAlternatives(
             subject=subject,
-            message='',
+            body='',  # plain text fallback
             from_email=from_email,
-            recipient_list=[recipient_email],
-            html_message=body_html,
-            fail_silently=True,
+            to=[recipient_email],
         )
+        email.attach_alternative(body_html, 'text/html')
+
+        # Attach .ics file if provided
+        if ics_content:
+            email.attach('meeting.ics', ics_content, 'text/calendar; method=REQUEST')
+
+        email.send(fail_silently=True)
     except Exception as e:
         logger.warning(f"Failed to send meeting email to {recipient_email}: {e}")
 
@@ -4024,13 +4033,13 @@ def _create_meeting_notification(company_user, title, message, data=None, severi
 
 
 def _serialize_meeting(meeting):
-    """Serialize a ScheduledMeeting to dict. Invitee is a Django User (project user)."""
+    """Serialize a ScheduledMeeting to dict with participants."""
     responses = []
     for r in meeting.responses.all().order_by('created_at'):
         if r.responded_by == 'organizer':
             responder_name = meeting.organizer.full_name
         else:
-            responder_name = meeting.invitee.get_full_name() or meeting.invitee.username
+            responder_name = meeting.invitee.get_full_name() or meeting.invitee.username if meeting.invitee else 'Invitee'
         responses.append({
             'id': r.id,
             'responded_by': r.responded_by,
@@ -4041,7 +4050,26 @@ def _serialize_meeting(meeting):
             'created_at': r.created_at.isoformat(),
         })
 
-    invitee_name = meeting.invitee.get_full_name() or meeting.invitee.username
+    # Participants list
+    participants = []
+    for p in meeting.participants.all().select_related('user'):
+        participants.append({
+            'id': p.id,
+            'user_id': p.user_id,
+            'name': p.user.get_full_name() or p.user.username,
+            'email': p.user.email or '',
+            'status': p.status,
+            'reason': p.reason,
+            'counter_proposed_time': p.counter_proposed_time.isoformat() if p.counter_proposed_time else None,
+            'responded_at': p.responded_at.isoformat() if p.responded_at else None,
+        })
+
+    # Fallback invitee info for backward compat
+    invitee_name = ''
+    if participants:
+        invitee_name = ', '.join(p['name'] for p in participants)
+    elif meeting.invitee:
+        invitee_name = meeting.invitee.get_full_name() or meeting.invitee.username
 
     return {
         'id': meeting.id,
@@ -4050,14 +4078,19 @@ def _serialize_meeting(meeting):
         'organizer_email': meeting.organizer.email,
         'invitee_id': meeting.invitee_id,
         'invitee_name': invitee_name,
-        'invitee_email': meeting.invitee.email or '',
-        'invitee_username': meeting.invitee.username,
         'title': meeting.title,
         'description': meeting.description,
+        'agenda': meeting.agenda or [],
         'proposed_time': meeting.proposed_time.isoformat(),
         'duration_minutes': meeting.duration_minutes,
         'status': meeting.status,
+        'participants': participants,
         'created_at': meeting.created_at.isoformat(),
+        'recurrence': meeting.recurrence or 'none',
+        'recurrence_end_date': meeting.recurrence_end_date.isoformat() if meeting.recurrence_end_date else None,
+        'is_recurring': meeting.recurrence and meeting.recurrence != 'none',
+        'parent_meeting_id': meeting.parent_meeting_id,
+        'occurrences_count': meeting.occurrences.count() if not meeting.parent_meeting_id else 0,
         'updated_at': meeting.updated_at.isoformat(),
         'responses': responses,
     }
@@ -4120,23 +4153,30 @@ def meeting_schedule(request):
         # If the agent says to schedule, create the meeting
         if action == "schedule" and result.get("data"):
             data = result["data"]
-            invitee_id = data["invitee_id"]
+            invitees_data = data.get("invitees", [])
 
-            # Look up the Django User (project user)
-            try:
-                invitee_user = User.objects.get(id=int(invitee_id))
-            except (User.DoesNotExist, ValueError, TypeError):
+            # Backward compat: if old format with single invitee_id
+            if not invitees_data and data.get("invitee_id"):
+                invitees_data = [{"id": data["invitee_id"], "name": data.get("invitee_name", "team member")}]
+
+            # Look up all Django Users
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            from core.models import Notification as UserNotification
+
+            invitee_users = []
+            for inv in invitees_data:
+                try:
+                    u = User.objects.get(id=int(inv["id"]))
+                    invitee_users.append(u)
+                except (User.DoesNotExist, ValueError, TypeError):
+                    logger.warning(f"[MEETING] Invitee user ID {inv.get('id')} not found, skipping")
+
+            if not invitee_users:
                 return Response({
                     "status": "success",
-                    "data": {
-                        "action": "user_not_found",
-                        "response": f"User not found. Please try again.",
-                        "meeting": None,
-                    }
+                    "data": {"action": "user_not_found", "response": "No valid users found. Please try again.", "meeting": None}
                 }, status=status.HTTP_200_OK)
-
-            invitee_name = invitee_user.get_full_name() or invitee_user.username
-            invitee_email = invitee_user.email
 
             # Parse proposed time
             proposed_time_str = data["proposed_time"]
@@ -4147,63 +4187,142 @@ def meeting_schedule(request):
             except Exception:
                 return Response({
                     "status": "success",
+                    "data": {"action": "parse_error", "response": "Could not parse the meeting time. Please try again.", "meeting": None}
+                }, status=status.HTTP_200_OK)
+
+            time_display = proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            invitee_names = [u.get_full_name() or u.username for u in invitee_users]
+            duration = data.get("duration_minutes", 30)
+            meeting_title = data.get("title") or (f"Meeting with {', '.join(invitee_names[:3])}" + (f" +{len(invitee_names)-3}" if len(invitee_names) > 3 else ""))
+
+            # ── Conflict detection ──
+            user_ids = [u.id for u in invitee_users]
+            conflicts = agent.check_conflicts(user_ids, proposed_time, duration)
+            if conflicts:
+                conflict_lines = []
+                for c in conflicts:
+                    conflict_lines.append(f"- **{c['user_name']}** has \"{c['conflicting_meeting']}\" on {c['conflicting_date']} at {c['conflicting_time']}")
+                conflict_str = "\n".join(conflict_lines)
+
+                # Suggest alternative slots
+                suggested_slots = agent.suggest_available_slots(user_ids, proposed_time.date(), duration)
+                slots_str = ""
+                if suggested_slots:
+                    slots_str = "\n\n**Available slots on that day:**\n" + "\n".join(f"- {s}" for s in suggested_slots)
+
+                return Response({
+                    "status": "success",
                     "data": {
-                        "action": "parse_error",
-                        "response": "Could not parse the meeting time. Please try again with a clear date and time.",
+                        "action": "conflict",
+                        "response": (
+                            f"**Schedule Conflict Detected!**\n\n{conflict_str}\n\n"
+                            f"The proposed time ({time_display}, {duration} min) overlaps with an existing meeting.{slots_str}\n\n"
+                            f"Please choose a different time."
+                        ),
                         "meeting": None,
                     }
                 }, status=status.HTTP_200_OK)
 
-            time_display = proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
-            meeting_title = data.get("title", f"Meeting with {invitee_name}")
+            # Recurrence info
+            recurrence = data.get("recurrence", "none") or "none"
+            recurrence_end_date = None
+            if data.get("recurrence_end_date"):
+                try:
+                    recurrence_end_date = datetime.strptime(data["recurrence_end_date"], "%Y-%m-%d").date()
+                except Exception:
+                    pass
 
-            # Create the meeting (organizer=CompanyUser, invitee=Django User)
+            duration = data.get("duration_minutes", 30)
+
+            # Build agenda
+            agenda = data.get("agenda") or []
+            if agenda and not isinstance(agenda[0], dict):
+                agenda = [{"item": str(a), "done": False} for a in agenda]
+
+            # Create the parent meeting
             meeting = ScheduledMeeting.objects.create(
                 organizer=company_user,
-                invitee=invitee_user,
+                invitee=invitee_users[0],
                 title=meeting_title,
                 description=data.get("description") or "",
+                agenda=agenda if agenda else None,
                 proposed_time=proposed_time,
-                duration_minutes=data.get("duration_minutes", 30),
+                duration_minutes=duration,
                 status='pending',
+                recurrence=recurrence,
+                recurrence_end_date=recurrence_end_date,
             )
 
-            # Create the initial "proposed" response
+            # Create participants for each invitee
+            for u in invitee_users:
+                MeetingParticipant.objects.create(meeting=meeting, user=u, status='pending')
+
+            # Create initial response record
             MeetingResponse.objects.create(
-                meeting=meeting,
-                responded_by='organizer',
-                action='proposed',
-                proposed_time=proposed_time,
+                meeting=meeting, responded_by='organizer', action='proposed', proposed_time=proposed_time,
             )
 
-            # Create in-app notification for invitee (project user dashboard)
-            from core.models import Notification as UserNotification
-            UserNotification.objects.create(
-                user=invitee_user,
-                type='meeting_request',
-                notification_type='meeting_request',
-                title=f"Meeting Request from {company_user.full_name}",
-                message=f'{company_user.full_name} wants to schedule "{meeting.title}" on {time_display} ({meeting.duration_minutes} min). Please accept or reject.',
-                action_url=f'/meetings/{meeting.id}/respond',
-            )
+            # Generate recurring occurrences
+            occurrences_created = 0
+            if recurrence != 'none':
+                occurrence_dates = agent.generate_occurrence_dates(proposed_time, recurrence, recurrence_end_date)
+                for occ_time in occurrence_dates:
+                    occ_meeting = ScheduledMeeting.objects.create(
+                        organizer=company_user,
+                        invitee=invitee_users[0],
+                        title=meeting_title,
+                        description=data.get("description") or "",
+                        agenda=agenda if agenda else None,
+                        proposed_time=occ_time,
+                        duration_minutes=duration,
+                        status='pending',
+                        recurrence=recurrence,
+                        recurrence_end_date=recurrence_end_date,
+                        parent_meeting=meeting,
+                    )
+                    for u in invitee_users:
+                        MeetingParticipant.objects.create(meeting=occ_meeting, user=u, status='pending')
+                    occurrences_created += 1
 
-            # Send email to invitee if they have an email
-            if invitee_email:
-                _send_meeting_email(
-                    recipient_email=invitee_email,
-                    subject=f"Meeting Request: {meeting.title}",
-                    body_html=f"""
-                    <h2>Meeting Request</h2>
-                    <p><strong>{company_user.full_name}</strong> has invited you to a meeting.</p>
-                    <table style="border-collapse:collapse; margin:16px 0;">
-                        <tr><td style="padding:4px 12px; font-weight:bold;">Title:</td><td style="padding:4px 12px;">{meeting.title}</td></tr>
-                        <tr><td style="padding:4px 12px; font-weight:bold;">When:</td><td style="padding:4px 12px;">{time_display}</td></tr>
-                        <tr><td style="padding:4px 12px; font-weight:bold;">Duration:</td><td style="padding:4px 12px;">{meeting.duration_minutes} minutes</td></tr>
-                        <tr><td style="padding:4px 12px; font-weight:bold;">Description:</td><td style="padding:4px 12px;">{meeting.description or 'N/A'}</td></tr>
-                    </table>
-                    <p>Please log in to your dashboard to accept or reject this meeting.</p>
-                    """,
+            # Generate .ics calendar file
+            try:
+                from project_manager_agent.ics_generator import generate_meeting_ics
+                ics_content = generate_meeting_ics(meeting, action='REQUEST')
+            except Exception as ics_err:
+                logger.warning(f"[MEETING] Failed to generate .ics: {ics_err}")
+                ics_content = None
+
+            # Notify each invitee
+            for u in invitee_users:
+                UserNotification.objects.create(
+                    user=u,
+                    type='meeting_request',
+                    notification_type='meeting_request',
+                    title=f"Meeting Request from {company_user.full_name}",
+                    message=f'{company_user.full_name} wants to schedule "{meeting.title}" on {time_display} ({meeting.duration_minutes} min). Please accept or reject.',
+                    action_url=f'/meetings/{meeting.id}/respond',
                 )
+                if u.email:
+                    participants_str = ", ".join(invitee_names)
+                    _send_meeting_email(
+                        recipient_email=u.email,
+                        subject=f"Meeting Request: {meeting.title}",
+                        body_html=f"""
+                        <h2>Meeting Request</h2>
+                        <p><strong>{company_user.full_name}</strong> has invited you to a meeting.</p>
+                        <table style="border-collapse:collapse; margin:16px 0;">
+                            <tr><td style="padding:4px 12px; font-weight:bold;">Title:</td><td style="padding:4px 12px;">{meeting.title}</td></tr>
+                            <tr><td style="padding:4px 12px; font-weight:bold;">When:</td><td style="padding:4px 12px;">{time_display}</td></tr>
+                            <tr><td style="padding:4px 12px; font-weight:bold;">Duration:</td><td style="padding:4px 12px;">{meeting.duration_minutes} minutes</td></tr>
+                            <tr><td style="padding:4px 12px; font-weight:bold;">Participants:</td><td style="padding:4px 12px;">{participants_str}</td></tr>
+                            <tr><td style="padding:4px 12px; font-weight:bold;">Description:</td><td style="padding:4px 12px;">{meeting.description or 'N/A'}</td></tr>
+                        </table>
+                        {'<h3>Agenda:</h3><ul>' + ''.join(f'<li>{a["item"]}</li>' for a in (meeting.agenda or [])) + '</ul>' if meeting.agenda else ''}
+                        <p>Please log in to your dashboard to accept or reject this meeting.</p>
+                        <p style="color:#666; font-size:12px;">A calendar invite (.ics) is attached — open it to add this meeting to your calendar.</p>
+                        """,
+                        ics_content=ics_content,
+                    )
 
             return Response({
                 "status": "success",
@@ -4309,6 +4428,16 @@ def meeting_respond(request):
         invitee_email = meeting.invitee.email
         time_display = meeting.proposed_time.strftime("%A, %B %d, %Y at %I:%M %p") if meeting.proposed_time else "TBD"
 
+        # Generate .ics for accepted/cancelled
+        confirm_ics = None
+        try:
+            from project_manager_agent.ics_generator import generate_meeting_ics
+            if action in ('accepted', 'withdrawn'):
+                ics_action = 'CANCEL' if action == 'withdrawn' else 'REQUEST'
+                confirm_ics = generate_meeting_ics(meeting, action=ics_action)
+        except Exception:
+            pass
+
         if action == 'accepted':
             UserNotification.objects.create(
                 user=meeting.invitee, type='meeting_accepted', notification_type='meeting_request',
@@ -4318,7 +4447,8 @@ def meeting_respond(request):
             )
             if invitee_email:
                 _send_meeting_email(recipient_email=invitee_email, subject=f"Meeting Confirmed: {meeting.title}",
-                    body_html=f"<p><strong>{company_user.full_name}</strong> has confirmed the meeting <strong>\"{meeting.title}\"</strong> on {time_display}.</p>")
+                    body_html=f"<p><strong>{company_user.full_name}</strong> has confirmed the meeting <strong>\"{meeting.title}\"</strong> on {time_display}.</p>",
+                    ics_content=confirm_ics)
 
         elif action == 'rejected':
             reason_text = f" Reason: {reason}" if reason else ""
@@ -4356,6 +4486,7 @@ def meeting_respond(request):
                     recipient_email=invitee_email,
                     subject=f"Meeting Cancelled: {meeting.title}",
                     body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.</p>",
+                    ics_content=confirm_ics,
                 )
 
         return Response({

@@ -498,16 +498,49 @@ export default function MeetingScheduler() {
                       <div className="flex items-start justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-white">{m.title}</h4>
-                          <p className="text-xs text-gray-400 mt-0.5">With: {m.invitee_name || m.invitee_username}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">With: {m.invitee_name}</p>
                         </div>
                         <span className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${sc.bg} ${sc.color}`}>
                           <StatusIcon className="h-3 w-3" /> {sc.label}
                         </span>
                       </div>
-                      <div className="flex items-center gap-4 text-xs text-gray-400">
+                      <div className="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {new Date(m.proposed_time).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                         <span>{m.duration_minutes} min</span>
+                        {m.is_recurring && (
+                          <span className="flex items-center gap-1 text-violet-400">
+                            <RefreshCw className="h-3 w-3" /> {m.recurrence?.replace('_', ' ')}
+                            {m.occurrences_count > 0 && ` (${m.occurrences_count} more)`}
+                          </span>
+                        )}
                       </div>
+
+                      {/* Participants */}
+                      {m.participants?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {m.participants.map((p, pi) => {
+                            const psc = STATUS_CONFIG[p.status] || STATUS_CONFIG.pending;
+                            return (
+                              <span key={pi} className={`text-[10px] px-2 py-0.5 rounded-full border ${psc.bg} ${psc.color} border-white/10`}>
+                                {p.name}: {p.status}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Agenda */}
+                      {m.agenda?.length > 0 && (
+                        <div className="pt-1 space-y-1">
+                          <span className="text-[10px] text-gray-500 uppercase tracking-wide">Agenda</span>
+                          {m.agenda.map((a, ai) => (
+                            <div key={ai} className="flex items-start gap-2 text-xs text-gray-300">
+                              <span className="text-violet-400 mt-0.5">{a.done ? '✓' : '•'}</span>
+                              <span className={a.done ? 'line-through text-gray-500' : ''}>{a.item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Response history */}
                       {m.responses?.length > 0 && (
