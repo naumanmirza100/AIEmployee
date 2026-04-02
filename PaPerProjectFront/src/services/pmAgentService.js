@@ -439,6 +439,34 @@ export const meetingList = async (statusFilter = '', roleFilter = '') => {
   }
 };
 
+export const listMeetingSchedulerChats = async () => {
+  try {
+    const response = await companyApi.get('/project-manager/ai/meeting-scheduler/chats');
+    return response?.data || { status: 'success', data: [] };
+  } catch (error) { console.error('List meeting chats error:', error); return { status: 'success', data: [] }; }
+};
+
+export const createMeetingSchedulerChat = async (data = {}) => {
+  try {
+    const response = await companyApi.post('/project-manager/ai/meeting-scheduler/chats/create', data);
+    return response?.data || {};
+  } catch (error) { console.error('Create meeting chat error:', error); throw error; }
+};
+
+export const updateMeetingSchedulerChat = async (chatId, data = {}) => {
+  try {
+    const response = await companyApi.patch(`/project-manager/ai/meeting-scheduler/chats/${chatId}/update`, data);
+    return response?.data || {};
+  } catch (error) { console.error('Update meeting chat error:', error); throw error; }
+};
+
+export const deleteMeetingSchedulerChat = async (chatId) => {
+  try {
+    const response = await companyApi.delete(`/project-manager/ai/meeting-scheduler/chats/${chatId}/delete`);
+    return response?.data || {};
+  } catch (error) { console.error('Delete meeting chat error:', error); throw error; }
+};
+
 export default {
   projectPilot,
   projectPilotFromFile,
@@ -469,6 +497,10 @@ export default {
   meetingSchedule,
   meetingRespond,
   meetingList,
+  listMeetingSchedulerChats,
+  createMeetingSchedulerChat,
+  updateMeetingSchedulerChat,
+  deleteMeetingSchedulerChat,
 };
 
 

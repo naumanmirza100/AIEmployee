@@ -1843,77 +1843,110 @@ const FrontlineDashboard = () => {
   }
 
   return (
-    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
+    <div
+      className="w-full rounded-2xl border border-white/[0.06] p-0"
+      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+    >
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
-        <Card className="w-full min-w-0">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Documents</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.total_documents || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.indexed_documents || 0} indexed
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card className="w-full min-w-0">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tickets</CardTitle>
-            <Ticket className="h-4 w-4 text-muted-foreground shrink-0" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.total_tickets || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.open_tickets || 0} open, {stats?.resolved_tickets || 0} resolved
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card className="w-full min-w-0 sm:col-span-2 lg:col-span-1">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Auto-Resolved</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-muted-foreground shrink-0" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.auto_resolved_tickets || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Automatically resolved tickets
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
+        {[
+          {
+            label: 'Total Documents',
+            value: stats?.total_documents || 0,
+            sub: `${stats?.indexed_documents || 0} indexed`,
+            icon: FileText,
+            color: '#a78bfa',
+            bgColor: 'rgba(167,139,250,0.2)',
+            borderColor: 'rgba(167,139,250,0.2)',
+            gradientFrom: 'rgba(167,139,250,0.2)',
+            gradientTo: 'rgba(147,51,234,0.1)',
+          },
+          {
+            label: 'Total Tickets',
+            value: stats?.total_tickets || 0,
+            sub: `${stats?.open_tickets || 0} open`,
+            icon: Ticket,
+            color: '#34d399',
+            bgColor: 'rgba(52,211,153,0.2)',
+            borderColor: 'rgba(52,211,153,0.2)',
+            gradientFrom: 'rgba(52,211,153,0.2)',
+            gradientTo: 'rgba(22,163,74,0.1)',
+          },
+          {
+            label: 'Resolved',
+            value: stats?.resolved_tickets || 0,
+            sub: 'Successfully resolved',
+            icon: CheckCircle2,
+            color: '#fbbf24',
+            bgColor: 'rgba(251,191,36,0.2)',
+            borderColor: 'rgba(251,191,36,0.2)',
+            gradientFrom: 'rgba(251,191,36,0.15)',
+            gradientTo: 'rgba(245,158,11,0.08)',
+          },
+          {
+            label: 'Auto-Resolved',
+            value: stats?.auto_resolved_tickets || 0,
+            sub: 'Resolved automatically',
+            icon: Sparkles,
+            color: '#60a5fa',
+            bgColor: 'rgba(96,165,250,0.2)',
+            borderColor: 'rgba(96,165,250,0.2)',
+            gradientFrom: 'rgba(96,165,250,0.2)',
+            gradientTo: 'rgba(34,211,238,0.1)',
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className="relative group w-full min-w-0 rounded-xl backdrop-blur-sm p-5 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
+            style={{
+              border: `1px solid ${card.borderColor}`,
+              background: `linear-gradient(135deg, ${card.gradientFrom} 0%, ${card.gradientTo} 100%)`,
+            }}
+          >
+            <div className="flex items-start justify-between mb-3">
+              <div className="rounded-lg p-2.5" style={{ backgroundColor: card.bgColor }}>
+                <card.icon className="h-5 w-5" style={{ color: card.color }} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-white/50 tracking-wide">{card.label}</p>
+              <p className="text-3xl font-bold text-white tracking-tight">{card.value}</p>
+              <p className="text-xs text-white/40">{card.sub}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
         {/* Mobile & Tablet: Hamburger menu (below lg) */}
-        <div className="lg:hidden w-full">
+        <div className="lg:hidden w-full mb-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full justify-between h-11">
+              <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
                 <div className="flex items-center gap-2 min-w-0">
-                  <currentTab.icon className="h-4 w-4 shrink-0" />
+                  <currentTab.icon className="h-4 w-4 shrink-0 text-violet-400" />
                   <span className="font-medium truncate">{currentTab.label}</span>
                 </div>
-                <Menu className="h-5 w-5 text-muted-foreground shrink-0" />
+                <Menu className="h-5 w-5 text-white/40 shrink-0" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto">
+            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
               {FRONTLINE_TAB_ITEMS.map((item) => {
                 const isActive = item.value === activeTab;
+                const ItemIcon = item.icon;
                 return (
                   <DropdownMenuItem
                     key={item.value}
                     onClick={() => setActiveTab(item.value)}
-                    className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-primary/10' : ''}`}
+                    className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-violet-600/20' : 'hover:bg-white/5'}`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <item.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                      <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
+                      <ItemIcon className={`h-4 w-4 shrink-0 ${isActive ? 'text-violet-400' : 'text-white/40'}`} />
+                      <span className={isActive ? 'font-medium text-violet-300' : 'text-white/70'}>{item.label}</span>
                     </div>
-                    {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
+                    {isActive && <Check className="h-4 w-4 text-violet-400 shrink-0" />}
                   </DropdownMenuItem>
                 );
               })}
@@ -1923,72 +1956,143 @@ const FrontlineDashboard = () => {
 
         {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
         <div className="hidden lg:block overflow-x-auto pb-1">
-          <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-            {FRONTLINE_TAB_ITEMS.map((item) => (
-              <TabsTrigger
-                key={item.value}
-                value={item.value}
-                className="whitespace-nowrap shrink-0 px-3 py-1.5 text-sm flex items-center gap-2"
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </TabsTrigger>
-            ))}
+          <TabsList
+            className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
+            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+          >
+            {FRONTLINE_TAB_ITEMS.map((item) => {
+              const TabIcon = item.icon;
+              return (
+                <TabsTrigger
+                  key={item.value}
+                  value={item.value}
+                  className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                  style={activeTab === item.value
+                    ? {
+                        background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                        color: '#fff',
+                        border: '1.5px solid #a259ff',
+                        boxShadow: '0 0 8px 0 #a259ff55',
+                      }
+                    : {
+                        background: 'rgba(60, 30, 90, 0.22)',
+                        color: '#cfc6e6',
+                        border: '1.5px solid #2d2342',
+                        boxShadow: 'none',
+                      }
+                  }
+                >
+                  <TabIcon className="h-4 w-4 mr-2" />
+                  {item.label}
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
         </div>
 
         {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-4 mt-4">
-          <Card className="w-full min-w-0">
-            <CardHeader>
-              <CardTitle>Welcome to Frontline Agent</CardTitle>
-              <CardDescription>
-                AI-powered customer support system for handling tickets and answering questions
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Button onClick={() => setShowUploadDialog(true)} className="w-full">
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload Document
-                </Button>
-                <Button onClick={() => setActiveTab('qa')} variant="outline" className="w-full">
-                  <MessageSquare className="mr-2 h-4 w-4" />
-                  Ask a Question
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+        <TabsContent value="overview" className="mt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
+            {[
+              {
+                title: 'Documents',
+                desc: 'Upload and manage knowledge base documents for AI-powered answers',
+                icon: FileText,
+                tab: 'documents',
+                color: '#a78bfa',
+                bgColor: 'rgba(167,139,250,0.15)',
+                borderHover: 'rgba(167,139,250,0.4)',
+              },
+              {
+                title: 'Knowledge Q&A',
+                desc: 'Ask questions and get AI-powered answers from your knowledge base',
+                icon: MessageSquare,
+                tab: 'qa',
+                color: '#34d399',
+                bgColor: 'rgba(52,211,153,0.15)',
+                borderHover: 'rgba(52,211,153,0.4)',
+              },
+              {
+                title: 'Tickets',
+                desc: 'Manage support tickets with AI auto-resolution and prioritization',
+                icon: Ticket,
+                tab: 'tickets',
+                color: '#60a5fa',
+                bgColor: 'rgba(96,165,250,0.15)',
+                borderHover: 'rgba(96,165,250,0.4)',
+              },
+              {
+                title: 'Chat Widget',
+                desc: 'Configure and embed a customer-facing chat widget on your site',
+                icon: Monitor,
+                tab: 'widget',
+                color: '#fbbf24',
+                bgColor: 'rgba(251,191,36,0.15)',
+                borderHover: 'rgba(251,191,36,0.4)',
+              },
+              {
+                title: 'Workflows',
+                desc: 'Set up automated workflows for ticket routing and notifications',
+                icon: GitBranch,
+                tab: 'workflows',
+                color: '#2dd4bf',
+                bgColor: 'rgba(45,212,191,0.15)',
+                borderHover: 'rgba(45,212,191,0.4)',
+              },
+              {
+                title: 'Analytics',
+                desc: 'View ticket trends, performance metrics, and AI-generated graphs',
+                icon: BarChart3,
+                tab: 'analytics',
+                color: '#f472b6',
+                bgColor: 'rgba(244,114,182,0.15)',
+                borderHover: 'rgba(244,114,182,0.4)',
+              },
+            ].map((card) => (
+              <button
+                key={card.title}
+                onClick={() => setActiveTab(card.tab)}
+                className="group relative flex flex-col items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-5 text-left transition-all duration-300 hover:bg-white/[0.06] cursor-pointer w-full min-w-0"
+                onMouseEnter={(e) => e.currentTarget.style.borderColor = card.borderHover}
+                onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
+              >
+                <div className="rounded-lg p-2.5" style={{ backgroundColor: card.bgColor }}>
+                  <card.icon className="h-5 w-5" style={{ color: card.color }} />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm text-white group-hover:text-white transition-colors">{card.title}</p>
+                  <p className="text-xs text-white/40 mt-1 leading-relaxed">{card.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
 
           {/* Recent Documents */}
           {documents.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Documents</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {documents.slice(0, 5).map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between p-2 border rounded">
-                      <div className="flex items-center space-x-2">
-                        <FileText className="h-4 w-4" />
-                        <span className="text-sm">{doc.title}</span>
-                        {doc.is_indexed && (
-                          <span className="text-xs text-green-600">Indexed</span>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteDocument(doc.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+            <div className="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-5">
+              <h3 className="text-sm font-semibold text-white mb-3">Recent Documents</h3>
+              <div className="space-y-2">
+                {documents.slice(0, 5).map((doc) => (
+                  <div key={doc.id} className="flex items-center justify-between p-2 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <FileText className="h-4 w-4 text-white/40 shrink-0" />
+                      <span className="text-sm text-white/70 truncate">{doc.title}</span>
+                      {doc.is_indexed && (
+                        <span className="text-xs text-emerald-400">Indexed</span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-white/30 hover:text-white/60 shrink-0"
+                      onClick={() => handleDeleteDocument(doc.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </TabsContent>
 
@@ -3034,6 +3138,7 @@ const FrontlineDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 };

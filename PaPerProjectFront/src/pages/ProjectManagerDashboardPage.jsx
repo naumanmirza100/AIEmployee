@@ -37,6 +37,7 @@ import {
   Menu,
   Check,
   Workflow,
+  CalendarPlus,
 } from 'lucide-react';
 import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
@@ -45,6 +46,7 @@ import TimelineGanttAgent from '@/components/pm-agent/TimelineGanttAgent';
 import ManualProjectCreation from '@/components/pm-agent/ManualProjectCreation';
 import ManualTaskCreation from '@/components/pm-agent/ManualTaskCreation';
 import PMToolsHub from '@/components/pm-agent/PMToolsHub';
+import MeetingScheduler from '@/components/pm-agent/MeetingScheduler';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 
 const PM_TAB_ITEMS = [
@@ -55,6 +57,7 @@ const PM_TAB_ITEMS = [
   { value: 'task-prioritization', label: 'Task Prioritization', icon: ListChecks },
   { value: 'knowledge-qa', label: 'Knowledge Q&A', icon: MessageSquare },
   { value: 'timeline-gantt', label: 'Timeline & Gantt', icon: Calendar },
+  { value: 'meeting-scheduler', label: 'Meeting Scheduler', icon: CalendarPlus },
   { value: 'ai-tools', label: 'AI Tools', icon: Workflow },
 ];
 
@@ -265,6 +268,21 @@ const ProjectManagerDashboardPage = () => {
           activeSection={activeSection}
           onLogout={handleLogout}
           navItems={isCompanyUser() ? getAgentNavItems(purchasedModules, 'project-manager', navigate) : []}
+          onNotificationClick={(n) => {
+            const type = n.type || n.notification_type || '';
+            const data = n.data || {};
+            if (type.includes('meeting') || data.type?.includes('meeting')) {
+              setActiveTab('meeting-scheduler');
+            } else if (type.includes('task') || type.includes('overdue') || type.includes('blocked') || type.includes('unassigned') || type.includes('sprint')) {
+              setActiveTab('task-prioritization');
+            } else if (type.includes('deadline') || type.includes('milestone')) {
+              setActiveTab('timeline-gantt');
+            } else if (type.includes('project') || type.includes('workload')) {
+              setActiveTab('overview');
+            } else {
+              setActiveTab('overview');
+            }
+          }}
         />
 
         {/* Main Content */}
@@ -515,6 +533,10 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="timeline-gantt" className="mt-6">
                   <TimelineGanttAgent projects={projects || []} />
+                </TabsContent>
+
+                <TabsContent value="meeting-scheduler" className="mt-6">
+                  <MeetingScheduler />
                 </TabsContent>
 
                 <TabsContent value="ai-tools" className="mt-6">

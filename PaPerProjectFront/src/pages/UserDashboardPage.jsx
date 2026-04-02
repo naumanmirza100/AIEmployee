@@ -13,6 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import userTaskService from '@/services/userTaskService';
 import userProjectManagerService from '@/services/userProjectManagerService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import { API_BASE_URL } from '@/config/apiConfig';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,7 +34,11 @@ import {
   Users,
   Edit,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  CalendarPlus,
+  CheckCircle,
+  XCircle,
+  ArrowRightLeft
 } from 'lucide-react';
 
 // Helper function to format role for display
@@ -62,6 +67,15 @@ const UserDashboardPage = () => {
   const [allProjectTasksLoading, setAllProjectTasksLoading] = useState(false);
   const [pmProjects, setPmProjects] = useState([]);
   const [expandedProjects, setExpandedProjects] = useState(new Set());
+
+  // Meeting state
+  const [meetings, setMeetings] = useState([]);
+  const [meetingsLoading, setMeetingsLoading] = useState(false);
+  const [respondingTo, setRespondingTo] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [counterDate, setCounterDate] = useState('');
+  const [counterTime, setCounterTime] = useState('');
+  const [respondLoading, setRespondLoading] = useState(false);
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
@@ -148,6 +162,52 @@ const UserDashboardPage = () => {
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
+  };
+
+  const fetchMeetings = async () => {
+    setMeetingsLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/meetings`, {
+        headers: { 'Authorization': `Token ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMeetings(data?.data?.meetings || []);
+      }
+    } catch (err) { console.error('Fetch meetings error:', err); }
+    finally { setMeetingsLoading(false); }
+  };
+
+  useEffect(() => { if (activeTab === 'meetings') fetchMeetings(); }, [activeTab]);
+
+  const handleMeetingRespond = async (meetingId, action) => {
+    setRespondLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      let counterTimeISO = null;
+      if (action === 'counter_proposed' && counterDate && counterTime) {
+        counterTimeISO = new Date(`${counterDate}T${counterTime}`).toISOString();
+      }
+      const res = await fetch(`${API_BASE_URL}/meetings/${meetingId}/respond`, {
+        method: 'POST',
+        headers: { 'Authorization': `Token ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, reason: rejectReason, counter_time: counterTimeISO }),
+      });
+      if (res.ok) {
+        toast({ title: action === 'accepted' ? 'Meeting Accepted' : action === 'rejected' ? 'Meeting Rejected' : 'New Time Proposed' });
+        setRespondingTo(null);
+        setRejectReason('');
+        setCounterDate('');
+        setCounterTime('');
+        fetchMeetings();
+      } else {
+        const err = await res.json();
+        toast({ title: 'Error', description: err.message || 'Failed', variant: 'destructive' });
+      }
+    } catch (e) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally { setRespondLoading(false); }
   };
 
   const handleStatusChange = async (taskId, newStatus) => {
@@ -569,14 +629,26 @@ const UserDashboardPage = () => {
         <title>{dashboardTitle} - Pay Per Project</title>
       </Helmet>
 
-      <DashboardNavbar 
+      <DashboardNavbar
         icon={User}
         title={dashboardTitle}
         subtitle={dashboardSubtitle}
-        user={user} 
+        user={user}
         userRole={formattedRole}
         onLogout={handleLogout}
         showCompanyUserOptions={false}
+        onNotificationClick={(n) => {
+          const type = n.type || n.notification_type || '';
+          if (type.includes('meeting')) {
+            setActiveTab('meetings');
+          } else if (type.includes('task')) {
+            setActiveTab('tasks');
+          } else if (type.includes('project')) {
+            setActiveTab('projects');
+          } else {
+            setActiveTab('tasks');
+          }
+        }}
       />
 
       <div className="container mx-auto px-4 py-8 max-w-7xl">
@@ -589,6 +661,10 @@ const UserDashboardPage = () => {
             <TabsTrigger value="projects">
               <FolderKanban className="h-4 w-4 mr-2" />
               My Projects
+            </TabsTrigger>
+            <TabsTrigger value="meetings">
+              <CalendarPlus className="h-4 w-4 mr-2" />
+              Meetings
             </TabsTrigger>
             {isProjectManager && (
               <>
@@ -823,6 +899,125 @@ const UserDashboardPage = () => {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* Meetings Tab */}
+          <TabsContent value="meetings" className="space-y-4 mt-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Meeting Requests</h2>
+              <Button onClick={fetchMeetings} disabled={meetingsLoading} variant="outline" size="sm">
+                {meetingsLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CalendarPlus className="h-4 w-4 mr-1" />}
+                Refresh
+              </Button>
+            </div>
+
+            {meetingsLoading && (
+              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
+            )}
+
+            {!meetingsLoading && meetings.length === 0 && (
+              <Card className="bg-white/[0.02] border-white/10">
+                <CardContent className="py-12 text-center">
+                  <CalendarPlus className="h-10 w-10 mx-auto mb-3 text-white/30" />
+                  <p className="text-sm text-white/50">No meeting requests yet.</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {meetings.map((m) => {
+              const statusColors = {
+                pending: 'text-yellow-400 bg-yellow-500/20',
+                accepted: 'text-green-400 bg-green-500/20',
+                rejected: 'text-red-400 bg-red-500/20',
+                counter_proposed: 'text-blue-400 bg-blue-500/20',
+                withdrawn: 'text-gray-400 bg-gray-500/20',
+              };
+              const sc = statusColors[m.status] || statusColors.pending;
+
+              return (
+                <Card key={m.id} className="bg-white/[0.02] border-white/10">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">{m.title}</h3>
+                        <p className="text-xs text-white/50 mt-0.5">From: {m.organizer_name} ({m.organizer_email})</p>
+                      </div>
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${sc}`}>
+                        {m.status.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-xs text-white/50">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(m.proposed_time).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                      <span>{m.duration_minutes} min</span>
+                    </div>
+
+                    {m.description && <p className="text-xs text-white/40">{m.description}</p>}
+
+                    {/* Response history */}
+                    {m.responses?.length > 0 && (
+                      <div className="space-y-1 pt-2 border-t border-white/5">
+                        {m.responses.map((r, ri) => (
+                          <div key={ri} className="text-xs text-white/40 flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-white/60">{r.responder_name}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] ${statusColors[r.action] || ''}`}>{r.action}</span>
+                            {r.proposed_time && <span>→ {new Date(r.proposed_time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
+                            {r.reason && <span className="italic">"{r.reason}"</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Action buttons — only for pending or counter_proposed meetings */}
+                    {(m.status === 'pending' || m.status === 'counter_proposed') && (
+                      <div className="pt-2 border-t border-white/5">
+                        {respondingTo === m.id ? (
+                          <div className="space-y-2 bg-white/[0.03] rounded-lg p-3">
+                            <input
+                              value={rejectReason}
+                              onChange={(e) => setRejectReason(e.target.value)}
+                              placeholder="Reason (optional)"
+                              className="w-full bg-transparent border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                            />
+                            <div className="flex items-center gap-2">
+                              <input type="date" value={counterDate} onChange={(e) => setCounterDate(e.target.value)}
+                                className="bg-transparent border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-500/50" />
+                              <input type="time" value={counterTime} onChange={(e) => setCounterTime(e.target.value)}
+                                className="bg-transparent border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-500/50" />
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => handleMeetingRespond(m.id, 'rejected')} disabled={respondLoading}
+                                className="bg-red-600 hover:bg-red-700 text-xs h-7">
+                                <XCircle className="h-3 w-3 mr-1" /> Reject
+                              </Button>
+                              <Button size="sm" onClick={() => handleMeetingRespond(m.id, 'counter_proposed')} disabled={respondLoading || !counterDate || !counterTime}
+                                className="bg-blue-600 hover:bg-blue-700 text-xs h-7">
+                                <ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest Time
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setRespondingTo(null)} className="text-xs h-7">Cancel</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={() => handleMeetingRespond(m.id, 'accepted')} disabled={respondLoading}
+                              className="bg-green-600 hover:bg-green-700 text-xs h-7">
+                              <CheckCircle className="h-3 w-3 mr-1" /> Accept
+                            </Button>
+                            <Button size="sm" onClick={() => setRespondingTo(m.id)} variant="outline"
+                              className="text-xs h-7 border-white/20 text-white/70 hover:bg-white/10">
+                              Reject / Suggest Time
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </TabsContent>
 
           {/* All Project Tasks Tab (Project Manager Only) */}
