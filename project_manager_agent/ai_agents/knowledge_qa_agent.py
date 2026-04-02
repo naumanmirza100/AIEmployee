@@ -212,7 +212,7 @@ def _build_aggregates_context(context: Dict, available_users: Optional[List[Dict
                 name = u.get("name") or u.get("username", "Unknown")
                 lines.append(f"  - {name}")
 
-    lines.append("\nAnswer using ONLY the numbers above. Do not list individual tasks or users.")
+    lines.append("\nUse the data above to answer the question.")
     return "\n".join(lines)
 
 
@@ -508,17 +508,14 @@ class KnowledgeQAAgent(BaseAgent):
         super().__init__()
         self.system_prompt = """You are a Knowledge Q&A Agent for a project management system.
         Your role is to answer questions about projects, tasks, team members, users, and provide helpful information.
-        You ONLY provide descriptive answers and information - you do NOT perform actions like creating projects, tasks, or modifying users.
-        You have READ-ONLY access to user information (users added by the company user, their roles, and their task assignments).
-        You can view and report on user information, but you CANNOT create, update, or delete users.
-        For action requests (creating projects, tasks, etc.), users should use the Project Pilot agent.
+        You provide descriptive answers and information. For action requests (creating projects, tasks, etc.), redirect users to the Project Pilot agent.
 
-        CRITICAL RESPONSE RULES:
-        1. Answer ONLY what the user asked. Do NOT add extra information they did not request.
-        2. If they ask about users, only provide user info. Do NOT include task assignments unless they specifically ask about tasks or assignments.
-        3. If they ask about tasks, only provide task info. Do NOT add user details unless relevant to the question.
-        4. If they ask for a count, give the number and one short sentence. Do NOT list items unless asked.
-        5. Keep responses concise and well-structured. Use markdown formatting (bold, lists, headings) for readability.
+        RESPONSE RULES:
+        1. Answer exactly what the user asked — no more, no less. If they ask for names, give names. If they ask for emails, give emails. If they ask for a count, give the count.
+        2. NEVER refuse to provide information that exists in the context. If the user asks for it and you have it, give it.
+        3. If the user asks for a count only ("how many users"), give just the count. If they also say "name them" or "list them", include the list too.
+        4. Do not add extra fields the user didn't ask for. If they ask for names, don't also dump emails and roles unless asked.
+        5. Keep responses well-structured. Use markdown formatting (bold, lists, headings) for readability.
         6. Be conversational but direct — no filler text or unnecessary preamble."""
     
     def answer_question(self, question: str, context: Optional[Dict] = None,
@@ -624,8 +621,7 @@ class KnowledgeQAAgent(BaseAgent):
         
         # Add available users information to context string
         if available_users:
-            context_str += f"\n\n📋 USERS ADDED BY COMPANY USER ({len(available_users)} total):\n"
-            context_str += "NOTE: You have READ-ONLY access to this user information. You can view and report on users, but you CANNOT create, update, or delete users.\n\n"
+            context_str += f"\n\n📋 COMPANY USERS ({len(available_users)} total):\n"
             for user in available_users:
                 context_str += f"- ID: {user.get('id', 'N/A')}, Username: {user.get('username', 'Unknown')}, Name: {user.get('name', user.get('username', 'Unknown'))}\n"
                 if 'role' in user:
@@ -779,13 +775,13 @@ Return a helpful text response (NOT JSON)."""
 
             # Fallback to LLM if we couldn't recognize the pattern.
             aggregates_str = _build_aggregates_context(context, available_users)
-            prompt = f"""Use the AGGREGATES below to answer the question. Give ONLY the requested number(s) and at most one short sentence. Do not list individual tasks, projects, or users.
+            prompt = f"""Use the AGGREGATES below to answer the question. Provide the numbers and any relevant details the user asked for.
 
 {aggregates_str}
 
 Question: {question}
 
-Answer briefly with the requested number(s)."""
+Answer with the requested information. If the user asks to name or list items alongside a count, include both."""
             max_tokens = 250
             relevant_results = []
         elif is_comparison_question and context:
@@ -848,15 +844,13 @@ INSTRUCTIONS:
 
 Question: {question}
 
-CRITICAL INSTRUCTIONS:
-- Answer ONLY what the user asked. Do NOT volunteer extra information they did not request.
-- If the question is about users (names, roles, etc.), provide ONLY user info. Do NOT include task assignments or task counts unless specifically asked.
-- If the question is about tasks, provide ONLY task info. Do NOT add unrelated user or project details.
-- If the question is about assignments, then include task-user mapping details.
-- Keep the response concise and well-structured. Use markdown (bold for names, bullet lists for details).
-- Do NOT add disclaimers, notes, or "please note" sections unless the data is missing.
-- If the question is about specific data that isn't in the context, say so briefly.
-- Use clear formatting: headings for sections, bold for key names, sub-bullets for attributes."""
+INSTRUCTIONS:
+- Answer exactly what the user asked — no more, no less.
+- NEVER refuse to share information that exists in the context. If the user asks for it, provide it.
+- If they ask for names, list the names. If they ask for emails, list emails. If they ask for details, give full details.
+- Only include information the user specifically asked for. Don't add extra fields they didn't request.
+- Keep the response well-structured. Use markdown (bold for names, bullet lists for details, headings for sections).
+- If the question is about specific data that isn't in the context, say so briefly."""
             max_tokens = 800
         
         try:

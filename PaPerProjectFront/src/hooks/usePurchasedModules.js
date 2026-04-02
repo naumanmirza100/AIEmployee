@@ -13,6 +13,7 @@ const CACHE_KEY = 'company_purchased_modules';
  */
 const usePurchasedModules = () => {
   const [purchasedModules, setPurchasedModules] = useState([]);
+  const [allPurchases, setAllPurchases] = useState([]);
   const [modulesLoaded, setModulesLoaded] = useState(false);
 
   const fetchModules = useCallback(async () => {
@@ -41,7 +42,7 @@ const usePurchasedModules = () => {
     fetchModules();
   }, [fetchModules]);
 
-  return { purchasedModules, modulesLoaded, refetch: fetchModules };
+  return { purchasedModules, allPurchases, modulesLoaded, refetch: fetchModules };
 };
 
 export default usePurchasedModules;

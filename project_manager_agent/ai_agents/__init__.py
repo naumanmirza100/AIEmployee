@@ -17,6 +17,7 @@ from .subtask_generation_agent import SubtaskGenerationAgent
 from .daily_standup_agent import DailyStandupAgent
 from .smart_notifications_agent import SmartNotificationsAgent
 from .time_estimation_agent import TimeEstimationAgent
+from .meeting_scheduler_agent import MeetingSchedulerAgent
 
 # Register all agents
 AgentRegistry.register("task_prioritization", TaskPrioritizationAgent)
@@ -31,6 +32,7 @@ AgentRegistry.register("subtask_generation", SubtaskGenerationAgent)
 AgentRegistry.register("daily_standup", DailyStandupAgent)
 AgentRegistry.register("smart_notifications", SmartNotificationsAgent)
 AgentRegistry.register("time_estimation", TimeEstimationAgent)
+AgentRegistry.register("meeting_scheduler", MeetingSchedulerAgent)
 
 __all__ = [
     'BaseAgent',
@@ -47,5 +49,6 @@ __all__ = [
     'DailyStandupAgent',
     'SmartNotificationsAgent',
     'TimeEstimationAgent',
+    'MeetingSchedulerAgent',
 ]
 

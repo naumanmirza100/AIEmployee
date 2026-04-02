@@ -14,6 +14,8 @@ from project_manager_agent.models import (
     PMProjectPilotChat,
     PMProjectPilotChatMessage,
     PMNotification,
+    ScheduledMeeting,
+    MeetingResponse,
 )
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
@@ -25,8 +27,11 @@ from datetime import datetime, timedelta
 import os
 import tempfile
 
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
+from django.core.mail import send_mail
+from django.conf import settings as django_settings
+from core.models import CompanyUser
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
@@ -3983,4 +3988,399 @@ def time_estimation(request):
 
     except Exception as e:
         logger.exception("time_estimation failed")
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== MEETING SCHEDULER ENDPOINTS ====================
+
+def _send_meeting_email(recipient_email, subject, body_html):
+    """Send meeting notification email. Fails silently if email is not configured."""
+    try:
+        from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+        send_mail(
+            subject=subject,
+            message='',
+            from_email=from_email,
+            recipient_list=[recipient_email],
+            html_message=body_html,
+            fail_silently=True,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send meeting email to {recipient_email}: {e}")
+
+
+def _create_meeting_notification(company_user, title, message, data=None, severity='info'):
+    """Create a PM notification for meeting events."""
+    PMNotification.objects.create(
+        company_user=company_user,
+        notification_type='custom',
+        severity=severity,
+        title=title,
+        message=message,
+        data=data or {},
+    )
+
+
+def _serialize_meeting(meeting):
+    """Serialize a ScheduledMeeting to dict. Invitee is a Django User (project user)."""
+    responses = []
+    for r in meeting.responses.all().order_by('created_at'):
+        if r.responded_by == 'organizer':
+            responder_name = meeting.organizer.full_name
+        else:
+            responder_name = meeting.invitee.get_full_name() or meeting.invitee.username
+        responses.append({
+            'id': r.id,
+            'responded_by': r.responded_by,
+            'responder_name': responder_name,
+            'action': r.action,
+            'proposed_time': r.proposed_time.isoformat() if r.proposed_time else None,
+            'reason': r.reason,
+            'created_at': r.created_at.isoformat(),
+        })
+
+    invitee_name = meeting.invitee.get_full_name() or meeting.invitee.username
+
+    return {
+        'id': meeting.id,
+        'organizer_id': meeting.organizer_id,
+        'organizer_name': meeting.organizer.full_name,
+        'organizer_email': meeting.organizer.email,
+        'invitee_id': meeting.invitee_id,
+        'invitee_name': invitee_name,
+        'invitee_email': meeting.invitee.email or '',
+        'invitee_username': meeting.invitee.username,
+        'title': meeting.title,
+        'description': meeting.description,
+        'proposed_time': meeting.proposed_time.isoformat(),
+        'duration_minutes': meeting.duration_minutes,
+        'status': meeting.status,
+        'created_at': meeting.created_at.isoformat(),
+        'updated_at': meeting.updated_at.isoformat(),
+        'responses': responses,
+    }
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def meeting_schedule(request):
+    """
+    Chat-based meeting scheduling endpoint.
+    Parses natural language request, validates invitee, creates meeting, and sends notifications.
+    """
+    try:
+        company_user = request.user
+        message = request.data.get("message", "").strip()
+        logger.info(f"[MEETING] Request from user {company_user.id} ({company_user.full_name}): '{message}'")
+
+        if not message:
+            return Response({"status": "error", "message": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get project users (Django Users) belonging to this company user
+        from core.models import UserProfile
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        logger.info(f"[MEETING] Fetching project users for company_user {company_user.id}")
+        created_profiles = UserProfile.objects.filter(
+            created_by_company_user=company_user
+        ).select_related('user')
+
+        project_users_list = []
+        for profile in created_profiles:
+            user = profile.user
+            if getattr(user, "is_superuser", False):
+                continue
+            project_users_list.append({
+                "id": user.id,
+                "full_name": user.get_full_name() or user.username,
+                "email": user.email or "",
+                "role": profile.role or "team_member",
+                "username": user.username,
+            })
+
+        logger.info(f"[MEETING] Found {len(project_users_list)} project users: {[u['full_name'] for u in project_users_list]}")
+
+        # Use the AI agent to parse the request
+        agent = AgentRegistry.get_agent("meeting_scheduler")
+        current_time = timezone.now().isoformat()
+        result = agent.process(
+            message=message,
+            company_users=project_users_list,
+            current_time=current_time,
+            organizer_id=company_user.id,
+        )
+
+        action = result.get("action")
+        logger.info(f"[MEETING] Agent result: action={action}")
+
+        # If the agent says to schedule, create the meeting
+        if action == "schedule" and result.get("data"):
+            data = result["data"]
+            invitee_id = data["invitee_id"]
+
+            # Look up the Django User (project user)
+            try:
+                invitee_user = User.objects.get(id=int(invitee_id))
+            except (User.DoesNotExist, ValueError, TypeError):
+                return Response({
+                    "status": "success",
+                    "data": {
+                        "action": "user_not_found",
+                        "response": f"User not found. Please try again.",
+                        "meeting": None,
+                    }
+                }, status=status.HTTP_200_OK)
+
+            invitee_name = invitee_user.get_full_name() or invitee_user.username
+            invitee_email = invitee_user.email
+
+            # Parse proposed time
+            proposed_time_str = data["proposed_time"]
+            try:
+                proposed_time = datetime.fromisoformat(proposed_time_str.replace("Z", "+00:00"))
+                if timezone.is_naive(proposed_time):
+                    proposed_time = timezone.make_aware(proposed_time)
+            except Exception:
+                return Response({
+                    "status": "success",
+                    "data": {
+                        "action": "parse_error",
+                        "response": "Could not parse the meeting time. Please try again with a clear date and time.",
+                        "meeting": None,
+                    }
+                }, status=status.HTTP_200_OK)
+
+            time_display = proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            meeting_title = data.get("title", f"Meeting with {invitee_name}")
+
+            # Create the meeting (organizer=CompanyUser, invitee=Django User)
+            meeting = ScheduledMeeting.objects.create(
+                organizer=company_user,
+                invitee=invitee_user,
+                title=meeting_title,
+                description=data.get("description", ""),
+                proposed_time=proposed_time,
+                duration_minutes=data.get("duration_minutes", 30),
+                status='pending',
+            )
+
+            # Create the initial "proposed" response
+            MeetingResponse.objects.create(
+                meeting=meeting,
+                responded_by='organizer',
+                action='proposed',
+                proposed_time=proposed_time,
+            )
+
+            # Send email to invitee if they have an email
+            if invitee_email:
+                _send_meeting_email(
+                    recipient_email=invitee_email,
+                    subject=f"Meeting Request: {meeting.title}",
+                    body_html=f"""
+                    <h2>Meeting Request</h2>
+                    <p><strong>{company_user.full_name}</strong> has invited you to a meeting.</p>
+                    <table style="border-collapse:collapse; margin:16px 0;">
+                        <tr><td style="padding:4px 12px; font-weight:bold;">Title:</td><td style="padding:4px 12px;">{meeting.title}</td></tr>
+                        <tr><td style="padding:4px 12px; font-weight:bold;">When:</td><td style="padding:4px 12px;">{time_display}</td></tr>
+                        <tr><td style="padding:4px 12px; font-weight:bold;">Duration:</td><td style="padding:4px 12px;">{meeting.duration_minutes} minutes</td></tr>
+                        <tr><td style="padding:4px 12px; font-weight:bold;">Description:</td><td style="padding:4px 12px;">{meeting.description or 'N/A'}</td></tr>
+                    </table>
+                    <p>Please log in to your dashboard to accept or reject this meeting.</p>
+                    """,
+                )
+
+            return Response({
+                "status": "success",
+                "data": {
+                    "action": "scheduled",
+                    "response": result["response"],
+                    "meeting": _serialize_meeting(meeting),
+                }
+            }, status=status.HTTP_200_OK)
+
+        # For non-schedule actions (error, not found, etc.), just return the response
+        return Response({
+            "status": "success",
+            "data": {
+                "action": action,
+                "response": result["response"],
+                "meeting": None,
+            }
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        import traceback
+        logger.exception("meeting_schedule failed")
+        print(f"[MEETING ERROR] {type(e).__name__}: {e}")
+        print(f"[MEETING ERROR] Traceback:\n{traceback.format_exc()}")
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def meeting_respond(request):
+    """
+    Respond to a meeting: accept, reject (with reason + optional counter time), or withdraw.
+    """
+    try:
+        company_user = request.user
+        meeting_id = request.data.get("meeting_id")
+        action = request.data.get("action")  # accept, reject, counter_propose, withdraw
+        reason = request.data.get("reason", "")
+        counter_time_str = request.data.get("counter_time")  # ISO datetime for counter-proposals
+
+        if not meeting_id or not action:
+            return Response({"status": "error", "message": "meeting_id and action are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action not in ('accepted', 'rejected', 'counter_proposed', 'withdrawn'):
+            return Response({"status": "error", "message": "Invalid action. Use: accepted, rejected, counter_proposed, withdrawn"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            meeting = ScheduledMeeting.objects.get(
+                id=meeting_id,
+            )
+        except ScheduledMeeting.DoesNotExist:
+            return Response({"status": "error", "message": "Meeting not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Verify user is the organizer of this meeting
+        # (Only the organizer — a CompanyUser — can respond via this endpoint.
+        #  Invitee responses come through a separate mechanism.)
+        is_organizer = meeting.organizer_id == company_user.id
+        if not is_organizer:
+            return Response({"status": "error", "message": "You are not the organizer of this meeting."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Can't act on already finalized meetings
+        if meeting.status in ('accepted', 'withdrawn'):
+            return Response({"status": "error", "message": f"Meeting is already {meeting.status}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Parse counter time if provided
+        counter_time = None
+        if action == 'counter_proposed' and counter_time_str:
+            try:
+                counter_time = datetime.fromisoformat(counter_time_str.replace("Z", "+00:00"))
+                if timezone.is_naive(counter_time):
+                    counter_time = timezone.make_aware(counter_time)
+            except Exception:
+                return Response({"status": "error", "message": "Invalid counter_time format."}, status=status.HTTP_400_BAD_REQUEST)
+        elif action == 'counter_proposed' and not counter_time_str:
+            return Response({"status": "error", "message": "counter_time is required for counter proposals."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create the response record
+        MeetingResponse.objects.create(
+            meeting=meeting,
+            responded_by='organizer',
+            action=action,
+            proposed_time=counter_time,
+            reason=reason,
+        )
+
+        # Update meeting status
+        if action == 'accepted':
+            meeting.status = 'accepted'
+        elif action == 'rejected':
+            meeting.status = 'rejected'
+        elif action == 'counter_proposed':
+            meeting.status = 'counter_proposed'
+            meeting.proposed_time = counter_time
+        elif action == 'withdrawn':
+            meeting.status = 'withdrawn'
+        meeting.save()
+
+        # Notify the invitee (project User) via email
+        invitee_name = meeting.invitee.get_full_name() or meeting.invitee.username
+        invitee_email = meeting.invitee.email
+        time_display = meeting.proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
+
+        if action == 'accepted':
+            # This shouldn't happen from organizer side normally, but handle it
+            if invitee_email:
+                _send_meeting_email(
+                    recipient_email=invitee_email,
+                    subject=f"Meeting Confirmed: {meeting.title}",
+                    body_html=f"<p><strong>{company_user.full_name}</strong> has confirmed the meeting <strong>\"{meeting.title}\"</strong> on {time_display}.</p>",
+                )
+
+        elif action == 'rejected':
+            reason_text = f" Reason: {reason}" if reason else ""
+            if invitee_email:
+                _send_meeting_email(
+                    recipient_email=invitee_email,
+                    subject=f"Meeting Cancelled: {meeting.title}",
+                    body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.{' Reason: ' + reason if reason else ''}</p>",
+                )
+
+        elif action == 'counter_proposed':
+            new_time_display = counter_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            if invitee_email:
+                _send_meeting_email(
+                    recipient_email=invitee_email,
+                    subject=f"New Time Proposed: {meeting.title}",
+                    body_html=f"""
+                    <p><strong>{company_user.full_name}</strong> proposed a new time for <strong>\"{meeting.title}\"</strong>.</p>
+                    <p><strong>New proposed time:</strong> {new_time_display}</p>
+                    {'<p><strong>Reason:</strong> ' + reason + '</p>' if reason else ''}
+                    """,
+                )
+
+        elif action == 'withdrawn':
+            if invitee_email:
+                _send_meeting_email(
+                    recipient_email=invitee_email,
+                    subject=f"Meeting Cancelled: {meeting.title}",
+                    body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.</p>",
+            )
+
+        return Response({
+            "status": "success",
+            "data": {
+                "action": action,
+                "meeting": _serialize_meeting(meeting),
+            }
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("meeting_respond failed")
+        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def meeting_list(request):
+    """
+    List all meetings for the current user (as organizer or invitee).
+    Query params: ?status=pending,accepted&role=organizer,invitee
+    """
+    try:
+        company_user = request.user
+        status_filter = request.query_params.get("status", "")
+        role_filter = request.query_params.get("role", "")
+
+        # CompanyUser is always the organizer — list all meetings they organized
+        meetings = ScheduledMeeting.objects.filter(
+            organizer=company_user
+        ).select_related('organizer', 'invitee').prefetch_related('responses')
+
+        if status_filter:
+            statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+            meetings = meetings.filter(status__in=statuses)
+
+        meetings = meetings.order_by('-created_at')[:50]
+
+        data = [_serialize_meeting(m) for m in meetings]
+
+        return Response({
+            "status": "success",
+            "data": {
+                "meetings": data,
+                "total": len(data),
+            }
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("meeting_list failed")
         return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

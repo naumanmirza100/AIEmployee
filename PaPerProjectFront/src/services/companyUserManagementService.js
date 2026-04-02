@@ -80,11 +80,25 @@ export const deleteUser = async (userId) => {
   }
 };
 
+/**
+ * Reactivate a deactivated user
+ */
+export const reactivateUser = async (userId) => {
+  try {
+    const response = await companyApi.post(`/company/users/${userId}/reactivate`);
+    return response;
+  } catch (error) {
+    console.error('Error reactivating user:', error);
+    throw error;
+  }
+};
+
 export default {
   createUser,
   listUsers,
   getUser,
   updateUser,
   deleteUser,
+  reactivateUser,
 };
 

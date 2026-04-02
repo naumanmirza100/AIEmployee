@@ -3,6 +3,7 @@ Company User Management API Views
 Allows company users to create and manage regular users (auth_user table)
 """
 
+import re
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
@@ -31,20 +32,114 @@ def create_user(request):
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
         company_user = request.user
         data = request.data
-        
+
         # Validate required fields
-        email = data.get('email')
-        password = data.get('password')
+        email = (data.get('email') or '').strip().lower()
+        password = data.get('password', '')
         username = data.get('username') or email.split('@')[0]  # Use email prefix as username if not provided
         role = data.get('role', 'team_member')
-        full_name = data.get('fullName') or data.get('full_name', '')
-        
+        full_name = (data.get('fullName') or data.get('full_name', '')).strip()
+        phone_number = (data.get('phoneNumber') or data.get('phone_number', '')).strip()
+
         if not email or not password:
             return Response({
                 'status': 'error',
                 'message': 'Email and password are required'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        if not full_name:
+            return Response({
+                'status': 'error',
+                'message': 'Full name is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Full name: no digits allowed, only letters/spaces/dots/hyphens/apostrophes
+        if re.search(r'[0-9]', full_name):
+            return Response({
+                'status': 'error',
+                'message': 'Full name must not contain numbers.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not re.match(r"^[a-zA-Z\s.'\-]+$", full_name):
+            return Response({
+                'status': 'error',
+                'message': "Full name can only contain letters, spaces, dots, hyphens, and apostrophes."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        alpha_count = sum(1 for c in full_name if c.isalpha())
+        if alpha_count < 2:
+            return Response({
+                'status': 'error',
+                'message': 'Full name must contain at least 2 alphabetic characters.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not phone_number:
+            return Response({
+                'status': 'error',
+                'message': 'Phone number is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Phone number validation - at least 7 digits, allows +, spaces, hyphens, parentheses
+        phone_digits = sum(1 for c in phone_number if c.isdigit())
+        if not re.match(r'^[+]?[\d\s\-()]{7,20}$', phone_number) or phone_digits < 7:
+            return Response({
+                'status': 'error',
+                'message': 'Enter a valid phone number (at least 7 digits, e.g., +1234567890).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Strict email validation
+        email_regex = r'^[a-zA-Z0-9][a-zA-Z0-9._%+-]*@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, email):
+            return Response({
+                'status': 'error',
+                'message': 'Enter a valid email address (e.g., user@example.com).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Password strength validation: min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
+        if len(password) < 8:
+            return Response({
+                'status': 'error',
+                'message': 'Password must be at least 8 characters long.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[A-Z]', password):
+            return Response({
+                'status': 'error',
+                'message': 'Password must contain at least one uppercase letter.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[a-z]', password):
+            return Response({
+                'status': 'error',
+                'message': 'Password must contain at least one lowercase letter.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[0-9]', password):
+            return Response({
+                'status': 'error',
+                'message': 'Password must contain at least one digit.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]', password):
+            return Response({
+                'status': 'error',
+                'message': 'Password must contain at least one special character (!@#$%^&* etc.).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Location validation (if provided)
+        location = (data.get('location') or '').strip()
+        if location:
+            loc_alpha = sum(1 for c in location if c.isalpha())
+            if loc_alpha < 2:
+                return Response({
+                    'status': 'error',
+                    'message': 'Location must contain at least 2 alphabetic characters.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Bio validation (if provided)
+        bio = (data.get('bio') or '').strip()
+        if bio:
+            bio_alnum = sum(1 for c in bio if c.isalnum())
+            if bio_alnum < 10:
+                return Response({
+                    'status': 'error',
+                    'message': 'Bio must contain at least 10 alphanumeric characters.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         # Validate role
         valid_roles = [choice[0] for choice in UserProfile.ROLE_CHOICES]
         if role not in valid_roles:
@@ -52,12 +147,27 @@ def create_user(request):
                 'status': 'error',
                 'message': f'Invalid role. Must be one of: {", ".join(valid_roles)}'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Check if user already exists
-        if User.objects.filter(email=email).exists():
+
+        # Check if user already exists in auth_user
+        if User.objects.filter(email__iexact=email).exists():
             return Response({
                 'status': 'error',
                 'message': 'User with this email already exists'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if email is already used by a company
+        from core.models import Company as CompanyModel
+        if CompanyModel.objects.filter(email__iexact=email).exists():
+            return Response({
+                'status': 'error',
+                'message': 'This email is already registered as a company email'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if email is already used by a company user
+        if CompanyUser.objects.filter(email__iexact=email).exists():
+            return Response({
+                'status': 'error',
+                'message': 'This email is already registered as a company user'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Check if username already exists
@@ -351,6 +461,50 @@ def delete_user(request, userId):
         return Response({
             'status': 'error',
             'message': 'Failed to delete user',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reactivate_user(request, userId):
+    """
+    Reactivate a deactivated user
+    POST /api/company/users/{userId}/reactivate
+    """
+    try:
+        company_user = request.user
+
+        user = get_object_or_404(User, id=userId)
+
+        if not hasattr(user, 'profile') or user.profile.created_by_company_user != company_user:
+            return Response({
+                'status': 'error',
+                'message': 'User not found or access denied'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if user.is_active:
+            return Response({
+                'status': 'error',
+                'message': 'User is already active'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user.is_active = True
+        user.save()
+
+        serializer = UserListSerializer(user)
+
+        return Response({
+            'status': 'success',
+            'message': 'User reactivated successfully',
+            'data': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'Failed to reactivate user',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
