@@ -11,6 +11,7 @@ const CACHE_KEY = 'company_purchased_modules';
  * Cache is NEVER used to decide access — only as a loading placeholder.
  * Once the API responds, its result ALWAYS wins (even if empty).
  */
+
 const usePurchasedModules = () => {
   const [purchasedModules, setPurchasedModules] = useState([]);
   const [allPurchases, setAllPurchases] = useState([]);
@@ -22,6 +23,7 @@ const usePurchasedModules = () => {
       if (response.status === 'success') {
         const moduleNames = response.module_names || [];
         setPurchasedModules(moduleNames);
+        setAllPurchases(response.all_purchases || []);
         localStorage.setItem(CACHE_KEY, JSON.stringify(moduleNames));
       } else {
         // API returned but not success — trust it, set empty
