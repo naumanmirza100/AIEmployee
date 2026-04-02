@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate, Outlet } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import OperationsDashboard from '@/components/operations/OperationsDashboard';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
@@ -146,8 +147,8 @@ const OperationsAgentPage = () => {
           navItems={getAgentNavItems(purchasedModules, 'operations', navigate)}
         />
 
-        <div className="container mx-auto px-4 py-8">
-          <Outlet />
+        <div className="container mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-8 max-w-full overflow-x-hidden">
+          <OperationsDashboard />
         </div>
       </div>
     </>
