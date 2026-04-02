@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  FileText, BarChart3, MessageSquareText, PenTool, Bell,
+  FileText, BarChart3, MessageSquare, PenTool, Bell,
   Upload, TrendingUp, Hash, Tag, Loader2,
 } from 'lucide-react';
 import * as operationsService from '@/services/operationsAgentService';
@@ -19,7 +19,7 @@ const TAB_CONFIG = [
   { value: 'documents',      icon: Upload,            label: 'Documents' },
   { value: 'summarization',  icon: FileText,          label: 'Summarization' },
   { value: 'analytics',      icon: BarChart3,         label: 'Analytics' },
-  { value: 'knowledge-qa',   icon: MessageSquareText, label: 'Knowledge Q&A' },
+  { value: 'knowledge-qa',   icon: MessageSquare, label: 'Knowledge Q&A' },
   { value: 'authoring',      icon: PenTool,           label: 'Authoring' },
   { value: 'notifications',  icon: Bell,              label: 'Notifications' },
 ];
