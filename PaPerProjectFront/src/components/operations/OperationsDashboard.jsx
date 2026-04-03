@@ -31,7 +31,7 @@ const TAB_ITEMS = [
   { value: 'documents',      icon: Upload,            label: 'Documents' },
   { value: 'summarization',  icon: FileText,          label: 'Summarization' },
   { value: 'analytics',      icon: BarChart3,         label: 'Analytics' },
-  { value: 'knowledge-qa',   icon: MessageSquareText, label: 'Knowledge Q&A' },
+  { value: 'knowledge-qa',   icon: MessageSquare, label: 'Knowledge Q&A' },
   { value: 'authoring',      icon: PenTool,           label: 'Authoring' },
   { value: 'notifications',  icon: Bell,              label: 'Notifications' },
 ];

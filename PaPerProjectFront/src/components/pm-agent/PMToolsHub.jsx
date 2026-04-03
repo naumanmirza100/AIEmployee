@@ -12,7 +12,6 @@ import TimeEstimationView from './TimeEstimationView';
 import WorkflowSuggestionsView from './WorkflowSuggestionsView';
 import CalendarScheduleView from './CalendarScheduleView';
 import SmartNotifications from './SmartNotifications';
-import MeetingScheduler from './MeetingScheduler';
 
 const TOOLS = [
   {
@@ -94,16 +93,6 @@ const TOOLS = [
     bgColor: 'rgba(248,113,113,0.15)',
     borderHover: 'rgba(248,113,113,0.4)',
     component: SmartNotifications,
-  },
-  {
-    key: 'meeting-scheduler',
-    title: 'Meeting Scheduler',
-    desc: 'AI-powered meeting scheduling with accept/reject negotiation flow',
-    icon: CalendarPlus,
-    color: '#818cf8',
-    bgColor: 'rgba(129,140,248,0.15)',
-    borderHover: 'rgba(129,140,248,0.4)',
-    component: MeetingScheduler,
   },
 ];
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MessageSquareText } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 
 const KnowledgeQA = () => {
   return (
@@ -9,7 +9,7 @@ const KnowledgeQA = () => {
       <CardHeader>
         <div className="flex items-center gap-3 mb-2">
           <div className="flex items-center justify-center w-11 h-11 rounded-xl" style={{ backgroundColor: '#f59e0b15' }}>
-            <MessageSquareText className="h-5 w-5" style={{ color: '#f59e0b' }} />
+            <MessageSquare className="h-5 w-5" style={{ color: '#f59e0b' }} />
           </div>
           <div>
             <CardTitle className="text-white text-lg">Knowledge Q&A</CardTitle>

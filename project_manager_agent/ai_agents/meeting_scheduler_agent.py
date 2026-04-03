@@ -365,7 +365,7 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             # LLM also couldn't find — try one more time with LLM's extracted name
             llm_name = parsed.get("user_not_found") or parsed.get("invitee_name")
             if llm_name:
-                retry_match = self._match_user(llm_name, company_users)
+                retry_match = self._find_user_in_message(f"meet with {llm_name}", company_users)
                 if retry_match["match"] in ("exact", "single"):
                     parsed["invitee_id"] = retry_match["user"]["id"]
                     parsed["invitee_name"] = retry_match["user"]["full_name"]
