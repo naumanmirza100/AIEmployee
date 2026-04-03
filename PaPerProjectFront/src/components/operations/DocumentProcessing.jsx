@@ -18,6 +18,7 @@ import {
   FileCheck, Zap, ArrowRight, Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import * as operationsService from '@/services/operationsAgentService';
 
 // ─── Helpers ────────────────────────────────
@@ -88,6 +89,7 @@ const StatCard = ({ icon: Icon, label, value, color, sub }) => (
 // ═════════════════════════════════════════════
 const DocumentProcessing = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
@@ -100,10 +102,6 @@ const DocumentProcessing = () => {
   const [uploadTags, setUploadTags] = useState('');
   const [uploading, setUploading] = useState(false);
 
-  // Detail
-  const [selectedDoc, setSelectedDoc] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailTab, setDetailTab] = useState('summary');
 
   // Delete
   const [deletingId, setDeletingId] = useState(null);
@@ -147,21 +145,6 @@ const DocumentProcessing = () => {
     }
   };
 
-  // ─── Detail ───────────────────────────────
-  const openDetail = async (docId) => {
-    try {
-      setDetailLoading(true);
-      setSelectedDoc(null);
-      setDetailTab('summary');
-      const res = await operationsService.getDocument(docId);
-      if (res.status === 'success') setSelectedDoc(res.document);
-    } catch (e) {
-      toast({ title: 'Error', description: 'Failed to load document details', variant: 'destructive' });
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
   // ─── Delete ───────────────────────────────
   const handleDelete = async (docId) => {
     try {
@@ -169,7 +152,6 @@ const DocumentProcessing = () => {
       await operationsService.deleteDocument(docId);
       toast({ title: 'Deleted', description: 'Document deleted successfully' });
       fetchDocuments();
-      if (selectedDoc?.id === docId) setSelectedDoc(null);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to delete', variant: 'destructive' });
     } finally {
@@ -364,7 +346,7 @@ const DocumentProcessing = () => {
                         variant="ghost"
                         size="sm"
                         className="h-8 px-3 rounded-lg text-white/60 hover:text-amber-400 hover:bg-amber-500/10 gap-1.5 text-xs"
-                        onClick={() => openDetail(doc.id)}
+                        onClick={() => navigate(`/operations/documents/${doc.id}`)}
                       >
                         <Eye className="h-3.5 w-3.5" />
                         View
@@ -499,249 +481,6 @@ const DocumentProcessing = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ═══ Detail Dialog ═══ */}
-      <Dialog open={!!selectedDoc || detailLoading} onOpenChange={(open) => { if (!open) setSelectedDoc(null); }}>
-        <DialogContent className="sm:max-w-3xl max-h-[88vh] overflow-hidden border-white/[0.08] text-white p-0" style={{ background: '#0c0816' }}>
-          {detailLoading ? (
-            <div className="flex flex-col items-center justify-center py-20">
-              <Loader2 className="h-10 w-10 animate-spin text-amber-500/60" />
-              <p className="mt-4 text-sm text-white/40">Loading document details...</p>
-            </div>
-          ) : selectedDoc && (
-            <div className="flex flex-col h-full max-h-[88vh]">
-              {/* Header */}
-              <div className="shrink-0 px-6 pt-6 pb-4 border-b border-white/[0.06]">
-                <div className="flex items-start gap-4">
-                  {(() => {
-                    const fc = getFileConfig(selectedDoc.file_type);
-                    const FI = fc.icon;
-                    return (
-                      <div className="flex items-center justify-center w-14 h-14 rounded-2xl shrink-0" style={{ backgroundColor: fc.bg }}>
-                        <FI className="h-7 w-7" style={{ color: fc.color }} />
-                      </div>
-                    );
-                  })()}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <h2 className="text-lg font-bold text-white truncate">{selectedDoc.title}</h2>
-                      {selectedDoc.is_processed && (
-                        <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full text-emerald-400 border border-emerald-400/20" style={{ background: 'rgba(16,185,129,0.08)' }}>
-                          <CheckCircle2 className="h-3 w-3" /> Processed
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-white/35">{selectedDoc.original_filename}</p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-lg text-white/40 hover:text-white shrink-0"
-                    onClick={() => setSelectedDoc(null)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                {/* Quick Stats Row */}
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-4">
-                  {[
-                    { label: 'Type', value: selectedDoc.document_type, icon: Tag, color: DOC_TYPE_COLORS[selectedDoc.document_type] || '#6b7280' },
-                    { label: 'Format', value: selectedDoc.file_type?.toUpperCase(), icon: File, color: getFileConfig(selectedDoc.file_type).color },
-                    { label: 'Size', value: formatFileSize(selectedDoc.file_size), icon: Hash, color: '#8b5cf6' },
-                    { label: 'Pages', value: selectedDoc.page_count || 'N/A', icon: BookOpen, color: '#3b82f6' },
-                    { label: 'Chunks', value: selectedDoc.chunks_count || 0, icon: Layers, color: '#14b8a6' },
-                    { label: 'Uploaded', value: formatDate(selectedDoc.created_at), icon: Calendar, color: '#f59e0b' },
-                  ].map((m, i) => (
-                    <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                      <m.icon className="h-3.5 w-3.5 shrink-0" style={{ color: `${m.color}80` }} />
-                      <div className="min-w-0">
-                        <p className="text-[9px] text-white/30 uppercase tracking-wider">{m.label}</p>
-                        <p className="text-xs text-white font-semibold truncate capitalize">{m.value}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tabbed Content */}
-              <div className="flex-1 overflow-y-auto">
-                <Tabs value={detailTab} onValueChange={setDetailTab} className="h-full">
-                  <div className="sticky top-0 z-10 px-6 pt-3 pb-0" style={{ background: '#0c0816' }}>
-                    <TabsList className="h-9 p-0.5 rounded-lg w-full justify-start gap-0.5" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                      {[
-                        { value: 'summary', label: 'Summary', icon: Sparkles },
-                        { value: 'entities', label: 'Entities', icon: Brain },
-                        { value: 'content', label: 'Content', icon: FileText },
-                      ].map((tab) => (
-                        <TabsTrigger
-                          key={tab.value}
-                          value={tab.value}
-                          className="text-xs rounded-md px-3 gap-1.5 data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-300 text-white/40 data-[state=active]:shadow-none"
-                        >
-                          <tab.icon className="h-3.5 w-3.5" />
-                          {tab.label}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </div>
-
-                  <div className="px-6 py-4">
-                    {/* Summary Tab */}
-                    <TabsContent value="summary" className="mt-0 space-y-4">
-                      {/* AI Summary */}
-                      {selectedDoc.summary ? (
-                        <div className="rounded-xl border border-amber-500/10 p-4" style={{ background: 'rgba(245,158,11,0.04)' }}>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Sparkles className="h-4 w-4 text-amber-400" />
-                            <h4 className="text-sm font-semibold text-white">AI Summary</h4>
-                          </div>
-                          <p className="text-sm text-white/60 leading-relaxed">{selectedDoc.summary}</p>
-                        </div>
-                      ) : (
-                        <div className="rounded-xl border border-white/[0.06] p-4 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <Info className="h-5 w-5 text-white/20 mx-auto mb-2" />
-                          <p className="text-xs text-white/30">No summary available. Re-upload the document to generate an AI summary.</p>
-                        </div>
-                      )}
-
-                      {/* Key Insights */}
-                      {selectedDoc.key_insights && selectedDoc.key_insights.length > 0 && (
-                        <div className="rounded-xl border border-white/[0.06] p-4" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Lightbulb className="h-4 w-4 text-amber-400" />
-                            <h4 className="text-sm font-semibold text-white">Key Insights</h4>
-                            <span className="text-[10px] text-white/30 ml-auto">{selectedDoc.key_insights.length} findings</span>
-                          </div>
-                          <div className="space-y-2">
-                            {selectedDoc.key_insights.map((insight, i) => (
-                              <div key={i} className="flex items-start gap-2.5 p-2 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                                <div className="h-5 w-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
-                                  <span className="text-[10px] font-bold text-amber-400">{i + 1}</span>
-                                </div>
-                                <p className="text-xs text-white/50 leading-relaxed">{insight}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Processing Info */}
-                      <div className="rounded-xl border border-white/[0.06] p-4" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                        <div className="flex items-center gap-2 mb-3">
-                          <Zap className="h-4 w-4 text-emerald-400" />
-                          <h4 className="text-sm font-semibold text-white">Processing Details</h4>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {[
-                            { label: 'Word Count', value: selectedDoc.metadata?.word_count?.toLocaleString() || 'N/A' },
-                            { label: 'Character Count', value: selectedDoc.metadata?.char_count?.toLocaleString() || 'N/A' },
-                            { label: 'Text Chunks', value: selectedDoc.chunks_count || 0 },
-                            { label: 'Processed At', value: selectedDoc.processed_at ? formatDateTime(selectedDoc.processed_at) : 'N/A' },
-                          ].map((item, i) => (
-                            <div key={i} className="p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-0.5">{item.label}</p>
-                              <p className="text-xs text-white/70 font-medium">{item.value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Tags */}
-                      {selectedDoc.tags && (
-                        <div className="rounded-xl border border-white/[0.06] p-4" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Tag className="h-4 w-4 text-violet-400" />
-                            <h4 className="text-sm font-semibold text-white">Tags</h4>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {selectedDoc.tags.split(',').map((tag, i) => (
-                              <span
-                                key={i}
-                                className="text-xs px-3 py-1 rounded-full text-violet-300 border border-violet-400/20"
-                                style={{ background: 'rgba(139,92,246,0.08)' }}
-                              >
-                                {tag.trim()}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </TabsContent>
-
-                    {/* Entities Tab */}
-                    <TabsContent value="entities" className="mt-0 space-y-4">
-                      {selectedDoc.entities && Object.keys(selectedDoc.entities).length > 0 ? (
-                        Object.entries(selectedDoc.entities).map(([key, values]) => {
-                          if (!Array.isArray(values) || values.length === 0) return null;
-                          const colorMap = {
-                            dates: '#f59e0b', amounts: '#10b981', names: '#3b82f6',
-                            organizations: '#8b5cf6', key_terms: '#ec4899',
-                          };
-                          const iconMap = {
-                            dates: Calendar, amounts: Hash, names: User,
-                            organizations: BarChart3, key_terms: Brain,
-                          };
-                          const EntityIcon = iconMap[key] || Tag;
-                          const entityColor = colorMap[key] || '#6b7280';
-                          return (
-                            <div key={key} className="rounded-xl border border-white/[0.06] p-4" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                              <div className="flex items-center gap-2 mb-3">
-                                <EntityIcon className="h-4 w-4" style={{ color: entityColor }} />
-                                <h4 className="text-sm font-semibold text-white capitalize">{key.replace(/_/g, ' ')}</h4>
-                                <span className="text-[10px] text-white/25 ml-auto">{values.length} found</span>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {values.map((v, i) => (
-                                  <span
-                                    key={i}
-                                    className="text-xs px-2.5 py-1 rounded-full border"
-                                    style={{ borderColor: `${entityColor}25`, color: `${entityColor}cc`, background: `${entityColor}0a` }}
-                                  >
-                                    {v}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="rounded-xl border border-white/[0.06] p-8 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <Brain className="h-8 w-8 text-white/15 mx-auto mb-3" />
-                          <p className="text-sm text-white/30">No entities were extracted from this document.</p>
-                          <p className="text-xs text-white/20 mt-1">Entity extraction works best with text-rich documents.</p>
-                        </div>
-                      )}
-                    </TabsContent>
-
-                    {/* Content Tab */}
-                    <TabsContent value="content" className="mt-0 space-y-4">
-                      {selectedDoc.parsed_text ? (
-                        <div className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-white/30" />
-                              <h4 className="text-xs font-semibold text-white/60">Extracted Content</h4>
-                            </div>
-                            <span className="text-[10px] text-white/25">{selectedDoc.full_text_length?.toLocaleString() || 0} characters total</span>
-                          </div>
-                          <div className="p-4 max-h-[400px] overflow-y-auto">
-                            <pre className="text-xs text-white/40 whitespace-pre-wrap font-mono leading-relaxed">{selectedDoc.parsed_text}</pre>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="rounded-xl border border-white/[0.06] p-8 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <FileText className="h-8 w-8 text-white/15 mx-auto mb-3" />
-                          <p className="text-sm text-white/30">No content preview available for this document.</p>
-                        </div>
-                      )}
-                    </TabsContent>
-                  </div>
-                </Tabs>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </motion.div>
   );
 };

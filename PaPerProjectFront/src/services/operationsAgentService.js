@@ -101,10 +101,93 @@ export const deleteDocument = async (documentId) => {
   }
 };
 
+/**
+ * Upload a file and generate a rich summary (no document storage)
+ */
+export const uploadAndSummarize = async (file) => {
+  try {
+    const token = localStorage.getItem('company_auth_token');
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE_URL}/operations/summaries/upload/`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Token ${token}` } : {},
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    if (data.status === 'error') {
+      throw new Error(data.message || 'Summarization failed');
+    }
+    return data;
+  } catch (error) {
+    console.error('Upload and summarize error:', error);
+    throw error;
+  }
+};
+
+/**
+ * List all saved summaries
+ */
+export const listSummaries = async (params = {}) => {
+  try {
+    const response = await companyApi.get('/operations/summaries', params);
+    return response;
+  } catch (error) {
+    console.error('List summaries error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get a single summary
+ */
+export const getSummary = async (summaryId) => {
+  try {
+    const response = await companyApi.get(`/operations/summaries/${summaryId}`);
+    return response;
+  } catch (error) {
+    console.error('Get summary error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a summary
+ */
+export const deleteSummary = async (summaryId) => {
+  try {
+    const token = localStorage.getItem('company_auth_token');
+    const response = await fetch(`${API_BASE_URL}/operations/summaries/${summaryId}/delete/`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Token ${token}` } : {}),
+      },
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return data;
+  } catch (error) {
+    console.error('Delete summary error:', error);
+    throw error;
+  }
+};
+
 export default {
   getDashboardStats,
   uploadDocument,
   listDocuments,
   getDocument,
   deleteDocument,
+  uploadAndSummarize,
+  listSummaries,
+  getSummary,
+  deleteSummary,
 };

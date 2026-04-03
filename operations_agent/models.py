@@ -83,6 +83,34 @@ class OperationsDocumentChunk(models.Model):
         return f"Chunk {self.chunk_index} of {self.document.title}"
 
 
+class OperationsDocumentSummary(models.Model):
+    """Standalone AI-generated document summaries (no document storage)."""
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE,
+        related_name='operations_summaries',
+    )
+    created_by = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='operations_summaries',
+    )
+    original_filename = models.CharField(max_length=500)
+    file_type = models.CharField(max_length=20, default='other')
+    file_size = models.PositiveIntegerField(default=0)
+    page_count = models.PositiveIntegerField(default=0)
+    word_count = models.PositiveIntegerField(default=0)
+    rich_summary = models.TextField(help_text='Full markdown summary')
+    key_findings = models.JSONField(default=list, blank=True)
+    action_items = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'operations_agent'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Summary: {self.original_filename}"
+
+
 class OperationsAnalyticsSnapshot(models.Model):
     """Periodic metric snapshots aggregated from documents"""
     company = models.ForeignKey(

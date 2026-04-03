@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from operations_agent.models import (
-    OperationsDocument, OperationsDocumentChunk,
+    OperationsDocument, OperationsDocumentChunk, OperationsDocumentSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -237,6 +237,171 @@ def delete_document(request, document_id):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# ──────────────────────────────────────────────
+# Summarization Endpoints
+# ──────────────────────────────────────────────
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def upload_and_summarize(request):
+    """Upload a document, extract text, generate rich summary, save summary only, delete file."""
+    try:
+        company_user = request.user
+        company = company_user.company
+
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'status': 'error', 'message': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if uploaded_file.size > 50 * 1024 * 1024:
+            return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save to temp location
+        upload_dir = Path(settings.MEDIA_ROOT) / 'operations' / 'summaries_tmp'
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        file_hash = hashlib.sha256(uploaded_file.read()).hexdigest()[:16]
+        uploaded_file.seek(0)
+
+        temp_path = upload_dir / f"{file_hash}_{uploaded_file.name}"
+        with open(temp_path, 'wb') as f:
+            for chunk in uploaded_file.chunks():
+                f.write(chunk)
+
+        # Process with summarization agent
+        from operations_agent.agents.summarization_agent import DocumentSummarizationAgent
+        agent = DocumentSummarizationAgent()
+        result = agent.process(
+            action='summarize_file',
+            file_path=str(temp_path),
+            original_filename=uploaded_file.name,
+            company_id=company.id,
+            uploaded_by_id=company_user.id,
+        )
+
+        # Agent deletes the file, but clean up just in case
+        if temp_path.exists():
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+        if not result.get('success'):
+            return Response({'status': 'error', 'message': result.get('error', 'Summarization failed')}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'success',
+            'message': 'Document summarized successfully',
+            'summary': result['summary'],
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f'Upload and summarize error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_summaries(request):
+    """List all saved summaries for the company."""
+    try:
+        company = request.user.company
+        summaries = OperationsDocumentSummary.objects.filter(company=company)
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            summaries = summaries.filter(original_filename__icontains=search)
+
+        data = []
+        for s in summaries:
+            data.append({
+                'id': s.id,
+                'original_filename': s.original_filename,
+                'file_type': s.file_type,
+                'file_size': s.file_size,
+                'page_count': s.page_count,
+                'word_count': s.word_count,
+                'rich_summary': s.rich_summary,
+                'key_findings': s.key_findings or [],
+                'action_items': s.action_items or [],
+                'created_by': s.created_by.full_name if s.created_by else None,
+                'created_at': s.created_at.isoformat(),
+            })
+
+        return Response({
+            'status': 'success',
+            'summaries': data,
+            'total': len(data),
+        })
+
+    except Exception as e:
+        logger.error(f'List summaries error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_summary(request, summary_id):
+    """Get a single summary by ID."""
+    try:
+        company = request.user.company
+        s = OperationsDocumentSummary.objects.filter(company=company, pk=summary_id).first()
+        if not s:
+            return Response({'status': 'error', 'message': 'Summary not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            'status': 'success',
+            'summary': {
+                'id': s.id,
+                'original_filename': s.original_filename,
+                'file_type': s.file_type,
+                'file_size': s.file_size,
+                'page_count': s.page_count,
+                'word_count': s.word_count,
+                'rich_summary': s.rich_summary,
+                'key_findings': s.key_findings or [],
+                'action_items': s.action_items or [],
+                'created_by': s.created_by.full_name if s.created_by else None,
+                'created_at': s.created_at.isoformat(),
+            },
+        })
+
+    except Exception as e:
+        logger.error(f'Get summary error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_summary(request, summary_id):
+    """Delete a summary."""
+    try:
+        company = request.user.company
+        s = OperationsDocumentSummary.objects.filter(company=company, pk=summary_id).first()
+        if not s:
+            return Response({'status': 'error', 'message': 'Summary not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        filename = s.original_filename
+        s.delete()
+
+        return Response({
+            'status': 'success',
+            'message': f'Summary for "{filename}" deleted',
+        })
+
+    except Exception as e:
+        logger.error(f'Delete summary error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ──────────────────────────────────────────────
+# Dashboard Stats
+# ──────────────────────────────────────────────
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -253,6 +418,7 @@ def dashboard_stats(request):
         from django.db.models import Count
         type_breakdown = dict(
             OperationsDocument.objects.filter(company=company)
+            .order_by()
             .values_list('document_type')
             .annotate(count=Count('id'))
             .values_list('document_type', 'count')
@@ -261,6 +427,7 @@ def dashboard_stats(request):
         # File type breakdown
         file_breakdown = dict(
             OperationsDocument.objects.filter(company=company)
+            .order_by()
             .values_list('file_type')
             .annotate(count=Count('id'))
             .values_list('file_type', 'count')
