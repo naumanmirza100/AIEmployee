@@ -69,7 +69,7 @@ export const listDocuments = async (params = {}) => {
  */
 export const getDocument = async (documentId) => {
   try {
-    const response = await companyApi.get(`/operations/documents/${documentId}`);
+    const response = await companyApi.get(`/operations/documents/${documentId}/`);
     return response;
   } catch (error) {
     console.error('Get document error:', error);
@@ -148,7 +148,7 @@ export const listSummaries = async (params = {}) => {
  */
 export const getSummary = async (summaryId) => {
   try {
-    const response = await companyApi.get(`/operations/summaries/${summaryId}`);
+    const response = await companyApi.get(`/operations/summaries/${summaryId}/`);
     return response;
   } catch (error) {
     console.error('Get summary error:', error);

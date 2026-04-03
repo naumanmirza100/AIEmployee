@@ -1,10 +1,11 @@
 """
 Document Summarization Agent for Operations Agent
 Accepts a document, extracts text, generates a rich structured summary,
-saves only the summary (not the document), and cleans up.
+extracts proper insights, saves only the summary (not the document), and cleans up.
 """
 
 import os
+import json
 import logging
 from pathlib import Path
 from typing import Dict
@@ -79,7 +80,10 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
         if not summary_result.get('success'):
             return summary_result
 
-        # 3. Save summary only
+        # 3. Extract proper insights via dedicated LLM call
+        insights = self._extract_insights(extracted_text, original_filename)
+
+        # 4. Save summary + insights
         company = Company.objects.get(pk=company_id)
         uploaded_by = CompanyUser.objects.get(pk=uploaded_by_id) if uploaded_by_id else None
 
@@ -94,6 +98,17 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             rich_summary=summary_result['rich_summary'],
             key_findings=summary_result.get('key_findings', []),
             action_items=summary_result.get('action_items', []),
+            # Insights fields
+            sentiment=insights.get('sentiment', ''),
+            sentiment_explanation=insights.get('sentiment_explanation', ''),
+            topics=insights.get('topics', []),
+            importance_level=insights.get('importance_level', ''),
+            importance_reason=insights.get('importance_reason', ''),
+            entities=insights.get('entities', {}),
+            risks=insights.get('risks', []),
+            opportunities=insights.get('opportunities', []),
+            deadlines=insights.get('deadlines', []),
+            document_category=insights.get('document_category', ''),
         )
 
         self.log_action('summarize_file', {
@@ -113,8 +128,109 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
                 'rich_summary': summary_result['rich_summary'],
                 'key_findings': summary_result.get('key_findings', []),
                 'action_items': summary_result.get('action_items', []),
+                'sentiment': insights.get('sentiment', ''),
+                'sentiment_explanation': insights.get('sentiment_explanation', ''),
+                'topics': insights.get('topics', []),
+                'importance_level': insights.get('importance_level', ''),
+                'importance_reason': insights.get('importance_reason', ''),
+                'entities': insights.get('entities', {}),
+                'risks': insights.get('risks', []),
+                'opportunities': insights.get('opportunities', []),
+                'deadlines': insights.get('deadlines', []),
+                'document_category': insights.get('document_category', ''),
             },
         }
+
+    # ------------------------------------------------------------------
+    # Dedicated Insights Extraction (separate LLM call)
+    # ------------------------------------------------------------------
+    def _extract_insights(self, text: str, filename: str) -> Dict:
+        """Extract structured insights from document text via a dedicated LLM call."""
+        # Use first 10K chars for insight extraction
+        text_sample = text[:10000]
+
+        prompt = f"""Analyze this document and extract structured insights. Return ONLY valid JSON, no markdown, no explanation.
+
+**Document:** {filename}
+
+**Text:**
+\"\"\"
+{text_sample}
+\"\"\"
+
+Return this exact JSON structure:
+{{
+  "sentiment": "positive" or "negative" or "neutral" or "mixed",
+  "sentiment_explanation": "Brief 1-sentence explanation of the overall tone",
+  "document_category": "One of: report, financial, legal, technical, marketing, hr, operations, strategic, research, correspondence, other",
+  "importance_level": "critical" or "high" or "medium" or "low",
+  "importance_reason": "Brief 1-sentence reason for the importance level",
+  "topics": ["topic1", "topic2", "topic3"],
+  "entities": {{
+    "people": ["person names mentioned"],
+    "organizations": ["company/org names"],
+    "locations": ["places mentioned"],
+    "dates": ["important dates found"],
+    "amounts": ["monetary values or key numbers"]
+  }},
+  "risks": ["risk or concern 1", "risk or concern 2"],
+  "opportunities": ["opportunity 1", "opportunity 2"],
+  "deadlines": ["deadline description with date if available"]
+}}
+
+Rules:
+- Extract ONLY what is actually in the document, do NOT invent anything
+- Keep each array to max 5 most important items
+- If a field has no relevant data, use empty string for strings, empty array [] for arrays, empty object {{}} for entities
+- "topics" should be 3-6 broad topic labels
+- "risks" = anything concerning, problematic, or needing attention
+- "opportunities" = positive possibilities, recommendations, growth areas
+- "deadlines" = any time-sensitive items, due dates, milestones
+- Return ONLY the JSON object, nothing else"""
+
+        try:
+            result = self._call_llm_for_reasoning(prompt, temperature=0.1, max_tokens=1500)
+            if not result or not result.strip():
+                logger.warning('Insights extraction returned empty response')
+                return {}
+
+            # Clean up response - remove markdown code fences if present
+            cleaned = result.strip()
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('\n', 1)[-1]
+            if cleaned.endswith('```'):
+                cleaned = cleaned.rsplit('```', 1)[0]
+            cleaned = cleaned.strip()
+
+            insights = json.loads(cleaned)
+
+            # Validate and sanitize
+            insights['sentiment'] = str(insights.get('sentiment', '')).lower()[:30]
+            insights['sentiment_explanation'] = str(insights.get('sentiment_explanation', ''))[:500]
+            insights['document_category'] = str(insights.get('document_category', ''))[:50]
+            insights['importance_level'] = str(insights.get('importance_level', '')).lower()[:20]
+            insights['importance_reason'] = str(insights.get('importance_reason', ''))[:500]
+            insights['topics'] = [str(t)[:100] for t in insights.get('topics', [])][:6]
+            insights['risks'] = [str(r)[:300] for r in insights.get('risks', [])][:5]
+            insights['opportunities'] = [str(o)[:300] for o in insights.get('opportunities', [])][:5]
+            insights['deadlines'] = [str(d)[:300] for d in insights.get('deadlines', [])][:5]
+
+            # Sanitize entities
+            entities = insights.get('entities', {})
+            if not isinstance(entities, dict):
+                entities = {}
+            for key in ['people', 'organizations', 'locations', 'dates', 'amounts']:
+                entities[key] = [str(v)[:200] for v in entities.get(key, [])][:5]
+            insights['entities'] = entities
+
+            return insights
+
+        except json.JSONDecodeError as e:
+            logger.warning(f'Failed to parse insights JSON: {e}')
+            return {}
+        except Exception as e:
+            logger.error(f'Insights extraction failed: {e}', exc_info=True)
+            return {}
 
     # ------------------------------------------------------------------
     # Single-pass summary (< 12K chars)

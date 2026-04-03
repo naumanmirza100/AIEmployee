@@ -146,6 +146,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/operations/documents" element={<OperationsAgentPage />} />
             <Route path="/operations/documents/:id" element={<OperationsAgentPage />} />
             <Route path="/operations/summarization" element={<OperationsAgentPage />} />
+            <Route path="/operations/summarization/:id" element={<OperationsAgentPage />} />
             <Route path="/operations/analytics" element={<OperationsAgentPage />} />
             <Route path="/operations/knowledge-qa" element={<OperationsAgentPage />} />
             <Route path="/operations/authoring" element={<OperationsAgentPage />} />

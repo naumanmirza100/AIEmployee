@@ -6,11 +6,10 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   FileText, Search, Loader2, Sparkles, RefreshCw, Upload,
   FileSpreadsheet, FileType, Presentation, File, Trash2,
-  ChevronDown, ChevronUp, ArrowRight, Clock, BookOpen,
-  Lightbulb, ListChecks, User,
+  ArrowRight, Clock, BookOpen, User, X, Plus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
+import { useNavigate } from 'react-router-dom';
 import * as operationsService from '@/services/operationsAgentService';
 
 // ─── Helpers ────────────────────────────────
@@ -37,65 +36,19 @@ const formatDate = (iso) => {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-// ─── Markdown Renderer with colored headings/bullets ──────────
-const markdownComponents = {
-  h2: ({ children }) => (
-    <div className="flex items-center gap-2.5 mt-7 mb-3 pb-2 border-b border-white/[0.06]">
-      <div className="h-6 w-1 rounded-full bg-amber-500" />
-      <h2 className="text-lg font-bold text-amber-400 m-0">{children}</h2>
-    </div>
-  ),
-  h3: ({ children }) => (
-    <div className="flex items-center gap-2 mt-5 mb-2">
-      <div className="h-1.5 w-1.5 rounded-full bg-violet-400" />
-      <h3 className="text-sm font-semibold text-violet-300 m-0">{children}</h3>
-    </div>
-  ),
-  p: ({ children }) => (
-    <p className="text-sm text-white/55 leading-relaxed my-2 ml-0">{children}</p>
-  ),
-  ul: ({ children }) => (
-    <ul className="space-y-1.5 my-3 ml-1 list-none p-0">{children}</ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="space-y-1.5 my-3 ml-1 list-none p-0 counter-reset-[item]">{children}</ol>
-  ),
-  li: ({ children, ordered, index }) => (
-    <li className="flex items-start gap-2.5 text-sm text-white/55 leading-relaxed p-0 m-0">
-      <span className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 mt-0.5 text-[10px] font-bold"
-        style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b' }}
-      >•</span>
-      <span className="flex-1">{children}</span>
-    </li>
-  ),
-  strong: ({ children }) => (
-    <strong className="font-semibold text-white/80">{children}</strong>
-  ),
-  a: ({ children, href }) => (
-    <a href={href} className="text-amber-400 underline underline-offset-2" target="_blank" rel="noopener noreferrer">{children}</a>
-  ),
-};
-
-const MarkdownSummary = ({ content }) => {
-  if (!content) return null;
-  return (
-    <div className="space-y-1">
-      <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
-    </div>
-  );
-};
-
 // ─── Main Component ─────────────────────────
 const SummarizationInsights = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   const [summaries, setSummaries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [expandedId, setExpandedId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
 
   // Fetch summaries
   const fetchSummaries = useCallback(async () => {
@@ -116,29 +69,32 @@ const SummarizationInsights = () => {
 
   useEffect(() => { fetchSummaries(); }, [fetchSummaries]);
 
-  // Upload and summarize
-  const handleFileSelect = async (e) => {
+  // File selection in modal
+  const handleFileChange = (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Reset input so same file can be re-selected
+    if (file) setSelectedFile(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Upload and summarize
+  const handleUpload = async () => {
+    if (!selectedFile) return;
 
     try {
       setUploading(true);
-      const res = await operationsService.uploadAndSummarize(file);
+      const res = await operationsService.uploadAndSummarize(selectedFile);
       if (res.status === 'success') {
         toast({
           title: 'Summary Generated',
-          description: `"${file.name}" has been summarized successfully`,
+          description: `"${selectedFile.name}" has been summarized successfully`,
         });
-        // Add the new summary to the top
         if (res.summary) {
           setSummaries(prev => [res.summary, ...prev]);
-          setExpandedId(res.summary.id);
         } else {
           fetchSummaries();
         }
+        setShowUploadModal(false);
+        setSelectedFile(null);
       }
     } catch (e) {
       toast({
@@ -151,6 +107,13 @@ const SummarizationInsights = () => {
     }
   };
 
+  // Close modal
+  const closeModal = () => {
+    if (uploading) return;
+    setShowUploadModal(false);
+    setSelectedFile(null);
+  };
+
   // Delete summary
   const handleDelete = async (summaryId) => {
     try {
@@ -158,12 +121,18 @@ const SummarizationInsights = () => {
       await operationsService.deleteSummary(summaryId);
       toast({ title: 'Deleted', description: 'Summary deleted successfully' });
       setSummaries(prev => prev.filter(s => s.id !== summaryId));
-      if (expandedId === summaryId) setExpandedId(null);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to delete', variant: 'destructive' });
     } finally {
       setDeletingId(null);
     }
+  };
+
+  // Get file config for selected file
+  const getSelectedFileConfig = () => {
+    if (!selectedFile) return null;
+    const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+    return getFileConfig(ext);
   };
 
   return (
@@ -174,57 +143,24 @@ const SummarizationInsights = () => {
           <h2 className="text-xl sm:text-2xl font-bold text-white">Document Summarization</h2>
           <p className="text-gray-400 text-sm mt-1">Upload any document and get an AI-powered comprehensive summary</p>
         </div>
-        <Badge variant="outline" className="text-xs py-1 px-3 w-fit" style={{ borderColor: '#f59e0b40', color: '#f59e0b' }}>
-          {summaries.length} {summaries.length === 1 ? 'Summary' : 'Summaries'}
-        </Badge>
-      </div>
-
-      {/* Upload Area */}
-      <div
-        className="relative rounded-2xl border-2 border-dashed border-white/[0.08] hover:border-amber-500/30 transition-colors cursor-pointer overflow-hidden"
-        style={{ background: 'rgba(0,0,0,0.15)' }}
-        onClick={() => !uploading && fileInputRef.current?.click()}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          accept=".pdf,.docx,.xlsx,.csv,.pptx,.txt,.md"
-          onChange={handleFileSelect}
-          disabled={uploading}
-        />
-        <div className="flex flex-col items-center justify-center py-10 px-4">
-          {uploading ? (
-            <>
-              <div className="relative">
-                <Loader2 className="h-10 w-10 animate-spin text-amber-500" />
-              </div>
-              <p className="mt-4 text-sm font-medium text-amber-400">Processing & Summarizing...</p>
-              <p className="text-xs text-white/30 mt-1">This may take a moment for large documents</p>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-center w-14 h-14 rounded-2xl mb-4" style={{ background: 'rgba(245,158,11,0.1)' }}>
-                <Upload className="h-7 w-7 text-amber-500" />
-              </div>
-              <p className="text-sm font-medium text-white">Upload Document to Summarize</p>
-              <p className="text-xs text-white/30 mt-1">PDF, DOCX, XLSX, CSV, PPTX, TXT (Max 50 MB)</p>
-              <Button
-                size="sm"
-                className="mt-4 text-xs gap-2"
-                style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff' }}
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-              >
-                <Upload className="h-3.5 w-3.5" />
-                Choose File
-              </Button>
-            </>
-          )}
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-xs py-1 px-3 w-fit" style={{ borderColor: '#f59e0b40', color: '#f59e0b' }}>
+            {summaries.length} {summaries.length === 1 ? 'Summary' : 'Summaries'}
+          </Badge>
+          <Button
+            size="sm"
+            className="gap-2 text-xs font-semibold"
+            style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff' }}
+            onClick={() => setShowUploadModal(true)}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Upload & Summarize
+          </Button>
         </div>
       </div>
 
       {/* Search & Refresh */}
-      {summaries.length > 0 && (
+      {(summaries.length > 0 || searchQuery) && (
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
@@ -252,11 +188,11 @@ const SummarizationInsights = () => {
           <Loader2 className="h-8 w-8 animate-spin text-amber-500/60" />
           <p className="mt-3 text-sm text-white/40">Loading summaries...</p>
         </div>
-      ) : summaries.length === 0 && !uploading ? (
+      ) : summaries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/[0.06]" style={{ background: 'rgba(0,0,0,0.1)' }}>
           <Sparkles className="h-10 w-10 text-white/10 mb-3" />
           <p className="text-white/40 text-sm">No summaries yet</p>
-          <p className="text-white/25 text-xs mt-1">Upload a document above to generate your first summary</p>
+          <p className="text-white/25 text-xs mt-1">Click "Upload & Summarize" to generate your first summary</p>
         </div>
       ) : (
         /* Summaries List */
@@ -265,7 +201,6 @@ const SummarizationInsights = () => {
             {summaries.map((s) => {
               const fc = getFileConfig(s.file_type);
               const FIcon = fc.icon;
-              const isExpanded = expandedId === s.id;
 
               return (
                 <motion.div
@@ -313,10 +248,10 @@ const SummarizationInsights = () => {
                         variant="ghost"
                         size="sm"
                         className="h-8 px-3 text-xs text-white/50 hover:text-amber-400 hover:bg-amber-500/10 gap-1.5 rounded-lg"
-                        onClick={() => setExpandedId(isExpanded ? null : s.id)}
+                        onClick={() => navigate(`/operations/summarization/${s.id}`)}
                       >
-                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        {isExpanded ? 'Hide' : 'View'}
+                        <ArrowRight className="h-3.5 w-3.5" />
+                        View
                       </Button>
                       <Button
                         variant="ghost"
@@ -329,72 +264,183 @@ const SummarizationInsights = () => {
                       </Button>
                     </div>
                   </div>
-
-                  {/* Expanded Summary Content */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.25 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="border-t border-white/[0.06] px-5 py-5 space-y-4">
-                          {/* Rich Markdown Summary */}
-                          <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                            <MarkdownSummary content={s.rich_summary} />
-                          </div>
-
-                          {/* Key Findings (separate card if available) */}
-                          {s.key_findings && s.key_findings.length > 0 && (
-                            <div className="rounded-xl border border-amber-500/10 p-4" style={{ background: 'rgba(245,158,11,0.04)' }}>
-                              <div className="flex items-center gap-2 mb-3">
-                                <Lightbulb className="h-4 w-4 text-amber-400" />
-                                <h4 className="text-sm font-semibold text-white">Key Findings</h4>
-                                <span className="text-[10px] text-white/30 ml-auto">{s.key_findings.length} findings</span>
-                              </div>
-                              <div className="space-y-2">
-                                {s.key_findings.map((finding, i) => (
-                                  <div key={i} className="flex items-start gap-2.5 p-2 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                                    <div className="h-5 w-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
-                                      <span className="text-[10px] font-bold text-amber-400">{i + 1}</span>
-                                    </div>
-                                    <p className="text-xs text-white/50 leading-relaxed">{finding}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Action Items */}
-                          {s.action_items && s.action_items.length > 0 && (
-                            <div className="rounded-xl border border-emerald-500/10 p-4" style={{ background: 'rgba(16,185,129,0.04)' }}>
-                              <div className="flex items-center gap-2 mb-3">
-                                <ListChecks className="h-4 w-4 text-emerald-400" />
-                                <h4 className="text-sm font-semibold text-white">Action Items</h4>
-                                <span className="text-[10px] text-white/30 ml-auto">{s.action_items.length} items</span>
-                              </div>
-                              <div className="space-y-1.5">
-                                {s.action_items.map((item, i) => (
-                                  <div key={i} className="flex items-start gap-2 text-xs text-white/50">
-                                    <ArrowRight className="h-3 w-3 text-emerald-400 mt-0.5 shrink-0" />
-                                    <span>{item}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
                 </motion.div>
               );
             })}
           </AnimatePresence>
         </div>
       )}
+
+      {/* ── Upload Modal ── */}
+      <AnimatePresence>
+        {showUploadModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+            onClick={closeModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md rounded-2xl border border-white/[0.08] overflow-hidden"
+              style={{ background: '#1a1028' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-xl" style={{ background: 'rgba(245,158,11,0.12)' }}>
+                    <Upload className="h-4.5 w-4.5 text-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Upload & Summarize</h3>
+                    <p className="text-[11px] text-white/35">Select a document to generate AI summary & insights</p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
+                  onClick={closeModal}
+                  disabled={uploading}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="px-6 py-5 space-y-4">
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.docx,.xlsx,.csv,.pptx,.txt,.md"
+                  onChange={handleFileChange}
+                  disabled={uploading}
+                />
+
+                {/* Drop/Select Area */}
+                {!selectedFile ? (
+                  <div
+                    className="rounded-xl border-2 border-dashed border-white/[0.08] hover:border-amber-500/30 transition-colors cursor-pointer p-8"
+                    style={{ background: 'rgba(0,0,0,0.15)' }}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <div className="flex flex-col items-center text-center">
+                      <div className="flex items-center justify-center w-12 h-12 rounded-2xl mb-3" style={{ background: 'rgba(245,158,11,0.1)' }}>
+                        <Upload className="h-6 w-6 text-amber-500" />
+                      </div>
+                      <p className="text-sm font-medium text-white">Click to select document</p>
+                      <p className="text-xs text-white/30 mt-1">PDF, DOCX, XLSX, CSV, PPTX, TXT</p>
+                      <p className="text-[10px] text-white/20 mt-0.5">Maximum 50 MB</p>
+                    </div>
+                  </div>
+                ) : (
+                  /* Selected File Preview */
+                  <div className="rounded-xl border border-white/[0.08] p-4" style={{ background: 'rgba(0,0,0,0.15)' }}>
+                    <div className="flex items-center gap-3">
+                      {(() => {
+                        const sfc = getSelectedFileConfig();
+                        const SFIcon = sfc?.icon || File;
+                        return (
+                          <div className="flex items-center justify-center w-11 h-11 rounded-xl shrink-0"
+                            style={{ backgroundColor: `${sfc?.color || '#6b7280'}15` }}>
+                            <SFIcon className="h-5 w-5" style={{ color: sfc?.color || '#6b7280' }} />
+                          </div>
+                        );
+                      })()}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{selectedFile.name}</p>
+                        <p className="text-[11px] text-white/30 mt-0.5">{formatFileSize(selectedFile.size)}</p>
+                      </div>
+                      {!uploading && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
+                          onClick={() => setSelectedFile(null)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Uploading Progress */}
+                    {uploading && (
+                      <div className="mt-4 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                          <span className="text-xs text-amber-400 font-medium">Processing & Summarizing...</span>
+                        </div>
+                        <p className="text-[10px] text-white/25">Extracting text, generating summary & insights</p>
+                        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          <motion.div
+                            className="h-full rounded-full"
+                            style={{ background: 'linear-gradient(90deg, #f59e0b, #f97316)' }}
+                            initial={{ width: '5%' }}
+                            animate={{ width: '85%' }}
+                            transition={{ duration: 15, ease: 'easeOut' }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between px-6 py-4 border-t border-white/[0.06]" style={{ background: 'rgba(0,0,0,0.1)' }}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-white/40 hover:text-white"
+                  onClick={closeModal}
+                  disabled={uploading}
+                >
+                  Cancel
+                </Button>
+                <div className="flex items-center gap-2">
+                  {selectedFile && !uploading && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-white/50 hover:text-white"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Change File
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="gap-2 text-xs font-semibold"
+                    style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff' }}
+                    onClick={handleUpload}
+                    disabled={!selectedFile || uploading}
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3.5 w-3.5" />
+                        Summarize
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
