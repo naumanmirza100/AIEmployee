@@ -20,6 +20,7 @@ import * as operationsService from '@/services/operationsAgentService';
 import DocumentProcessing from './DocumentProcessing';
 import DocumentDetailPage from './DocumentDetailPage';
 import SummarizationInsights from './SummarizationInsights';
+import SummaryDetailPage from './SummaryDetailPage';
 import AnalyticsDashboardTab from './AnalyticsDashboardTab';
 import KnowledgeQA from './KnowledgeQA';
 import DocumentAuthoring from './DocumentAuthoring';
@@ -60,7 +61,8 @@ const OperationsDashboard = () => {
   const navigate = useNavigate();
   const pathSegment = (location.pathname.match(/\/operations\/?([^/]*)/) || [])[1] || 'dashboard';
   const docDetailMatch = location.pathname.match(/\/operations\/documents\/(\d+)/);
-  const activeTab = docDetailMatch ? 'documents' : (PATH_TO_TAB[pathSegment] || 'dashboard');
+  const summaryDetailMatch = location.pathname.match(/\/operations\/summarization\/(\d+)/);
+  const activeTab = docDetailMatch ? 'documents' : summaryDetailMatch ? 'summarization' : (PATH_TO_TAB[pathSegment] || 'dashboard');
   const currentTab = TAB_ITEMS.find(item => item.value === activeTab) || TAB_ITEMS[0];
 
   const [stats, setStats] = useState(null);
@@ -84,9 +86,12 @@ const OperationsDashboard = () => {
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
-  // If on document detail page, render that instead
+  // If on detail pages, render those instead
   if (docDetailMatch) {
     return <DocumentDetailPage />;
+  }
+  if (summaryDetailMatch) {
+    return <SummaryDetailPage />;
   }
 
   const statCards = [

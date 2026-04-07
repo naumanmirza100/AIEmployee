@@ -101,6 +101,17 @@ class OperationsDocumentSummary(models.Model):
     rich_summary = models.TextField(help_text='Full markdown summary')
     key_findings = models.JSONField(default=list, blank=True)
     action_items = models.JSONField(default=list, blank=True)
+    # ── Proper Insights Fields ──
+    sentiment = models.CharField(max_length=30, blank=True, help_text='positive/negative/neutral/mixed')
+    sentiment_explanation = models.CharField(max_length=500, blank=True)
+    topics = models.JSONField(default=list, blank=True, help_text='Main topics/categories')
+    importance_level = models.CharField(max_length=20, blank=True, help_text='critical/high/medium/low')
+    importance_reason = models.CharField(max_length=500, blank=True)
+    entities = models.JSONField(default=dict, blank=True, help_text='people, organizations, dates, amounts, locations')
+    risks = models.JSONField(default=list, blank=True, help_text='Identified risks/concerns')
+    opportunities = models.JSONField(default=list, blank=True, help_text='Identified opportunities')
+    deadlines = models.JSONField(default=list, blank=True, help_text='Key dates/deadlines found')
+    document_category = models.CharField(max_length=50, blank=True, help_text='Auto-classified category')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
