@@ -50,7 +50,7 @@ import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
-import OperationsDashboard from '@/components/operations/OperationsDashboard';
+import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
@@ -141,9 +141,16 @@ import { useTranslation } from 'react-i18next';
             </Route>
 
             {/* Operations Agent routes without header/footer */}
-            <Route path="/operations/dashboard" element={<OperationsAgentPage />}>
-              <Route index element={<OperationsDashboard />} />
-            </Route>
+            <Route path="/operations" element={<Navigate to="/operations/dashboard" replace />} />
+            <Route path="/operations/dashboard" element={<OperationsAgentPage />} />
+            <Route path="/operations/documents" element={<OperationsAgentPage />} />
+            <Route path="/operations/documents/:id" element={<OperationsAgentPage />} />
+            <Route path="/operations/summarization" element={<OperationsAgentPage />} />
+            <Route path="/operations/summarization/:id" element={<OperationsAgentPage />} />
+            <Route path="/operations/analytics" element={<OperationsAgentPage />} />
+            <Route path="/operations/knowledge-qa" element={<OperationsAgentPage />} />
+            <Route path="/operations/authoring" element={<OperationsAgentPage />} />
+            <Route path="/operations/notifications" element={<OperationsAgentPage />} />
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

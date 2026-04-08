@@ -409,6 +409,10 @@ urlpatterns = [
     re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
+    re_path(r'^operations/summaries/upload/?$', operations_agent.upload_and_summarize, name='operations_upload_and_summarize'),  # POST
+    re_path(r'^operations/summaries/?$', operations_agent.list_summaries, name='operations_list_summaries'),  # GET
+    re_path(r'^operations/summaries/(?P<summary_id>\d+)/?$', operations_agent.get_summary, name='operations_get_summary'),  # GET
+    re_path(r'^operations/summaries/(?P<summary_id>\d+)/delete/?$', operations_agent.delete_summary, name='operations_delete_summary'),  # DELETE
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)

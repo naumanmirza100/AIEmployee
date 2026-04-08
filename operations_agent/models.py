@@ -83,6 +83,45 @@ class OperationsDocumentChunk(models.Model):
         return f"Chunk {self.chunk_index} of {self.document.title}"
 
 
+class OperationsDocumentSummary(models.Model):
+    """Standalone AI-generated document summaries (no document storage)."""
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE,
+        related_name='operations_summaries',
+    )
+    created_by = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='operations_summaries',
+    )
+    original_filename = models.CharField(max_length=500)
+    file_type = models.CharField(max_length=20, default='other')
+    file_size = models.PositiveIntegerField(default=0)
+    page_count = models.PositiveIntegerField(default=0)
+    word_count = models.PositiveIntegerField(default=0)
+    rich_summary = models.TextField(help_text='Full markdown summary')
+    key_findings = models.JSONField(default=list, blank=True)
+    action_items = models.JSONField(default=list, blank=True)
+    # ── Proper Insights Fields ──
+    sentiment = models.CharField(max_length=30, blank=True, help_text='positive/negative/neutral/mixed')
+    sentiment_explanation = models.CharField(max_length=500, blank=True)
+    topics = models.JSONField(default=list, blank=True, help_text='Main topics/categories')
+    importance_level = models.CharField(max_length=20, blank=True, help_text='critical/high/medium/low')
+    importance_reason = models.CharField(max_length=500, blank=True)
+    entities = models.JSONField(default=dict, blank=True, help_text='people, organizations, dates, amounts, locations')
+    risks = models.JSONField(default=list, blank=True, help_text='Identified risks/concerns')
+    opportunities = models.JSONField(default=list, blank=True, help_text='Identified opportunities')
+    deadlines = models.JSONField(default=list, blank=True, help_text='Key dates/deadlines found')
+    document_category = models.CharField(max_length=50, blank=True, help_text='Auto-classified category')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'operations_agent'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Summary: {self.original_filename}"
+
+
 class OperationsAnalyticsSnapshot(models.Model):
     """Periodic metric snapshots aggregated from documents"""
     company = models.ForeignKey(
