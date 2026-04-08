@@ -188,6 +188,17 @@ export default function MeetingScheduler() {
     }
   };
 
+  // Meeting stats
+  const meetingStats = {
+    pending: meetings.filter(m => m.status === 'pending').length,
+    accepted: meetings.filter(m => m.status === 'accepted').length,
+    counter: meetings.filter(m => m.status === 'counter_proposed' || m.status === 'partially_accepted').length,
+    total: meetings.length,
+  };
+  const nextMeeting = meetings
+    .filter(m => m.status === 'accepted' && new Date(m.proposed_time) > new Date())
+    .sort((a, b) => new Date(a.proposed_time) - new Date(b.proposed_time))[0];
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -474,12 +485,26 @@ export default function MeetingScheduler() {
             {/* ========== MEETINGS TAB ========== */}
             {activeTab === 'meetings' && (
               <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <h3 className="text-sm font-medium text-gray-300">Your Meetings</h3>
                   <Button onClick={fetchMeetings} disabled={meetingsLoading} variant="outline" size="sm" className="border-gray-600 text-gray-300">
                     <RefreshCw className={`w-3.5 h-3.5 mr-1 ${meetingsLoading ? 'animate-spin' : ''}`} /> Refresh
                   </Button>
                 </div>
+
+                {/* Stats summary */}
+                {meetingStats.total > 0 && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400">{meetingStats.pending} pending</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">{meetingStats.accepted} accepted</span>
+                    {meetingStats.counter > 0 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400">{meetingStats.counter} counter-proposed</span>}
+                    {nextMeeting && (
+                      <span className="text-[11px] text-violet-400 flex items-center gap-1">
+                        <Clock className="h-3 w-3" /> Next: {nextMeeting.title} — {new Date(nextMeeting.proposed_time).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {meetingsLoading && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>}
 
@@ -596,6 +621,15 @@ export default function MeetingScheduler() {
                               </Button>
                             </>
                           )}
+                        </div>
+                      )}
+
+                      {/* Meeting Notes link — show for past accepted meetings */}
+                      {m.status === 'accepted' && new Date(m.proposed_time) < new Date() && (
+                        <div className="pt-1 border-t border-white/5">
+                          <span className="text-[10px] text-green-400 flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3" /> Meeting completed — add notes in the AI Tools → Meeting Notes tab
+                          </span>
                         </div>
                       )}
                     </div>

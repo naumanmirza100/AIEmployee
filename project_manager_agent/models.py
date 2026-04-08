@@ -243,6 +243,7 @@ class ScheduledMeeting(models.Model):
         related_name='occurrences',
         help_text='Parent meeting for recurring series. Null = standalone or parent itself.',
     )
+    actual_duration_minutes = models.IntegerField(null=True, blank=True, help_text='Actual meeting duration (filled after meeting ends)')
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

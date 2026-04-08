@@ -646,6 +646,22 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 3600.0,  # Every hour (3600 seconds)
         'options': {'expires': 7200}
     },
+
+    # Meeting reminders - runs every 5 minutes
+    # Sends 1-hour and 15-minute reminders for upcoming meetings
+    'send-meeting-reminders': {
+        'task': 'project_manager_agent.send_meeting_reminders',
+        'schedule': 300.0,  # Every 5 minutes (300 seconds)
+        'options': {'expires': 600}
+    },
+
+    # Stale meeting checker - runs daily
+    # Sends reminders after 48h, auto-withdraws after 7 days
+    'check-stale-meetings': {
+        'task': 'project_manager_agent.check_stale_meetings',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800}
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)

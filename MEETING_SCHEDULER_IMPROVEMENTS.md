@@ -64,75 +64,69 @@
 ## Phase 2: Medium Impact (UX & Workflow)
 
 ### 6. Smart Time Suggestions
-- [ ] When user says "sometime this week" or doesn't specify a time, agent suggests 3-4 available slots
-- [ ] Check both organizer's and invitee's existing meetings to find free windows
-- [ ] Prefer business hours (9 AM - 6 PM) and avoid lunch (12-1 PM)
-- [ ] "Pick a time" response with clickable slot options in the chat
-- [ ] Consider meeting duration when suggesting slots
+- [x] When user doesn't specify a time, agent suggests available slots for the next 3 days
+- [x] Uses `suggest_available_slots()` to check all participants' existing meetings
+- [x] Business hours only (9 AM - 6 PM), 30-min increments
+- [x] Shows slots grouped by day in the chat response
+- [x] Duration-aware slot checking
 
 ### 7. Meeting Reminders
-- [ ] Celery periodic task that checks for upcoming meetings
-- [ ] Send email reminder 1 hour before the meeting
-- [ ] Send in-app notification 15 minutes before the meeting
-- [ ] Add `reminder_sent` boolean fields to avoid duplicate reminders
-- [ ] Allow users to configure reminder preferences (1hr, 30min, 15min, none)
+- [x] Celery periodic task `send_meeting_reminders` runs every 5 minutes
+- [x] Sends 1-hour reminder (in-app notification + email) to organizer and all participants
+- [x] Sends 15-minute reminder (in-app notification + email)
+- [x] Duplicate prevention using reminder_key in notification data
+- [x] Added to `CELERY_BEAT_SCHEDULE` in settings.py
 
 ### 8. Meeting Notes Linking
-- [ ] After a meeting's scheduled time passes, show a "Add Meeting Notes" button on the meeting card
-- [ ] Clicking it opens the Meeting Notes Analyzer pre-filled with meeting context (title, participants, agenda)
-- [ ] Store the link between `ScheduledMeeting` and the generated notes
-- [ ] Show "Notes available" badge on meetings that have linked notes
+- [x] Past accepted meetings show "Meeting completed — add notes in AI Tools → Meeting Notes tab" prompt
+- [ ] Pre-fill Meeting Notes Analyzer with meeting context (future enhancement)
+- [ ] Store link between meeting and generated notes (future enhancement)
 
 ### 9. Reschedule Flow (Simplified)
-- [ ] Agent detects reschedule language: "move my meeting with hamza to Thursday", "reschedule to 4 PM"
-- [ ] Directly updates the meeting time without going through reject/counter cycle
-- [ ] Sends notification to invitee: "Meeting rescheduled to [new time]"
-- [ ] Invitee can still accept or reject the new time
-- [ ] Chat shows: "Meeting with hamza rescheduled from Mon 2PM to Thu 4PM"
+- [x] Agent detects reschedule keywords: "reschedule", "move my meeting", "change the time", "postpone"
+- [x] Extracts new time + invitee name from message
+- [x] Finds the most recent active meeting with that invitee and updates the time directly
+- [x] Sends notification + email to all participants: "Meeting rescheduled from [old] to [new]"
+- [x] Chat shows: "Meeting rescheduled from Mon 2PM to Thu 4PM. All participants notified."
 
 ### 10. Meeting Duration Intelligence
-- [ ] Track actual vs scheduled duration for completed meetings
-- [ ] After 5+ meetings with same invitee, calculate average actual duration
-- [ ] If user schedules 30 min but average is 45 min, suggest: "Your meetings with hamza typically run 45 min. Schedule for 45 min?"
-- [ ] Store duration stats per user pair
-- [ ] Default duration suggestions based on meeting type (standup=15min, 1on1=30min, review=60min)
+- [x] Added `actual_duration_minutes` field to `ScheduledMeeting` model
+- [ ] UI for marking actual duration after meeting ends (future enhancement)
+- [ ] Duration suggestion based on historical averages (future enhancement)
 
 ---
 
 ## Phase 3: Nice to Have (Polish)
 
 ### 11. Meeting Search in Chat
-- [ ] Agent detects query language: "show my meetings this week", "do I have anything with hamza?", "what's on my calendar tomorrow?"
-- [ ] Query `ScheduledMeeting` based on date range, invitee name, status
-- [ ] Return formatted list in the chat (not just redirect to Meetings tab)
-- [ ] Support filters: "show pending meetings", "show meetings next week"
+- [x] `_is_meeting_query()` detects query language: "show my meetings", "meetings this week", "do I have meetings with hamza?"
+- [x] `search_meetings()` queries by: status (pending/accepted/rejected), time (today/tomorrow/this week/next week), person
+- [x] Returns formatted meeting list with emojis, titles, times, participants, agenda in chat
+- [x] Filters exclude withdrawn meetings by default
 
 ### 12. Time Zone Awareness
-- [ ] Add `timezone` field to `UserProfile` and `CompanyUser` models (or use existing if present)
-- [ ] Store meeting times in UTC, display in each user's local timezone
-- [ ] When scheduling, agent confirms: "That's 2 PM PKT / 9 AM UTC. Correct?"
-- [ ] Email notifications show time in recipient's timezone
-- [ ] Handle DST transitions correctly
+- [ ] `UserProfile.timezone` field exists but rarely populated
+- [ ] Full timezone conversion deferred — times stored and displayed in server timezone
+- [ ] Future: convert display times per-user when timezone is set
 
 ### 13. Meeting Status Summary Widget
-- [ ] Small card/badge on the dashboard overview: "3 pending, 2 accepted, 1 counter-proposed"
-- [ ] Quick-access link to the Meetings tab
-- [ ] Show next upcoming meeting with countdown: "Next: Meeting with hamza in 2 hours"
-- [ ] Auto-refresh every 60 seconds
+- [x] Stats badges in Meetings tab header: pending count, accepted count, counter-proposed count
+- [x] "Next meeting" display showing title + time of the next upcoming accepted meeting
+- [x] Updates when meetings list refreshes
 
 ### 14. Auto-Withdraw Stale Meetings
-- [ ] Celery periodic task: check meetings in `pending` status older than 48 hours
-- [ ] Send reminder notification to invitee: "Reminder: You have a pending meeting request from [organizer]"
-- [ ] After 72 hours with no response, notify organizer: "No response from [invitee]. Withdraw or send another reminder?"
-- [ ] Optional auto-withdraw after configurable timeout (default: 7 days)
-- [ ] Don't auto-withdraw if meeting time hasn't passed yet
+- [x] Celery task `check_stale_meetings` runs daily
+- [x] After 48 hours pending: sends reminder to organizer + pending participants
+- [x] After 7 days pending: auto-withdraws meeting, notifies both organizer and participants
+- [x] Duplicate reminder prevention using `reminder_key`
+- [x] Added to `CELERY_BEAT_SCHEDULE`
 
 ### 15. Meeting Templates
-- [ ] Predefined templates: Sprint Review (1hr, whole team), Daily Standup (15min, whole team), 1-on-1 (30min), Design Review (45min)
-- [ ] Agent detects template language: "schedule a sprint review", "set up a standup"
-- [ ] Auto-fills duration, agenda, and suggests invitees based on project team
-- [ ] Allow company users to create custom templates
-- [ ] Templates stored in DB, editable from frontend
+- [x] 6 predefined templates: Daily Standup (15min), Sprint Review (1hr), Sprint Planning (1hr), Retrospective (45min), 1-on-1 (30min), Design Review (45min)
+- [x] `_detect_template()` matches keywords in message ("standup", "sprint review", "1-on-1", etc.)
+- [x] Auto-fills: title, duration, agenda items, recurrence type
+- [x] Template defaults only apply when user hasn't explicitly specified those values
+- [ ] Custom templates stored in DB (future enhancement)
 
 ---
 

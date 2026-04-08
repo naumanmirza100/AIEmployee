@@ -509,6 +509,162 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
 
         return "Meeting request processed."
 
+    MEETING_TEMPLATES = {
+        'standup': {
+            'title': 'Daily Standup',
+            'duration_minutes': 15,
+            'agenda': [{'item': 'What did you do yesterday?', 'done': False}, {'item': 'What will you do today?', 'done': False}, {'item': 'Any blockers?', 'done': False}],
+            'recurrence': 'weekly_weekdays',
+        },
+        'sprint review': {
+            'title': 'Sprint Review',
+            'duration_minutes': 60,
+            'agenda': [{'item': 'Demo completed work', 'done': False}, {'item': 'Stakeholder feedback', 'done': False}, {'item': 'Sprint metrics review', 'done': False}],
+            'recurrence': 'biweekly',
+        },
+        'sprint planning': {
+            'title': 'Sprint Planning',
+            'duration_minutes': 60,
+            'agenda': [{'item': 'Review backlog priorities', 'done': False}, {'item': 'Estimate story points', 'done': False}, {'item': 'Assign sprint tasks', 'done': False}, {'item': 'Set sprint goal', 'done': False}],
+            'recurrence': 'biweekly',
+        },
+        'retrospective': {
+            'title': 'Sprint Retrospective',
+            'duration_minutes': 45,
+            'agenda': [{'item': 'What went well?', 'done': False}, {'item': 'What could be improved?', 'done': False}, {'item': 'Action items for next sprint', 'done': False}],
+            'recurrence': 'biweekly',
+        },
+        '1-on-1': {
+            'title': '1-on-1 Meeting',
+            'duration_minutes': 30,
+            'agenda': [{'item': 'Check-in and updates', 'done': False}, {'item': 'Blockers and challenges', 'done': False}, {'item': 'Goals and growth', 'done': False}],
+            'recurrence': 'weekly',
+        },
+        'design review': {
+            'title': 'Design Review',
+            'duration_minutes': 45,
+            'agenda': [{'item': 'Present designs', 'done': False}, {'item': 'Feedback and discussion', 'done': False}, {'item': 'Action items', 'done': False}],
+            'recurrence': 'none',
+        },
+    }
+
+    def _detect_template(self, message: str) -> Optional[Dict]:
+        """Check if the message references a known meeting template."""
+        msg_lower = message.lower()
+        for key, template in self.MEETING_TEMPLATES.items():
+            if key in msg_lower:
+                return {**template}
+        return None
+
+    def _is_meeting_query(self, message: str) -> bool:
+        """Check if the message is asking about existing meetings."""
+        msg_lower = message.lower()
+        query_keywords = [
+            'show my meetings', 'list my meetings', 'my meetings', 'upcoming meetings',
+            'what meetings', 'do i have', 'any meetings', 'meeting with',
+            'what\'s on my calendar', 'my calendar', 'meetings this week',
+            'meetings today', 'meetings tomorrow', 'how many meetings',
+            'show meetings', 'list meetings', 'pending meetings',
+        ]
+        # Must NOT contain scheduling keywords
+        schedule_keywords = ['schedule', 'set up', 'create', 'book']
+        if any(kw in msg_lower for kw in schedule_keywords):
+            return False
+        return any(kw in msg_lower for kw in query_keywords)
+
+    def search_meetings(self, message: str, organizer_id: int, company_users: List[Dict]) -> Dict:
+        """
+        Search existing meetings based on natural language query.
+        Returns formatted meeting list.
+        """
+        from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
+        from django.db.models import Q
+
+        msg_lower = message.lower()
+        now = timezone.now()
+
+        # Build base query — meetings organized by this company user
+        meetings = ScheduledMeeting.objects.filter(
+            organizer_id=organizer_id,
+        ).select_related('organizer', 'invitee').prefetch_related('participants__user')
+
+        # Filter by status
+        if 'pending' in msg_lower:
+            meetings = meetings.filter(status='pending')
+        elif 'accepted' in msg_lower or 'confirmed' in msg_lower:
+            meetings = meetings.filter(status='accepted')
+        elif 'rejected' in msg_lower:
+            meetings = meetings.filter(status='rejected')
+        else:
+            # Default: show active meetings (not withdrawn)
+            meetings = meetings.exclude(status='withdrawn')
+
+        # Filter by time
+        if 'today' in msg_lower:
+            meetings = meetings.filter(proposed_time__date=now.date())
+        elif 'tomorrow' in msg_lower:
+            tomorrow = (now + timedelta(days=1)).date()
+            meetings = meetings.filter(proposed_time__date=tomorrow)
+        elif 'this week' in msg_lower:
+            week_end = now + timedelta(days=7)
+            meetings = meetings.filter(proposed_time__gte=now, proposed_time__lte=week_end)
+        elif 'next week' in msg_lower:
+            next_week_start = now + timedelta(days=(7 - now.weekday()))
+            next_week_end = next_week_start + timedelta(days=7)
+            meetings = meetings.filter(proposed_time__gte=next_week_start, proposed_time__lte=next_week_end)
+        else:
+            # Show upcoming by default
+            meetings = meetings.filter(proposed_time__gte=now - timedelta(days=1))
+
+        # Filter by person
+        matched = self._find_all_users_in_message(message, company_users)
+        if matched:
+            user_ids = [u["id"] for u in matched]
+            participant_meeting_ids = MeetingParticipant.objects.filter(
+                user_id__in=user_ids
+            ).values_list('meeting_id', flat=True)
+            meetings = meetings.filter(Q(id__in=participant_meeting_ids) | Q(invitee_id__in=user_ids))
+
+        meetings = meetings.order_by('proposed_time')[:15]
+
+        if not meetings.exists():
+            return {
+                "action": "meeting_list",
+                "response": "No meetings found matching your query.",
+                "data": None,
+            }
+
+        # Format the list
+        lines = [f"**Your Meetings ({meetings.count()}):**\n"]
+        for m in meetings:
+            participants = [p.user.get_full_name() or p.user.username for p in m.participants.all()]
+            if not participants and m.invitee:
+                participants = [m.invitee.get_full_name() or m.invitee.username]
+            time_str = m.proposed_time.strftime("%a, %b %d at %I:%M %p")
+
+            status_emoji = {'pending': '⏳', 'accepted': '✅', 'rejected': '❌', 'counter_proposed': '🔄', 'partially_accepted': '⚡', 'withdrawn': '🚫'}.get(m.status, '•')
+            lines.append(f"{status_emoji} **{m.title}** — {time_str} ({m.duration_minutes} min)")
+            lines.append(f"   With: {', '.join(participants)} | Status: {m.status}")
+            if m.agenda:
+                agenda_str = ", ".join(a["item"] for a in m.agenda[:3])
+                lines.append(f"   Agenda: {agenda_str}")
+
+        return {
+            "action": "meeting_list",
+            "response": "\n".join(lines),
+            "data": None,
+        }
+
+    def _is_reschedule_request(self, message: str) -> bool:
+        """Check if the message is about rescheduling an existing meeting."""
+        msg_lower = message.lower()
+        reschedule_keywords = [
+            'reschedule', 'move my meeting', 'change the time', 'postpone',
+            'push back', 'move the meeting', 'shift my meeting', 'delay the meeting',
+            'change meeting time', 'update meeting time',
+        ]
+        return any(kw in msg_lower for kw in reschedule_keywords)
+
     def process(self, message: str, company_users: List[Dict], current_time: str,
                 organizer_id: int = None) -> Dict:
         """
@@ -516,6 +672,45 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         Supports multi-participant meetings ("schedule with hamza, sarah, and developer1").
         Uses deterministic user matching first, then LLM for date/time parsing.
         """
+        # ── Step 0a: Check for meeting query ──
+        if self._is_meeting_query(message):
+            return self.search_meetings(message, organizer_id, company_users)
+
+        # ── Step 0b: Check for reschedule intent ──
+        if self._is_reschedule_request(message):
+            # Parse the new time from the message
+            parsed = self.parse_meeting_request(message, company_users, current_time)
+            new_time = parsed.get("proposed_time")
+            if not new_time:
+                return {
+                    "action": "parse_error",
+                    "response": "I understand you want to reschedule, but I couldn't determine the new time. Please say something like *\"Reschedule my meeting with hamza to Friday at 3 PM\"*.",
+                    "data": None,
+                }
+            # Find who the meeting is with
+            matched = self._find_all_users_in_message(message, company_users)
+            if not matched:
+                single = self._find_user_in_message(message, company_users)
+                if single["match"] in ("exact", "single"):
+                    matched = [single["user"]]
+
+            if not matched:
+                return {
+                    "action": "parse_error",
+                    "response": "I understand you want to reschedule, but I couldn't determine which meeting. Please mention the person's name, e.g., *\"Reschedule my meeting with hamza to Thursday at 2 PM\"*.",
+                    "data": None,
+                }
+
+            return {
+                "action": "reschedule",
+                "response": None,  # API will fill this after updating
+                "data": {
+                    "invitee_ids": [u["id"] for u in matched],
+                    "invitee_names": [u["full_name"] for u in matched],
+                    "new_time": new_time,
+                },
+            }
+
         # ── Step 1: Deterministic multi-user matching ──
         all_matched = self._find_all_users_in_message(message, company_users)
         single_match = self._find_user_in_message(message, company_users)
@@ -586,12 +781,40 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
 
         # No time specified
         invitee_names = [i["name"] for i in invitees]
+        invitee_ids = [i["id"] for i in invitees]
+        duration = parsed.get("duration_minutes", 30)
+
         if not parsed.get("proposed_time"):
-            return {
-                "action": "parse_error",
-                "response": f"I understood you want to meet with {', '.join(f'**{n}**' for n in invitee_names)}, but I couldn't determine the date/time. Please specify when, e.g., *\"tomorrow at 2 PM\"*.",
-                "data": None,
-            }
+            # Try to suggest available slots for tomorrow and the next few days
+            names_str = ", ".join(f"**{n}**" for n in invitee_names)
+            suggestions_text = ""
+            try:
+                now = timezone.now()
+                for day_offset in range(1, 4):  # tomorrow, day after, day after that
+                    check_date = (now + timedelta(days=day_offset)).date()
+                    day_name = check_date.strftime("%A, %b %d")
+                    slots = self.suggest_available_slots(invitee_ids, check_date, duration)
+                    if slots:
+                        suggestions_text += f"\n**{day_name}:** {', '.join(slots[:5])}"
+            except Exception:
+                pass
+
+            if suggestions_text:
+                return {
+                    "action": "suggest_times",
+                    "response": (
+                        f"I'd like to help schedule a meeting with {names_str}, but I need a specific time.\n\n"
+                        f"Here are some available slots:{suggestions_text}\n\n"
+                        f"Just say something like *\"schedule it for {(timezone.now() + timedelta(days=1)).strftime('%A')} at 2 PM\"*"
+                    ),
+                    "data": None,
+                }
+            else:
+                return {
+                    "action": "parse_error",
+                    "response": f"I understood you want to meet with {names_str}, but I couldn't determine the date/time. Please specify when, e.g., *\"tomorrow at 2 PM\"* or *\"Friday at 10 AM\"*.",
+                    "data": None,
+                }
 
         # Validate proposed time is in the future
         try:
@@ -604,7 +827,9 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         except Exception:
             pass
 
-        # ── Step 4: Build meeting data ──
+        # ── Step 4: Build meeting data (with template support) ──
+        template = self._detect_template(message)
+
         if len(invitee_names) == 1:
             title_default = f"Meeting with {invitee_names[0]}"
         else:
@@ -620,12 +845,19 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         else:
             agenda_items = []
 
+        # Apply template defaults (template values are used only if not explicitly provided)
+        if template:
+            if not agenda_items:
+                agenda_items = template.get("agenda", [])
+            if recurrence == "none" and template.get("recurrence", "none") != "none":
+                recurrence = template["recurrence"]
+
         meeting_data = {
             "invitees": invitees,
             "invitee_names": invitee_names,
             "proposed_time": parsed["proposed_time"],
-            "duration_minutes": parsed.get("duration_minutes", 30),
-            "title": parsed.get("title") or title_default,
+            "duration_minutes": parsed.get("duration_minutes") or (template.get("duration_minutes") if template else 30) or 30,
+            "title": parsed.get("title") or (template.get("title") if template else None) or title_default,
             "description": parsed.get("description") or "",
             "agenda": agenda_items,
             "recurrence": recurrence,

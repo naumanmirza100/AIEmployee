@@ -24,7 +24,11 @@
       "Bash(python:*)",
       "Bash(python manage.py shell -c \":*)",
       "Bash(ls celerybeat-schedule.*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(grep -n \"TODO\\\\|FIXME\\\\|XXX\\\\|hardcoded\\\\|magic number\\\\|raise Exception\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)",
+      "Bash(find /c/Study/Others/Projectsss/AIEmploees/AIEmployee/PaPerProjectFront/src/components/pm-agent -name \"*.jsx\" -exec wc -l {} +)",
+      "Bash(grep -rn \"max_tokens\\\\|temperature\\\\|model.*=\\\\|hardcoded\\\\|xxx\\\\|fixme\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)",
+      "Bash(grep -n \"max_tokens\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)"
     ]
   }
 }
