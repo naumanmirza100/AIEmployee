@@ -4150,6 +4150,64 @@ def meeting_schedule(request):
         action = result.get("action")
         logger.info(f"[MEETING] Agent result: action={action}")
 
+        # Handle reschedule
+        if action == "reschedule" and result.get("data"):
+            data = result["data"]
+            invitee_ids = data.get("invitee_ids", [])
+            invitee_names = data.get("invitee_names", [])
+            new_time_str = data["new_time"]
+
+            try:
+                new_time = datetime.fromisoformat(new_time_str.replace("Z", "+00:00"))
+                if timezone.is_naive(new_time):
+                    new_time = timezone.make_aware(new_time)
+            except Exception:
+                return Response({"status": "success", "data": {"action": "parse_error", "response": "Could not parse the new time.", "meeting": None}}, status=status.HTTP_200_OK)
+
+            # Find the most recent pending/accepted meeting with this invitee
+            from django.db.models import Q
+            meeting = ScheduledMeeting.objects.filter(
+                organizer=company_user,
+                status__in=['pending', 'accepted', 'counter_proposed', 'partially_accepted'],
+            ).filter(
+                Q(participants__user_id__in=invitee_ids) | Q(invitee_id__in=invitee_ids)
+            ).order_by('-created_at').first()
+
+            if not meeting:
+                names_str = ", ".join(f"**{n}**" for n in invitee_names)
+                return Response({"status": "success", "data": {"action": "not_found", "response": f"I couldn't find an active meeting with {names_str} to reschedule.", "meeting": None}}, status=status.HTTP_200_OK)
+
+            old_time = meeting.proposed_time.strftime("%A, %B %d at %I:%M %p") if meeting.proposed_time else "unknown"
+            meeting.proposed_time = new_time
+            meeting.save(update_fields=['proposed_time', 'updated_at'])
+
+            new_time_display = new_time.strftime("%A, %B %d, %Y at %I:%M %p")
+
+            # Notify participants
+            from core.models import Notification as UserNotification
+            for p in meeting.participants.all().select_related('user'):
+                UserNotification.objects.create(
+                    user=p.user, type='meeting_rescheduled', notification_type='meeting_request',
+                    title=f"Meeting Rescheduled: {meeting.title}",
+                    message=f'{company_user.full_name} rescheduled "{meeting.title}" to {new_time_display}.',
+                    action_url=f'/meetings/{meeting.id}/respond',
+                )
+                if p.user.email:
+                    _send_meeting_email(
+                        recipient_email=p.user.email,
+                        subject=f"Meeting Rescheduled: {meeting.title}",
+                        body_html=f"<p><strong>{company_user.full_name}</strong> rescheduled <strong>\"{meeting.title}\"</strong> from {old_time} to <strong>{new_time_display}</strong>.</p>",
+                    )
+
+            return Response({
+                "status": "success",
+                "data": {
+                    "action": "rescheduled",
+                    "response": f"**Meeting Rescheduled!**\n\n**{meeting.title}** has been moved from {old_time} to **{new_time_display}**.\n\nAll participants have been notified.",
+                    "meeting": _serialize_meeting(meeting),
+                }
+            }, status=status.HTTP_200_OK)
+
         # If the agent says to schedule, create the meeting
         if action == "schedule" and result.get("data"):
             data = result["data"]
