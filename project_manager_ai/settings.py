@@ -340,7 +340,7 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 # Install Microsoft ODBC Driver: https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server
 # Then set DB_DRIVER in .env to match (e.g. "ODBC Driver 17 for SQL Server" or "ODBC Driver 18 for SQL Server").
 # List installed drivers: Get-OdbcDriver (PowerShell) or run: pyodbc.drivers() in Python.
-_db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 17 for SQL Server')
+_db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 18 for SQL Server')
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
