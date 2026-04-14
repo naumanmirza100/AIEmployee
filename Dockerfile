@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc-dev gcc \
+    pkg-config libcairo2-dev libgirepository1.0-dev gir1.2-pango-1.0 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
