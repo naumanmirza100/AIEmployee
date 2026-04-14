@@ -113,25 +113,40 @@ def upload_document(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_documents(request):
-    """List all documents for the company with optional filters."""
+    """List all documents for the company with pagination and filters."""
     try:
         company = request.user.company
         docs = OperationsDocument.objects.filter(company=company).order_by('-created_at')
 
-        # Optional filters
+        # Filters
         doc_type = request.query_params.get('document_type')
         file_type = request.query_params.get('file_type')
         search = request.query_params.get('search', '').strip()
+        is_processed = request.query_params.get('is_processed')
 
         if doc_type:
             docs = docs.filter(document_type=doc_type)
         if file_type:
             docs = docs.filter(file_type=file_type)
         if search:
-            docs = docs.filter(title__icontains=search)
+            from django.db.models import Q
+            docs = docs.filter(Q(title__icontains=search) | Q(original_filename__icontains=search))
+        if is_processed is not None and is_processed != '':
+            docs = docs.filter(is_processed=is_processed.lower() in ('true', '1'))
+
+        # Pagination
+        total = docs.count()
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        page = max(1, page)
+        page_size = min(max(1, page_size), 50)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        end = start + page_size
+        docs_page = docs[start:end]
 
         data = []
-        for doc in docs:
+        for doc in docs_page:
             data.append({
                 'id': doc.id,
                 'title': doc.title,
@@ -154,7 +169,10 @@ def list_documents(request):
         return Response({
             'status': 'success',
             'documents': data,
-            'total': len(data),
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
         })
 
     except Exception as e:
@@ -305,17 +323,36 @@ def upload_and_summarize(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_summaries(request):
-    """List all saved summaries for the company."""
+    """List all saved summaries for the company with pagination and filters."""
     try:
         company = request.user.company
-        summaries = OperationsDocumentSummary.objects.filter(company=company)
+        summaries = OperationsDocumentSummary.objects.filter(company=company).order_by('-created_at')
 
+        # Filters
         search = request.query_params.get('search', '').strip()
+        file_type = request.query_params.get('file_type')
+        category = request.query_params.get('category')
+
         if search:
             summaries = summaries.filter(original_filename__icontains=search)
+        if file_type:
+            summaries = summaries.filter(file_type=file_type)
+        if category:
+            summaries = summaries.filter(document_category=category)
+
+        # Pagination
+        total = summaries.count()
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        page = max(1, page)
+        page_size = min(max(1, page_size), 50)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        end = start + page_size
+        summaries_page = summaries[start:end]
 
         data = []
-        for s in summaries:
+        for s in summaries_page:
             data.append({
                 'id': s.id,
                 'original_filename': s.original_filename,
@@ -344,7 +381,10 @@ def list_summaries(request):
         return Response({
             'status': 'success',
             'summaries': data,
-            'total': len(data),
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
         })
 
     except Exception as e:

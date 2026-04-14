@@ -147,7 +147,7 @@ const OperationsAgentPage = () => {
           navItems={getAgentNavItems(purchasedModules, 'operations', navigate)}
         />
 
-        <div className="container mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-8 max-w-full overflow-x-hidden">
+        <div className="container mx-auto px-6 sm:px-10 lg:px-16 xl:px-20 py-4 sm:py-8 max-w-full overflow-x-hidden">
           <OperationsDashboard />
         </div>
       </div>
