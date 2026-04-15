@@ -6,8 +6,9 @@ import pmAgentService from '@/services/pmAgentService';
 import {
   Loader2, Send, CalendarPlus, CheckCircle, XCircle, Clock,
   ArrowRightLeft, Trash2, Calendar, MessageCircle, RefreshCw,
-  Plus, ChevronsLeft, ChevronsRight, Bot
+  Plus, ChevronsLeft, ChevronsRight, Bot, Download
 } from 'lucide-react';
+import Skeleton from '@/components/common/Skeleton';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -72,6 +73,15 @@ export default function MeetingScheduler() {
       timestamp: chat.updatedAt || chat.timestamp,
     };
   };
+
+  // Auto-hide sidebar on mobile
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    if (mq.matches) setShowChatHistory(false);
+    const handler = (e) => { if (e.matches) setShowChatHistory(false); };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const loadChats = async () => {
     try {
@@ -188,6 +198,39 @@ export default function MeetingScheduler() {
     }
   };
 
+  const downloadIcs = (meeting) => {
+    const start = new Date(meeting.proposed_time);
+    const end = new Date(start.getTime() + (meeting.duration_minutes || 30) * 60000);
+    const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const agenda = (meeting.agenda || []).map(a => `- ${a.item}`).join('\\n');
+    const desc = (meeting.description || '') + (agenda ? '\\n\\nAgenda:\\n' + agenda : '');
+    const participants = (meeting.participants || []).map(p =>
+      p.email ? `ATTENDEE;CN=${p.name}:mailto:${p.email}` : ''
+    ).filter(Boolean).join('\r\n');
+
+    const ics = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//AIEmployee//Meeting//EN', 'METHOD:REQUEST',
+      'BEGIN:VEVENT',
+      `UID:meeting-${meeting.id}@aiemployee.app`,
+      `DTSTAMP:${fmt(new Date())}`,
+      `DTSTART:${fmt(start)}`,
+      `DTEND:${fmt(end)}`,
+      `SUMMARY:${meeting.title}`,
+      `DESCRIPTION:${desc}`,
+      participants,
+      'BEGIN:VALARM', 'TRIGGER:-PT15M', 'ACTION:DISPLAY', `DESCRIPTION:Reminder: ${meeting.title}`, 'END:VALARM',
+      'END:VEVENT', 'END:VCALENDAR',
+    ].filter(Boolean).join('\r\n');
+
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${meeting.title.replace(/[^a-zA-Z0-9 ]/g, '').trim()}.ics`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Meeting stats
   const meetingStats = {
     pending: meetings.filter(m => m.status === 'pending').length,
@@ -200,9 +243,12 @@ export default function MeetingScheduler() {
     .sort((a, b) => new Date(a.proposed_time) - new Date(b.proposed_time))[0];
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
       e.preventDefault();
       handleSend();
+    }
+    if (e.key === 'Escape') {
+      setRespondingTo(null);
     }
   };
 
@@ -328,7 +374,7 @@ export default function MeetingScheduler() {
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto custom-sidebar-scroll">
               {loadingChats ? (
-                <div className="p-4 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                <Skeleton.ChatList count={4} />
               ) : chats.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Send a request to start.</div>
               ) : (
@@ -412,10 +458,24 @@ export default function MeetingScheduler() {
               <>
                 <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
                   {!selectedChatId && !loading && chats.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground max-w-md mx-auto">
                       <CalendarPlus className="h-12 w-12 mb-4 opacity-50" />
-                      <p className="font-medium">Schedule your first meeting</p>
-                      <p className="text-sm mt-1">Try: "Set up a meeting with John tomorrow at 3 PM"</p>
+                      <p className="font-medium text-white/80 text-lg mb-3">Schedule your first meeting</p>
+                      <div className="space-y-2 text-left w-full">
+                        <p className="text-xs text-white/30 uppercase tracking-wide mb-1">Quick Start Examples:</p>
+                        {[
+                          'Schedule a meeting with developer1 tomorrow at 2 PM',
+                          'Set up a weekly standup with the team at 9 AM',
+                          'Book a 1-on-1 with Sarah on Friday at 3 PM to discuss the API',
+                          'Show my upcoming meetings',
+                          'Reschedule my meeting with hamza to Thursday',
+                        ].map((example, i) => (
+                          <button key={i} onClick={() => { setInput(example); }}
+                            className="w-full text-left text-xs px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] text-white/50 hover:text-white/80 transition-colors border border-white/5 hover:border-violet-500/20">
+                            "{example}"
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {!selectedChatId && !loading && chats.length > 0 && (
@@ -506,7 +566,7 @@ export default function MeetingScheduler() {
                   </div>
                 )}
 
-                {meetingsLoading && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>}
+                {meetingsLoading && <Skeleton.MeetingList count={3} />}
 
                 {!meetingsLoading && meetings.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
@@ -538,6 +598,10 @@ export default function MeetingScheduler() {
                             {m.occurrences_count > 0 && ` (${m.occurrences_count} more)`}
                           </span>
                         )}
+                        <button onClick={() => downloadIcs(m)} title="Download .ics calendar file"
+                          className="flex items-center gap-1 text-violet-400 hover:text-violet-300 transition-colors">
+                          <Download className="h-3 w-3" /> .ics
+                        </button>
                       </div>
 
                       {/* Participants */}

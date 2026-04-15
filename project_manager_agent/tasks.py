@@ -210,3 +210,44 @@ def check_stale_meetings():
 
     logger.info(f"[STALE MEETINGS] Sent {reminders_sent} stale reminders, auto-withdrew {auto_withdrawn} meetings")
     return {'reminders_sent': reminders_sent, 'auto_withdrawn': auto_withdrawn}
+
+
+@shared_task(name='project_manager_agent.cleanup_old_notifications')
+def cleanup_old_notifications():
+    """
+    Clean up old notifications to prevent database bloat.
+    - Delete read PMNotifications older than 30 days
+    - Delete read User Notifications older than 30 days
+    - Keep max 200 notifications per user (delete oldest beyond that)
+    Runs daily.
+    """
+    from project_manager_agent.models import PMNotification
+    from core.models import Notification
+
+    now = timezone.now()
+    cutoff = now - timedelta(days=30)
+
+    # Clean old read PM notifications
+    pm_deleted = PMNotification.objects.filter(
+        is_read=True, created_at__lt=cutoff
+    ).delete()[0]
+
+    # Clean old read user notifications
+    user_deleted = Notification.objects.filter(
+        is_read=True, created_at__lt=cutoff
+    ).delete()[0]
+
+    # Cap per-user PM notifications at 200
+    from django.db.models import Subquery, OuterRef
+    from core.models import CompanyUser
+    pm_capped = 0
+    for cu in CompanyUser.objects.all():
+        notif_ids = PMNotification.objects.filter(
+            company_user=cu
+        ).order_by('-created_at').values_list('id', flat=True)[200:]
+        if notif_ids:
+            count = PMNotification.objects.filter(id__in=list(notif_ids)).delete()[0]
+            pm_capped += count
+
+    logger.info(f"[NOTIFICATION CLEANUP] Deleted: {pm_deleted} PM, {user_deleted} User notifications (30d+). Capped: {pm_capped}")
+    return {'pm_deleted': pm_deleted, 'user_deleted': user_deleted, 'pm_capped': pm_capped}

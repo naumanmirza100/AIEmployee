@@ -19,6 +19,7 @@ class PMKnowledgeQAChat(models.Model):
         ordering = ['-updated_at']
         verbose_name = 'PM Knowledge QA Chat'
         verbose_name_plural = 'PM Knowledge QA Chats'
+        indexes = [models.Index(fields=['company_user', '-updated_at'])]
 
     def __str__(self):
         return f"PM QA Chat: {self.title[:40]}... ({self.id})"
@@ -72,6 +73,7 @@ class PMProjectPilotChat(models.Model):
         ordering = ['-updated_at']
         verbose_name = 'PM Project Pilot Chat'
         verbose_name_plural = 'PM Project Pilot Chats'
+        indexes = [models.Index(fields=['company_user', '-updated_at'])]
 
     def __str__(self):
         return f"PM Pilot Chat: {self.title[:40]}... ({self.id})"
@@ -122,6 +124,7 @@ class PMMeetingSchedulerChat(models.Model):
     class Meta:
         app_label = 'project_manager_agent'
         ordering = ['-updated_at']
+        indexes = [models.Index(fields=['company_user', '-updated_at'])]
 
     def __str__(self):
         return f"Meeting Chat: {self.title[:40]}... ({self.id})"
@@ -186,9 +189,48 @@ class PMNotification(models.Model):
         ordering = ['-created_at']
         verbose_name = 'PM Notification'
         verbose_name_plural = 'PM Notifications'
+        indexes = [models.Index(fields=['company_user', 'is_read', '-created_at'])]
 
     def __str__(self):
         return f"[{self.severity}] {self.title}"
+
+
+class PMAuditLog(models.Model):
+    """Audit trail for tracking all actions in the PM agent system."""
+    ACTION_CHOICES = [
+        ('project_created', 'Project Created'),
+        ('project_updated', 'Project Updated'),
+        ('project_deleted', 'Project Deleted'),
+        ('task_created', 'Task Created'),
+        ('task_updated', 'Task Updated'),
+        ('task_deleted', 'Task Deleted'),
+        ('task_assigned', 'Task Assigned'),
+        ('meeting_scheduled', 'Meeting Scheduled'),
+        ('meeting_accepted', 'Meeting Accepted'),
+        ('meeting_rejected', 'Meeting Rejected'),
+        ('meeting_withdrawn', 'Meeting Withdrawn'),
+        ('meeting_rescheduled', 'Meeting Rescheduled'),
+        ('subtasks_generated', 'Subtasks Generated'),
+        ('priority_updated', 'Priority Updated'),
+    ]
+
+    company_user = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.CASCADE, related_name='pm_audit_logs',
+    )
+    action = models.CharField(max_length=50, choices=ACTION_CHOICES)
+    model_name = models.CharField(max_length=50, help_text='e.g., Project, Task, ScheduledMeeting')
+    object_id = models.IntegerField(null=True, blank=True)
+    object_title = models.CharField(max_length=255, blank=True, default='')
+    details = models.JSONField(null=True, blank=True, help_text='Additional context')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['company_user', '-created_at'])]
+
+    def __str__(self):
+        return f"[{self.action}] {self.object_title} by {self.company_user_id}"
 
 
 class ScheduledMeeting(models.Model):
@@ -252,6 +294,10 @@ class ScheduledMeeting(models.Model):
         ordering = ['-created_at']
         verbose_name = 'Scheduled Meeting'
         verbose_name_plural = 'Scheduled Meetings'
+        indexes = [
+            models.Index(fields=['organizer', '-created_at']),
+            models.Index(fields=['status', 'proposed_time']),
+        ]
 
     def __str__(self):
         participant_count = self.participants.count()

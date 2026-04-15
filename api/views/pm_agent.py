@@ -22,6 +22,8 @@ from project_manager_agent.models import (
 )
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
+from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.decorators import throttle_classes
 
 import logging
 import json
@@ -54,6 +56,88 @@ try:
 except ImportError:
     DOCX_AVAILABLE = False
     logger.warning("python-docx not available. DOCX extraction will not work.")
+
+
+def _audit_log(company_user, action, model_name='', object_id=None, object_title='', details=None):
+    """Create an audit log entry. Fails silently."""
+    try:
+        from project_manager_agent.models import PMAuditLog
+        PMAuditLog.objects.create(
+            company_user=company_user, action=action, model_name=model_name,
+            object_id=object_id, object_title=str(object_title)[:255],
+            details=details,
+        )
+    except Exception:
+        pass  # Audit logging should never break the main flow
+
+
+class PMLLMThrottle(SimpleRateThrottle):
+    """Rate limit for LLM-powered PM agent endpoints (30/hour per user)."""
+    scope = 'pm_llm'
+    rate = '30/hour'
+
+    def get_cache_key(self, request, view):
+        if hasattr(request, 'user') and request.user:
+            ident = getattr(request.user, 'id', None) or getattr(request.user, 'pk', None)
+            if ident:
+                return self.cache_format % {'scope': self.scope, 'ident': ident}
+        return self.get_ident(request)
+
+
+def _get_project_owner(company_user):
+    """
+    Get a Django User to use as project owner for this company user.
+    Prefers a user created by this company user. Falls back to creating one.
+    """
+    from core.models import UserProfile
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    # Try to find a user created by this company user
+    profile = UserProfile.objects.filter(
+        created_by_company_user=company_user
+    ).select_related('user').first()
+    if profile and profile.user:
+        return profile.user
+
+    # Fallback: find or create a user from the company user's email
+    user, created = User.objects.get_or_create(
+        username=f"cu_{company_user.id}_{company_user.email.split('@')[0]}",
+        defaults={
+            'email': company_user.email,
+            'first_name': company_user.full_name.split()[0] if company_user.full_name else '',
+            'last_name': ' '.join(company_user.full_name.split()[1:]) if company_user.full_name and len(company_user.full_name.split()) > 1 else '',
+        }
+    )
+    if created:
+        # Create a profile linking back to this company user
+        UserProfile.objects.get_or_create(user=user, defaults={'created_by_company_user': company_user})
+    return user
+
+
+def _validate_positive_number(value, field_name, max_val=999999999):
+    """Validate a numeric field is positive and within bounds. Returns (cleaned_value, error_msg)."""
+    if value is None:
+        return None, None
+    try:
+        num = float(value)
+        if num < 0:
+            return None, f"{field_name} must be a positive number."
+        if num > max_val:
+            return None, f"{field_name} is too large (max {max_val})."
+        return num, None
+    except (ValueError, TypeError):
+        return None, f"{field_name} must be a valid number."
+
+
+def _validate_string(value, field_name, max_length=255):
+    """Validate a string field length. Returns (cleaned_value, error_msg)."""
+    if value is None:
+        return None, None
+    val = str(value).strip()
+    if len(val) > max_length:
+        return val[:max_length], None  # Truncate silently
+    return val, None
 
 
 def _assignee_display(assignee):
@@ -358,6 +442,7 @@ def _build_user_assignments(available_users, *, project_id=None, all_tasks=None,
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMThrottle])
 def project_pilot(request):
     """
     Project Pilot Agent API - Only accessible to company users.
@@ -596,7 +681,7 @@ def project_pilot(request):
                                                 try:
                                                     obj = json.loads(obj_str)
                                                     complete_objects.append(obj)
-                                                except:
+                                                except (json.JSONDecodeError, ValueError):
                                                     pass
                                 
                                 if complete_objects:
@@ -621,7 +706,7 @@ def project_pilot(request):
                                     obj = json.loads(match)
                                     if isinstance(obj, dict) and obj.get("action"):
                                         extracted_objects.append(obj)
-                                except:
+                                except (json.JSONDecodeError, ValueError):
                                     pass
                             if extracted_objects:
                                 actions = extracted_objects
@@ -719,7 +804,7 @@ def project_pilot(request):
                     # For now, we'll set it to None if the field allows it, otherwise we need to handle it
                     from django.contrib.auth.models import User
                     # Try to get the first user as owner (you might want to change this logic)
-                    default_owner = User.objects.first()
+                    default_owner = _get_project_owner(company_user)
                     
                     project_data = {
                         "name": action_data.get("project_name", "New Project"),
@@ -750,7 +835,8 @@ def project_pilot(request):
                         project_data["deadline"] = deadline
                     
                     project = Project.objects.create(**project_data)
-                    
+                    _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
+
                     # Store the created project ID for use in subsequent task creation
                     created_project_id = project.id
                     # Store it in the action_data for reference
@@ -854,17 +940,29 @@ def project_pilot(request):
                         except (ValueError, TypeError):
                             estimated_hours = None
 
+                    # Capacity check — warn if assignee has too many active tasks
+                    capacity_warning = None
+                    assignee_id_val = action_data.get("assignee_id")
+                    if assignee_id_val:
+                        active_count = Task.objects.filter(
+                            assignee_id=assignee_id_val,
+                            status__in=['todo', 'in_progress', 'review']
+                        ).count()
+                        if active_count >= 10:
+                            capacity_warning = f"Warning: assignee already has {active_count} active tasks."
+
                     task = Task.objects.create(
                         title=action_data.get("task_title", "New Task"),
                         description=action_data.get("task_description", ""),
                         project=task_project,
                         status=action_data.get("status", "todo"),
                         priority=action_data.get("priority", "medium"),
-                        assignee_id=action_data.get("assignee_id") if action_data.get("assignee_id") else None,
+                        assignee_id=assignee_id_val if assignee_id_val else None,
                         estimated_hours=estimated_hours,
                         due_date=due_date,
                         ai_reasoning=action_data.get("reasoning", ""),
                     )
+                    _audit_log(company_user, 'task_created', 'Task', task.id, task.title)
 
                     action_results.append(
                         {
@@ -1095,6 +1193,7 @@ def project_pilot(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMThrottle])
 def task_prioritization(request):
     """
     Task Prioritization Agent API - Only accessible to company users.
@@ -1598,6 +1697,7 @@ def timeline_gantt(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMThrottle])
 def knowledge_qa(request):
     """
     Knowledge Q&A Agent API - Only accessible to company users.
@@ -2177,7 +2277,9 @@ def list_knowledge_qa_chats(request):
     """List all Knowledge QA chats for the company user."""
     try:
         company_user = request.user
-        chats = PMKnowledgeQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        limit = min(int(request.GET.get('limit', 50)), 100)
+        offset = max(int(request.GET.get('offset', 0)), 0)
+        chats = PMKnowledgeQAChat.objects.filter(company_user=company_user).prefetch_related('messages').order_by('-updated_at')[offset:offset + limit]
         result = []
         for chat in chats:
             messages = []
@@ -2310,7 +2412,9 @@ def list_project_pilot_chats(request):
     """List all Project Pilot chats for the company user."""
     try:
         company_user = request.user
-        chats = PMProjectPilotChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
+        limit = min(int(request.GET.get('limit', 50)), 100)
+        offset = max(int(request.GET.get('offset', 0)), 0)
+        chats = PMProjectPilotChat.objects.filter(company_user=company_user).prefetch_related('messages').order_by('-updated_at')[offset:offset + limit]
         result = []
         for chat in chats:
             messages = []
@@ -2499,13 +2603,12 @@ def create_project_manual(request):
                 'message': f'Invalid project_type. Must be one of: {", ".join(valid_project_types)}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get default owner (required field)
-        from django.contrib.auth.models import User
-        default_owner = User.objects.first()
+        # Get project owner from company user's project users
+        default_owner = _get_project_owner(company_user)
         if not default_owner:
             return Response({
                 'status': 'error',
-                'message': 'No default owner available. Please ensure at least one user exists in the system.'
+                'message': 'Could not determine project owner. Please create at least one project user first.'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Build project data
@@ -2533,22 +2636,16 @@ def create_project_manual(request):
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         if budget_min:
-            try:
-                project_data['budget_min'] = float(budget_min)
-            except (ValueError, TypeError):
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid budget_min value'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
+            val, err = _validate_positive_number(budget_min, 'budget_min')
+            if err:
+                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
+            project_data['budget_min'] = val
+
         if budget_max:
-            try:
-                project_data['budget_max'] = float(budget_max)
-            except (ValueError, TypeError):
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid budget_max value'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            val, err = _validate_positive_number(budget_max, 'budget_max')
+            if err:
+                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
+            project_data['budget_max'] = val
         
         # Parse dates
         from datetime import datetime
@@ -2581,7 +2678,8 @@ def create_project_manual(request):
         
         # Create project
         project = Project.objects.create(**project_data)
-        
+        _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
+
         return Response({
             'status': 'success',
             'message': 'Project created successfully',
@@ -2799,14 +2897,38 @@ def get_available_users(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+# Magic bytes for file type validation
+FILE_MAGIC_BYTES = {
+    '.pdf': b'%PDF',
+    '.docx': b'PK',  # DOCX is a ZIP file
+}
+
+
 def _extract_text_from_file(file):
     """
     Extract text from uploaded file.
     Supports: .txt, .pdf, .docx
+    Validates file size, magic bytes, and sanitizes output.
     """
+    # Server-side file size check
+    if hasattr(file, 'size') and file.size > MAX_FILE_SIZE:
+        raise ValueError(f"File too large ({file.size // (1024*1024)}MB). Maximum is 10MB.")
+
     file_extension = os.path.splitext(file.name)[1].lower()
+
+    # Validate magic bytes for PDF and DOCX
+    if file_extension in FILE_MAGIC_BYTES:
+        file.seek(0)
+        header = file.read(4)
+        file.seek(0)
+        expected = FILE_MAGIC_BYTES[file_extension]
+        if not header.startswith(expected):
+            raise ValueError(f"File content does not match {file_extension} format. The file may be corrupted or mislabeled.")
+
     text = ""
-    
+
     try:
         if file_extension == '.txt':
             # Read text file
@@ -2845,11 +2967,18 @@ def _extract_text_from_file(file):
         else:
             raise ValueError(f"Unsupported file type: {file_extension}. Supported types: .txt, .pdf, .docx")
         
-        return text.strip()
-    
+        # Sanitize: strip control chars, truncate to prevent LLM token overflow
+        text = text.strip()
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)  # Remove control chars (keep \n, \r, \t)
+        if len(text) > 50000:
+            text = text[:50000] + "\n\n[... text truncated at 50,000 characters ...]"
+        return text
+
+    except ValueError:
+        raise  # Re-raise validation errors as-is
     except Exception as e:
         logger.exception(f"Error extracting text from file: {file.name}")
-        raise ValueError(f"Failed to extract text from file: {str(e)}")
+        raise ValueError(f"Failed to extract text from file. Please ensure the file is not corrupted.")
 
 
 @api_view(["POST"])
@@ -3153,7 +3282,7 @@ def project_pilot_from_file(request):
                 try:
                     # Get default owner (required field)
                     from django.contrib.auth.models import User
-                    default_owner = User.objects.first()
+                    default_owner = _get_project_owner(company_user)
                     if not default_owner:
                         action_results.append({
                             "action": "create_project",
@@ -3187,21 +3316,24 @@ def project_pilot_from_file(request):
                         try:
                             from datetime import datetime
                             start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-                        except:
+                        except (ValueError, TypeError):
+                            logger.debug(f"Failed to parse start_date: {start_date}")
                             start_date = None
-                    
+
                     if end_date and isinstance(end_date, str):
                         try:
                             from datetime import datetime
                             end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-                        except:
+                        except (ValueError, TypeError):
+                            logger.debug(f"Failed to parse end_date: {end_date}")
                             end_date = None
-                    
+
                     if deadline and isinstance(deadline, str):
                         try:
                             from datetime import datetime
                             deadline = datetime.strptime(deadline, '%Y-%m-%d').date()
-                        except:
+                        except (ValueError, TypeError):
+                            logger.debug(f"Failed to parse deadline: {deadline}")
                             deadline = None
                     
                     # Handle budget - Project model uses budget_min and budget_max, not budget
@@ -3320,7 +3452,7 @@ def project_pilot_from_file(request):
                         try:
                             from django.utils import timezone
                             from datetime import datetime as dt_time
-                            task_project = Project.objects.filter(id=project_id_for_task).first()
+                            task_project = Project.objects.filter(id=project_id_for_task, created_by_company_user=company_user).first()
                             if task_project and getattr(task_project, "deadline", None):
                                 d = task_project.deadline
                                 if hasattr(d, "year"):
@@ -3822,7 +3954,7 @@ def scan_notifications(request):
 
     except Exception as e:
         logger.exception("scan_notifications failed")
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
@@ -3864,7 +3996,7 @@ def list_notifications(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -3892,7 +4024,7 @@ def mark_notifications_read(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== TEAM PERFORMANCE ENDPOINT ====================
@@ -3925,7 +4057,7 @@ def team_performance(request):
 
     except Exception as e:
         logger.exception("team_performance failed")
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== TIME ESTIMATION ENDPOINT ====================
@@ -3991,7 +4123,7 @@ def time_estimation(request):
 
     except Exception as e:
         logger.exception("time_estimation failed")
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== MEETING SCHEDULER ENDPOINTS ====================
@@ -4099,6 +4231,7 @@ def _serialize_meeting(meeting):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMThrottle])
 def meeting_schedule(request):
     """
     Chat-based meeting scheduling endpoint.
@@ -4119,7 +4252,8 @@ def meeting_schedule(request):
 
         logger.info(f"[MEETING] Fetching project users for company_user {company_user.id}")
         created_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user
+            created_by_company_user=company_user,
+            user__is_active=True,
         ).select_related('user')
 
         project_users_list = []
@@ -4225,10 +4359,10 @@ def meeting_schedule(request):
             invitee_users = []
             for inv in invitees_data:
                 try:
-                    u = User.objects.get(id=int(inv["id"]))
+                    u = User.objects.get(id=int(inv["id"]), is_active=True)
                     invitee_users.append(u)
                 except (User.DoesNotExist, ValueError, TypeError):
-                    logger.warning(f"[MEETING] Invitee user ID {inv.get('id')} not found, skipping")
+                    logger.warning(f"[MEETING] Invitee user ID {inv.get('id')} not found or inactive, skipping")
 
             if not invitee_users:
                 return Response({
@@ -4310,6 +4444,9 @@ def meeting_schedule(request):
                 recurrence=recurrence,
                 recurrence_end_date=recurrence_end_date,
             )
+
+            _audit_log(company_user, 'meeting_scheduled', 'ScheduledMeeting', meeting.id, meeting.title,
+                      {'invitees': [u.username for u in invitee_users], 'time': time_display})
 
             # Create participants for each invitee
             for u in invitee_users:
@@ -4406,7 +4543,7 @@ def meeting_schedule(request):
         logger.exception("meeting_schedule failed")
         print(f"[MEETING ERROR] {type(e).__name__}: {e}")
         print(f"[MEETING ERROR] Traceback:\n{traceback.format_exc()}")
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -4432,16 +4569,10 @@ def meeting_respond(request):
         try:
             meeting = ScheduledMeeting.objects.get(
                 id=meeting_id,
+                organizer=company_user,  # Enforce data isolation — only organizer can access
             )
         except ScheduledMeeting.DoesNotExist:
             return Response({"status": "error", "message": "Meeting not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        # Verify user is the organizer of this meeting
-        # (Only the organizer — a CompanyUser — can respond via this endpoint.
-        #  Invitee responses come through a separate mechanism.)
-        is_organizer = meeting.organizer_id == company_user.id
-        if not is_organizer:
-            return Response({"status": "error", "message": "You are not the organizer of this meeting."}, status=status.HTTP_403_FORBIDDEN)
 
         # Can't act on already finalized meetings
         if meeting.status in ('accepted', 'withdrawn'):
@@ -4479,6 +4610,7 @@ def meeting_respond(request):
         elif action == 'withdrawn':
             meeting.status = 'withdrawn'
         meeting.save()
+        _audit_log(company_user, f'meeting_{action}', 'ScheduledMeeting', meeting.id, meeting.title)
 
         # Notify the invitee (project User) via in-app notification + email
         from core.models import Notification as UserNotification
@@ -4557,7 +4689,7 @@ def meeting_respond(request):
 
     except Exception as e:
         logger.exception("meeting_respond failed")
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
@@ -4582,7 +4714,9 @@ def meeting_list(request):
             statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
             meetings = meetings.filter(status__in=statuses)
 
-        meetings = meetings.order_by('-created_at')[:50]
+        limit = min(int(request.GET.get('limit', 50)), 100)
+        offset = max(int(request.GET.get('offset', 0)), 0)
+        meetings = meetings.order_by('-created_at')[offset:offset + limit]
 
         data = [_serialize_meeting(m) for m in meetings]
 
@@ -4596,7 +4730,7 @@ def meeting_list(request):
 
     except Exception as e:
         logger.exception("meeting_list failed")
-        return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== MEETING SCHEDULER CHAT CRUD ====================
@@ -4622,7 +4756,9 @@ def _serialize_meeting_chat(chat):
 @permission_classes([IsCompanyUserOnly])
 def list_meeting_scheduler_chats(request):
     try:
-        chats = PMMeetingSchedulerChat.objects.filter(company_user=request.user).order_by('-updated_at')[:50]
+        limit = min(int(request.GET.get('limit', 50)), 100)
+        offset = max(int(request.GET.get('offset', 0)), 0)
+        chats = PMMeetingSchedulerChat.objects.filter(company_user=request.user).prefetch_related('messages').order_by('-updated_at')[offset:offset + limit]
         return Response({'status': 'success', 'data': [_serialize_meeting_chat(c) for c in chats]})
     except Exception as e:
         logger.exception("list_meeting_scheduler_chats error")
@@ -4685,4 +4821,95 @@ def delete_meeting_scheduler_chat(request, chat_id):
         return Response({'status': 'success', 'message': 'Chat deleted.'})
     except Exception as e:
         logger.exception("delete_meeting_scheduler_chat error")
-        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'status': 'error', 'message': 'An internal error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== AUDIT LOG ENDPOINT ====================
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_audit_logs(request):
+    """List audit logs for the current company user. Supports pagination and action filter."""
+    try:
+        from project_manager_agent.models import PMAuditLog
+        company_user = request.user
+        limit = min(int(request.GET.get('limit', 50)), 100)
+        offset = max(int(request.GET.get('offset', 0)), 0)
+        action_filter = request.GET.get('action', '')
+
+        qs = PMAuditLog.objects.filter(company_user=company_user)
+        if action_filter:
+            qs = qs.filter(action=action_filter)
+
+        total = qs.count()
+        logs = qs[offset:offset + limit]
+
+        data = [{
+            'id': log.id,
+            'action': log.action,
+            'model_name': log.model_name,
+            'object_id': log.object_id,
+            'object_title': log.object_title,
+            'details': log.details,
+            'created_at': log.created_at.isoformat(),
+        } for log in logs]
+
+        return Response({
+            'status': 'success',
+            'data': {'logs': data, 'total': total},
+        })
+    except Exception as e:
+        logger.exception("list_audit_logs error")
+        return Response({'status': 'error', 'message': 'An internal error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== HEALTH CHECK ENDPOINT ====================
+
+@api_view(["GET"])
+def pm_health_check(request):
+    """
+    Health check endpoint for the PM Agent system.
+    Returns system status, database connectivity, and LLM availability.
+    No authentication required — used by monitoring/load balancers.
+    """
+    import time as _time
+    checks = {}
+
+    # Database check
+    try:
+        _db_start = _time.time()
+        from project_manager_agent.models import ScheduledMeeting
+        ScheduledMeeting.objects.count()
+        checks['database'] = {'status': 'ok', 'latency_ms': round((_time.time() - _db_start) * 1000)}
+    except Exception as e:
+        checks['database'] = {'status': 'error', 'error': str(type(e).__name__)}
+
+    # LLM check (quick — just verify client initializes)
+    try:
+        from project_manager_agent.ai_agents.base_agent import BaseAgent
+        agent = BaseAgent.__new__(BaseAgent)
+        api_key = getattr(django_settings, 'GROQ_API_KEY', '')
+        checks['llm'] = {
+            'status': 'ok' if api_key else 'warning',
+            'model': getattr(django_settings, 'GROQ_MODEL', 'unknown'),
+            'api_key_configured': bool(api_key),
+        }
+    except Exception as e:
+        checks['llm'] = {'status': 'error', 'error': str(type(e).__name__)}
+
+    # Agent registry check
+    try:
+        from project_manager_agent.ai_agents import AgentRegistry
+        registered = list(AgentRegistry._agents.keys()) if hasattr(AgentRegistry, '_agents') else []
+        checks['agents'] = {'status': 'ok', 'registered': len(registered), 'names': registered}
+    except Exception as e:
+        checks['agents'] = {'status': 'error', 'error': str(type(e).__name__)}
+
+    overall = 'healthy' if all(c.get('status') == 'ok' for c in checks.values()) else 'degraded'
+
+    return Response({
+        'status': overall,
+        'checks': checks,
+        'timestamp': timezone.now().isoformat(),
+    })

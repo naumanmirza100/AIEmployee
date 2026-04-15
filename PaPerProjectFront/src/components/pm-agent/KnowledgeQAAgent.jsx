@@ -771,7 +771,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
                         e.preventDefault();
                         handleSubmit(e);
                       }

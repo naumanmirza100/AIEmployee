@@ -48,6 +48,7 @@ import ManualTaskCreation from '@/components/pm-agent/ManualTaskCreation';
 import PMToolsHub from '@/components/pm-agent/PMToolsHub';
 import MeetingScheduler from '@/components/pm-agent/MeetingScheduler';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 
 const PM_TAB_ITEMS = [
   { value: 'overview', label: 'Overview', icon: BrainCircuit },
@@ -520,27 +521,27 @@ const ProjectManagerDashboardPage = () => {
                 </TabsContent>
 
                 <TabsContent value="project-pilot" className="mt-6">
-                  <ProjectPilotAgent projects={projects || []} onProjectUpdate={fetchProjects} />
+                  <ErrorBoundary><ProjectPilotAgent projects={projects || []} onProjectUpdate={fetchProjects} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="task-prioritization" className="mt-6">
-                  <TaskPrioritizationAgent projects={projects || []} />
+                  <ErrorBoundary><TaskPrioritizationAgent projects={projects || []} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="knowledge-qa" className="mt-6">
-                  <KnowledgeQAAgent projects={projects || []} />
+                  <ErrorBoundary><KnowledgeQAAgent projects={projects || []} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="timeline-gantt" className="mt-6">
-                  <TimelineGanttAgent projects={projects || []} />
+                  <ErrorBoundary><TimelineGanttAgent projects={projects || []} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="meeting-scheduler" className="mt-6">
-                  <MeetingScheduler />
+                  <ErrorBoundary><MeetingScheduler /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="ai-tools" className="mt-6">
-                  <PMToolsHub />
+                  <ErrorBoundary><PMToolsHub /></ErrorBoundary>
                 </TabsContent>
               </Tabs>
           </div>
