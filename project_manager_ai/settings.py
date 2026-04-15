@@ -351,8 +351,10 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'OPTIONS': {
             'driver': _db_driver,
-            # Driver 17: use TrustServerCertificate=yes (Encrypt=Optional is Driver 18 only)
-            'extra_params': 'TrustServerCertificate=yes',
+            # Driver 18 encrypts by default; disable encryption + trust cert for self-signed servers
+            'extra_params': 'Encrypt=no;TrustServerCertificate=yes',
+            'connection_timeout': 60,
+            'login_timeout': 60,
         },
         'CONN_MAX_AGE': 0,
         'TIME_ZONE': 'UTC',
