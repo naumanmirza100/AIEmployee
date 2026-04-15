@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  FileText, BarChart3, MessageSquareText, PenTool, Bell,
+  FileText, BarChart3, MessageSquare, MessageSquareText, PenTool, Bell,
   Upload, TrendingUp, Hash, Tag, Loader2, LayoutDashboard,
   Menu, Check, ArrowUpRight,
 } from 'lucide-react';
