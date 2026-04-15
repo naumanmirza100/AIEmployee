@@ -22,7 +22,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Link } from 'react-router-dom';
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib/utils.js';
 
 const pricingData = {
   plans: [
