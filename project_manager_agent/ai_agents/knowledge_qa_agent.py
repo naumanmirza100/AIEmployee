@@ -928,14 +928,39 @@ INSTRUCTIONS:
         Returns:
             Dict: Search results
         """
-        # This would typically search a database or knowledge base
-        # For now, return a placeholder
-        return {
-            "success": True,
-            "query": query,
-            "results": [],
-            "message": "Project history search not yet fully implemented"
-        }
+        try:
+            from core.models import Task, Project
+            from django.db.models import Q
+
+            project = Project.objects.filter(id=project_id).first()
+            if not project:
+                return {"success": False, "error": f"Project {project_id} not found."}
+
+            # Search tasks by title/description matching the query
+            tasks = Task.objects.filter(
+                project_id=project_id
+            ).filter(
+                Q(title__icontains=query) | Q(description__icontains=query)
+            )[:15]
+
+            results = [{
+                "type": "task",
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "assignee": t.assignee.username if t.assignee else None,
+            } for t in tasks]
+
+            return {
+                "success": True,
+                "query": query,
+                "results": results,
+                "count": len(results),
+            }
+        except Exception as e:
+            self.log_action("Error in search_project_history", {"error": str(e)})
+            return {"success": False, "error": str(e)}
     
     def explain_workflow(self, workflow_name: str) -> Dict:
         """
@@ -974,12 +999,30 @@ Provide a clear, step-by-step explanation of how this workflow works."""
         Returns:
             Dict: Project summary
         """
-        # This would fetch project data and generate summary
-        return {
-            "success": True,
-            "project_id": project_id,
-            "summary": "Project summary generation not yet fully implemented"
-        }
+        try:
+            from core.models import Project, Task
+            project = Project.objects.filter(id=project_id).first()
+            if not project:
+                return {"success": False, "error": f"Project {project_id} not found."}
+
+            tasks = Task.objects.filter(project_id=project_id)
+            total = tasks.count()
+            by_status = {}
+            for t in tasks:
+                by_status[t.status] = by_status.get(t.status, 0) + 1
+
+            context = (
+                f"Project: {project.name}\nStatus: {project.status}\nPriority: {project.priority}\n"
+                f"Total Tasks: {total}\nBy Status: {by_status}\n"
+                f"Description: {project.description[:500] if project.description else 'N/A'}"
+            )
+            summary = self._call_llm(
+                f"Generate a brief project summary:\n\n{context}\n\nKeep it to 3-4 sentences.",
+                self.system_prompt, temperature=0.5, max_tokens=300
+            )
+            return {"success": True, "project_id": project_id, "summary": summary}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     def provide_insights(self, project_id: int) -> Dict:
         """
@@ -991,12 +1034,36 @@ Provide a clear, step-by-step explanation of how this workflow works."""
         Returns:
             Dict: Project insights
         """
-        # This would analyze project data and provide insights
-        return {
-            "success": True,
-            "project_id": project_id,
-            "insights": "Insight generation not yet fully implemented"
-        }
+        try:
+            from core.models import Project, Task
+            from django.utils import timezone as tz
+            project = Project.objects.filter(id=project_id).first()
+            if not project:
+                return {"success": False, "error": f"Project {project_id} not found."}
+
+            tasks = Task.objects.filter(project_id=project_id)
+            now = tz.now()
+            overdue = tasks.filter(due_date__lt=now, status__in=['todo', 'in_progress']).count()
+            blocked = tasks.filter(status='blocked').count()
+            unassigned = tasks.filter(assignee__isnull=True).exclude(status='done').count()
+            done = tasks.filter(status='done').count()
+            total = tasks.count()
+
+            insights = []
+            if overdue > 0:
+                insights.append(f"{overdue} task(s) are overdue.")
+            if blocked > 0:
+                insights.append(f"{blocked} task(s) are blocked.")
+            if unassigned > 0:
+                insights.append(f"{unassigned} task(s) are unassigned.")
+            if total > 0:
+                insights.append(f"Completion rate: {round(done/total*100)}%.")
+            if not insights:
+                insights.append("Project looks healthy — no overdue, blocked, or unassigned tasks.")
+
+            return {"success": True, "project_id": project_id, "insights": insights}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     def process(self, question: str, **kwargs) -> Dict:
         """

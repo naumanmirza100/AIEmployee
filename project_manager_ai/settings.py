@@ -424,6 +424,29 @@ LOGIN_URL = '/login/'
 # --------------------
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
+GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
+
+# Per-agent LLM configuration overrides
+# Keys: agent class name (lowercase), Values: { model, temperature, max_tokens }
+PM_AGENT_LLM_CONFIG = {
+    'defaults': {
+        'model': GROQ_MODEL,
+        'temperature': 0.7,
+        'max_tokens': 1024,
+    },
+    'meetingscheduleragent': {
+        'temperature': 0.1,
+        'max_tokens': 700,
+    },
+    'dailystandupagent': {
+        'temperature': 0.5,
+        'max_tokens': 1500,
+    },
+    'knowledgeqaagent': {
+        'temperature': 0.7,
+        'max_tokens': 800,
+    },
+}
 GROQ_REC_API_KEY = os.getenv('GROQ_REC_API_KEY', '')
 
 # OpenRouter API Settings (Highest Priority)
@@ -648,6 +671,30 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 3600.0,  # Every hour (3600 seconds)
         'options': {'expires': 7200}
     },
+
+    # Meeting reminders - runs every 5 minutes
+    # Sends 1-hour and 15-minute reminders for upcoming meetings
+    'send-meeting-reminders': {
+        'task': 'project_manager_agent.send_meeting_reminders',
+        'schedule': 300.0,  # Every 5 minutes (300 seconds)
+        'options': {'expires': 600}
+    },
+
+    # Stale meeting checker - runs daily
+    # Sends reminders after 48h, auto-withdraws after 7 days
+    'check-stale-meetings': {
+        'task': 'project_manager_agent.check_stale_meetings',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800}
+    },
+
+    # Notification cleanup - runs daily
+    # Deletes read notifications older than 30 days, caps at 200 per user
+    'cleanup-old-notifications': {
+        'task': 'project_manager_agent.cleanup_old_notifications',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800}
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
@@ -696,4 +743,11 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
         'rest_framework.parsers.MultiPartParser',
     ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'pm_llm': '30/hour',        # LLM-powered endpoints (project_pilot, knowledge_qa, task_prioritization, meeting_schedule)
+        'pm_crud': '200/hour',       # CRUD endpoints (chat create/update/delete, meeting respond)
+    },
 }

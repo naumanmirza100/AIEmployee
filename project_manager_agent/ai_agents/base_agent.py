@@ -54,11 +54,22 @@ class BaseAgent:
             logger.error(f"Unexpected error initializing Groq client: {e}")
             raise ValueError(f"Failed to initialize Groq client: {e}")
         
-        self.model = model or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
         self.agent_name = self.__class__.__name__
+        self.fallback_model = getattr(settings, 'GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
+
+        # Load per-agent config from settings
+        agent_config = getattr(settings, 'PM_AGENT_LLM_CONFIG', {})
+        defaults = agent_config.get('defaults', {})
+        agent_overrides = agent_config.get(self.agent_name.lower(), {})
+
+        self.model = model or agent_overrides.get('model') or defaults.get('model') or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+        self.default_temperature = agent_overrides.get('temperature') or defaults.get('temperature', 0.7)
+        self.default_max_tokens = agent_overrides.get('max_tokens') or defaults.get('max_tokens', 1024)
+
         # Store last token usage from Groq API calls (if available)
-        # Shape: {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
         self.last_llm_usage = None
+        # Cumulative token tracking for this agent instance
+        self.total_tokens_used = 0
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024):
         """
@@ -73,15 +84,17 @@ class BaseAgent:
         Returns:
             str: LLM response text
         """
+        import time as _time
+        _start = _time.time()
         try:
             messages = []
-            
+
             if system_prompt:
                 messages.append({
                     "role": "system",
                     "content": system_prompt
                 })
-            
+
             messages.append({
                 "role": "user",
                 "content": prompt
@@ -117,10 +130,32 @@ class BaseAgent:
                     usage_dict = None
             
             self.last_llm_usage = usage_dict
-            
+            if usage_dict and usage_dict.get('total_tokens'):
+                self.total_tokens_used += usage_dict['total_tokens']
+
+            elapsed = round(_time.time() - _start, 2)
+            tokens = usage_dict.get('total_tokens', '?') if usage_dict else '?'
+            logger.info(f"[LLM] {self.agent_name} | {elapsed}s | {tokens} tokens | model={self.model}")
+            if elapsed > 5:
+                logger.warning(f"[LLM SLOW] {self.agent_name} took {elapsed}s (>5s threshold)")
+
             return response.choices[0].message.content
-            
+
         except Exception as e:
+            # Try fallback model if primary fails
+            if self.fallback_model and self.fallback_model != self.model:
+                logger.warning(f"{self.agent_name}: Primary model '{self.model}' failed ({e}), trying fallback '{self.fallback_model}'")
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.fallback_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                    return response.choices[0].message.content
+                except Exception as fallback_err:
+                    logger.error(f"{self.agent_name}: Fallback model also failed: {fallback_err}")
+                    raise
             logger.error(f"Error in {self.agent_name} LLM call: {str(e)}")
             raise
     
