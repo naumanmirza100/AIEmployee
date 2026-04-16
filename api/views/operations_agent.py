@@ -18,6 +18,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from operations_agent.models import (
     OperationsDocument, OperationsDocumentChunk, OperationsDocumentSummary,
+    OperationsChat, OperationsChatMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -509,3 +510,268 @@ def dashboard_stats(request):
     except Exception as e:
         logger.error(f'Dashboard stats error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ──────────────────────────────────────────────
+# Knowledge Q&A Endpoints
+# ──────────────────────────────────────────────
+
+def _serialize_chat(chat, include_messages=False):
+    data = {
+        'id': chat.id,
+        'title': chat.title,
+        'created_at': chat.created_at.isoformat(),
+        'updated_at': chat.updated_at.isoformat(),
+    }
+    if include_messages:
+        msgs = chat.messages.all().order_by('created_at')
+        data['messages'] = [
+            {
+                'id': m.id,
+                'role': m.role,
+                'content': m.content,
+                'sources': m.sources or [],
+                'created_at': m.created_at.isoformat(),
+            }
+            for m in msgs
+        ]
+    else:
+        last = chat.messages.order_by('-created_at').first()
+        data['last_message'] = (last.content[:140] if last else '')
+        data['message_count'] = chat.messages.count()
+    return data
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_qa_chats(request):
+    """List all Knowledge Q&A chats for the current user."""
+    try:
+        user = request.user
+        chats = OperationsChat.objects.filter(
+            company=user.company, user=user
+        ).order_by('-updated_at')
+        return Response({
+            'status': 'success',
+            'chats': [_serialize_chat(c) for c in chats],
+        })
+    except Exception as e:
+        logger.error(f'list_qa_chats error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_qa_chat(request):
+    """Create a new empty chat session."""
+    try:
+        user = request.user
+        title = (request.data.get('title') or 'New chat').strip()[:255] or 'New chat'
+        chat = OperationsChat.objects.create(
+            company=user.company, user=user, title=title,
+        )
+        return Response(
+            {'status': 'success', 'chat': _serialize_chat(chat, include_messages=True)},
+            status=status.HTTP_201_CREATED,
+        )
+    except Exception as e:
+        logger.error(f'create_qa_chat error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_qa_chat(request, chat_id):
+    """Get a chat with all its messages."""
+    try:
+        user = request.user
+        chat = OperationsChat.objects.filter(
+            company=user.company, user=user, pk=chat_id
+        ).first()
+        if not chat:
+            return Response(
+                {'status': 'error', 'message': 'Chat not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({
+            'status': 'success',
+            'chat': _serialize_chat(chat, include_messages=True),
+        })
+    except Exception as e:
+        logger.error(f'get_qa_chat error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def rename_qa_chat(request, chat_id):
+    """Rename a chat."""
+    try:
+        user = request.user
+        chat = OperationsChat.objects.filter(
+            company=user.company, user=user, pk=chat_id
+        ).first()
+        if not chat:
+            return Response(
+                {'status': 'error', 'message': 'Chat not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        title = (request.data.get('title') or '').strip()[:255]
+        if not title:
+            return Response(
+                {'status': 'error', 'message': 'Title cannot be empty'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        chat.title = title
+        chat.save(update_fields=['title', 'updated_at'])
+        return Response({'status': 'success', 'chat': _serialize_chat(chat)})
+    except Exception as e:
+        logger.error(f'rename_qa_chat error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_qa_chat(request, chat_id):
+    """Delete a chat and all its messages."""
+    try:
+        user = request.user
+        chat = OperationsChat.objects.filter(
+            company=user.company, user=user, pk=chat_id
+        ).first()
+        if not chat:
+            return Response(
+                {'status': 'error', 'message': 'Chat not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        chat.delete()
+        return Response({'status': 'success', 'message': 'Chat deleted'})
+    except Exception as e:
+        logger.error(f'delete_qa_chat error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def ask_qa_question(request):
+    """Ask a question. Creates a chat if chat_id missing; persists both user+assistant messages."""
+    try:
+        user = request.user
+        company = user.company
+
+        question = (request.data.get('question') or '').strip()
+        if not question:
+            return Response(
+                {'status': 'error', 'message': 'Question is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        chat_id = request.data.get('chat_id')
+        document_ids = request.data.get('document_ids') or []
+        if not isinstance(document_ids, list):
+            document_ids = []
+        # Normalise to ints, drop bad entries silently
+        clean_doc_ids = []
+        for d in document_ids:
+            try:
+                clean_doc_ids.append(int(d))
+            except (TypeError, ValueError):
+                continue
+
+        # Resolve / create chat
+        chat = None
+        if chat_id:
+            chat = OperationsChat.objects.filter(
+                company=company, user=user, pk=chat_id
+            ).first()
+            if not chat:
+                return Response(
+                    {'status': 'error', 'message': 'Chat not found'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        if not chat:
+            # New chat — temporary title, updated after answer
+            chat = OperationsChat.objects.create(
+                company=company, user=user, title=question[:60] or 'New chat',
+            )
+
+        # Build chat history from DB
+        existing_msgs = list(
+            chat.messages.order_by('created_at').values('role', 'content')
+        )
+
+        # Persist user message
+        OperationsChatMessage.objects.create(
+            chat=chat, role='user', content=question,
+        )
+
+        # Run agent
+        from operations_agent.agents.knowledge_qa_agent import OperationsKnowledgeQAAgent
+        agent = OperationsKnowledgeQAAgent()
+        result = agent.answer(
+            question=question,
+            company_id=company.id,
+            chat_history=existing_msgs,
+            document_ids=clean_doc_ids or None,
+        )
+
+        answer_text = result.get('answer') or 'Sorry, I could not produce an answer.'
+        sources = result.get('sources') or []
+
+        # Persist assistant message even on soft errors so the user sees something
+        assistant_msg = OperationsChatMessage.objects.create(
+            chat=chat,
+            role='assistant',
+            content=answer_text,
+            sources=sources,
+            response_data={'success': bool(result.get('success'))},
+        )
+
+        # If this was a new chat and the first exchange, upgrade the title
+        if chat.messages.count() <= 2 and result.get('suggested_title'):
+            chat.title = result['suggested_title'][:255]
+        chat.save(update_fields=['title', 'updated_at'])
+
+        return Response({
+            'status': 'success',
+            'chat_id': chat.id,
+            'chat_title': chat.title,
+            'message': {
+                'id': assistant_msg.id,
+                'role': 'assistant',
+                'content': answer_text,
+                'sources': sources,
+                'created_at': assistant_msg.created_at.isoformat(),
+            },
+            'success': bool(result.get('success')),
+            'error': result.get('error'),
+        })
+
+    except Exception as e:
+        logger.error(f'ask_qa_question error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
