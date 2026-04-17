@@ -180,6 +180,88 @@ export const deleteSummary = async (summaryId) => {
   }
 };
 
+// ──────────────────────────────────────────────
+// Knowledge Q&A
+// ──────────────────────────────────────────────
+
+/**
+ * List all Q&A chats for current user
+ */
+export const listQaChats = async () => {
+  try {
+    return await companyApi.get('/operations/qa/chats');
+  } catch (error) {
+    console.error('List Q&A chats error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Create a new empty Q&A chat
+ */
+export const createQaChat = async (title = 'New chat') => {
+  try {
+    return await companyApi.post('/operations/qa/chats/create', { title });
+  } catch (error) {
+    console.error('Create Q&A chat error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get a chat with all messages
+ */
+export const getQaChat = async (chatId) => {
+  try {
+    return await companyApi.get(`/operations/qa/chats/${chatId}/`);
+  } catch (error) {
+    console.error('Get Q&A chat error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Rename a Q&A chat
+ */
+export const renameQaChat = async (chatId, title) => {
+  try {
+    return await companyApi.patch(`/operations/qa/chats/${chatId}/rename`, { title });
+  } catch (error) {
+    console.error('Rename Q&A chat error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a Q&A chat
+ */
+export const deleteQaChat = async (chatId) => {
+  try {
+    return await companyApi.delete(`/operations/qa/chats/${chatId}/delete`);
+  } catch (error) {
+    console.error('Delete Q&A chat error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Ask a question. Creates a chat if chatId omitted.
+ * @param {string} question
+ * @param {number|null} chatId
+ * @param {number[]} [documentIds] optional restrict to specific doc ids
+ */
+export const askQaQuestion = async (question, chatId = null, documentIds = []) => {
+  try {
+    const body = { question };
+    if (chatId) body.chat_id = chatId;
+    if (Array.isArray(documentIds) && documentIds.length > 0) body.document_ids = documentIds;
+    return await companyApi.post('/operations/qa/ask', body);
+  } catch (error) {
+    console.error('Ask Q&A question error:', error);
+    throw error;
+  }
+};
+
 export default {
   getDashboardStats,
   uploadDocument,
@@ -190,4 +272,11 @@ export default {
   listSummaries,
   getSummary,
   deleteSummary,
+  // Q&A
+  listQaChats,
+  createQaChat,
+  getQaChat,
+  renameQaChat,
+  deleteQaChat,
+  askQaQuestion,
 };

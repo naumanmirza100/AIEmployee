@@ -416,6 +416,14 @@ urlpatterns = [
     re_path(r'^operations/summaries/(?P<summary_id>\d+)/?$', operations_agent.get_summary, name='operations_get_summary'),  # GET
     re_path(r'^operations/summaries/(?P<summary_id>\d+)/delete/?$', operations_agent.delete_summary, name='operations_delete_summary'),  # DELETE
 
+    # Operations Knowledge Q&A endpoints
+    re_path(r'^operations/qa/ask/?$', operations_agent.ask_qa_question, name='operations_qa_ask'),  # POST
+    re_path(r'^operations/qa/chats/?$', operations_agent.list_qa_chats, name='operations_qa_list_chats'),  # GET
+    re_path(r'^operations/qa/chats/create/?$', operations_agent.create_qa_chat, name='operations_qa_create_chat'),  # POST
+    re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/?$', operations_agent.get_qa_chat, name='operations_qa_get_chat'),  # GET
+    re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/rename/?$', operations_agent.rename_qa_chat, name='operations_qa_rename_chat'),  # PATCH
+    re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/delete/?$', operations_agent.delete_qa_chat, name='operations_qa_delete_chat'),  # DELETE
+
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
