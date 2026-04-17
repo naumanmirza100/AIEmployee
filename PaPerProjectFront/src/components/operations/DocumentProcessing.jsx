@@ -15,7 +15,8 @@ import {
   Tag, Hash, User, Calendar, BarChart3, RefreshCw,
   CheckCircle2, AlertCircle, Clock, Layers, BookOpen,
   Lightbulb, Brain, ChevronRight, Download, Sparkles,
-  FileCheck, Zap, ArrowRight, Info,
+  FileCheck, Zap, ArrowRight, Info, LayoutList, LayoutGrid,
+  ChevronLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -94,6 +95,13 @@ const DocumentProcessing = () => {
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Upload
   const [showUpload, setShowUpload] = useState(false);
@@ -102,24 +110,39 @@ const DocumentProcessing = () => {
   const [uploadTags, setUploadTags] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  // View mode
+  const [viewMode, setViewMode] = useState('table');
 
   // Delete
   const [deletingId, setDeletingId] = useState(null);
+
+  // ─── Debounced search ────────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // ─── Fetch ────────────────────────────────
   const fetchDocuments = useCallback(async () => {
     try {
       setDocsLoading(true);
-      const params = {};
+      const params = { page, page_size: pageSize };
       if (searchQuery) params.search = searchQuery;
       const res = await operationsService.listDocuments(params);
-      if (res.status === 'success') setDocuments(res.documents || []);
+      if (res.status === 'success') {
+        setDocuments(res.documents || []);
+        setTotalItems(res.total || 0);
+        setTotalPages(res.total_pages || 1);
+      }
     } catch (e) {
       console.error('Documents fetch error:', e);
     } finally {
       setDocsLoading(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, page, pageSize]);
 
   useEffect(() => { fetchDocuments(); }, [fetchDocuments]);
 
@@ -162,7 +185,7 @@ const DocumentProcessing = () => {
   // ─── Computed stats ───────────────────────
   const totalDocs = documents.length;
   const processedDocs = documents.filter(d => d.is_processed).length;
-  const totalPages = documents.reduce((sum, d) => sum + (d.page_count || 0), 0);
+  const totalDocPages = documents.reduce((sum, d) => sum + (d.page_count || 0), 0);
   const totalSize = documents.reduce((sum, d) => sum + (d.file_size || 0), 0);
 
   // ═══ RENDER ═══════════════════════════════
@@ -174,37 +197,46 @@ const DocumentProcessing = () => {
       className="space-y-5"
     >
       {/* ── Toolbar ── */}
-      <motion.div variants={itemVariants} className="flex gap-3">
+      <motion.div variants={itemVariants} className="flex gap-3 items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
           <Input
             className="pl-10 h-10 rounded-xl text-sm text-white placeholder:text-white/30 border-white/[0.08] focus:border-amber-500/40"
             style={{ background: 'rgba(0,0,0,0.25)' }}
             placeholder="Search documents by title..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={fetchDocuments}
+        {/* Rows per page */}
+        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+          className="h-10 rounded-xl border border-white/[0.08] text-xs text-white/70 pl-3 pr-8 shrink-0 cursor-pointer outline-none focus:border-amber-500/40 transition-colors"
+          style={{ background: 'rgba(0,0,0,0.25)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}>
+          {[5, 10, 20, 30, 50].map(n => (
+            <option key={n} value={n} className="bg-[#1a1028] text-white">{n} rows</option>
+          ))}
+        </select>
+        {/* View Toggle */}
+        <div className="flex items-center h-10 rounded-xl border border-white/[0.08] overflow-hidden" style={{ background: 'rgba(0,0,0,0.25)' }}>
+          <button onClick={() => setViewMode('list')}
+            className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}>
+            <LayoutList className="h-4 w-4" />
+          </button>
+          <div className="w-px h-5 bg-white/[0.08]" />
+          <button onClick={() => setViewMode('table')}
+            className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'table' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}>
+            <LayoutGrid className="h-4 w-4" />
+          </button>
+        </div>
+        <Button variant="outline" size="icon" onClick={fetchDocuments}
           className="h-10 w-10 rounded-xl border-white/[0.08] text-white/40 hover:text-white hover:border-white/20"
-          style={{ background: 'rgba(0,0,0,0.25)' }}
-        >
+          style={{ background: 'rgba(0,0,0,0.25)' }}>
           <RefreshCw className="h-4 w-4" />
         </Button>
-        <Button
-          onClick={() => setShowUpload(true)}
+        <Button onClick={() => setShowUpload(true)}
           className="h-10 rounded-xl px-5 text-sm font-medium border-0"
-          style={{
-            background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-            color: '#fff',
-            boxShadow: '0 0 20px rgba(245,158,11,0.25)',
-          }}
-        >
-          <Upload className="mr-2 h-4 w-4" />
-          Upload Document
+          style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff', boxShadow: '0 0 20px rgba(245,158,11,0.25)' }}>
+          <Upload className="mr-2 h-4 w-4" />Upload Document
         </Button>
       </motion.div>
 
@@ -236,137 +268,191 @@ const DocumentProcessing = () => {
           </Card>
         </motion.div>
       ) : (
-        <motion.div variants={containerVariants} className="space-y-2.5">
-          <AnimatePresence>
-            {documents.map((doc, index) => {
-              const fc = getFileConfig(doc.file_type);
-              const FileIcon = fc.icon;
-              const dtColor = DOC_TYPE_COLORS[doc.document_type] || '#6b7280';
-              const hasSummary = !!(doc.summary);
-              return (
-                <motion.div
-                  key={doc.id}
-                  variants={itemVariants}
-                  layout
-                  className="group relative rounded-xl border border-white/[0.06] overflow-hidden transition-all duration-200 hover:border-white/[0.12]"
-                  style={{ background: 'rgba(0,0,0,0.2)' }}
-                >
-                  {/* Processing status indicator line */}
-                  <div
-                    className="absolute top-0 left-0 w-full h-[2px]"
-                    style={{ background: doc.is_processed ? `linear-gradient(90deg, ${fc.color}, transparent)` : 'linear-gradient(90deg, #ef4444, transparent)' }}
-                  />
-
-                  <div className="p-4 flex items-start gap-4">
-                    {/* File type icon */}
-                    <div
-                      className="flex items-center justify-center w-12 h-12 rounded-xl shrink-0 mt-0.5"
-                      style={{ backgroundColor: fc.bg }}
+        <>
+          {/* ── List View ── */}
+          {viewMode === 'list' && (
+            <motion.div variants={containerVariants} className="space-y-2.5">
+              <AnimatePresence>
+                {documents.map((doc) => {
+                  const fc = getFileConfig(doc.file_type);
+                  const FileIcon = fc.icon;
+                  const dtColor = DOC_TYPE_COLORS[doc.document_type] || '#6b7280';
+                  const hasSummary = !!(doc.summary);
+                  return (
+                    <motion.div
+                      key={doc.id}
+                      variants={itemVariants}
+                      layout
+                      className="group relative rounded-xl border border-white/[0.06] overflow-hidden transition-all duration-200 hover:border-white/[0.12]"
+                      style={{ background: 'rgba(0,0,0,0.2)' }}
                     >
-                      <FileIcon className="h-6 w-6" style={{ color: fc.color }} />
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <h4 className="text-sm font-semibold text-white truncate max-w-[300px]">{doc.title}</h4>
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] px-2 py-0 rounded-full capitalize shrink-0"
-                          style={{ borderColor: `${dtColor}50`, color: dtColor, background: `${dtColor}12` }}
-                        >
-                          {doc.document_type}
-                        </Badge>
-                        {doc.is_processed ? (
-                          <span className="flex items-center gap-1 text-[10px] text-emerald-400/80">
-                            <CheckCircle2 className="h-3 w-3" /> Processed
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-[10px] text-amber-400/80">
-                            <Clock className="h-3 w-3" /> Pending
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Summary preview */}
-                      {hasSummary && (
-                        <p className="text-xs text-white/35 line-clamp-2 mb-2 leading-relaxed max-w-xl">
-                          {doc.summary}
-                        </p>
-                      )}
-
-                      {/* Meta row */}
-                      <div className="flex items-center gap-4 text-[11px] text-white/30 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <File className="h-3 w-3" />
-                          {fc.label} &middot; {formatFileSize(doc.file_size)}
-                        </span>
-                        {doc.page_count > 0 && (
-                          <span className="flex items-center gap-1">
-                            <BookOpen className="h-3 w-3" />{doc.page_count} pages
-                          </span>
-                        )}
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />{formatDate(doc.created_at)}
-                        </span>
-                        {doc.uploaded_by && (
-                          <span className="hidden sm:flex items-center gap-1">
-                            <User className="h-3 w-3" />{doc.uploaded_by}
-                          </span>
-                        )}
-                        {doc.tags && (
-                          <span className="flex items-center gap-1">
-                            <Tag className="h-3 w-3" />{doc.tags.split(',').length} tags
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Tags inline */}
-                      {doc.tags && (
-                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                          {doc.tags.split(',').slice(0, 4).map((t, i) => (
-                            <span
-                              key={i}
-                              className="text-[10px] px-2 py-0.5 rounded-full text-white/50 border border-white/[0.06]"
-                              style={{ background: 'rgba(255,255,255,0.03)' }}
-                            >
-                              {t.trim()}
-                            </span>
-                          ))}
-                          {doc.tags.split(',').length > 4 && (
-                            <span className="text-[10px] text-white/25">+{doc.tags.split(',').length - 4} more</span>
+                      <div
+                        className="absolute top-0 left-0 w-full h-[2px]"
+                        style={{ background: doc.is_processed ? `linear-gradient(90deg, ${fc.color}, transparent)` : 'linear-gradient(90deg, #ef4444, transparent)' }}
+                      />
+                      <div className="p-4 flex items-start gap-4">
+                        <div className="flex items-center justify-center w-12 h-12 rounded-xl shrink-0 mt-0.5" style={{ backgroundColor: fc.bg }}>
+                          <FileIcon className="h-6 w-6" style={{ color: fc.color }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                            <h4 className="text-sm font-semibold text-white truncate max-w-[300px]">{doc.title}</h4>
+                            <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full capitalize shrink-0"
+                              style={{ borderColor: `${dtColor}50`, color: dtColor, background: `${dtColor}12` }}>
+                              {doc.document_type}
+                            </Badge>
+                            {doc.is_processed ? (
+                              <span className="flex items-center gap-1 text-[10px] text-emerald-400/80"><CheckCircle2 className="h-3 w-3" /> Processed</span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-[10px] text-amber-400/80"><Clock className="h-3 w-3" /> Pending</span>
+                            )}
+                          </div>
+                          {hasSummary && (
+                            <p className="text-xs text-white/35 line-clamp-2 mb-2 leading-relaxed max-w-xl">{doc.summary}</p>
+                          )}
+                          <div className="flex items-center gap-4 text-[11px] text-white/30 flex-wrap">
+                            <span className="flex items-center gap-1"><File className="h-3 w-3" />{fc.label} &middot; {formatFileSize(doc.file_size)}</span>
+                            {doc.page_count > 0 && <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" />{doc.page_count} pages</span>}
+                            <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(doc.created_at)}</span>
+                            {doc.uploaded_by && <span className="hidden sm:flex items-center gap-1"><User className="h-3 w-3" />{doc.uploaded_by}</span>}
+                          </div>
+                          {doc.tags && (
+                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                              {doc.tags.split(',').slice(0, 4).map((t, i) => (
+                                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full text-white/50 border border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.03)' }}>{t.trim()}</span>
+                              ))}
+                              {doc.tags.split(',').length > 4 && <span className="text-[10px] text-white/25">+{doc.tags.split(',').length - 4} more</span>}
+                            </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                        <div className="flex items-center gap-1 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="sm" className="h-8 px-3 rounded-lg text-white/60 hover:text-amber-400 hover:bg-amber-500/10 gap-1.5 text-xs"
+                            onClick={() => navigate(`/operations/documents/${doc.id}`)}>
+                            <Eye className="h-3.5 w-3.5" />View
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
+                            onClick={() => handleDelete(doc.id)} disabled={deletingId === doc.id}>
+                            {deletingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </motion.div>
+          )}
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-3 rounded-lg text-white/60 hover:text-amber-400 hover:bg-amber-500/10 gap-1.5 text-xs"
-                        onClick={() => navigate(`/operations/documents/${doc.id}`)}
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        View
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                        onClick={() => handleDelete(doc.id)}
-                        disabled={deletingId === doc.id}
-                      >
-                        {deletingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
-        </motion.div>
+          {/* ── Table View ── */}
+          {viewMode === 'table' && (
+            <motion.div variants={itemVariants} className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.2)' }}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Document</th>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Type</th>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Size</th>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Pages</th>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Status</th>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Uploaded</th>
+                      <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documents.map((doc) => {
+                      const fc = getFileConfig(doc.file_type);
+                      const FileIcon = fc.icon;
+                      const dtColor = DOC_TYPE_COLORS[doc.document_type] || '#6b7280';
+                      return (
+                        <tr key={doc.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors group">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0" style={{ backgroundColor: fc.bg }}>
+                                <FileIcon className="h-4 w-4" style={{ color: fc.color }} />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-white truncate max-w-[220px]">{doc.title}</p>
+                                <p className="text-[10px] text-white/25 truncate max-w-[220px]">{doc.original_filename}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full capitalize"
+                              style={{ borderColor: `${dtColor}50`, color: dtColor, background: `${dtColor}12` }}>
+                              {doc.document_type}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-white/40">{formatFileSize(doc.file_size)}</td>
+                          <td className="px-4 py-3 text-xs text-white/40">{doc.page_count || '—'}</td>
+                          <td className="px-4 py-3">
+                            {doc.is_processed ? (
+                              <span className="flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Processed</span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-[11px] text-amber-400"><Clock className="h-3 w-3" /> Pending</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-xs text-white/40">{formatDate(doc.created_at)}</div>
+                            {doc.uploaded_by && <div className="text-[10px] text-white/25">{doc.uploaded_by}</div>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/60 hover:text-amber-400 hover:bg-amber-500/10"
+                                onClick={() => navigate(`/operations/documents/${doc.id}`)}>
+                                <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10"
+                                onClick={() => handleDelete(doc.id)} disabled={deletingId === doc.id}>
+                                {deletingId === doc.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Pagination ── */}
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-[11px] text-white/25">
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalItems)} of {totalItems}
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-white disabled:opacity-20"
+                  disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                  .reduce((acc, p, i, arr) => {
+                    if (i > 0 && p - arr[i - 1] > 1) acc.push('...');
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, i) =>
+                    p === '...' ? (
+                      <span key={`dot-${i}`} className="text-[11px] text-white/20 px-1">...</span>
+                    ) : (
+                      <button key={p} onClick={() => setPage(p)}
+                        className={`h-8 min-w-[32px] rounded-lg text-[11px] font-medium transition-colors ${p === page ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white hover:bg-white/[0.05]'}`}>
+                        {p}
+                      </button>
+                    )
+                  )}
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-white disabled:opacity-20"
+                  disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {/* ═══ Upload Dialog ═══ */}
