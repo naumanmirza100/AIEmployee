@@ -749,5 +749,10 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'pm_llm': '30/hour',        # LLM-powered endpoints (project_pilot, knowledge_qa, task_prioritization, meeting_schedule)
         'pm_crud': '200/hour',       # CRUD endpoints (chat create/update/delete, meeting respond)
+        # Frontline Agent throttles
+        'frontline_public': '20/hour',   # Unauthenticated widget/form endpoints — keyed by IP
+        'frontline_llm': '60/hour',      # Authenticated LLM-powered endpoints (Q&A, triage, auto-resolve, summarize, extract)
+        'frontline_upload': '30/hour',   # Document uploads (expensive: parse + embed)
+        'frontline_crud': '300/hour',    # Authenticated CRUD endpoints
     },
 }

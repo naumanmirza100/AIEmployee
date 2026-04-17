@@ -502,7 +502,10 @@ class Company(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     # Public key for embedding chat widget / web form on company's site (no login required)
     frontline_widget_key = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
-    
+    # Comma-separated list of origins allowed to use the widget key (e.g. "https://acme.com,https://www.acme.com").
+    # When blank, all origins are accepted (back-compat). Populated origins enforce origin/referer check.
+    frontline_allowed_origins = models.TextField(blank=True, default='')
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']

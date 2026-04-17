@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1992,6 +1993,7 @@ const FrontlineDashboard = () => {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-6">
+          <ErrorBoundary>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
             {[
               {
@@ -2094,10 +2096,12 @@ const FrontlineDashboard = () => {
               </div>
             </div>
           )}
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Documents Tab */}
         <TabsContent value="documents" className="space-y-4 mt-4">
+          <ErrorBoundary>
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
@@ -2145,10 +2149,12 @@ const FrontlineDashboard = () => {
               )}
             </CardContent>
           </Card>
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Knowledge Q&A Tab - Chat UI with sidebar */}
         <TabsContent value="qa" className="space-y-4 mt-4">
+          <ErrorBoundary>
           <div
             className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
             style={{
@@ -2749,10 +2755,12 @@ const FrontlineDashboard = () => {
               </Card>
             </div>
           </div>
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Chat widget tab */}
         <TabsContent value="widget" className="space-y-4 mt-4">
+          <ErrorBoundary>
           <Card className="w-full min-w-0">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2825,10 +2833,12 @@ const FrontlineDashboard = () => {
               )}
             </CardContent>
           </Card>
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Tickets Tab */}
         <TabsContent value="tickets" className="space-y-4 mt-4">
+          <ErrorBoundary>
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
@@ -2981,26 +2991,27 @@ const FrontlineDashboard = () => {
               )}
             </CardContent>
           </Card>
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-4 mt-4">
-          <FrontlineNotificationsTab />
+          <ErrorBoundary><FrontlineNotificationsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* Workflows Tab */}
         <TabsContent value="workflows" className="space-y-4 mt-4">
-          <FrontlineWorkflowsTab />
+          <ErrorBoundary><FrontlineWorkflowsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="space-y-4 mt-4">
-          <FrontlineAnalyticsTab />
+          <ErrorBoundary><FrontlineAnalyticsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* AI Graphs Tab */}
         <TabsContent value="ai-graphs" className="space-y-4 mt-4">
-          <FrontlineAIGraphs />
+          <ErrorBoundary><FrontlineAIGraphs /></ErrorBoundary>
         </TabsContent>
       </Tabs>
 

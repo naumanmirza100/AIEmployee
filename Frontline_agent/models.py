@@ -519,14 +519,43 @@ class DocumentChunk(models.Model):
     chunk_text = models.TextField(help_text='Text content of this specific chunk')
     embedding = models.TextField(null=True, blank=True, help_text='Vector embedding for this chunk (JSON string)')
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['document', 'chunk_index']
         indexes = [
             models.Index(fields=['document', 'chunk_index']),
         ]
-        
+
     def __str__(self):
         return f"Chunk {self.chunk_index} of {self.document.title}"
 
+
+class LLMUsage(models.Model):
+    """Per-call LLM usage log for cost tracking and per-tenant caps.
+
+    One row per successful or failed LLM call made by any agent that opts in
+    (by setting self.company_id on the BaseAgent). estimated_cost_usd is a
+    rough approximation from a hardcoded price map — tune as models change.
+    """
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='llm_usage')
+    agent_name = models.CharField(max_length=100, db_index=True)
+    model = models.CharField(max_length=100, db_index=True)
+    prompt_tokens = models.IntegerField(default=0)
+    completion_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    duration_ms = models.IntegerField(default=0)
+    success = models.BooleanField(default=True)
+    estimated_cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'created_at']),
+            models.Index(fields=['company', 'agent_name', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.agent_name}/{self.model} · {self.total_tokens}tok · ${self.estimated_cost_usd}"
