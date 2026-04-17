@@ -9,6 +9,7 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
 import { Headphones, Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 
 const FrontlineAgentPage = () => {
   const navigate = useNavigate();
@@ -147,7 +148,9 @@ const FrontlineAgentPage = () => {
         />
 
         <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full max-w-full overflow-x-hidden">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </>

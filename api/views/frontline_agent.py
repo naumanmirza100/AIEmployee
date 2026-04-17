@@ -4,9 +4,14 @@ Similar structure to marketing_agent.py and recruitment_agent.py
 """
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from Frontline_agent.throttling import (
+    FrontlinePublicThrottle,
+    FrontlineLLMThrottle,
+    FrontlineUploadThrottle,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q, Count
@@ -363,6 +368,7 @@ def list_documents(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineUploadThrottle])
 def upload_document(request):
     """Upload and process a document"""
     try:
@@ -380,44 +386,57 @@ def upload_document(request):
         title = request.POST.get('title', uploaded_file.name)
         description = request.POST.get('description', '')
         document_type = request.POST.get('document_type', 'knowledge_base')
-        
+
         # Validate file size (50MB max) - increased to support large documents with 100+ pages
         if uploaded_file.size > 50 * 1024 * 1024:
             return Response(
                 {'status': 'error', 'message': 'File size exceeds 50MB limit'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Create uploads directory if it doesn't exist
-        upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_documents' / str(company.id)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate unique filename
-        file_hash = hashlib.sha256(uploaded_file.read()).hexdigest()[:16]
-        file_ext = Path(uploaded_file.name).suffix
-        filename = f"{file_hash}_{uploaded_file.name}"
-        file_path = upload_dir / filename
-        
-        # Check for duplicate
-        existing_doc = Document.objects.filter(company=company, file_hash=hashlib.sha256(uploaded_file.read()).hexdigest()).first()
+
+        # Sanitize filename (strips path separators, safe characters only)
+        safe_filename = DocumentProcessor.sanitize_filename(uploaded_file.name)
+
+        # Read once into memory so we can validate, hash, and write without re-reading a spent pointer
+        file_bytes = uploaded_file.read()
+
+        # Magic-byte / content validation: reject disguised files (e.g. .exe renamed to .pdf)
+        content_ok, _detected_fmt, content_err = DocumentProcessor.validate_content(file_bytes, safe_filename)
+        if not content_ok:
+            return Response(
+                {'status': 'error', 'message': content_err or 'File content validation failed'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Compute content hash once and use it for both dedupe and storage naming
+        file_hash_full = hashlib.sha256(file_bytes).hexdigest()
+
+        # Dedupe against previous uploads in this company
+        existing_doc = Document.objects.filter(company=company, file_hash=file_hash_full).first()
         if existing_doc:
             return Response({
                 'status': 'error',
                 'message': 'Document with same content already exists',
                 'document_id': existing_doc.id
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Save file
-        uploaded_file.seek(0)  # Reset file pointer
+
+        # Create uploads directory if it doesn't exist
+        upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_documents' / str(company.id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        # Storage name: short hash prefix + sanitized original name
+        storage_filename = f"{file_hash_full[:16]}_{safe_filename}"
+        file_path = upload_dir / storage_filename
+
+        # Save the bytes we already read — no second read of the upload stream
         with open(file_path, 'wb') as f:
-            for chunk in uploaded_file.chunks():
-                f.write(chunk)
+            f.write(file_bytes)
         
-        # Process document
+        # Process document (use the sanitized filename for consistent format detection)
         processor = DocumentProcessor()
-        file_format = processor.get_file_format(uploaded_file.name)
-        
-        processing_result = processor.process_document(str(file_path), uploaded_file.name)
+        file_format = processor.get_file_format(safe_filename)
+
+        processing_result = processor.process_document(str(file_path), safe_filename)
         
         if not processing_result['success']:
             # Delete file if processing failed
@@ -568,6 +587,7 @@ def get_document(request, document_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
 def summarize_document(request, document_id):
     """Summarize a document by ID. Body: optional { \"max_sentences\": 5, \"by_section\": false }."""
     try:
@@ -609,6 +629,7 @@ def summarize_document(request, document_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
 def extract_document(request, document_id):
     """Extract structured data from a document. Body: optional { \"schema\": [\"parties\", \"dates\", \"amounts\"] }."""
     try:
@@ -694,8 +715,26 @@ def _build_knowledge_gap_task_description(question: str, agent_response: str) ->
 """
 
 
+def _origin_matches(request_origin: str, allowed_origins_csv: str) -> bool:
+    """Check whether request_origin is in the company's comma-separated allowlist.
+
+    Matching is case-insensitive on scheme+host[:port]; trailing slashes are stripped.
+    Empty allowlist means "any origin" (back-compat for existing widgets).
+    """
+    allowlist = [o.strip().rstrip('/').lower() for o in (allowed_origins_csv or '').split(',') if o.strip()]
+    if not allowlist:
+        return True
+    if not request_origin:
+        return False
+    return request_origin.strip().rstrip('/').lower() in allowlist
+
+
 def _get_company_by_widget_key(request):
-    """Resolve company from widget_key in body (POST) or query/header. Returns (company, error_response) or (company, None)."""
+    """Resolve company from widget_key in body (POST) or query/header. Returns (company, error_response) or (company, None).
+
+    Also enforces the company's frontline_allowed_origins allowlist against the
+    request's Origin / Referer header. Empty allowlist = back-compat (any origin).
+    """
     widget_key = None
     if request.method == 'POST' and request.body:
         try:
@@ -718,12 +757,38 @@ def _get_company_by_widget_key(request):
             {'status': 'error', 'message': 'Invalid widget key'},
             status=status.HTTP_404_NOT_FOUND
         )
+
+    # Origin validation: if the company has configured allowed origins, the caller's
+    # Origin (or Referer) must match. Prevents a scraped widget key from being used elsewhere.
+    allowed = getattr(company, 'frontline_allowed_origins', '') or ''
+    if allowed.strip():
+        origin = (request.headers.get('Origin') or '').strip()
+        if not origin:
+            referer = (request.headers.get('Referer') or '').strip()
+            if referer:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(referer)
+                    if parsed.scheme and parsed.netloc:
+                        origin = f"{parsed.scheme}://{parsed.netloc}"
+                except Exception:
+                    origin = ''
+        if not _origin_matches(origin, allowed):
+            logger.warning(
+                "Widget-key origin rejected: key=%s company=%s origin=%s",
+                widget_key[:8] + '...', company.id, origin or '(none)',
+            )
+            return None, Response(
+                {'status': 'error', 'message': 'Origin not allowed for this widget key'},
+                status=status.HTTP_403_FORBIDDEN
+            )
     return company, None
 
 
 @api_view(["POST"])
 @permission_classes([])
 @authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle])
 def public_qa(request):
     """Public Knowledge Q&A for embedded chat/widget. No auth. Identify company by widget_key in body or X-Widget-Key header."""
     try:
@@ -765,6 +830,7 @@ def public_qa(request):
 @api_view(["POST"])
 @permission_classes([])
 @authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle])
 def public_submit(request):
     """Public web form submit (contact/support). Creates a ticket for the company. No auth. Body: widget_key, name, email, message."""
     try:
@@ -820,6 +886,7 @@ def public_submit(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
 def knowledge_qa(request):
     """Knowledge Q&A - Answer questions using knowledge base and uploaded documents.
     When the agent has no verified info, a ticket task is created for the company user (Ticket Tasks tab)."""
@@ -941,6 +1008,7 @@ def knowledge_feedback(request):
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
 def search_knowledge(request):
     """Search knowledge base and uploaded documents"""
     try:
@@ -1187,6 +1255,7 @@ def update_ticket_task(request, ticket_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
 def create_ticket(request):
     """Create and process a support ticket"""
     try:

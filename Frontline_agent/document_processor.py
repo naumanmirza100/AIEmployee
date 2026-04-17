@@ -7,10 +7,40 @@ Supports extraction of 100+ page PDFs. Uses pdfplumber (preferred) or PyPDF2 as 
 import os
 import hashlib
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from django.utils.text import get_valid_filename
+
 logger = logging.getLogger(__name__)
+
+
+# Magic-byte signatures per format. Each entry: (prefix_bytes, description).
+# A file is accepted for a format only if its first bytes match one of the signatures.
+_MAGIC_SIGNATURES = {
+    'pdf': [(b'%PDF-', 'PDF')],
+    'docx': [(b'PK\x03\x04', 'ZIP/OOXML')],  # DOCX is a ZIP; content-type check below confirms OOXML
+    'doc': [(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1', 'OLE compound (legacy .doc)')],
+    'html': [(b'<!DOCTYPE', 'HTML doctype'), (b'<html', 'HTML tag'),
+             (b'<HTML', 'HTML tag'), (b'<?xml', 'XHTML')],
+    # txt and md have no magic bytes — validated by UTF-8 decode heuristic below.
+}
+
+
+def _looks_like_text(data: bytes) -> bool:
+    """Heuristic: decodable as UTF-8 or latin-1 AND contains few control characters."""
+    try:
+        sample = data[:4096]
+        try:
+            text = sample.decode('utf-8')
+        except UnicodeDecodeError:
+            text = sample.decode('latin-1')
+        # Reject if >5% of characters are non-printable control bytes (excluding tab/newline/CR)
+        bad = sum(1 for c in text if ord(c) < 32 and c not in '\t\n\r')
+        return len(text) == 0 or (bad / max(len(text), 1)) < 0.05
+    except Exception:
+        return False
 
 
 class DocumentProcessor:
@@ -50,11 +80,55 @@ class DocumentProcessor:
         """Validate file before processing"""
         if file_size > DocumentProcessor.MAX_FILE_SIZE:
             return False, f"File size exceeds maximum allowed size ({DocumentProcessor.MAX_FILE_SIZE / 1024 / 1024}MB)"
-        
+
         if not os.path.exists(file_path):
             return False, "File does not exist"
-        
+
         return True, None
+
+    @staticmethod
+    def sanitize_filename(name: str) -> str:
+        """Strip path separators and reduce to a safe filename (no path traversal)."""
+        # Take basename only — defeats ../../etc/passwd style inputs
+        base = os.path.basename(name or '')
+        # Django helper: replaces spaces and strips anything not safe
+        base = get_valid_filename(base) if base else ''
+        # Collapse repeated dots / strip leading dots to avoid hidden files
+        base = re.sub(r'\.{2,}', '.', base).lstrip('.')
+        if not base:
+            base = 'upload'
+        # Hard cap length to keep FS happy
+        if len(base) > 128:
+            stem, dot, ext = base.rpartition('.')
+            base = (stem[:120] + dot + ext) if dot else base[:128]
+        return base
+
+    @staticmethod
+    def validate_content(data: bytes, filename: str) -> Tuple[bool, str, Optional[str]]:
+        """
+        Magic-byte / content validation. Returns (ok, detected_format, error).
+        Rejects when the claimed extension and actual file content disagree.
+        """
+        ext_format = DocumentProcessor.get_file_format(filename)
+        if ext_format == 'other' or ext_format not in DocumentProcessor.SUPPORTED_EXTENSIONS.values():
+            return False, ext_format, f"Unsupported file type: {Path(filename).suffix}"
+
+        if ext_format in ('txt', 'md'):
+            if not _looks_like_text(data):
+                return False, ext_format, "File does not look like valid text (binary or high-entropy content)"
+            return True, ext_format, None
+
+        signatures = _MAGIC_SIGNATURES.get(ext_format, [])
+        for prefix, _desc in signatures:
+            if data.startswith(prefix):
+                # DOCX: confirm it's OOXML not a random ZIP by looking for the Content_Types entry
+                if ext_format == 'docx' and b'[Content_Types].xml' not in data[:8192]:
+                    continue
+                return True, ext_format, None
+        return False, ext_format, (
+            f"File content does not match its extension ({ext_format}). "
+            "Upload rejected to prevent disguised files."
+        )
     
     @staticmethod
     def extract_text(file_path: str, file_format: str) -> Tuple[bool, str, Optional[str]]:
