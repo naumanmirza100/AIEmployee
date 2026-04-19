@@ -374,6 +374,15 @@ urlpatterns = [
     re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
     re_path(r'^frontline/ticket-tasks/?$', frontline_agent.list_ticket_tasks, name='frontline_list_ticket_tasks'),  # GET
     re_path(r'^frontline/ticket-tasks/(?P<ticket_id>\d+)/?$', frontline_agent.update_ticket_task, name='frontline_update_ticket_task'),  # PATCH/PUT
+    # Ticket lifecycle (Phase 2 Batch 2)
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/?$', frontline_agent.list_ticket_notes, name='frontline_list_ticket_notes'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/create/?$', frontline_agent.create_ticket_note, name='frontline_create_ticket_note'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/(?P<note_id>\d+)/?$', frontline_agent.update_or_delete_ticket_note, name='frontline_update_delete_ticket_note'),  # PATCH/DELETE
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/snooze/?$', frontline_agent.snooze_ticket, name='frontline_snooze_ticket'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/unsnooze/?$', frontline_agent.unsnooze_ticket, name='frontline_unsnooze_ticket'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/sla/pause/?$', frontline_agent.pause_ticket_sla, name='frontline_pause_ticket_sla'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/sla/resume/?$', frontline_agent.resume_ticket_sla, name='frontline_resume_ticket_sla'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/retriage/?$', frontline_agent.retriage_ticket, name='frontline_retriage_ticket'),  # POST
     # Notifications
     re_path(r'^frontline/notifications/templates/?$', frontline_agent.list_notification_templates, name='frontline_list_notification_templates'),  # GET
     re_path(r'^frontline/notifications/templates/create/?$', frontline_agent.create_notification_template, name='frontline_create_notification_template'),  # POST

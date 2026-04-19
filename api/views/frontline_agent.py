@@ -34,7 +34,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
 from Frontline_agent.models import (
-    Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
+    Document, Ticket, TicketNote, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
     SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences, DocumentChunk,
 )
@@ -43,6 +43,32 @@ from core.Fronline_agent.frontline_agent import FrontlineAgent
 from core.Fronline_agent.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_rag_params(data):
+    """Pull optional RAG tuning params from a request dict. Returns
+    (min_similarity, max_age_days, max_results, enable_rewrite) with safe defaults
+    and hard caps so callers can't request runaway LLM work.
+    """
+    def _as_float(v, lo=0.0, hi=1.0):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return max(lo, min(hi, f))
+
+    def _as_int(v, lo, hi):
+        try:
+            i = int(v)
+        except (TypeError, ValueError):
+            return None
+        return max(lo, min(hi, i))
+
+    min_similarity = _as_float(data.get('min_similarity')) if data.get('min_similarity') is not None else None
+    max_age_days = _as_int(data.get('max_age_days'), 1, 3650) if data.get('max_age_days') is not None else None
+    max_results = _as_int(data.get('max_results'), 1, 10) or 5
+    enable_rewrite = bool(data.get('enable_rewrite', False))
+    return min_similarity, max_age_days, max_results, enable_rewrite
 
 
 def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
@@ -483,17 +509,42 @@ def upload_document(request):
         # Chunk text and generate embeddings
         if extracted_text:
             text_to_chunk = f"{title}\n{description}\n{extracted_text}".strip()
-            # Intelligent Chunking: ~4000 characters, 200 character overlap
-            chunk_size = 4000
-            overlap = 200
+            # Configurable chunking: settings provide the defaults; upload form can override.
+            default_size = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE', 4000))
+            default_overlap = int(getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 200))
+            size_min = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE_MIN', 500))
+            size_max = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE_MAX', 16000))
+            overlap_min = int(getattr(settings, 'FRONTLINE_CHUNK_OVERLAP_MIN', 0))
+
+            def _clamp_int(raw, lo, hi, fallback):
+                try:
+                    v = int(raw)
+                except (TypeError, ValueError):
+                    return fallback
+                return max(lo, min(hi, v))
+
+            chunk_size = _clamp_int(request.POST.get('chunk_size'), size_min, size_max, default_size)
+            # Overlap must be < chunk_size to avoid infinite loops
+            overlap = _clamp_int(
+                request.POST.get('chunk_overlap'),
+                overlap_min, max(overlap_min, chunk_size - 1),
+                default_overlap,
+            )
+            if overlap >= chunk_size:
+                overlap = max(overlap_min, chunk_size // 4)
+
             chunks = []
             start = 0
+            step = max(1, chunk_size - overlap)
             while start < len(text_to_chunk):
                 end = start + chunk_size
                 chunks.append(text_to_chunk[start:end])
-                start += chunk_size - overlap
+                start += step
                 
-            logger.info(f"Split document {title} into {len(chunks)} chunks.")
+            logger.info(
+                "Split document %s into %d chunks (size=%d, overlap=%d)",
+                title, len(chunks), chunk_size, overlap,
+            )
             
             if embedding_service.is_available():
                 # Process chunks in batches to avoid overwhelming the API
@@ -808,12 +859,17 @@ def public_qa(request):
         scope_document_ids = data.get('scope_document_ids')
         if scope_document_ids is not None:
             scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
+        min_similarity, max_age_days, max_results, enable_rewrite = _parse_rag_params(data)
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(
             question,
             company_id=company.id,
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
+            min_similarity=min_similarity,
+            max_age_days=max_age_days,
+            max_results=max_results,
+            enable_rewrite=enable_rewrite,
         )
         return Response({
             'status': 'success',
@@ -910,7 +966,10 @@ def knowledge_qa(request):
         scope_document_ids = data.get('scope_document_ids')
         if scope_document_ids is not None:
             scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
-        
+
+        # Optional retrieval tuning params (all safely defaulted if absent)
+        min_similarity, max_age_days, max_results, enable_rewrite = _parse_rag_params(data)
+
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(
@@ -918,6 +977,10 @@ def knowledge_qa(request):
             company_id=company.id,
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
+            min_similarity=min_similarity,
+            max_age_days=max_age_days,
+            max_results=max_results,
+            enable_rewrite=enable_rewrite,
         )
         
         # When agent doesn't have verified info, create a ticket task assigned to this company user
@@ -1132,7 +1195,20 @@ def list_tickets(request):
         at_risk_threshold = now + timedelta(hours=2)  # due within 2 hours = at risk
         resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
 
+        # Bulk count notes to avoid N+1 on the per-ticket serialization
+        ticket_ids = [t.id for t in tickets]
+        notes_count_map = {}
+        if ticket_ids:
+            from django.db.models import Count
+            notes_count_map = dict(
+                TicketNote.objects.filter(ticket_id__in=ticket_ids)
+                .values_list('ticket_id')
+                .annotate(c=Count('id'))
+                .values_list('ticket_id', 'c')
+            )
+
         def _ticket_row(t):
+            is_snoozed = bool(t.snoozed_until and t.snoozed_until > now)
             row = {
                 'id': t.id,
                 'title': t.title,
@@ -1146,10 +1222,18 @@ def list_tickets(request):
                 'updated_at': t.updated_at.isoformat(),
                 'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
                 'sla_due_at': t.sla_due_at.isoformat() if t.sla_due_at else None,
+                'snoozed_until': t.snoozed_until.isoformat() if t.snoozed_until else None,
+                'is_snoozed': is_snoozed,
+                'sla_paused_at': t.sla_paused_at.isoformat() if t.sla_paused_at else None,
+                'is_sla_paused': t.sla_paused_at is not None,
+                'last_triaged_at': t.last_triaged_at.isoformat() if t.last_triaged_at else None,
+                'notes_count': notes_count_map.get(t.id, 0),
                 'intent': t.intent,
                 'entities': t.entities,
             }
-            if t.sla_due_at and t.status not in resolved_statuses:
+            # Aging: a paused or snoozed ticket cannot be "at risk" — its clock is not running
+            if (t.sla_due_at and t.status not in resolved_statuses
+                    and not is_snoozed and t.sla_paused_at is None):
                 row['sla_breached'] = t.sla_due_at < now
                 row['sla_at_risk'] = t.sla_due_at <= at_risk_threshold and t.sla_due_at >= now
             else:
@@ -1190,7 +1274,10 @@ def list_tickets_aging(request):
         qs = Ticket.objects.filter(
             created_by=user,
             sla_due_at__isnull=False,
+            sla_paused_at__isnull=True,  # paused tickets don't age
         ).exclude(status__in=resolved_statuses).order_by('sla_due_at')
+        # Exclude snoozed tickets (snoozed_until in the future)
+        qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lte=now))
         breached = [t for t in qs if t.sla_due_at < now]
         at_risk = [t for t in qs if t.sla_due_at >= now and t.sla_due_at <= at_risk_threshold]
         data = {
@@ -1250,6 +1337,293 @@ def update_ticket_task(request, ticket_id):
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ---------- Ticket lifecycle helpers (Phase 2 Batch 2) ----------
+
+def _get_company_ticket_or_404(request, ticket_id):
+    """Fetch a ticket that belongs to the caller's company. Returns (ticket, error_response)."""
+    company_user = request.user
+    company = company_user.company
+    ticket = Ticket.objects.filter(id=ticket_id, company=company).first()
+    if not ticket:
+        return None, Response(
+            {'status': 'error', 'message': 'Ticket not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return ticket, None
+
+
+def _serialize_note(n):
+    return {
+        'id': n.id,
+        'body': n.body,
+        'is_internal': n.is_internal,
+        'author_id': n.author_id,
+        'author_name': (n.author.get_full_name() or n.author.username) if n.author else None,
+        'created_at': n.created_at.isoformat(),
+        'updated_at': n.updated_at.isoformat(),
+    }
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_ticket_notes(request, ticket_id):
+    """List notes on a ticket (company-scoped)."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        notes = ticket.notes.select_related('author').all()
+        return Response({'status': 'success', 'data': [_serialize_note(n) for n in notes]})
+    except Exception as e:
+        logger.exception("list_ticket_notes failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_ticket_note(request, ticket_id):
+    """Add an internal note to a ticket. Body: {body: str, is_internal?: bool}."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        body = (data.get('body') or '').strip()
+        if not body:
+            return Response({'status': 'error', 'message': 'body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        author = _get_or_create_user_for_company_user(request.user)
+        note = TicketNote.objects.create(
+            ticket=ticket,
+            author=author,
+            body=body,
+            is_internal=bool(data.get('is_internal', True)),
+        )
+        return Response({'status': 'success', 'data': _serialize_note(note)}, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception("create_ticket_note failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_or_delete_ticket_note(request, ticket_id, note_id):
+    """Edit or delete a note. Only the author can modify their own note."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        author = _get_or_create_user_for_company_user(request.user)
+        note = TicketNote.objects.filter(id=note_id, ticket=ticket).first()
+        if not note:
+            return Response({'status': 'error', 'message': 'Note not found'}, status=status.HTTP_404_NOT_FOUND)
+        if note.author_id and note.author_id != author.id:
+            return Response({'status': 'error', 'message': 'Only the note author can modify it'},
+                            status=status.HTTP_403_FORBIDDEN)
+        if request.method == 'DELETE':
+            note.delete()
+            return Response({'status': 'success'})
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        body = (data.get('body') or '').strip()
+        if not body:
+            return Response({'status': 'error', 'message': 'body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        note.body = body
+        if 'is_internal' in data:
+            note.is_internal = bool(data['is_internal'])
+        note.save(update_fields=['body', 'is_internal', 'updated_at'])
+        return Response({'status': 'success', 'data': _serialize_note(note)})
+    except Exception as e:
+        logger.exception("update_or_delete_ticket_note failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def snooze_ticket(request, ticket_id):
+    """Snooze a ticket. Body accepts either:
+    - {"snoozed_until": "2026-04-20T09:00:00Z"}  (ISO-8601)
+    - {"hours": 24}  (snooze for N hours from now)
+    """
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        until = None
+        if data.get('snoozed_until'):
+            try:
+                from datetime import datetime
+                raw = data['snoozed_until'].replace('Z', '+00:00')
+                until = datetime.fromisoformat(raw)
+                if until.tzinfo is None:
+                    until = timezone.make_aware(until, timezone.utc)
+            except Exception:
+                return Response({'status': 'error', 'message': 'Invalid snoozed_until (ISO-8601 expected)'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        elif data.get('hours') is not None:
+            try:
+                hours = float(data['hours'])
+            except (TypeError, ValueError):
+                return Response({'status': 'error', 'message': 'hours must be a number'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if hours <= 0 or hours > 24 * 90:  # cap at ~90 days
+                return Response({'status': 'error', 'message': 'hours must be > 0 and <= 2160'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            until = timezone.now() + timedelta(hours=hours)
+        else:
+            return Response({'status': 'error', 'message': 'snoozed_until or hours required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if until <= timezone.now():
+            return Response({'status': 'error', 'message': 'snoozed_until must be in the future'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        ticket.snoozed_until = until
+        ticket.save(update_fields=['snoozed_until', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id, 'snoozed_until': ticket.snoozed_until.isoformat(),
+        }})
+    except Exception as e:
+        logger.exception("snooze_ticket failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def unsnooze_ticket(request, ticket_id):
+    """Clear a ticket's snooze — it returns to the active queue immediately."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        ticket.snoozed_until = None
+        ticket.save(update_fields=['snoozed_until', 'updated_at'])
+        return Response({'status': 'success', 'data': {'id': ticket.id, 'snoozed_until': None}})
+    except Exception as e:
+        logger.exception("unsnooze_ticket failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pause_ticket_sla(request, ticket_id):
+    """Pause the SLA clock (e.g. waiting on customer). Idempotent — re-pausing is a no-op."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        if ticket.sla_paused_at is None:
+            ticket.sla_paused_at = timezone.now()
+            ticket.save(update_fields=['sla_paused_at', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id,
+            'sla_paused_at': ticket.sla_paused_at.isoformat() if ticket.sla_paused_at else None,
+            'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
+        }})
+    except Exception as e:
+        logger.exception("pause_ticket_sla failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def resume_ticket_sla(request, ticket_id):
+    """Resume the SLA clock. Extends sla_due_at by the paused duration so the
+    SLA target reflects actual working time, not calendar time."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        if ticket.sla_paused_at is None:
+            return Response({'status': 'success', 'data': {
+                'id': ticket.id,
+                'sla_paused_at': None,
+                'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
+                'message': 'SLA was not paused',
+            }})
+        paused_for = (timezone.now() - ticket.sla_paused_at).total_seconds()
+        paused_for = max(0, int(paused_for))
+        ticket.sla_paused_accumulated_seconds = (ticket.sla_paused_accumulated_seconds or 0) + paused_for
+        # Push the due date out by the paused duration so SLA math is preserved
+        if ticket.sla_due_at:
+            ticket.sla_due_at = ticket.sla_due_at + timedelta(seconds=paused_for)
+        ticket.sla_paused_at = None
+        ticket.save(update_fields=['sla_paused_at', 'sla_paused_accumulated_seconds', 'sla_due_at', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id,
+            'sla_paused_at': None,
+            'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
+            'sla_due_at': ticket.sla_due_at.isoformat() if ticket.sla_due_at else None,
+            'paused_for_seconds': paused_for,
+        }})
+    except Exception as e:
+        logger.exception("resume_ticket_sla failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
+def retriage_ticket(request, ticket_id):
+    """Re-run classification (category + priority + intent + entities) on a ticket.
+
+    Typically called after the description has been updated. If the LLM suggests
+    a different category/priority, the ticket is updated accordingly.
+    """
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        company = request.user.company
+        agent = FrontlineAgent(company_id=company.id)
+        llm_extraction = agent._extract_ticket_intent(ticket.title, ticket.description) or {}
+        classification = agent.ticket_service.classify_ticket(ticket.title, ticket.description)
+
+        old_category, old_priority = ticket.category, ticket.priority
+        updated_fields = ['last_triaged_at', 'updated_at']
+
+        valid_categories = {'technical', 'billing', 'account', 'feature_request', 'bug', 'other'}
+        valid_priorities = {'low', 'medium', 'high', 'urgent'}
+
+        suggested_cat = (llm_extraction.get('suggested_category')
+                         or classification.get('category') or '').lower()
+        suggested_pri = (llm_extraction.get('suggested_priority')
+                         or classification.get('priority') or '').lower()
+
+        if suggested_cat in valid_categories and suggested_cat != ticket.category:
+            ticket.category = suggested_cat
+            updated_fields.append('category')
+        if suggested_pri in valid_priorities and suggested_pri != ticket.priority:
+            ticket.priority = suggested_pri
+            updated_fields.append('priority')
+        if llm_extraction.get('intent'):
+            ticket.intent = llm_extraction['intent']
+            updated_fields.append('intent')
+        if llm_extraction.get('entities'):
+            ticket.entities = llm_extraction['entities']
+            updated_fields.append('entities')
+
+        ticket.last_triaged_at = timezone.now()
+        ticket.save(update_fields=list(set(updated_fields)))
+
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id,
+            'old_category': old_category, 'new_category': ticket.category,
+            'old_priority': old_priority, 'new_priority': ticket.priority,
+            'intent': ticket.intent,
+            'entities': ticket.entities,
+            'last_triaged_at': ticket.last_triaged_at.isoformat(),
+        }})
+    except Exception as e:
+        logger.exception("retriage_ticket failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])

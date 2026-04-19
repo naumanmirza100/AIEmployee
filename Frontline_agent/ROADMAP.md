@@ -86,29 +86,29 @@ Things that are actively risky or broken in what's shipped today. These should b
 ## 2. Improvements to Existing Features
 
 ### 2.1 RAG / Knowledge Q&A
-- [ ] Move embeddings to pgvector (or Qdrant/Weaviate)
-- [ ] Add cross-encoder reranker (e.g., BAAI bge-reranker or Cohere rerank) on top-N
-- [ ] Return citations `{answer, sources: [{doc_id, chunk_id, snippet, score}]}` with every answer
-- [ ] Render citations as inline footnotes in the UI
-- [ ] Query rewriting / HyDE pass before retrieval
+- [ ] Move embeddings to vector store (note: MSSQL not Postgres, so not pgvector — Qdrant/Azure Cognitive Search/FAISS)
+- [~] Add cross-encoder reranker on top-N *(existing LLM reranker via gpt-4o-mini already in `services._llm_rerank`; swap to true cross-encoder later)*
+- [x] Return citations `{answer, sources: [{doc_id, chunk_id, snippet, score}]}` with every answer *(Phase 2 Batch 1: multi-source citations from all chunks fed to LLM, not just top-1)*
+- [x] Render citations as inline footnotes in the UI *(Phase 2 Batch 1: numbered list with title/snippet/score in QA chat)*
+- [x] Query rewriting / HyDE pass before retrieval *(Phase 2 Batch 1: `FrontlineAgent._rewrite_query`; opt-in via `enable_rewrite`, auto-retries on weak retrieval)*
 - [ ] Semantic / structure-aware chunking (preserve headings, tables, avoid mid-sentence cuts)
-- [ ] Metadata filters on retrieval (access level, category, recency, tags)
-- [ ] Formalize confidence threshold → "I don't know" + auto-escalate
+- [x] Metadata filters on retrieval (access level, category, recency, tags) *(Phase 2 Batch 1: `min_similarity`, `max_age_days`, `max_results`, plus existing `scope_document_type`/`scope_document_ids`)*
+- [x] Formalize confidence threshold → "I don't know" + auto-escalate *(Phase 2 Batch 1: `FRONTLINE_RAG_MIN_CONFIDENCE` setting, returns `confidence: 'low'` + `best_score` + `threshold`; UI shows escalation hint)*
 - [ ] Multi-turn conversation memory in Q&A chat
-- [ ] Configurable chunk size / overlap per tenant & per doc type
+- [x] Configurable chunk size / overlap per tenant & per doc type *(Phase 2 Batch 1: `FRONTLINE_CHUNK_SIZE`/`FRONTLINE_CHUNK_OVERLAP` settings + optional `chunk_size`/`chunk_overlap` upload params, clamped to safe bounds)*
 - [ ] KB feedback loop: thumbs-down → weekly review queue; flagged chunks re-indexed or marked stale
 
 ### 2.2 Ticket Triage & Auto-Resolution
 - [ ] Duplicate detection via embedding similarity + merge flow
 - [ ] Weekly cluster report: "28 tickets this week = 'reset password'" → suggest KB article
-- [ ] Re-triage on new messages (priority/category shouldn't be frozen at creation)
+- [x] Re-triage on new messages (priority/category shouldn't be frozen at creation) *(Phase 2 Batch 2: `POST /frontline/tickets/<id>/retriage/` + Re-triage action in dashboard)*
 - [ ] Skills-based routing (language, product area, tier, availability, least-busy)
 - [ ] Per-tenant configurable tags & custom fields
-- [ ] Internal notes / private comments
+- [x] Internal notes / private comments *(Phase 2 Batch 2: `TicketNote` model + notes CRUD endpoints + notes dialog in dashboard)*
 - [ ] @mentions + assignment notifications
 - [ ] Ticket splitting (one message → two tickets)
-- [ ] Snooze / follow-up reminders
-- [ ] SLA pause while waiting on customer, auto-resume on reply
+- [x] Snooze / follow-up reminders *(Phase 2 Batch 2: `snoozed_until` field + snooze/unsnooze endpoints + 1h/1d/3d preset actions + Celery `wake_snoozed_tickets` every 5min)*
+- [~] SLA pause while waiting on customer, auto-resume on reply *(Phase 2 Batch 2: manual pause/resume landed — `sla_paused_at`, `sla_paused_accumulated_seconds`, pause/resume endpoints. Auto-resume on customer reply still pending — needs a ticket-messages model first)*
 
 ### 2.3 Notifications
 - [ ] Delivery receipts, open / click tracking, bounce handling (auto-disable bad channel per user)

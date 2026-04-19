@@ -461,6 +461,23 @@ DEEPSEEK_EMBEDDING_MODEL = os.getenv('DEEPSEEK_EMBEDDING_MODEL', 'deepseek/deeps
 EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'auto')  # 'auto', 'openrouter', 'deepseek', 'groq', or 'openai'
 OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
 
+# --------------------
+# Frontline Agent — RAG tuning knobs
+# --------------------
+# Minimum similarity score for a document match to be treated as "verified".
+# Below this, the agent responds with "I don't have verified info" and escalates.
+FRONTLINE_RAG_MIN_CONFIDENCE = float(os.getenv('FRONTLINE_RAG_MIN_CONFIDENCE', '0.3'))
+
+# Chunking parameters used when uploading + indexing documents.
+# Override per-upload by sending chunk_size / chunk_overlap form params.
+FRONTLINE_CHUNK_SIZE = int(os.getenv('FRONTLINE_CHUNK_SIZE', '4000'))
+FRONTLINE_CHUNK_OVERLAP = int(os.getenv('FRONTLINE_CHUNK_OVERLAP', '200'))
+
+# Safety bounds for user-provided chunking params
+FRONTLINE_CHUNK_SIZE_MIN = 500
+FRONTLINE_CHUNK_SIZE_MAX = 16000
+FRONTLINE_CHUNK_OVERLAP_MIN = 0
+
 
 # --------------------
 # Email Configuration
@@ -694,6 +711,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'project_manager_agent.cleanup_old_notifications',
         'schedule': 86400.0,  # Every 24 hours
         'options': {'expires': 172800}
+    },
+
+    # Wake snoozed frontline tickets - runs every 5 minutes
+    # Clears snoozed_until on tickets whose snooze time has passed
+    'frontline-wake-snoozed-tickets': {
+        'task': 'Frontline_agent.tasks.wake_snoozed_tickets',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600}
     },
 }
 

@@ -46,7 +46,22 @@ class Ticket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     sla_due_at = models.DateTimeField(null=True, blank=True, help_text='Target response time for SLA; used for aging alerts')
-    
+
+    # Snooze: when set in the future, the ticket is dormant; Celery wakes it when the time passes.
+    snoozed_until = models.DateTimeField(null=True, blank=True, db_index=True,
+                                         help_text='If set and in the future, ticket is snoozed and hidden from queues.')
+
+    # SLA pause: sla_paused_at is the moment we stopped the clock (e.g. waiting on customer).
+    # sla_paused_accumulated_seconds tracks total paused time across multiple pause/resume cycles.
+    sla_paused_at = models.DateTimeField(null=True, blank=True,
+                                         help_text='If set, the SLA clock is currently paused since this time.')
+    sla_paused_accumulated_seconds = models.IntegerField(default=0,
+                                                         help_text='Total accumulated paused seconds across all pause/resume cycles.')
+
+    # Triage bookkeeping: track when the ticket was last re-triaged.
+    last_triaged_at = models.DateTimeField(null=True, blank=True,
+                                           help_text='When triage was last run (create or re-triage on update).')
+
     # Internal entities for analytics/workflow
     intent = models.CharField(max_length=100, blank=True, null=True, help_text='Extracted intention of the user')
     entities = models.JSONField(default=dict, blank=True, help_text='Extracted entities like user_id, product, etc.')
@@ -58,10 +73,37 @@ class Ticket(models.Model):
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['created_at']),
             models.Index(fields=['sla_due_at']),
+            models.Index(fields=['snoozed_until']),
         ]
-    
+
     def __str__(self):
         return f"{self.title} - {self.get_status_display()}"
+
+    def is_snoozed(self):
+        """True if the ticket is currently within its snooze window."""
+        return bool(self.snoozed_until and self.snoozed_until > timezone.now())
+
+
+class TicketNote(models.Model):
+    """Internal / private note on a ticket. Agents use these to discuss with
+    each other without the customer seeing. `is_internal=False` is reserved
+    for a future customer-visible comment type."""
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='notes')
+    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='frontline_ticket_notes')
+    body = models.TextField()
+    is_internal = models.BooleanField(default=True, help_text='True = private agent note. Reserved False for future customer-visible comments.')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['ticket', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"Note on ticket #{self.ticket_id} by {self.author_id}"
 
 
 class KnowledgeBase(models.Model):

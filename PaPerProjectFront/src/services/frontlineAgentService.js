@@ -276,6 +276,62 @@ export const listTicketTasks = async () => {
   }
 };
 
+/** List internal notes on a ticket. */
+export const listTicketNotes = async (ticketId) => {
+  const response = await companyApi.get(`/frontline/tickets/${ticketId}/notes`);
+  return response;
+};
+
+/** Add an internal note to a ticket. */
+export const createTicketNote = async (ticketId, body, isInternal = true) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/notes/create`, {
+    body,
+    is_internal: isInternal,
+  });
+  return response;
+};
+
+/** Update a ticket note (author only). */
+export const updateTicketNote = async (ticketId, noteId, body) => {
+  const response = await companyApi.patch(`/frontline/tickets/${ticketId}/notes/${noteId}`, { body });
+  return response;
+};
+
+/** Delete a ticket note (author only). */
+export const deleteTicketNote = async (ticketId, noteId) => {
+  const response = await companyApi.delete(`/frontline/tickets/${ticketId}/notes/${noteId}`);
+  return response;
+};
+
+/** Snooze a ticket. Accepts either { hours } or { snoozedUntil: ISO string }. */
+export const snoozeTicket = async (ticketId, { hours, snoozedUntil } = {}) => {
+  const payload = snoozedUntil ? { snoozed_until: snoozedUntil } : { hours };
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/snooze`, payload);
+  return response;
+};
+
+/** Clear a ticket's snooze. */
+export const unsnoozeTicket = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/unsnooze`, {});
+  return response;
+};
+
+/** Pause / resume SLA clock. */
+export const pauseTicketSla = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/sla/pause`, {});
+  return response;
+};
+export const resumeTicketSla = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/sla/resume`, {});
+  return response;
+};
+
+/** Re-run LLM triage on a ticket (e.g. after description update). */
+export const retriageTicket = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/retriage`, {});
+  return response;
+};
+
 /**
  * Update a ticket task (e.g. mark as resolved)
  */
@@ -460,6 +516,15 @@ export default {
   createTicket,
   listTicketTasks,
   updateTicketTask,
+  listTicketNotes,
+  createTicketNote,
+  updateTicketNote,
+  deleteTicketNote,
+  snoozeTicket,
+  unsnoozeTicket,
+  pauseTicketSla,
+  resumeTicketSla,
+  retriageTicket,
   listNotificationTemplates,
   createNotificationTemplate,
   getNotificationTemplate,
