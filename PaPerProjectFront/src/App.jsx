@@ -35,9 +35,11 @@ import React from 'react';
 import ApplyForProjectsPage from '@/pages/ApplyForProjectsPage';
 import LoginPage from '@/pages/LoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import SuperAdminApiKeysPage from '@/pages/SuperAdminApiKeysPage';
 import CompanyRegisterPage from '@/pages/CompanyRegisterPage';
 import CompanyLoginPage from '@/pages/CompanyLoginPage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
+import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
 import MarketingAgentPage from '@/pages/MarketingAgentPage';
@@ -75,15 +77,23 @@ import { useTranslation } from 'react-i18next';
           <Routes location={location}>
             {/* Admin routes without header/footer */}
             <Route path="/login" element={<LoginPage />} />
-            <Route 
-              path="/admin/dashboard" 
+            <Route
+              path="/admin/dashboard"
               element={
                 <ProtectedRoute requireAdmin={true}>
                   <AdminDashboardPage />
                 </ProtectedRoute>
-              } 
+              }
             />
-            
+            <Route
+              path="/admin/api-keys"
+              element={
+                <ProtectedRoute requireAdmin={true}>
+                  <SuperAdminApiKeysPage />
+                </ProtectedRoute>
+              }
+            />
+
             {/* User Dashboard (for company-created users) */}
             <Route 
               path="/user/dashboard" 
@@ -98,6 +108,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/register" element={<CompanyRegisterPage />} />
             <Route path="/company/login" element={<CompanyLoginPage />} />
             <Route path="/company/dashboard" element={<CompanyDashboardPage />} />
+            <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
             
             {/* Project Manager routes without header/footer */}
             <Route 

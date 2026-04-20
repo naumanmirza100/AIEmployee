@@ -953,6 +953,12 @@ def marketing_qa(request):
         try:
             agent.last_token_usage = None
             agent.last_llm_used = False
+            # Route LLM call through the company key/quota resolver. If the
+            # company's 1M managed quota is exhausted and no BYOK is set, the
+            # resolver raises QuotaExhausted which our DRF exception handler
+            # turns into a 402 for the frontend hard-block UI.
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
         except Exception:
             pass
         question = request.data.get('question', '')

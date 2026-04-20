@@ -733,6 +733,12 @@ const AdminDashboardPage = () => {
         />
 
         <div className="container mx-auto px-4 py-4 sm:py-6 lg:py-8">
+          <div className="mb-4 flex justify-end">
+            <Button variant="outline" onClick={() => navigate('/admin/api-keys')} className="gap-2">
+              <BrainCircuit className="h-4 w-4" />
+              API Keys & Pricing Control
+            </Button>
+          </div>
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 gap-2 mb-6 h-auto p-2">

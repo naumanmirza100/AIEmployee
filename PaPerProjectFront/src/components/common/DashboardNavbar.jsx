@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell } from 'lucide-react';
+import { LogOut, Bell, Key } from 'lucide-react';
 import { API_BASE_URL } from '@/config/apiConfig';
 
 const DashboardNavbar = ({
@@ -229,6 +229,16 @@ const DashboardNavbar = ({
                     <p className="text-xs text-white/40 leading-tight truncate max-w-[160px]">{user.email}</p>
                   </div>
                 </div>
+              )}
+              {/* API Keys (company users only) */}
+              {isCompanyUser && (
+                <button
+                  onClick={() => navigate('/company/settings/api-keys')}
+                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                  title="API Keys & Token Quota"
+                >
+                  <Key className="h-4 w-4" />
+                </button>
               )}
               {/* Logout */}
               <button
