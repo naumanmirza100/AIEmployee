@@ -9,9 +9,56 @@ except ImportError:
     raise ImportError("groq library not installed. Run: pip install --upgrade groq")
 
 from django.conf import settings
+from decimal import Decimal
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# Rough prices in USD per 1M tokens (input, output). Update as providers change pricing.
+# Used only for approximate cost tracking. Unknown models fall back to _DEFAULT_PRICE_PER_MTOK.
+_PRICE_PER_MTOK = {
+    'llama-3.1-8b-instant': (0.05, 0.08),
+    'llama-3.3-70b-versatile': (0.59, 0.79),
+    'llama-3.1-70b-versatile': (0.59, 0.79),
+    'mixtral-8x7b-32768': (0.24, 0.24),
+    'gemma2-9b-it': (0.20, 0.20),
+}
+_DEFAULT_PRICE_PER_MTOK = (0.50, 0.50)
+
+
+def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
+    """Cheap best-effort $ estimate. Returns Decimal with 6 dp for the DB field."""
+    in_price, out_price = _PRICE_PER_MTOK.get(model or '', _DEFAULT_PRICE_PER_MTOK)
+    cost = ((prompt_tokens or 0) * in_price + (completion_tokens or 0) * out_price) / 1_000_000.0
+    return Decimal(str(round(cost, 6)))
+
+
+def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms, success):
+    """Persist a single LLM call row. Silent no-op if company_id is missing or the
+    write fails — cost tracking must never break the request."""
+    if not company_id:
+        return
+    try:
+        prompt_tokens = int((usage_dict or {}).get('prompt_tokens') or 0)
+        completion_tokens = int((usage_dict or {}).get('completion_tokens') or 0)
+        total_tokens = int((usage_dict or {}).get('total_tokens') or (prompt_tokens + completion_tokens))
+        cost = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+        # Local import — avoids loading Django models at module import time
+        from Frontline_agent.models import LLMUsage
+        LLMUsage.objects.create(
+            company_id=company_id,
+            agent_name=agent_name or 'unknown',
+            model=model or 'unknown',
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            duration_ms=int(duration_ms or 0),
+            success=bool(success),
+            estimated_cost_usd=cost,
+        )
+    except Exception as exc:
+        logger.warning("LLM usage tracking failed: %s", exc)
 
 
 class BaseAgent:
@@ -54,11 +101,22 @@ class BaseAgent:
             logger.error(f"Unexpected error initializing Groq client: {e}")
             raise ValueError(f"Failed to initialize Groq client: {e}")
         
-        self.model = model or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
         self.agent_name = self.__class__.__name__
+        self.fallback_model = getattr(settings, 'GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
+
+        # Load per-agent config from settings
+        agent_config = getattr(settings, 'PM_AGENT_LLM_CONFIG', {})
+        defaults = agent_config.get('defaults', {})
+        agent_overrides = agent_config.get(self.agent_name.lower(), {})
+
+        self.model = model or agent_overrides.get('model') or defaults.get('model') or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+        self.default_temperature = agent_overrides.get('temperature') or defaults.get('temperature', 0.7)
+        self.default_max_tokens = agent_overrides.get('max_tokens') or defaults.get('max_tokens', 1024)
+
         # Store last token usage from Groq API calls (if available)
-        # Shape: {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
         self.last_llm_usage = None
+        # Cumulative token tracking for this agent instance
+        self.total_tokens_used = 0
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024):
         """
@@ -73,15 +131,17 @@ class BaseAgent:
         Returns:
             str: LLM response text
         """
+        import time as _time
+        _start = _time.time()
         try:
             messages = []
-            
+
             if system_prompt:
                 messages.append({
                     "role": "system",
                     "content": system_prompt
                 })
-            
+
             messages.append({
                 "role": "user",
                 "content": prompt
@@ -117,10 +177,80 @@ class BaseAgent:
                     usage_dict = None
             
             self.last_llm_usage = usage_dict
-            
+            if usage_dict and usage_dict.get('total_tokens'):
+                self.total_tokens_used += usage_dict['total_tokens']
+
+            elapsed = round(_time.time() - _start, 2)
+            tokens = usage_dict.get('total_tokens', '?') if usage_dict else '?'
+            logger.info(f"[LLM] {self.agent_name} | {elapsed}s | {tokens} tokens | model={self.model}")
+            if elapsed > 5:
+                logger.warning(f"[LLM SLOW] {self.agent_name} took {elapsed}s (>5s threshold)")
+
+            # Per-tenant usage tracking (opt-in: agent sets self.company_id)
+            _record_llm_usage(
+                company_id=getattr(self, 'company_id', None),
+                agent_name=self.agent_name,
+                model=self.model,
+                usage_dict=usage_dict,
+                duration_ms=int((_time.time() - _start) * 1000),
+                success=True,
+            )
+
             return response.choices[0].message.content
-            
+
         except Exception as e:
+            # Record the failed attempt before attempting fallback
+            _record_llm_usage(
+                company_id=getattr(self, 'company_id', None),
+                agent_name=self.agent_name,
+                model=self.model,
+                usage_dict=None,
+                duration_ms=int((_time.time() - _start) * 1000),
+                success=False,
+            )
+            # Try fallback model if primary fails
+            if self.fallback_model and self.fallback_model != self.model:
+                logger.warning(f"{self.agent_name}: Primary model '{self.model}' failed ({e}), trying fallback '{self.fallback_model}'")
+                _fallback_start = _time.time()
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.fallback_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                    # Best-effort usage capture for the fallback call too
+                    fb_usage_info = getattr(response, "usage", None)
+                    fb_usage_dict = None
+                    if fb_usage_info is not None:
+                        try:
+                            fb_usage_dict = {
+                                "prompt_tokens": getattr(fb_usage_info, "prompt_tokens", None),
+                                "completion_tokens": getattr(fb_usage_info, "completion_tokens", None),
+                                "total_tokens": getattr(fb_usage_info, "total_tokens", None),
+                            }
+                        except Exception:
+                            fb_usage_dict = None
+                    _record_llm_usage(
+                        company_id=getattr(self, 'company_id', None),
+                        agent_name=self.agent_name,
+                        model=self.fallback_model,
+                        usage_dict=fb_usage_dict,
+                        duration_ms=int((_time.time() - _fallback_start) * 1000),
+                        success=True,
+                    )
+                    return response.choices[0].message.content
+                except Exception as fallback_err:
+                    logger.error(f"{self.agent_name}: Fallback model also failed: {fallback_err}")
+                    _record_llm_usage(
+                        company_id=getattr(self, 'company_id', None),
+                        agent_name=self.agent_name,
+                        model=self.fallback_model,
+                        usage_dict=None,
+                        duration_ms=int((_time.time() - _fallback_start) * 1000),
+                        success=False,
+                    )
+                    raise
             logger.error(f"Error in {self.agent_name} LLM call: {str(e)}")
             raise
     

@@ -13,6 +13,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import userTaskService from '@/services/userTaskService';
 import userProjectManagerService from '@/services/userProjectManagerService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
+import Skeleton from '@/components/common/Skeleton';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -903,6 +905,7 @@ const UserDashboardPage = () => {
 
           {/* Meetings Tab */}
           <TabsContent value="meetings" className="space-y-4 mt-6">
+            <ErrorBoundary>
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-white">Meeting Requests</h2>
               <Button onClick={fetchMeetings} disabled={meetingsLoading} variant="outline" size="sm">
@@ -911,9 +914,7 @@ const UserDashboardPage = () => {
               </Button>
             </div>
 
-            {meetingsLoading && (
-              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
-            )}
+            {meetingsLoading && <Skeleton.MeetingList count={3} />}
 
             {!meetingsLoading && meetings.length === 0 && (
               <Card className="bg-white/[0.02] border-white/10">
@@ -1048,6 +1049,7 @@ const UserDashboardPage = () => {
                 </Card>
               );
             })}
+            </ErrorBoundary>
           </TabsContent>
 
           {/* All Project Tasks Tab (Project Manager Only) */}

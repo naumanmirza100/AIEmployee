@@ -8,6 +8,9 @@ from .enhancements.project_pilot_enhancements import ProjectPilotEnhancements
 from .context_manager import ContextManager
 from typing import Dict, Optional, List
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import re
 
 # Words to ignore when matching user names from the question (e.g. "hamza and abdullah" must not match "and")
@@ -1449,11 +1452,14 @@ Return a helpful text response (NOT JSON) explaining this."""
                     "question": question
                 }
         except Exception as e:
-            self.log_action("Error handling action request", {"error": str(e)})
+            import traceback
+            error_detail = traceback.format_exc()
+            self.log_action("Error handling action request", {"error": str(e), "traceback": error_detail})
+            logger.error(f"[PROJECT PILOT] Error: {error_detail}")
             return {
                 "success": False,
                 "error": str(e),
-                "answer": "I'm sorry, I encountered an error while processing your request. Please try again."
+                "answer": f"I'm sorry, I encountered an error while processing your request. Please try again.\n\n_Debug: {str(e)}_"
             }
     
     def process(self, question: str, **kwargs) -> Dict:
