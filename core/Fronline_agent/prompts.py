@@ -4,10 +4,17 @@ Enterprise-level prompts that enforce strict data-only responses
 """
 import logging
 
+from .prompt_safety import (
+    sanitize_user_input,
+    wrap_untrusted,
+    wrap_untrusted_list,
+    ANTI_INJECTION_SYSTEM_ADDENDUM,
+)
+
 logger = logging.getLogger(__name__)
 
 
-FRONTLINE_SYSTEM_PROMPT = """You are a Frontline Support AI Agent for PayPerProject, an enterprise project management platform.
+_FRONTLINE_SYSTEM_PROMPT_BODY = """You are a Frontline Support AI Agent for PayPerProject, an enterprise project management platform.
 
 CRITICAL RULES - YOU MUST FOLLOW THESE STRICTLY:
 1. YOU MUST ONLY use information provided by the knowledge base APIs. NEVER guess, assume, or make up information.
@@ -35,6 +42,9 @@ YOUR LIMITATIONS:
 - You cannot guess answers
 
 Remember: Your primary goal is to help users with verified information and route complex issues to human experts."""
+
+# Exported system prompt includes the anti-injection addendum.
+FRONTLINE_SYSTEM_PROMPT = _FRONTLINE_SYSTEM_PROMPT_BODY + ANTI_INJECTION_SYSTEM_ADDENDUM
 
 
 FRONTLINE_KNOWLEDGE_PROMPT = """You are answering a user's question using information from uploaded documents.
@@ -167,9 +177,14 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
             knowledge_items.append(item_text)
         knowledge_text = "\n".join(knowledge_items)
     
+    # Wrap the user's question in a tagged block so the model can tell data from
+    # instructions; sanitize first to scrub obvious injection phrases + invisible chars.
+    safe_question = sanitize_user_input(user_question, max_len=4000)
+    wrapped_question = wrap_untrusted(safe_question, tag='user_question')
+
     return FRONTLINE_KNOWLEDGE_PROMPT.format(
         knowledge_results=knowledge_text,
-        user_question=user_question
+        user_question=wrapped_question,
     )
 
 

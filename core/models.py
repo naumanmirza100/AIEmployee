@@ -505,6 +505,18 @@ class Company(models.Model):
     # Comma-separated list of origins allowed to use the widget key (e.g. "https://acme.com,https://www.acme.com").
     # When blank, all origins are accepted (back-compat). Populated origins enforce origin/referer check.
     frontline_allowed_origins = models.TextField(blank=True, default='')
+    # Customer-configurable widget appearance + behaviour. Defaults are injected in
+    # the GET /frontline/widget/public-config/ endpoint so a blank row still renders a usable widget.
+    # Shape: {
+    #   "theme": {"primary_color": "#7c3aed", "launcher_text": "Chat with us", "position": "bottom-right", "logo_url": null},
+    #   "pre_chat_form": {"enabled": true, "fields": ["name", "email"]},
+    #   "operating_hours": {"enabled": false, "timezone_name": "UTC",
+    #                        "schedule": {"mon": [["09:00","17:00"]], "tue": [...], ...},
+    #                        "offline_message": "We're offline. Leave a message and we'll reply."},
+    #   "require_captcha": false
+    # }
+    frontline_widget_config = models.JSONField(default=dict, blank=True,
+                                               help_text='Widget theming + pre-chat form + operating hours + captcha toggle.')
 
     class Meta:
         verbose_name_plural = 'Companies'

@@ -1,13 +1,20 @@
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import AnonRateThrottle
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password
 from rest_framework.authtoken.models import Token
 
 from core.models import Company, CompanyUser, CompanyRegistrationToken, CompanyUserToken
+
+
+class CompanyAuthThrottle(AnonRateThrottle):
+    """Throttle by IP for public login/register endpoints to slow brute-force
+    attempts. Rate defined in settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']."""
+    scope = 'company_auth'
 
 
 @api_view(['GET'])
@@ -68,6 +75,7 @@ def verify_registration_token(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
 def register_company_user(request):
     """Register company account via token"""
     try:
@@ -157,6 +165,7 @@ def register_company_user(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
 def login_company_user(request):
     """Company login"""
     try:

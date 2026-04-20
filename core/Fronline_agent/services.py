@@ -35,6 +35,7 @@ class KnowledgeService:
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
         max_age_days: Optional[int] = None,
+        company_user_id: Optional[int] = None,
     ) -> Dict:
         """
         Search knowledge base (FAQs, policies, manuals, uploaded documents) for relevant information.
@@ -90,6 +91,7 @@ class KnowledgeService:
                     scope_document_type=scope_document_type,
                     scope_document_ids=scope_document_ids,
                     max_age_days=max_age_days,
+                    company_user_id=company_user_id,
                 )
                 documents_count = len(documents)
                 for doc in documents:
@@ -135,10 +137,13 @@ class KnowledgeService:
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
         max_age_days: Optional[int] = None,
+        company_user_id: Optional[int] = None,
     ) -> List[Dict]:
         """
         Search uploaded documents for company using hybrid search (chunk embeddings + keyword) and RRF.
         Returns the top_k chunks re-ranked by language model.
+        Enforces: superseded-revision exclusion, processing_status='ready', and
+        per-document visibility (company vs private → allowed_users).
         """
         try:
             from Frontline_agent.models import Document, DocumentChunk
@@ -151,8 +156,19 @@ class KnowledgeService:
             all_documents = Document.objects.filter(
                 company_id=company_id,
                 is_indexed=True,
-                processed=True
+                processed=True,
+                superseded_by__isnull=True,          # skip old revisions
+                processing_status='ready',           # skip in-flight / failed docs
             )
+            # Visibility gate: 'company' docs are available to any company user.
+            # 'private' docs require the asker to be in allowed_users.
+            if company_user_id is not None:
+                all_documents = all_documents.filter(
+                    Q(visibility='company') | Q(visibility='private', allowed_users__id=company_user_id)
+                ).distinct()
+            else:
+                # No user context (e.g. public widget): company-wide visibility only.
+                all_documents = all_documents.filter(visibility='company')
             if scope_document_type:
                 all_documents = all_documents.filter(document_type__in=scope_document_type)
             if scope_document_ids:
@@ -328,6 +344,7 @@ Chunks:
         min_similarity: Optional[float] = None,
         max_age_days: Optional[int] = None,
         max_results: int = 5,
+        company_user_id: Optional[int] = None,
     ) -> Dict:
         """
         Get answer to a question from knowledge base and uploaded documents.
@@ -356,6 +373,7 @@ Chunks:
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
             max_age_days=max_age_days,
+            company_user_id=company_user_id,
         )
 
         # Keyword fallback if initial search came up empty
@@ -376,6 +394,7 @@ Chunks:
                     scope_document_type=scope_document_type,
                     scope_document_ids=scope_document_ids,
                     max_age_days=max_age_days,
+                    company_user_id=company_user_id,
                 )
                 if kw_results['success'] and kw_results['count'] > 0:
                     search_results = kw_results
