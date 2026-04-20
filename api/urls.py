@@ -422,6 +422,16 @@ urlpatterns = [
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/rename/?$', operations_agent.rename_qa_chat, name='operations_qa_rename_chat'),  # PATCH
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/delete/?$', operations_agent.delete_qa_chat, name='operations_qa_delete_chat'),  # DELETE
 
+    # Operations Document Authoring endpoints
+    re_path(r'^operations/authoring/generate/?$', operations_agent.generate_document, name='operations_authoring_generate'),  # POST
+    re_path(r'^operations/authoring/documents/?$', operations_agent.list_generated_documents, name='operations_authoring_list'),  # GET
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/?$', operations_agent.get_generated_document, name='operations_authoring_get'),  # GET
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/update/?$', operations_agent.update_generated_document, name='operations_authoring_update'),  # PATCH
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/delete/?$', operations_agent.delete_generated_document, name='operations_authoring_delete'),  # DELETE
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/regenerate/?$', operations_agent.regenerate_document, name='operations_authoring_regenerate'),  # POST
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/export/pdf/?$', operations_agent.export_generated_document_pdf, name='operations_authoring_export_pdf'),  # GET
+    re_path(r'^operations/authoring/generate/stream/?$', operations_agent.stream_generate_document, name='operations_authoring_generate_stream'),  # POST
+
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
