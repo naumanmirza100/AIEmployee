@@ -1836,8 +1836,10 @@ class AgentTokenQuota(models.Model):
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='agent_quotas')
     agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
-    included_tokens = models.BigIntegerField(default=DEFAULT_FREE_TOKENS)
-    used_tokens = models.BigIntegerField(default=0)
+    # DB was renamed out-of-band to platform_* / managed_* variants. Model field
+    # names kept stable for code compatibility; db_column maps to the actual column.
+    included_tokens = models.BigIntegerField(default=DEFAULT_FREE_TOKENS, db_column='platform_included_tokens')
+    used_tokens = models.BigIntegerField(default=0, db_column='platform_used_tokens')
     byok_tokens_info = models.BigIntegerField(
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',
