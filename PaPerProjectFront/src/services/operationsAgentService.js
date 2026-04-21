@@ -335,6 +335,19 @@ export const deleteGeneratedDocument = async (docId) => {
   }
 };
 
+/**
+ * Aggregated analytics for the operations module.
+ * @param {string} range  '7d' | '30d' | '90d' | 'all'
+ */
+export const getOperationsAnalytics = async (range = '30d') => {
+  try {
+    return await companyApi.get('/operations/analytics', { range });
+  } catch (error) {
+    console.error('Operations analytics error:', error);
+    throw error;
+  }
+};
+
 /** Regenerate an existing document (fresh AI output, bumps version) */
 export const regenerateDocument = async (docId, payload = {}) => {
   try {
@@ -399,6 +412,7 @@ export default {
   updateGeneratedDocument,
   deleteGeneratedDocument,
   regenerateDocument,
+  getOperationsAnalytics,
   getGeneratedDocumentPdfUrl,
   fetchGeneratedDocumentPdf,
 };
