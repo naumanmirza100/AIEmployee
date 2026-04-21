@@ -164,6 +164,10 @@ import { useTranslation } from 'react-i18next';
             <Route path="/operations/authoring" element={<OperationsAgentPage />} />
             <Route path="/operations/notifications" element={<OperationsAgentPage />} />
 
+            {/* Reply Draft Agent routes without header/footer */}
+            <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
+            <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
+
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />
             <Route path="/embed/form" element={<FrontlineEmbedFormPage />} />
