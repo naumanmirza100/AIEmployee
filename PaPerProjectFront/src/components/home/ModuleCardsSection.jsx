@@ -147,7 +147,7 @@ const ModuleCardsSection = () => {
   ];
 
   return (
-    <section className="py-16 md:py-24 bg-gradient-to-b from-background via-secondary/20 to-background">
+    <section id="ai-modules" className="py-16 md:py-24 bg-gradient-to-b from-background via-secondary/20 to-background">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <motion.div

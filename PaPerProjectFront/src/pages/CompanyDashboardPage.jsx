@@ -1751,13 +1751,26 @@ const CompanyDashboardPage = () => {
             <TabsContent value="ai-agents" className="space-y-4">
               <Card className="bg-[#120d22] border border-[#2d2342]">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-white">
-                    <BrainCircuit className="h-5 w-5 text-violet-400" />
-                    Your AI Agents
-                  </CardTitle>
-                  <CardDescription className="text-white/50">
-                    View all your AI agent purchases, their current status, and timeline
-                  </CardDescription>
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-white">
+                        <BrainCircuit className="h-5 w-5 text-violet-400" />
+                        Your AI Agents
+                      </CardTitle>
+                      <CardDescription className="text-white/50">
+                        View all your AI agent purchases, their current status, and timeline
+                      </CardDescription>
+                    </div>
+                    {allPurchases.length > 0 && (
+                      <Button
+                        onClick={() => navigate('/#ai-modules')}
+                        className="bg-violet-600 hover:bg-violet-700 text-white shrink-0"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Browse More Agents
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {allPurchases.length === 0 ? (
@@ -1768,7 +1781,7 @@ const CompanyDashboardPage = () => {
                         Explore our AI agents to supercharge your workflow
                       </p>
                       <Button
-                        onClick={() => navigate('/value-and-pricing')}
+                        onClick={() => navigate('/#ai-modules')}
                         className="bg-violet-600 hover:bg-violet-700 text-white"
                       >
                         Browse AI Agents
