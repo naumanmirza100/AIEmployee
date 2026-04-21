@@ -527,6 +527,7 @@ class CompanyUser(models.Model):
         ('frontline_agent', 'Frontline Agent'),
         ('marketing_agent', 'Marketing Agent'),
         ('operations_agent', 'Operations Agent'),
+        ('reply_draft_agent', 'Reply Draft Agent'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
@@ -584,6 +585,7 @@ class CompanyModulePurchase(models.Model):
         ('project_manager_agent', 'Project Manager Agent'),
         ('frontline_agent', 'Frontline Agent'),
         ('operations_agent', 'Operations Agent'),
+        ('reply_draft_agent', 'Reply Draft Agent'),
     ]
     
     STATUS_CHOICES = [
@@ -1742,6 +1744,7 @@ AGENT_CHOICES = [
     ('project_manager_agent', 'Project Manager Agent'),
     ('frontline_agent', 'Frontline Agent'),
     ('operations_agent', 'Operations Agent'),
+    ('reply_draft_agent', 'Reply Draft Agent'),
 ]
 
 PROVIDER_CHOICES = [

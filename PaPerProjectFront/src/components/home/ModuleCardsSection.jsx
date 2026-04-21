@@ -6,7 +6,8 @@ import {
   Megaphone,
   FolderKanban,
   Headphones,
-  FileSearch
+  FileSearch,
+  Reply
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -120,6 +121,26 @@ const ModuleCardsSection = () => {
         'Knowledge base Q&A with source citations',
         'Automated report & memo generation',
         'Proactive anomaly & threshold alerts'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'Reply Draft Agent',
+      moduleName: 'reply_draft_agent',
+      description: 'AI-assisted email reply drafting with human-in-the-loop review. Drafts replies from incoming emails, you edit and approve before sending.',
+      icon: Reply,
+      iconColor: 'text-cyan-500',
+      gradientFrom: gradientColors['cyan-500'],
+      gradientTo: gradientColors['blue-500'],
+      price: 79,
+      pricePeriod: 'month',
+      features: [
+        'AI-generated reply drafts from inbox',
+        'Tone selection (professional, casual, empathetic)',
+        'Regenerate with custom instructions',
+        'Inline edit before approving',
+        'Proper email threading (In-Reply-To)',
+        'Full version history of regenerations'
       ],
       highlight: false,
     }

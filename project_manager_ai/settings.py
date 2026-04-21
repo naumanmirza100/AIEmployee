@@ -293,6 +293,7 @@ INSTALLED_APPS = [
     'project_manager_agent',
     'recruitment_agent',
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
+    'reply_draft_agent.apps.ReplyDraftAgentConfig',  # AI reply drafter (human-in-the-loop)
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
     'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app

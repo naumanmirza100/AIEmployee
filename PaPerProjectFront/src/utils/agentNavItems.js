@@ -5,6 +5,7 @@ import {
   Megaphone,
   Headphones,
   FileSearch,
+  Reply,
 } from 'lucide-react';
 
 /**
@@ -17,6 +18,7 @@ const ALL_AGENTS = [
   { key: 'marketing_agent',       label: 'Marketing Agent',       icon: Megaphone,    section: 'marketing',        path: '/marketing/dashboard' },
   { key: 'frontline_agent',       label: 'Frontline Agent',       icon: Headphones,   section: 'frontline',        path: '/frontline/dashboard' },
   { key: 'operations_agent',      label: 'Operations Agent',      icon: FileSearch,   section: 'operations',       path: '/operations/dashboard' },
+  { key: 'reply_draft_agent',     label: 'Reply Draft Agent',     icon: Reply,        section: 'reply-draft',      path: '/reply-draft/dashboard' },
 ];
 
 /**
