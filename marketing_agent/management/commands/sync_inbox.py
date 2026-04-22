@@ -16,10 +16,13 @@ Usage:
 import imaplib
 import email
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from django.db import IntegrityError
 from marketing_agent.models import EmailAccount, EmailSendHistory, CampaignContact, Reply, Campaign, Lead
 from marketing_agent.views import mark_contact_replied
+from reply_draft_agent.models import InboxEmail
 import logging
 import re
 from datetime import timedelta
@@ -70,55 +73,66 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('[WARNING] Please enable IMAP sync in Email Accounts settings.'))
             return
         
-        # Get all active campaign leads (for filtering)
+        # Known campaign lead emails are still precomputed so we can short-circuit
+        # reply detection for campaign mail, but we no longer filter out
+        # unknown senders — generic inbox mail is stored as InboxEmail rows.
         active_campaigns = Campaign.objects.filter(status='active')
         campaign_leads = Lead.objects.filter(
             campaigns__in=active_campaigns
         ).distinct()
         known_lead_emails = set(lead.email.lower() for lead in campaign_leads)
-        
+
         self.stdout.write(f'Found {len(known_lead_emails)} known lead email(s) from active campaigns')
-        if known_lead_emails:
-            self.stdout.write(f'   Will only process replies from these leads')
-        
+        self.stdout.write('   All other mail will be stored as generic InboxEmail rows.')
+
         total_replies_found = 0
         total_replies_processed = 0
-        
+        total_inbox_stored = 0
+
         # Process each account
         for account in accounts:
             self.stdout.write(f'\n{"="*60}')
             self.stdout.write(f'Processing Account: {account.name} ({account.email})')
             self.stdout.write(f'{"="*60}')
-            
+
             if not account.imap_host or not account.imap_username or not account.imap_password:
                 self.stdout.write(self.style.WARNING(f'  [WARNING] IMAP settings incomplete for {account.email}. Skipping.'))
                 continue
-            
+
             try:
-                replies_found, replies_processed = self.sync_account_inbox(account, dry_run, known_lead_emails)
+                replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
+                    account, dry_run, known_lead_emails,
+                )
                 total_replies_found += replies_found
                 total_replies_processed += replies_processed
+                total_inbox_stored += inbox_stored
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f'  [ERROR] Error syncing {account.email}: {str(e)}'))
                 logger.error(f'Error syncing account {account.id} ({account.email}): {str(e)}', exc_info=True)
-        
+
         self.stdout.write(f'\n{"="*60}')
         self.stdout.write(self.style.SUCCESS(f'\n[OK] Sync Complete'))
-        self.stdout.write(f'Total replies found: {total_replies_found}')
-        self.stdout.write(f'Total replies processed: {total_replies_processed}')
+        self.stdout.write(f'Total campaign replies found: {total_replies_found}')
+        self.stdout.write(f'Total campaign replies processed: {total_replies_processed}')
+        self.stdout.write(f'Total generic inbox emails stored: {total_inbox_stored}')
         self.stdout.write(f'{"="*60}\n')
 
     def sync_account_inbox(self, account, dry_run=False, known_lead_emails=None):
         """
-        Sync inbox for a single email account
-        Only processes emails from known campaign leads (optimized for privacy & performance)
+        Sync inbox for a single email account.
+
+        Campaign replies (matched by In-Reply-To / References / Subject) go into
+        the Reply table via the existing path. Everything else from the last
+        7 days is stored as an InboxEmail row so the Reply Draft Agent can
+        surface it in the UI with campaign + days filters.
         """
         replies_found = 0
         replies_processed = 0
-        
+        inbox_stored = 0
+
         if known_lead_emails is None:
             known_lead_emails = set()
-        
+
         try:
             # Connect to IMAP server
             if account.imap_use_ssl:
@@ -127,111 +141,163 @@ class Command(BaseCommand):
                 mail = imaplib.IMAP4(account.imap_host, account.imap_port or 143)
                 if account.imap_port == 143:
                     mail.starttls()  # Use STARTTLS for port 143
-            
-            # Login
+
             mail.login(account.imap_username, account.imap_password)
             self.stdout.write(f'  Connected to IMAP server: {account.imap_host}:{account.imap_port}')
-            
-            # Select inbox
             mail.select('INBOX')
-            
-            # Search for unread emails (last 7 days)
+
+            # Last 7 days of mail (both UNSEEN and SEEN). We rely on our own
+            # Message-ID dedupe so reading mail in another client doesn't
+            # cause the draft agent to miss messages.
             since_date = (timezone.now() - timedelta(days=7)).strftime('%d-%b-%Y')
-            status, messages = mail.search(None, f'(UNSEEN SINCE {since_date})')
-            
+            status, messages = mail.search(None, f'(SINCE {since_date})')
+
             if status != 'OK':
                 self.stdout.write(self.style.WARNING(f'   Failed to search inbox'))
                 mail.logout()
-                return replies_found, replies_processed
-            
+                return replies_found, replies_processed, inbox_stored
+
             email_ids = messages[0].split()
-            
+
             if not email_ids:
-                self.stdout.write(f'  [INFO] No unread emails found')
+                self.stdout.write(f'  [INFO] No emails in the last 7 days')
                 mail.logout()
-                return replies_found, replies_processed
-            
-            self.stdout.write(f'   Found {len(email_ids)} unread email(s)')
-            
+                return replies_found, replies_processed, inbox_stored
+
+            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last 7 days')
+
             emails_checked = 0
-            emails_from_leads = 0
-            
-            # Process each email
+            emails_skipped_known = 0
+
             for email_id in email_ids:
                 try:
-                    # Fetch email headers first (lightweight check)
-                    status, msg_data = mail.fetch(email_id, '(BODY.PEEK[HEADER])')
-                    if status != 'OK':
+                    # Stage 1: peek at headers only, bail out if we've already stored this Message-ID.
+                    status, hdr_data = mail.fetch(email_id, '(BODY.PEEK[HEADER])')
+                    if status != 'OK' or not hdr_data or not hdr_data[0]:
                         continue
-                    
-                    header_data = msg_data[0][1]
-                    msg_headers = email.message_from_bytes(header_data)
-                    
-                    # OPTIMIZATION: Check sender email first (before fetching full email)
-                    sender_email = self.get_email_address(msg_headers['From'])
-                    if not sender_email:
+                    hdr_msg = email.message_from_bytes(hdr_data[0][1])
+                    msg_id_raw = (hdr_msg.get('Message-ID') or hdr_msg.get('Message-Id') or '').strip().strip('<>')
+                    if msg_id_raw and InboxEmail.objects.filter(
+                        email_account=account, message_id=msg_id_raw[:500]
+                    ).exists():
+                        emails_skipped_known += 1
                         continue
-                    
-                    emails_checked += 1
-                    
-                    # Skip if not from a known lead (privacy & performance optimization)
-                    if known_lead_emails and sender_email.lower() not in known_lead_emails:
-                        continue  # Skip this email - not from a campaign lead
-                    
-                    emails_from_leads += 1
-                    
-                    # Fetch full email only if it's from a known lead
+
+                    # Stage 2: full fetch for anything new.
                     status, msg_data = mail.fetch(email_id, '(RFC822)')
                     if status != 'OK':
                         continue
-                    
+
                     email_body = msg_data[0][1]
                     msg = email.message_from_bytes(email_body)
-                    
-                    # Check if this is a reply
+
+                    sender_email = self.get_email_address(msg.get('From', ''))
+                    if not sender_email:
+                        continue
+
+                    emails_checked += 1
+
+                    # Step 1: try to match as a campaign reply first.
                     is_reply, sent_email = self.detect_reply(msg, account)
-                    
+
                     if is_reply and sent_email:
                         replies_found += 1
-                        self.stdout.write(f'\n  [REPLY] Reply detected!')
+                        self.stdout.write(f'\n  [REPLY] Campaign reply detected!')
                         self.stdout.write(f'     From: {sender_email}')
-                        self.stdout.write(f'     Subject: {self.decode_header(msg["Subject"])}')
+                        self.stdout.write(f'     Subject: {self.decode_header(msg.get("Subject", ""))}')
                         self.stdout.write(f'     Original Email: {sent_email.subject} (ID: {sent_email.id})')
-                        
+
                         if not dry_run:
-                            # Process reply
-                            success = self.process_reply(msg, sent_email, account)
-                            if success:
+                            if self.process_reply(msg, sent_email, account):
                                 replies_processed += 1
                                 self.stdout.write(f'     [OK] Reply processed successfully')
-                                # Mark email as read (optional - comment out if you want to keep unread)
-                                # mail.store(email_id, '+FLAGS', '\\Seen')
                             else:
                                 self.stdout.write(f'     [ERROR] Failed to process reply')
                         else:
                             self.stdout.write(f'     [SKIP] Skipped (dry run)')
-                    else:
-                        # Email from lead but not a reply to campaign email
-                        logger.debug(f'Email from lead {sender_email} is not a reply to campaign email')
-                    
+                        continue
+
+                    # Step 2: generic inbox mail — store as InboxEmail.
+                    if dry_run:
+                        continue
+
+                    if self.store_inbox_email(msg, account, sender_email):
+                        inbox_stored += 1
+
                 except Exception as e:
                     self.stdout.write(self.style.ERROR(f'  [ERROR] Error processing email {email_id.decode()}: {str(e)}'))
                     logger.error(f'Error processing email {email_id.decode()}: {str(e)}', exc_info=True)
                     continue
-            
-            # Logout
+
             mail.logout()
             self.stdout.write(f'\n  [OK] Finished processing account: {account.email}')
-            self.stdout.write(f'     Checked: {emails_checked} email(s), From leads: {emails_from_leads} email(s)')
-            
+            self.stdout.write(
+                f'     Checked: {emails_checked} · Skipped (already known): {emails_skipped_known} · '
+                f'Campaign replies: {replies_found} · Inbox stored: {inbox_stored}'
+            )
+
         except imaplib.IMAP4.error as e:
             self.stdout.write(self.style.ERROR(f'  [ERROR] IMAP error: {str(e)}'))
             logger.error(f'IMAP error for account {account.id}: {str(e)}', exc_info=True)
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'  [ERROR] Error: {str(e)}'))
             logger.error(f'Error syncing account {account.id}: {str(e)}', exc_info=True)
-        
-        return replies_found, replies_processed
+
+        return replies_found, replies_processed, inbox_stored
+
+    def store_inbox_email(self, msg, account, sender_email):
+        """Persist a generic (non-campaign) inbox email. Idempotent on (account, Message-ID)."""
+        message_id = (msg.get('Message-ID') or msg.get('Message-Id') or '').strip().strip('<>')
+        if not message_id:
+            # Synthesize a stable-ish id for messages without a Message-ID header
+            # so dedupe still works across syncs.
+            date_hint = msg.get('Date', '') or ''
+            subj_hint = (msg.get('Subject', '') or '')[:60]
+            message_id = f'synthetic-{hash((sender_email, date_hint, subj_hint)) & 0xffffffff:x}'
+
+        if InboxEmail.objects.filter(email_account=account, message_id=message_id).exists():
+            return False
+
+        received_at = timezone.now()
+        date_str = msg.get('Date')
+        if date_str:
+            try:
+                parsed = parsedate_to_datetime(date_str)
+                if parsed:
+                    if timezone.is_naive(parsed):
+                        parsed = timezone.make_aware(parsed)
+                    received_at = parsed
+            except Exception:
+                pass
+
+        from_header = msg.get('From', '') or ''
+        from_name = ''
+        m = re.match(r'\s*"?([^"<]+?)"?\s*<', from_header)
+        if m:
+            from_name = m.group(1).strip()
+
+        subject = self.decode_header(msg.get('Subject', ''))[:500]
+        body = self.get_email_body(msg)
+        in_reply_to = (msg.get('In-Reply-To', '') or '').strip()[:500]
+        references = (msg.get('References', '') or '').strip()
+
+        try:
+            InboxEmail.objects.create(
+                owner=account.owner,
+                email_account=account,
+                message_id=message_id[:500],
+                in_reply_to=in_reply_to,
+                references=references,
+                from_email=sender_email,
+                from_name=from_name[:255],
+                subject=subject,
+                body=body,
+                received_at=received_at,
+            )
+            return True
+        except IntegrityError:
+            # Raced with a concurrent sync — treat as already stored.
+            return False
 
     def detect_reply(self, msg, account):
         """
@@ -328,7 +394,6 @@ class Command(BaseCommand):
             date_str = msg.get('Date')
             if date_str:
                 try:
-                    from email.utils import parsedate_to_datetime
                     reply_date = parsedate_to_datetime(date_str)
                     # Convert to timezone-aware datetime
                     if reply_date and timezone.is_naive(reply_date):
@@ -338,7 +403,24 @@ class Command(BaseCommand):
                     reply_date = timezone.now()
             else:
                 reply_date = timezone.now()
-            
+
+            # Dedupe: skip if we've already stored a Reply for this exact incoming message.
+            # Keyed on (campaign, lead, subject, replied_at within 2 min). We intentionally
+            # exclude triggering_email from the filter because multiple EmailSendHistory
+            # rows can share a Message-ID (re-sends), which made detect_reply return a
+            # different sent_email each run and broke dedupe.
+            dedupe_window_start = reply_date - timedelta(minutes=2)
+            dedupe_window_end = reply_date + timedelta(minutes=2)
+            if Reply.objects.filter(
+                campaign=campaign,
+                lead=lead,
+                reply_subject=reply_subject,
+                replied_at__gte=dedupe_window_start,
+                replied_at__lte=dedupe_window_end,
+            ).exists():
+                logger.info(f'Skipping duplicate reply for {sender_email} (already stored)')
+                return True
+
             # Call process_reply_directly service function (avoids middleware/HTTP issues)
             from marketing_agent.services.reply_processor import process_reply_directly
             

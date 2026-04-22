@@ -12,11 +12,29 @@ export const getReplyDraftDashboard = async () => {
   }
 };
 
-export const listPendingReplies = async () => {
+export const listPendingReplies = async ({ campaign = '', days = '' } = {}) => {
   try {
-    return await companyApi.get('/reply-draft/pending-replies');
+    const params = new URLSearchParams();
+    if (campaign !== '' && campaign !== null && campaign !== undefined) {
+      params.set('campaign', String(campaign));
+    }
+    if (days !== '' && days !== null && days !== undefined) {
+      params.set('days', String(days));
+    }
+    const qs = params.toString();
+    const path = qs ? `/reply-draft/pending-replies?${qs}` : '/reply-draft/pending-replies';
+    return await companyApi.get(path);
   } catch (error) {
     console.error('List pending replies error:', error);
+    throw error;
+  }
+};
+
+export const listReplyDraftCampaigns = async () => {
+  try {
+    return await companyApi.get('/reply-draft/campaigns');
+  } catch (error) {
+    console.error('List reply-draft campaigns error:', error);
     throw error;
   }
 };
@@ -33,14 +51,22 @@ export const listDrafts = async (statusFilter = null) => {
   }
 };
 
-export const generateDraft = async ({ originalEmailId, userContext = '', tone = 'professional', emailAccountId = null }) => {
+export const generateDraft = async ({
+  originalEmailId = null,
+  inboxEmailId = null,
+  userContext = '',
+  tone = 'professional',
+  emailAccountId = null,
+} = {}) => {
   try {
-    return await companyApi.post('/reply-draft/drafts/generate', {
-      original_email_id: originalEmailId,
+    const payload = {
       user_context: userContext,
       tone,
       email_account_id: emailAccountId,
-    });
+    };
+    if (originalEmailId) payload.original_email_id = originalEmailId;
+    if (inboxEmailId) payload.inbox_email_id = inboxEmailId;
+    return await companyApi.post('/reply-draft/drafts/generate', payload);
   } catch (error) {
     console.error('Generate draft error:', error);
     throw error;

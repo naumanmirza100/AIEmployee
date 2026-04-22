@@ -35,12 +35,20 @@ import { Badge } from '@/components/ui/badge';
 import {
   listPendingReplies,
   listDrafts,
+  listReplyDraftCampaigns,
   generateDraft,
   regenerateDraft,
   approveDraft,
   rejectDraft,
   sendDraft,
 } from '@/services/replyDraftService';
+
+const DAYS_FILTERS = [
+  { value: '',   label: 'All time' },
+  { value: '1',  label: 'Last 24h' },
+  { value: '7',  label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+];
 
 const TONES = [
   { value: 'professional', label: 'Professional' },
@@ -191,6 +199,9 @@ const ReplyDraftAgentPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignFilter, setCampaignFilter] = useState(''); // '' = all, 'none' = generic only, or campaign id
+  const [daysFilter, setDaysFilter] = useState('');           // '' = all, '1' | '7' | '30'
 
   useEffect(() => {
     const companyUserStr = localStorage.getItem('company_user');
@@ -220,12 +231,12 @@ const ReplyDraftAgentPage = () => {
 
   const refreshInbox = useCallback(async () => {
     try {
-      const res = await listPendingReplies();
+      const res = await listPendingReplies({ campaign: campaignFilter, days: daysFilter });
       setPendingReplies(res?.data || []);
     } catch (e) {
       toast({ title: 'Failed to load inbox', description: e.message, variant: 'destructive' });
     }
-  }, [toast]);
+  }, [toast, campaignFilter, daysFilter]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -235,6 +246,16 @@ const ReplyDraftAgentPage = () => {
       toast({ title: 'Failed to load drafts', description: e.message, variant: 'destructive' });
     }
   }, [toast]);
+
+  const refreshCampaigns = useCallback(async () => {
+    try {
+      const res = await listReplyDraftCampaigns();
+      setCampaigns(res?.data || []);
+    } catch (e) {
+      // Non-fatal — filter dropdown just shows no campaigns.
+      console.error('Failed to load campaigns', e);
+    }
+  }, []);
 
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
@@ -246,8 +267,16 @@ const ReplyDraftAgentPage = () => {
   }, [refreshInbox, refreshDrafts]);
 
   useEffect(() => {
-    if (hasAccess) refreshAll();
-  }, [hasAccess, refreshAll]);
+    if (hasAccess) {
+      refreshCampaigns();
+      refreshAll();
+    }
+  }, [hasAccess, refreshCampaigns, refreshAll]);
+
+  // Re-fetch the inbox whenever the user changes a filter.
+  useEffect(() => {
+    if (hasAccess) refreshInbox();
+  }, [hasAccess, campaignFilter, daysFilter, refreshInbox]);
 
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
@@ -284,8 +313,10 @@ const ReplyDraftAgentPage = () => {
     if (!selectedReply) return;
     setBusy(true);
     try {
+      const isInbox = selectedReply.source === 'inbox';
       const res = await generateDraft({
-        originalEmailId: selectedReply.id,
+        originalEmailId: isInbox ? null : selectedReply.id,
+        inboxEmailId: isInbox ? selectedReply.id : null,
         userContext,
         tone,
       });
@@ -297,6 +328,7 @@ const ReplyDraftAgentPage = () => {
         setSelectedDraft({
           id: d.draft_id,
           status: 'pending',
+          source: d.source || (isInbox ? 'inbox' : 'reply'),
           subject: d.subject,
           body: d.body,
           tone,
@@ -564,7 +596,7 @@ const ReplyDraftAgentPage = () => {
                 </div>
 
                 {/* Search */}
-                <div className="p-3 border-b border-white/10">
+                <div className="p-3 border-b border-white/10 space-y-2">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <input
@@ -581,6 +613,37 @@ const ReplyDraftAgentPage = () => {
                       className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     />
                   </div>
+
+                  {activeTab === 'inbox' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={campaignFilter}
+                        onChange={(e) => setCampaignFilter(e.target.value)}
+                        title="Filter by campaign"
+                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      >
+                        <option value="" className="bg-gray-900">All campaigns</option>
+                        <option value="none" className="bg-gray-900">No campaign (inbox)</option>
+                        {campaigns.map((c) => (
+                          <option key={c.id} value={String(c.id)} className="bg-gray-900">
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={daysFilter}
+                        onChange={(e) => setDaysFilter(e.target.value)}
+                        title="Filter by time"
+                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      >
+                        {DAYS_FILTERS.map((d) => (
+                          <option key={d.value || 'all'} value={d.value} className="bg-gray-900">
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* List */}
@@ -590,8 +653,14 @@ const ReplyDraftAgentPage = () => {
                       {filteredInbox.length === 0 ? (
                         <EmptyState
                           icon={Inbox}
-                          title={search ? 'No matches' : 'Inbox is clear'}
-                          subtitle={search ? 'Try a different search term.' : 'New replies from your campaigns will appear here.'}
+                          title={search ? 'No matches' : (campaignFilter || daysFilter ? 'Nothing in this filter' : 'Inbox is clear')}
+                          subtitle={
+                            search
+                              ? 'Try a different search term.'
+                              : (campaignFilter || daysFilter)
+                                ? 'Try widening the campaign or time range.'
+                                : 'Replies and inbox mail will appear here.'
+                          }
                         />
                       ) : (
                         filteredInbox.map((r) => (
