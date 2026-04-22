@@ -253,7 +253,11 @@ class ReplyDraftAgent(MarketingBaseAgent):
         }
 
     def regenerate_draft(self, draft_id, new_instructions='', tone=None):
-        """Produce a fresh draft based on an existing one, with new instructions."""
+        """Produce a fresh draft based on an existing one, with new instructions.
+
+        The parent draft is marked 'rejected' once a new child is created, so
+        the drafts list and pending counts only reflect the latest iteration.
+        """
         try:
             existing = ReplyDraft.objects.get(id=draft_id, owner=self.user)
         except ReplyDraft.DoesNotExist:
@@ -262,7 +266,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return {'success': False, 'error': 'Cannot regenerate a draft that was already sent'}
 
         combined_context = (existing.generation_prompt + '\n' + new_instructions).strip()
-        return self.generate_draft(
+        result = self.generate_draft(
             original_email_id=existing.original_email_id,
             inbox_email_id=existing.inbox_email_id,
             user_context=combined_context,
@@ -270,6 +274,13 @@ class ReplyDraftAgent(MarketingBaseAgent):
             email_account_id=existing.email_account_id,
             parent_draft_id=existing.id,
         )
+
+        # If the new draft was created successfully, supersede the parent.
+        if result.get('success') and result.get('draft_id') and existing.status != 'rejected':
+            existing.status = 'rejected'
+            existing.save(update_fields=['status', 'updated_at'])
+
+        return result
 
     def approve_draft(self, draft_id, edited_subject=None, edited_body=None):
         """User approves a draft, optionally with inline edits. Send happens separately."""

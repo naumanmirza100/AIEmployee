@@ -16,7 +16,8 @@ from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from marketing_agent.models import Reply, Campaign
+from core.models import CompanyUser
+from marketing_agent.models import Reply, Campaign, Lead
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail
 from reply_draft_agent.permissions import company_has_module
@@ -152,10 +153,52 @@ def _parse_days_filter(value):
     return timezone.now() - timedelta(days=days)
 
 
-def _visible_campaigns_for_user(user):
-    """Campaigns the dropdown can filter on — scoped to the bridged User's own
-    campaigns (same scope the list_pending_replies endpoint uses)."""
-    return Campaign.objects.filter(owner=user).order_by('-created_at')
+def _company_bridge_user_ids(company_user):
+    """Django User ids bridged from every active CompanyUser in this company.
+
+    The Reply Draft agent operates on the full set because inbox mail can land
+    in any company user's mailbox and the business rule is "show replies from
+    leads across all of this company's campaigns".
+    """
+    company = getattr(company_user, 'company', None)
+    if company is None:
+        user = _get_or_create_user_for_company_user(company_user)
+        return [user.id]
+    emails = list(
+        CompanyUser.objects.filter(company=company, is_active=True)
+        .values_list('email', flat=True)
+    )
+    if not emails:
+        user = _get_or_create_user_for_company_user(company_user)
+        return [user.id]
+    ids = list(User.objects.filter(email__in=emails).values_list('id', flat=True))
+    # Always include the caller's own bridge user in case it hasn't been
+    # materialized for another CompanyUser yet.
+    caller_user = _get_or_create_user_for_company_user(company_user)
+    if caller_user.id not in ids:
+        ids.append(caller_user.id)
+    return ids
+
+
+def _visible_campaigns(user_ids):
+    """Campaigns across the whole company (any active CompanyUser's bridged owner)."""
+    return Campaign.objects.filter(owner_id__in=user_ids).order_by('-created_at')
+
+
+def _known_lead_emails(user_ids):
+    """Emails of every Lead attached to any Campaign in this company.
+
+    Used to decide which InboxEmail rows should surface in the Reply Draft UI.
+    """
+    if not user_ids:
+        return set()
+    campaign_ids = Campaign.objects.filter(owner_id__in=user_ids).values_list('id', flat=True)
+    emails = (
+        Lead.objects.filter(campaigns__in=list(campaign_ids))
+        .values_list('email', flat=True)
+        .distinct()
+    )
+    return {e.lower() for e in emails if e}
 
 
 @api_view(['GET'])
@@ -167,15 +210,24 @@ def dashboard(request):
     if gate is not None:
         return gate
 
-    user = _get_or_create_user_for_company_user(request.user)
+    user_ids = _company_bridge_user_ids(request.user)
     try:
-        drafts_qs = ReplyDraft.objects.filter(owner=user)
-        pending_reply_count = Reply.objects.filter(lead__owner=user).exclude(
-            id__in=drafts_qs.filter(original_email_id__isnull=False).values_list('original_email_id', flat=True)
+        drafts_qs = ReplyDraft.objects.filter(owner_id__in=user_ids)
+        # "Live" drafts only — rejected ones don't block the original from being pending again.
+        live_drafts_qs = drafts_qs.exclude(status='rejected')
+        pending_reply_count = Reply.objects.filter(lead__owner_id__in=user_ids).exclude(
+            id__in=live_drafts_qs.filter(original_email_id__isnull=False).values_list('original_email_id', flat=True)
         ).count()
-        pending_inbox_count = InboxEmail.objects.filter(owner=user).exclude(
-            id__in=drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True)
-        ).count()
+
+        lead_emails = _known_lead_emails(user_ids)
+        pending_inbox_count = 0
+        if lead_emails:
+            pending_inbox_count = (
+                InboxEmail.objects
+                .filter(owner_id__in=user_ids, from_email__in=lead_emails)
+                .exclude(id__in=live_drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True))
+                .count()
+            )
 
         stats = {
             'pending_replies': pending_reply_count + pending_inbox_count,
@@ -187,7 +239,7 @@ def dashboard(request):
             'drafts_failed': drafts_qs.filter(status='failed').count(),
         }
 
-        recent_drafts = list(drafts_qs.select_related('lead').order_by('-created_at')[:10])
+        recent_drafts = list(drafts_qs.select_related('lead', 'inbox_email').order_by('-created_at')[:10])
         return Response({
             'status': 'success',
             'data': {
@@ -207,7 +259,10 @@ def dashboard(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_pending_replies(request):
-    """Inbox view: campaign replies + generic inbox emails that don't yet have a draft.
+    """Inbox view: campaign replies + generic inbox emails from known campaign leads.
+
+    Non-lead mail (newsletters, personal mail, etc.) is filtered out — only
+    senders that appear as a Lead on any campaign in this company are shown.
 
     Query params:
       - campaign: campaign id, or 'none' (generic inbox only), or blank (all)
@@ -216,27 +271,32 @@ def list_pending_replies(request):
     gate = _enforce_module(request.user)
     if gate is not None:
         return gate
-    user = _get_or_create_user_for_company_user(request.user)
 
+    user_ids = _company_bridge_user_ids(request.user)
     campaign_param = (request.GET.get('campaign') or '').strip()
     days_cutoff = _parse_days_filter(request.GET.get('days'))
 
+    # Only LIVE drafts block their original from re-appearing in the inbox.
+    # Rejected/discarded drafts should send the original back to the inbox so
+    # the user can draft again.
     drafted_reply_ids = set(
-        ReplyDraft.objects.filter(owner=user, original_email_id__isnull=False)
+        ReplyDraft.objects.filter(owner_id__in=user_ids, original_email_id__isnull=False)
+        .exclude(status='rejected')
         .values_list('original_email_id', flat=True)
     )
     drafted_inbox_ids = set(
-        ReplyDraft.objects.filter(owner=user, inbox_email_id__isnull=False)
+        ReplyDraft.objects.filter(owner_id__in=user_ids, inbox_email_id__isnull=False)
+        .exclude(status='rejected')
         .values_list('inbox_email_id', flat=True)
     )
 
     items = []
 
-    # Campaign replies — included unless campaign == 'none'.
+    # Campaign replies — included unless the user asked for generic-only ('none').
     if campaign_param != 'none':
         reply_qs = (
             Reply.objects
-            .filter(lead__owner=user)
+            .filter(lead__owner_id__in=user_ids)
             .exclude(id__in=drafted_reply_ids)
             .select_related('lead', 'campaign')
         )
@@ -250,18 +310,21 @@ def list_pending_replies(request):
         for r in reply_qs.order_by('-replied_at')[:150]:
             items.append((r.replied_at, _serialize_reply(r)))
 
-    # Generic inbox emails — excluded when the user picked a specific campaign id.
+    # Generic inbox emails — only show messages whose sender is a Lead in this
+    # company's campaigns. Excluded entirely when the user picked a specific campaign.
     specific_campaign_selected = bool(campaign_param) and campaign_param != 'none'
     if not specific_campaign_selected:
-        inbox_qs = (
-            InboxEmail.objects.filter(owner=user)
-            .exclude(id__in=drafted_inbox_ids)
-            .select_related('email_account')
-        )
-        if days_cutoff is not None:
-            inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
-        for m in inbox_qs.order_by('-received_at')[:150]:
-            items.append((m.received_at, _serialize_inbox_email(m)))
+        lead_emails = _known_lead_emails(user_ids)
+        if lead_emails:
+            inbox_qs = (
+                InboxEmail.objects.filter(owner_id__in=user_ids, from_email__in=lead_emails)
+                .exclude(id__in=drafted_inbox_ids)
+                .select_related('email_account')
+            )
+            if days_cutoff is not None:
+                inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
+            for m in inbox_qs.order_by('-received_at')[:150]:
+                items.append((m.received_at, _serialize_inbox_email(m)))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
     payload = [entry for _, entry in items[:200]]
@@ -280,10 +343,10 @@ def list_campaigns(request):
     gate = _enforce_module(request.user)
     if gate is not None:
         return gate
-    user = _get_or_create_user_for_company_user(request.user)
+    user_ids = _company_bridge_user_ids(request.user)
     data = [
         {'id': c.id, 'name': c.name, 'status': c.status}
-        for c in _visible_campaigns_for_user(user)[:200]
+        for c in _visible_campaigns(user_ids)[:200]
     ]
     return Response({'status': 'success', 'data': data})
 
@@ -295,11 +358,14 @@ def list_drafts(request):
     gate = _enforce_module(request.user)
     if gate is not None:
         return gate
-    user = _get_or_create_user_for_company_user(request.user)
-    qs = ReplyDraft.objects.filter(owner=user).select_related('lead', 'original_email')
+    user_ids = _company_bridge_user_ids(request.user)
+    qs = ReplyDraft.objects.filter(owner_id__in=user_ids).select_related('lead', 'original_email', 'inbox_email')
     status_filter = request.GET.get('status')
     if status_filter:
         qs = qs.filter(status=status_filter)
+    else:
+        # Hide rejected drafts by default — they're terminal and shouldn't clutter the list.
+        qs = qs.exclude(status='rejected')
     drafts = list(qs.order_by('-created_at')[:100])
     return Response({
         'status': 'success',

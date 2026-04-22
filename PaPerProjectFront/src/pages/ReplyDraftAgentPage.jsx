@@ -400,9 +400,10 @@ const ReplyDraftAgentPage = () => {
     setBusy(true);
     try {
       await rejectDraft(selectedDraft.id);
-      toast({ title: 'Draft discarded' });
+      toast({ title: 'Draft discarded', description: 'The original message is back in your inbox.' });
       clearSelection();
-      refreshDrafts();
+      // Refresh BOTH lists — inbox picks the original back up, drafts loses this row.
+      refreshAll();
     } catch (e) {
       toast({ title: 'Discard failed', description: e.message, variant: 'destructive' });
     } finally {
@@ -419,7 +420,7 @@ const ReplyDraftAgentPage = () => {
   }, [pendingReplies, search]);
 
   const unsentDrafts = useMemo(
-    () => drafts.filter((d) => d.status !== 'sent'),
+    () => drafts.filter((d) => d.status !== 'sent' && d.status !== 'rejected'),
     [drafts]
   );
 

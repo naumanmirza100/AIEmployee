@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = 'Sync inbox via IMAP and detect email replies automatically'
 
+    DEFAULT_SINCE_DAYS = 30
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--account-id',
@@ -44,13 +46,23 @@ class Command(BaseCommand):
             action='store_true',
             help='Run without actually processing replies',
         )
+        parser.add_argument(
+            '--since-days',
+            type=int,
+            default=self.DEFAULT_SINCE_DAYS,
+            help='How many days back to fetch from IMAP (default: 30). Pass a larger number for a one-shot backfill.',
+        )
 
     def handle(self, *args, **options):
         account_id = options.get('account_id')
         dry_run = options.get('dry_run', False)
-        
+        since_days = options.get('since_days') or self.DEFAULT_SINCE_DAYS
+        if since_days < 1:
+            since_days = self.DEFAULT_SINCE_DAYS
+
         self.stdout.write(self.style.SUCCESS('\n=== Starting IMAP Inbox Sync ===\n'))
         self.stdout.write(f'Current time: {timezone.now()}')
+        self.stdout.write(f'IMAP window: last {since_days} day(s)')
         
         if dry_run:
             self.stdout.write(self.style.WARNING('[DRY RUN] DRY RUN MODE - No replies will be processed\n'))
@@ -73,17 +85,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('[WARNING] Please enable IMAP sync in Email Accounts settings.'))
             return
         
-        # Known campaign lead emails are still precomputed so we can short-circuit
-        # reply detection for campaign mail, but we no longer filter out
-        # unknown senders — generic inbox mail is stored as InboxEmail rows.
-        active_campaigns = Campaign.objects.filter(status='active')
-        campaign_leads = Lead.objects.filter(
-            campaigns__in=active_campaigns
-        ).distinct()
-        known_lead_emails = set(lead.email.lower() for lead in campaign_leads)
+        # Known lead emails across ALL campaigns (not just active ones) — used to
+        # decide which non-campaign-reply messages are worth storing as generic
+        # InboxEmail rows. Senders outside this set are ignored entirely so the
+        # Reply Draft UI only surfaces mail from leads the company is working with.
+        campaign_leads = Lead.objects.filter(campaigns__isnull=False).distinct()
+        known_lead_emails = set(lead.email.lower() for lead in campaign_leads if lead.email)
 
-        self.stdout.write(f'Found {len(known_lead_emails)} known lead email(s) from active campaigns')
-        self.stdout.write('   All other mail will be stored as generic InboxEmail rows.')
+        self.stdout.write(f'Found {len(known_lead_emails)} known lead email(s) across all campaigns')
+        self.stdout.write('   Non-lead mail will be skipped; only lead mail is stored as InboxEmail.')
 
         total_replies_found = 0
         total_replies_processed = 0
@@ -101,7 +111,7 @@ class Command(BaseCommand):
 
             try:
                 replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
-                    account, dry_run, known_lead_emails,
+                    account, dry_run, known_lead_emails, since_days=since_days,
                 )
                 total_replies_found += replies_found
                 total_replies_processed += replies_processed
@@ -117,15 +127,17 @@ class Command(BaseCommand):
         self.stdout.write(f'Total generic inbox emails stored: {total_inbox_stored}')
         self.stdout.write(f'{"="*60}\n')
 
-    def sync_account_inbox(self, account, dry_run=False, known_lead_emails=None):
+    def sync_account_inbox(self, account, dry_run=False, known_lead_emails=None, since_days=None):
         """
         Sync inbox for a single email account.
 
         Campaign replies (matched by In-Reply-To / References / Subject) go into
-        the Reply table via the existing path. Everything else from the last
-        7 days is stored as an InboxEmail row so the Reply Draft Agent can
-        surface it in the UI with campaign + days filters.
+        the Reply table via the existing path. Mail from a known lead that is
+        not a campaign reply is stored as an InboxEmail row so the Reply Draft
+        Agent can surface it in the UI.
         """
+        if since_days is None or since_days < 1:
+            since_days = self.DEFAULT_SINCE_DAYS
         replies_found = 0
         replies_processed = 0
         inbox_stored = 0
@@ -146,10 +158,10 @@ class Command(BaseCommand):
             self.stdout.write(f'  Connected to IMAP server: {account.imap_host}:{account.imap_port}')
             mail.select('INBOX')
 
-            # Last 7 days of mail (both UNSEEN and SEEN). We rely on our own
+            # Last N days of mail (both UNSEEN and SEEN). We rely on our own
             # Message-ID dedupe so reading mail in another client doesn't
             # cause the draft agent to miss messages.
-            since_date = (timezone.now() - timedelta(days=7)).strftime('%d-%b-%Y')
+            since_date = (timezone.now() - timedelta(days=since_days)).strftime('%d-%b-%Y')
             status, messages = mail.search(None, f'(SINCE {since_date})')
 
             if status != 'OK':
@@ -160,11 +172,11 @@ class Command(BaseCommand):
             email_ids = messages[0].split()
 
             if not email_ids:
-                self.stdout.write(f'  [INFO] No emails in the last 7 days')
+                self.stdout.write(f'  [INFO] No emails in the last {since_days} day(s)')
                 mail.logout()
                 return replies_found, replies_processed, inbox_stored
 
-            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last 7 days')
+            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last {since_days} day(s)')
 
             emails_checked = 0
             emails_skipped_known = 0
@@ -217,8 +229,12 @@ class Command(BaseCommand):
                             self.stdout.write(f'     [SKIP] Skipped (dry run)')
                         continue
 
-                    # Step 2: generic inbox mail — store as InboxEmail.
+                    # Step 2: generic inbox mail — only store if the sender is a
+                    # lead on any of this company's campaigns. Skip everything else.
                     if dry_run:
+                        continue
+
+                    if sender_email.lower() not in known_lead_emails:
                         continue
 
                     if self.store_inbox_email(msg, account, sender_email):
@@ -444,40 +460,58 @@ class Command(BaseCommand):
             logger.error(f'Error processing reply: {str(e)}', exc_info=True)
             return False
 
+    @staticmethod
+    def _safe_decode(raw, encoding):
+        """Decode bytes while tolerating bogus encoding labels from malformed mail.
+
+        Some clients produce headers like 'unknown-8bit' which Python cannot
+        resolve — LookupError here would bubble up and break the whole sync.
+        """
+        if not isinstance(raw, (bytes, bytearray)):
+            return raw
+        candidates = [encoding, 'utf-8', 'latin-1']
+        for enc in candidates:
+            if not enc:
+                continue
+            try:
+                return raw.decode(enc, errors='ignore')
+            except (LookupError, UnicodeDecodeError):
+                continue
+        return raw.decode('latin-1', errors='ignore')
+
     def get_email_address(self, header_value):
         """Extract email address from header value"""
         if not header_value:
             return None
-        
-        # Decode header
+
         decoded_header = decode_header(header_value)
         email_str = ''
         for part, encoding in decoded_header:
             if isinstance(part, bytes):
-                email_str += part.decode(encoding or 'utf-8', errors='ignore')
+                email_str += self._safe_decode(part, encoding or 'utf-8')
             else:
                 email_str += part
-        
+
         # Extract email from string like "Name <email@example.com>" or "email@example.com"
         match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', email_str)
         if match:
             return match.group(0).lower()
-        
+
         return None
 
     def decode_header(self, header_value):
         """Decode email header value"""
         if not header_value:
             return ''
-        
+
         decoded_header = decode_header(header_value)
         result = ''
         for part, encoding in decoded_header:
             if isinstance(part, bytes):
-                result += part.decode(encoding or 'utf-8', errors='ignore')
+                result += self._safe_decode(part, encoding or 'utf-8')
             else:
                 result += part
-        
+
         return result.strip()
 
     def get_email_body(self, msg):
@@ -498,7 +532,7 @@ class Command(BaseCommand):
                         payload = part.get_payload(decode=True)
                         if payload:
                             charset = part.get_content_charset() or 'utf-8'
-                            body = payload.decode(charset, errors='ignore')
+                            body = self._safe_decode(payload, charset)
                             break
                     except Exception as e:
                         logger.warning(f'Error decoding text/plain: {str(e)}')
@@ -508,7 +542,7 @@ class Command(BaseCommand):
                         payload = part.get_payload(decode=True)
                         if payload:
                             charset = part.get_content_charset() or 'utf-8'
-                            html_body = payload.decode(charset, errors='ignore')
+                            html_body = self._safe_decode(payload, charset)
                             # Convert HTML to text (simple)
                             import re
                             body = re.sub(r'<[^>]+>', '', html_body)
@@ -521,7 +555,7 @@ class Command(BaseCommand):
                 payload = msg.get_payload(decode=True)
                 if payload:
                     charset = msg.get_content_charset() or 'utf-8'
-                    body = payload.decode(charset, errors='ignore')
+                    body = self._safe_decode(payload, charset)
             except Exception as e:
                 logger.warning(f'Error decoding body: {str(e)}')
         
