@@ -18,7 +18,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from operations_agent.models import (
     OperationsDocument, OperationsDocumentChunk, OperationsDocumentSummary,
-    OperationsChat, OperationsChatMessage,
+    OperationsChat, OperationsChatMessage, OperationsGeneratedDocument,
 )
 
 logger = logging.getLogger(__name__)
@@ -773,6 +773,762 @@ def ask_qa_question(request):
 
     except Exception as e:
         logger.error(f'ask_qa_question error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ──────────────────────────────────────────────
+# Document Authoring Endpoints
+# ──────────────────────────────────────────────
+
+def _serialize_generated(doc, include_content=True):
+    refs = [
+        {'id': d.id, 'title': d.title or d.original_filename, 'file_type': d.file_type}
+        for d in doc.reference_documents.all()
+    ]
+    data = {
+        'id': doc.id,
+        'title': doc.title,
+        'template_type': doc.template_type,
+        'tone': doc.tone,
+        'prompt': doc.prompt,
+        'version': doc.version,
+        'edit_history': doc.edit_history or [],
+        'reference_documents': refs,
+        'generated_by': doc.generated_by.full_name if doc.generated_by else None,
+        'created_at': doc.created_at.isoformat(),
+        'updated_at': doc.updated_at.isoformat(),
+        'word_count': len((doc.content or '').split()),
+        'tokens_used': doc.tokens_used or {},
+    }
+    if include_content:
+        data['content'] = doc.content
+    else:
+        preview = (doc.content or '').strip()
+        if len(preview) > 220:
+            preview = preview[:220] + '…'
+        data['preview'] = preview
+    return data
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def generate_document(request):
+    """Generate a professional document using the authoring agent and persist it."""
+    try:
+        user = request.user
+        company = user.company
+
+        prompt = (request.data.get('prompt') or '').strip()
+        if not prompt:
+            return Response(
+                {'status': 'error', 'message': 'Prompt is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        template_type = (request.data.get('template_type') or 'custom').strip()
+        tone = (request.data.get('tone') or 'formal').strip()
+        title = (request.data.get('title') or '').strip()
+
+        ref_raw = request.data.get('reference_document_ids') or []
+        if not isinstance(ref_raw, list):
+            ref_raw = []
+        ref_ids = []
+        for r in ref_raw:
+            try:
+                ref_ids.append(int(r))
+            except (TypeError, ValueError):
+                continue
+
+        # Validate refs belong to company
+        valid_refs = list(
+            OperationsDocument.objects.filter(
+                company=company, id__in=ref_ids, is_processed=True,
+            )
+        )
+
+        from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        agent = DocumentAuthoringAgent()
+        result = agent.generate(
+            company_id=company.id,
+            prompt=prompt,
+            template_type=template_type,
+            tone=tone,
+            title=title or None,
+            reference_document_ids=[d.id for d in valid_refs] or None,
+        )
+
+        if not result.get('success'):
+            return Response(
+                {'status': 'error', 'message': result.get('error', 'Generation failed')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        doc = OperationsGeneratedDocument.objects.create(
+            company=company,
+            generated_by=user,
+            title=result['title'][:500],
+            template_type=template_type if template_type in dict(
+                OperationsGeneratedDocument.TEMPLATE_TYPE_CHOICES
+            ) else 'custom',
+            tone=tone if tone in dict(OperationsGeneratedDocument.TONE_CHOICES) else 'formal',
+            prompt=prompt,
+            content=result['content_markdown'],
+            version=1,
+            edit_history=[],
+            tokens_used=result.get('tokens_used') or {},
+        )
+        if valid_refs:
+            doc.reference_documents.set(valid_refs)
+
+        return Response(
+            {'status': 'success', 'document': _serialize_generated(doc, include_content=True)},
+            status=status.HTTP_201_CREATED,
+        )
+
+    except Exception as e:
+        logger.error(f'generate_document error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_generated_documents(request):
+    """List all generated documents for the company."""
+    try:
+        company = request.user.company
+        docs = OperationsGeneratedDocument.objects.filter(company=company).order_by('-updated_at')
+
+        search = (request.query_params.get('search') or '').strip()
+        template = request.query_params.get('template_type')
+        if search:
+            docs = docs.filter(title__icontains=search)
+        if template:
+            docs = docs.filter(template_type=template)
+
+        total = docs.count()
+        page = max(1, int(request.query_params.get('page', 1)))
+        page_size = min(max(1, int(request.query_params.get('page_size', 20))), 100)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_docs = docs[start:end]
+
+        return Response({
+            'status': 'success',
+            'documents': [_serialize_generated(d, include_content=False) for d in page_docs],
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+        })
+    except Exception as e:
+        logger.error(f'list_generated_documents error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_generated_document(request, doc_id):
+    """Get a generated document with full content."""
+    try:
+        company = request.user.company
+        doc = OperationsGeneratedDocument.objects.filter(company=company, pk=doc_id).first()
+        if not doc:
+            return Response(
+                {'status': 'error', 'message': 'Document not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({'status': 'success', 'document': _serialize_generated(doc)})
+    except Exception as e:
+        logger.error(f'get_generated_document error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_generated_document(request, doc_id):
+    """Update title / content of a generated document. Bumps version on content change."""
+    try:
+        user = request.user
+        company = user.company
+        doc = OperationsGeneratedDocument.objects.filter(company=company, pk=doc_id).first()
+        if not doc:
+            return Response(
+                {'status': 'error', 'message': 'Document not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        changed = False
+        new_title = request.data.get('title')
+        new_content = request.data.get('content')
+
+        if isinstance(new_title, str):
+            new_title = new_title.strip()[:500]
+            if new_title and new_title != doc.title:
+                doc.title = new_title
+                changed = True
+
+        if isinstance(new_content, str) and new_content != doc.content:
+            history = doc.edit_history or []
+            history.append({
+                'version': doc.version,
+                'edited_at': timezone.now().isoformat(),
+                'edited_by': user.full_name if hasattr(user, 'full_name') else None,
+                'previous_length': len(doc.content or ''),
+            })
+            # Cap history to last 20 entries
+            doc.edit_history = history[-20:]
+            doc.content = new_content
+            doc.version += 1
+            changed = True
+
+        if changed:
+            doc.save()
+
+        return Response({'status': 'success', 'document': _serialize_generated(doc)})
+    except Exception as e:
+        logger.error(f'update_generated_document error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_generated_document(request, doc_id):
+    """Delete a generated document."""
+    try:
+        company = request.user.company
+        doc = OperationsGeneratedDocument.objects.filter(company=company, pk=doc_id).first()
+        if not doc:
+            return Response(
+                {'status': 'error', 'message': 'Document not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        title = doc.title
+        doc.delete()
+        return Response({'status': 'success', 'message': f'Deleted "{title}"'})
+    except Exception as e:
+        logger.error(f'delete_generated_document error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def regenerate_document(request, doc_id):
+    """Regenerate a document using same prompt/template/refs but fresh AI output."""
+    try:
+        user = request.user
+        company = user.company
+        doc = OperationsGeneratedDocument.objects.filter(company=company, pk=doc_id).first()
+        if not doc:
+            return Response(
+                {'status': 'error', 'message': 'Document not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Allow overriding prompt/tone/refs at regen time
+        prompt = (request.data.get('prompt') or doc.prompt or '').strip()
+        template_type = request.data.get('template_type') or doc.template_type
+        tone = request.data.get('tone') or doc.tone
+        ref_ids_raw = request.data.get('reference_document_ids')
+        if ref_ids_raw is None:
+            ref_ids = list(doc.reference_documents.values_list('id', flat=True))
+        else:
+            ref_ids = []
+            if isinstance(ref_ids_raw, list):
+                for r in ref_ids_raw:
+                    try:
+                        ref_ids.append(int(r))
+                    except (TypeError, ValueError):
+                        continue
+
+        valid_refs = list(
+            OperationsDocument.objects.filter(
+                company=company, id__in=ref_ids, is_processed=True,
+            )
+        )
+
+        from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+        agent = DocumentAuthoringAgent()
+        result = agent.generate(
+            company_id=company.id,
+            prompt=prompt,
+            template_type=template_type,
+            tone=tone,
+            title=doc.title,
+            reference_document_ids=[d.id for d in valid_refs] or None,
+        )
+
+        if not result.get('success'):
+            return Response(
+                {'status': 'error', 'message': result.get('error', 'Regeneration failed')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        history = doc.edit_history or []
+        history.append({
+            'version': doc.version,
+            'edited_at': timezone.now().isoformat(),
+            'edited_by': user.full_name if hasattr(user, 'full_name') else None,
+            'action': 'regenerate',
+            'previous_length': len(doc.content or ''),
+        })
+        doc.edit_history = history[-20:]
+        doc.prompt = prompt
+        doc.template_type = template_type if template_type in dict(
+            OperationsGeneratedDocument.TEMPLATE_TYPE_CHOICES
+        ) else 'custom'
+        doc.tone = tone if tone in dict(OperationsGeneratedDocument.TONE_CHOICES) else 'formal'
+        doc.content = result['content_markdown']
+        doc.version += 1
+        doc.tokens_used = result.get('tokens_used') or {}
+        doc.save()
+        doc.reference_documents.set(valid_refs)
+
+        return Response({'status': 'success', 'document': _serialize_generated(doc)})
+
+    except Exception as e:
+        logger.error(f'regenerate_document error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def export_generated_document_pdf(request, doc_id):
+    """Stream a generated document as a PDF file (direct download)."""
+    from django.http import HttpResponse
+    try:
+        company = request.user.company
+        doc = OperationsGeneratedDocument.objects.filter(company=company, pk=doc_id).first()
+        if not doc:
+            return Response(
+                {'status': 'error', 'message': 'Document not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from operations_agent.utils.pdf_exporter import render_document_pdf
+
+        template_label = dict(OperationsGeneratedDocument.TEMPLATE_TYPE_CHOICES).get(doc.template_type, doc.template_type)
+        tone_label = dict(OperationsGeneratedDocument.TONE_CHOICES).get(doc.tone, doc.tone)
+
+        pdf_bytes = render_document_pdf(
+            title=doc.title,
+            content_markdown=doc.content or '',
+            template_label=template_label,
+            tone_label=tone_label,
+            version=doc.version,
+            word_count=len((doc.content or '').split()),
+        )
+
+        safe_name = ''.join(c if c.isalnum() or c in ('-', '_', ' ') else '_' for c in (doc.title or 'document'))[:80].strip() or 'document'
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
+        response['Content-Length'] = str(len(pdf_bytes))
+        return response
+
+    except Exception as e:
+        logger.error(f'export_generated_document_pdf error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def stream_generate_document(request):
+    """Stream a generated document using newline-delimited JSON (NDJSON).
+
+    Each line is one event:
+        {"type": "meta",  "title": "...", "references": [...]}
+        {"type": "text",  "data": "chunk..."}
+        {"type": "done",  "document": {...serialized...}}
+        {"type": "error", "message": "..."}
+
+    The client reads line-by-line with fetch().body.getReader().
+    """
+    import json
+    from django.http import StreamingHttpResponse
+
+    user = request.user
+    company = user.company
+
+    prompt = (request.data.get('prompt') or '').strip()
+    if not prompt:
+        return Response(
+            {'status': 'error', 'message': 'Prompt is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    template_type = (request.data.get('template_type') or 'custom').strip()
+    tone = (request.data.get('tone') or 'formal').strip()
+    title = (request.data.get('title') or '').strip()
+
+    ref_raw = request.data.get('reference_document_ids') or []
+    if not isinstance(ref_raw, list):
+        ref_raw = []
+    ref_ids = []
+    for r in ref_raw:
+        try:
+            ref_ids.append(int(r))
+        except (TypeError, ValueError):
+            continue
+
+    valid_refs = list(
+        OperationsDocument.objects.filter(
+            company=company, id__in=ref_ids, is_processed=True,
+        )
+    )
+    valid_ref_ids = [d.id for d in valid_refs]
+
+    # Validate template/tone against model choices
+    resolved_template = template_type if template_type in dict(
+        OperationsGeneratedDocument.TEMPLATE_TYPE_CHOICES
+    ) else 'custom'
+    resolved_tone = tone if tone in dict(OperationsGeneratedDocument.TONE_CHOICES) else 'formal'
+
+    def _emit(event_type: str, payload) -> str:
+        if event_type == 'text':
+            msg = {'type': 'text', 'data': payload}
+        elif isinstance(payload, dict):
+            msg = {'type': event_type, **payload}
+        else:
+            msg = {'type': event_type, 'data': payload}
+        return json.dumps(msg, ensure_ascii=False) + '\n'
+
+    def event_stream():
+        try:
+            from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
+            agent = DocumentAuthoringAgent()
+
+            final_payload = None
+
+            for event_type, payload in agent.generate_stream(
+                company_id=company.id,
+                prompt=prompt,
+                template_type=resolved_template,
+                tone=resolved_tone,
+                title=title or None,
+                reference_document_ids=valid_ref_ids or None,
+            ):
+                if event_type == 'done':
+                    final_payload = payload
+                    # Don't emit yet — save to DB first so the client gets the real id
+                    break
+                if event_type == 'error':
+                    yield _emit('error', {'message': payload.get('message', 'Generation failed')})
+                    return
+                yield _emit(event_type, payload)
+
+            if not final_payload:
+                yield _emit('error', {'message': 'Stream ended without a result'})
+                return
+
+            # Persist to DB
+            try:
+                doc = OperationsGeneratedDocument.objects.create(
+                    company=company,
+                    generated_by=user,
+                    title=final_payload['title'][:500],
+                    template_type=resolved_template,
+                    tone=resolved_tone,
+                    prompt=prompt,
+                    content=final_payload['content_markdown'],
+                    version=1,
+                    edit_history=[],
+                    tokens_used=final_payload.get('tokens_used') or {},
+                )
+                if valid_refs:
+                    doc.reference_documents.set(valid_refs)
+            except Exception as db_err:
+                logger.error(f'stream_generate_document DB save error: {db_err}', exc_info=True)
+                yield _emit('error', {'message': f'Could not save document: {db_err}'})
+                return
+
+            yield _emit('done', {'document': _serialize_generated(doc, include_content=True)})
+
+        except Exception as e:
+            logger.error(f'stream_generate_document error: {e}', exc_info=True)
+            yield _emit('error', {'message': str(e)})
+
+    response = StreamingHttpResponse(event_stream(), content_type='application/x-ndjson')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'  # disable nginx buffering when deployed
+    return response
+
+
+# ──────────────────────────────────────────────
+# Operations Analytics Endpoint
+# ──────────────────────────────────────────────
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def operations_analytics(request):
+    """Aggregated analytics for the Operations module.
+
+    Query params:
+        range: '7d' | '30d' | '90d' | 'all'  (default '30d')
+
+    Returns a big payload with KPIs + chart-ready series.
+    """
+    from collections import Counter
+    from datetime import timedelta
+    from django.db.models import Count, Sum
+
+    try:
+        company = request.user.company
+        rng = (request.query_params.get('range') or '30d').lower()
+        now = timezone.now()
+        start = None
+        if rng == '7d':
+            start = now - timedelta(days=7)
+        elif rng == '30d':
+            start = now - timedelta(days=30)
+        elif rng == '90d':
+            start = now - timedelta(days=90)
+        # 'all' leaves start as None
+
+        # ── Base querysets ─────────────────────────
+        docs_qs = OperationsDocument.objects.filter(company=company)
+        summaries_qs = OperationsDocumentSummary.objects.filter(company=company)
+        gen_qs = OperationsGeneratedDocument.objects.filter(company=company)
+        chat_qs = OperationsChat.objects.filter(company=company)
+        msg_qs = OperationsChatMessage.objects.filter(chat__company=company)
+
+        if start:
+            docs_qs = docs_qs.filter(created_at__gte=start)
+            summaries_qs = summaries_qs.filter(created_at__gte=start)
+            gen_qs = gen_qs.filter(created_at__gte=start)
+            chat_qs = chat_qs.filter(created_at__gte=start)
+            msg_qs = msg_qs.filter(created_at__gte=start)
+
+        # ── KPIs ───────────────────────────────────
+        total_docs = docs_qs.count()
+        processed_docs = docs_qs.filter(is_processed=True).count()
+        total_pages = docs_qs.aggregate(s=Sum('page_count'))['s'] or 0
+        total_file_bytes = docs_qs.aggregate(s=Sum('file_size'))['s'] or 0
+        total_summaries = summaries_qs.count()
+        total_generated = gen_qs.count()
+        total_chats = chat_qs.count()
+        total_qa_messages = msg_qs.filter(role='user').count()
+
+        # Tokens across generated docs (JSONField aggregation done in Python for portability)
+        token_sum = 0
+        token_by_template = {}
+        for g in gen_qs.only('template_type', 'tokens_used'):
+            tokens = (g.tokens_used or {}).get('total_tokens') or 0
+            token_sum += tokens
+            token_by_template.setdefault(g.template_type, {'count': 0, 'tokens': 0})
+            token_by_template[g.template_type]['count'] += 1
+            token_by_template[g.template_type]['tokens'] += tokens
+
+        # ── Breakdowns ─────────────────────────────
+        # `.order_by()` resets the model's default -created_at ordering which SQL Server
+        # otherwise appends to the GROUP BY query and then rejects.
+        doc_types = dict(
+            docs_qs.order_by()
+            .values_list('document_type')
+            .annotate(c=Count('id'))
+            .values_list('document_type', 'c')
+        )
+        file_types = dict(
+            docs_qs.order_by()
+            .values_list('file_type')
+            .annotate(c=Count('id'))
+            .values_list('file_type', 'c')
+        )
+
+        # ── Time series: uploads per day ───────────
+        # Use last 30 buckets regardless of range (bucket size scales with range)
+        bucket_days = 1
+        lookback_days = 30
+        if rng == '7d':
+            lookback_days = 7
+        elif rng == '30d':
+            lookback_days = 30
+        elif rng == '90d':
+            lookback_days = 90
+            bucket_days = 3  # 30 buckets × 3 days
+        elif rng == 'all':
+            oldest = OperationsDocument.objects.filter(company=company).order_by('created_at').first()
+            if oldest:
+                days_total = max(1, (now - oldest.created_at).days + 1)
+                lookback_days = days_total
+                bucket_days = max(1, days_total // 30)
+
+        series_docs = []
+        series_generated = []
+        series_qa = []
+        for i in range(lookback_days, 0, -bucket_days):
+            bucket_end = now - timedelta(days=i - bucket_days)
+            bucket_start = now - timedelta(days=i)
+            label = bucket_start.strftime('%b %d')
+            c_docs = OperationsDocument.objects.filter(
+                company=company, created_at__gte=bucket_start, created_at__lt=bucket_end,
+            ).count()
+            c_gen = OperationsGeneratedDocument.objects.filter(
+                company=company, created_at__gte=bucket_start, created_at__lt=bucket_end,
+            ).count()
+            c_qa = OperationsChatMessage.objects.filter(
+                chat__company=company, role='user',
+                created_at__gte=bucket_start, created_at__lt=bucket_end,
+            ).count()
+            series_docs.append({'label': label, 'value': c_docs})
+            series_generated.append({'label': label, 'value': c_gen})
+            series_qa.append({'label': label, 'value': c_qa})
+
+        # ── Insights from summaries ────────────────
+        sentiment_counts = Counter()
+        importance_counts = Counter()
+        topic_counts = Counter()
+        category_counts = Counter()
+        risks_total = 0
+        opportunities_total = 0
+        upcoming_deadlines = []
+        entity_counter_orgs = Counter()
+        entity_counter_people = Counter()
+
+        for s in summaries_qs.only(
+            'sentiment', 'importance_level', 'topics', 'document_category',
+            'risks', 'opportunities', 'deadlines', 'entities', 'created_at',
+        ):
+            if s.sentiment:
+                sentiment_counts[s.sentiment.lower()] += 1
+            if s.importance_level:
+                importance_counts[s.importance_level.lower()] += 1
+            if s.document_category:
+                category_counts[s.document_category] += 1
+            for t in (s.topics or [])[:5]:
+                if t:
+                    topic_counts[str(t).strip()[:50]] += 1
+            risks_total += len(s.risks or [])
+            opportunities_total += len(s.opportunities or [])
+
+            # Entities
+            ents = s.entities or {}
+            if isinstance(ents, dict):
+                for org in (ents.get('organizations') or [])[:10]:
+                    if org:
+                        entity_counter_orgs[str(org).strip()[:60]] += 1
+                for person in (ents.get('people') or [])[:10]:
+                    if person:
+                        entity_counter_people[str(person).strip()[:60]] += 1
+
+            # Deadlines
+            for d in (s.deadlines or [])[:10]:
+                if isinstance(d, dict):
+                    date = d.get('date') or d.get('deadline')
+                    desc = d.get('description') or d.get('title') or d.get('text')
+                    if date or desc:
+                        upcoming_deadlines.append({
+                            'date': str(date) if date else None,
+                            'description': str(desc) if desc else '',
+                            'source': s.original_filename,
+                        })
+                elif isinstance(d, str) and d.strip():
+                    upcoming_deadlines.append({
+                        'date': None,
+                        'description': d.strip()[:200],
+                        'source': s.original_filename,
+                    })
+
+        # Keep top deadlines (first 10, arbitrary order)
+        upcoming_deadlines = upcoming_deadlines[:10]
+
+        # ── Template breakdown (for generated docs) ─
+        template_breakdown = []
+        for template, data in token_by_template.items():
+            template_breakdown.append({
+                'template': template,
+                'count': data['count'],
+                'tokens': data['tokens'],
+            })
+
+        # ── Compose response ──────────────────────
+        return Response({
+            'status': 'success',
+            'range': rng,
+            'kpis': {
+                'total_documents': total_docs,
+                'processed_documents': processed_docs,
+                'total_pages': total_pages,
+                'total_file_bytes': int(total_file_bytes),
+                'total_summaries': total_summaries,
+                'total_generated': total_generated,
+                'total_chats': total_chats,
+                'total_qa_messages': total_qa_messages,
+                'total_tokens_used': token_sum,
+            },
+            'document_types': [
+                {'name': k, 'value': v} for k, v in sorted(doc_types.items(), key=lambda x: -x[1])
+            ],
+            'file_types': [
+                {'name': k, 'value': v} for k, v in sorted(file_types.items(), key=lambda x: -x[1])
+            ],
+            'timeseries': {
+                'documents': series_docs,
+                'generated': series_generated,
+                'qa': series_qa,
+            },
+            'sentiment': [
+                {'name': k, 'value': v} for k, v in sentiment_counts.most_common()
+            ],
+            'importance': [
+                {'name': k, 'value': v}
+                for k, v in sorted(importance_counts.items(), key=lambda x: -x[1])
+            ],
+            'topics': [
+                {'name': k, 'value': v} for k, v in topic_counts.most_common(10)
+            ],
+            'categories': [
+                {'name': k, 'value': v} for k, v in category_counts.most_common(8)
+            ],
+            'risks_vs_opportunities': {
+                'risks': risks_total,
+                'opportunities': opportunities_total,
+            },
+            'top_organizations': [
+                {'name': k, 'value': v} for k, v in entity_counter_orgs.most_common(8)
+            ],
+            'top_people': [
+                {'name': k, 'value': v} for k, v in entity_counter_people.most_common(8)
+            ],
+            'upcoming_deadlines': upcoming_deadlines,
+            'template_usage': template_breakdown,
+        })
+
+    except Exception as e:
+        logger.error(f'operations_analytics error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
