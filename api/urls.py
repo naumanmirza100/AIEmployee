@@ -437,6 +437,14 @@ urlpatterns = [
     # Operations Analytics
     re_path(r'^operations/analytics/?$', operations_agent.operations_analytics, name='operations_analytics'),  # GET
 
+    # Operations Notifications
+    re_path(r'^operations/notifications/?$', operations_agent.list_notifications, name='operations_notifications_list'),  # GET
+    re_path(r'^operations/notifications/unread-count/?$', operations_agent.unread_notifications_count, name='operations_notifications_unread_count'),  # GET
+    re_path(r'^operations/notifications/mark-all-read/?$', operations_agent.mark_all_notifications_read, name='operations_notifications_mark_all_read'),  # POST
+    re_path(r'^operations/notifications/clear/?$', operations_agent.clear_all_notifications, name='operations_notifications_clear'),  # DELETE
+    re_path(r'^operations/notifications/(?P<notification_id>\d+)/read/?$', operations_agent.mark_notification_read, name='operations_notifications_mark_read'),  # POST
+    re_path(r'^operations/notifications/(?P<notification_id>\d+)/delete/?$', operations_agent.delete_notification, name='operations_notifications_delete'),  # DELETE
+
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
