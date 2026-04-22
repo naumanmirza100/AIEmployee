@@ -12,12 +12,13 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from django.contrib.auth.models import User
+from django.db.models import Count, Max, Prefetch
 from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
-from marketing_agent.models import Reply, Campaign, Lead
+from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail
 from reply_draft_agent.permissions import company_has_module
@@ -348,6 +349,131 @@ def list_campaigns(request):
         {'id': c.id, 'name': c.name, 'status': c.status}
         for c in _visible_campaigns(user_ids)[:200]
     ]
+    return Response({'status': 'success', 'data': data})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_leads(request):
+    """All leads across every campaign in this company, with reply analytics.
+
+    Response shape per lead:
+      {
+        id, email, first_name, last_name, company, job_title,
+        campaigns: [{id, name, status}],
+        emails_sent, replies_count, last_reply_at, latest_interest_level,
+        has_replied, latest_analysis
+      }
+
+    Query params:
+      - search: substring match across email / name / company
+      - has_replied: 'yes' | 'no' (optional)
+      - campaign: campaign id to filter leads to a single campaign (optional)
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    user_ids = _company_bridge_user_ids(request.user)
+    if not user_ids:
+        return Response({'status': 'success', 'data': []})
+
+    campaign_ids = list(
+        Campaign.objects.filter(owner_id__in=user_ids).values_list('id', flat=True)
+    )
+    if not campaign_ids:
+        return Response({'status': 'success', 'data': []})
+
+    # Leads attached to any of the company's campaigns. distinct() avoids dupes
+    # when a lead is on multiple campaigns.
+    leads_qs = (
+        Lead.objects
+        .filter(campaigns__in=campaign_ids)
+        .annotate(
+            emails_sent=Count('email_history', distinct=True),
+            replies_count=Count('replies', distinct=True),
+            last_reply_at=Max('replies__replied_at'),
+        )
+        .prefetch_related(
+            Prefetch(
+                'campaigns',
+                queryset=Campaign.objects.filter(id__in=campaign_ids).only('id', 'name', 'status'),
+            )
+        )
+        .distinct()
+    )
+
+    search = (request.GET.get('search') or '').strip().lower()
+    if search:
+        from django.db.models import Q
+        leads_qs = leads_qs.filter(
+            Q(email__icontains=search)
+            | Q(first_name__icontains=search)
+            | Q(last_name__icontains=search)
+            | Q(company__icontains=search)
+        )
+
+    has_replied = (request.GET.get('has_replied') or '').strip().lower()
+    if has_replied == 'yes':
+        leads_qs = leads_qs.filter(replies_count__gt=0)
+    elif has_replied == 'no':
+        leads_qs = leads_qs.filter(replies_count=0)
+
+    campaign_param = (request.GET.get('campaign') or '').strip()
+    if campaign_param:
+        try:
+            leads_qs = leads_qs.filter(campaigns__id=int(campaign_param))
+        except ValueError:
+            pass
+
+    leads = list(leads_qs.order_by('-last_reply_at', '-id')[:500])
+
+    # Pull the most-recent Reply per lead for interest_level + analysis snippet.
+    lead_ids = [l.id for l in leads]
+    latest_reply_by_lead = {}
+    if lead_ids:
+        latest_ids = (
+            Reply.objects.filter(lead_id__in=lead_ids)
+            .order_by('lead_id', '-replied_at')
+            .distinct('lead_id')  # works on Postgres; MSSQL falls through below
+        )
+        try:
+            for r in latest_ids:
+                latest_reply_by_lead[r.lead_id] = r
+        except Exception:
+            latest_reply_by_lead = {}
+
+        if not latest_reply_by_lead:
+            # Portable fallback: group in Python.
+            for r in Reply.objects.filter(lead_id__in=lead_ids).order_by('-replied_at').only(
+                'lead_id', 'interest_level', 'analysis', 'replied_at'
+            ):
+                latest_reply_by_lead.setdefault(r.lead_id, r)
+
+    data = []
+    for lead in leads:
+        latest = latest_reply_by_lead.get(lead.id)
+        data.append({
+            'id': lead.id,
+            'email': lead.email,
+            'first_name': lead.first_name,
+            'last_name': lead.last_name,
+            'full_name': ' '.join(filter(None, [lead.first_name, lead.last_name])).strip(),
+            'company': lead.company,
+            'job_title': lead.job_title,
+            'campaigns': [
+                {'id': c.id, 'name': c.name, 'status': c.status}
+                for c in lead.campaigns.all()
+            ],
+            'emails_sent': lead.emails_sent or 0,
+            'replies_count': lead.replies_count or 0,
+            'has_replied': bool(lead.replies_count),
+            'last_reply_at': lead.last_reply_at.isoformat() if lead.last_reply_at else None,
+            'latest_interest_level': latest.interest_level if latest else '',
+            'latest_analysis': (latest.analysis[:300] if latest and latest.analysis else ''),
+        })
+
     return Response({'status': 'success', 'data': data})
 
 

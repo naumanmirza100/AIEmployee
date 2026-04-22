@@ -28,6 +28,8 @@ import {
   ChevronDown,
   CornerUpLeft,
   Quote,
+  Users,
+  TrendingUp,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +38,7 @@ import {
   listPendingReplies,
   listDrafts,
   listReplyDraftCampaigns,
+  listReplyDraftLeads,
   generateDraft,
   regenerateDraft,
   approveDraft,
@@ -202,6 +205,8 @@ const ReplyDraftAgentPage = () => {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignFilter, setCampaignFilter] = useState(''); // '' = all, 'none' = generic only, or campaign id
   const [daysFilter, setDaysFilter] = useState('');           // '' = all, '1' | '7' | '30'
+  const [leads, setLeads] = useState([]);
+  const [leadsHasRepliedFilter, setLeadsHasRepliedFilter] = useState(''); // '' | 'yes' | 'no'
 
   useEffect(() => {
     const companyUserStr = localStorage.getItem('company_user');
@@ -257,14 +262,26 @@ const ReplyDraftAgentPage = () => {
     }
   }, []);
 
+  const refreshLeads = useCallback(async () => {
+    try {
+      const res = await listReplyDraftLeads({
+        hasReplied: leadsHasRepliedFilter,
+        campaign: campaignFilter && campaignFilter !== 'none' ? campaignFilter : '',
+      });
+      setLeads(res?.data || []);
+    } catch (e) {
+      console.error('Failed to load leads', e);
+    }
+  }, [leadsHasRepliedFilter, campaignFilter]);
+
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refreshInbox(), refreshDrafts()]);
+      await Promise.all([refreshInbox(), refreshDrafts(), refreshLeads()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refreshInbox, refreshDrafts]);
+  }, [refreshInbox, refreshDrafts, refreshLeads]);
 
   useEffect(() => {
     if (hasAccess) {
@@ -277,6 +294,11 @@ const ReplyDraftAgentPage = () => {
   useEffect(() => {
     if (hasAccess) refreshInbox();
   }, [hasAccess, campaignFilter, daysFilter, refreshInbox]);
+
+  // Re-fetch leads whenever the leads-scoped filters change.
+  useEffect(() => {
+    if (hasAccess && activeTab === 'leads') refreshLeads();
+  }, [hasAccess, activeTab, leadsHasRepliedFilter, campaignFilter, refreshLeads]);
 
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
@@ -445,6 +467,14 @@ const ReplyDraftAgentPage = () => {
     );
   }, [sentDrafts, search]);
 
+  const filteredLeads = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return leads;
+    return leads.filter((l) =>
+      [l.full_name, l.email, l.company, l.job_title].some((v) => (v || '').toLowerCase().includes(q))
+    );
+  }, [leads, search]);
+
   const stats = useMemo(() => ({
     pending: pendingReplies.length,
     draftsPending: drafts.filter((d) => d.status === 'pending').length,
@@ -519,6 +549,24 @@ const ReplyDraftAgentPage = () => {
         />
 
         <div className="container mx-auto px-4 sm:px-6 py-6 max-w-[1500px]">
+          {/* Page Header with Refresh */}
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div>
+              <h1 className="text-lg font-bold text-white">Reply Draft Workspace</h1>
+              <p className="text-xs text-gray-400">
+                {refreshing ? 'Syncing from your mailbox…' : 'Click refresh to pull the latest from your inbox and drafts.'}
+              </p>
+            </div>
+            <Button
+              onClick={refreshAll}
+              disabled={refreshing}
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          </div>
+
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
@@ -561,9 +609,9 @@ const ReplyDraftAgentPage = () => {
                     >
                       <Edit3 className="h-4 w-4" />
                       Drafts
-                      {drafts.length > 0 && (
+                      {unsentDrafts.length > 0 && (
                         <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
-                          {drafts.length}
+                          {unsentDrafts.length}
                         </span>
                       )}
                     </button>
@@ -583,17 +631,23 @@ const ReplyDraftAgentPage = () => {
                         </span>
                       )}
                     </button>
+                    <button
+                      onClick={() => setActiveTab('leads')}
+                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        activeTab === 'leads'
+                          ? 'bg-gradient-to-r from-indigo-500/20 to-violet-500/20 text-indigo-200 border border-indigo-500/30'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Users className="h-4 w-4" />
+                      Leads
+                      {leads.length > 0 && (
+                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'leads' ? 'bg-indigo-500/30 text-indigo-100' : 'bg-white/10 text-gray-300'}`}>
+                          {leads.length}
+                        </span>
+                      )}
+                    </button>
                   </div>
-                  <Button
-                    onClick={refreshAll}
-                    variant="outline"
-                    size="icon"
-                    disabled={refreshing}
-                    title="Refresh inbox and drafts"
-                    className="h-9 w-9 shrink-0 bg-white/5 border-white/10 text-white hover:bg-white/10"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  </Button>
                 </div>
 
                 {/* Search */}
@@ -609,7 +663,9 @@ const ReplyDraftAgentPage = () => {
                           ? 'Search replies…'
                           : activeTab === 'drafts'
                             ? 'Search unsent drafts…'
-                            : 'Search sent replies…'
+                            : activeTab === 'sent'
+                              ? 'Search sent replies…'
+                              : 'Search leads…'
                       }
                       className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     />
@@ -642,6 +698,34 @@ const ReplyDraftAgentPage = () => {
                             {d.label}
                           </option>
                         ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {activeTab === 'leads' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={campaignFilter}
+                        onChange={(e) => setCampaignFilter(e.target.value)}
+                        title="Filter by campaign"
+                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      >
+                        <option value="" className="bg-gray-900">All campaigns</option>
+                        {campaigns.map((c) => (
+                          <option key={c.id} value={String(c.id)} className="bg-gray-900">
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={leadsHasRepliedFilter}
+                        onChange={(e) => setLeadsHasRepliedFilter(e.target.value)}
+                        title="Filter by reply status"
+                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                      >
+                        <option value="" className="bg-gray-900">All leads</option>
+                        <option value="yes" className="bg-gray-900">Replied</option>
+                        <option value="no" className="bg-gray-900">Not replied</option>
                       </select>
                     </div>
                   )}

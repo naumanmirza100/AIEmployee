@@ -39,6 +39,21 @@ export const listReplyDraftCampaigns = async () => {
   }
 };
 
+export const listReplyDraftLeads = async ({ search = '', hasReplied = '', campaign = '' } = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (hasReplied) params.set('has_replied', hasReplied);
+    if (campaign) params.set('campaign', String(campaign));
+    const qs = params.toString();
+    const path = qs ? `/reply-draft/leads?${qs}` : '/reply-draft/leads';
+    return await companyApi.get(path);
+  } catch (error) {
+    console.error('List reply-draft leads error:', error);
+    throw error;
+  }
+};
+
 export const listDrafts = async (statusFilter = null) => {
   try {
     const path = statusFilter
