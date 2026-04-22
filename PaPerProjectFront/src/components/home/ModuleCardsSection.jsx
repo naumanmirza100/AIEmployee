@@ -6,7 +6,8 @@ import {
   Megaphone,
   FolderKanban,
   Headphones,
-  FileSearch
+  FileSearch,
+  Reply
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -122,11 +123,31 @@ const ModuleCardsSection = () => {
         'Proactive anomaly & threshold alerts'
       ],
       highlight: false,
+    },
+    {
+      title: 'Reply Draft Agent',
+      moduleName: 'reply_draft_agent',
+      description: 'AI-assisted email reply drafting with human-in-the-loop review. Drafts replies from incoming emails, you edit and approve before sending.',
+      icon: Reply,
+      iconColor: 'text-cyan-500',
+      gradientFrom: gradientColors['cyan-500'],
+      gradientTo: gradientColors['blue-500'],
+      price: 79,
+      pricePeriod: 'month',
+      features: [
+        'AI-generated reply drafts from inbox',
+        'Tone selection (professional, casual, empathetic)',
+        'Regenerate with custom instructions',
+        'Inline edit before approving',
+        'Proper email threading (In-Reply-To)',
+        'Full version history of regenerations'
+      ],
+      highlight: false,
     }
   ];
 
   return (
-    <section className="py-16 md:py-24 bg-gradient-to-b from-background via-secondary/20 to-background">
+    <section id="ai-modules" className="py-16 md:py-24 bg-gradient-to-b from-background via-secondary/20 to-background">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <motion.div
