@@ -11,6 +11,7 @@ from Frontline_agent.throttling import (
     FrontlinePublicThrottle,
     FrontlineLLMThrottle,
     FrontlineUploadThrottle,
+    FrontlineCRUDThrottle,
 )
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -34,10 +35,12 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
 from Frontline_agent.models import (
-    Document, Ticket, TicketNote, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
+    Document, Ticket, TicketNote, TicketMessage, TicketAttachment,
+    KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
     FrontlineWorkflowVersion, FrontlineMeeting,
     SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences, DocumentChunk,
+    Contact,
 )
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Fronline_agent.frontline_agent import FrontlineAgent
@@ -1090,6 +1093,12 @@ def public_submit(request):
         user = _get_or_create_user_for_company_user(company_user)
         title = f"Web form: {(name or email or 'Contact')[:50]}"
         description = f"From: {name or 'N/A'}\nEmail: {email or 'N/A'}\n\n{message}"
+        # Upsert a Contact for this customer (email is how we deduplicate).
+        contact = None
+        if email:
+            from Frontline_agent.contacts import upsert_contact_from_email
+            contact = upsert_contact_from_email(company=company, email=email, name=name)
+
         ticket = Ticket.objects.create(
             title=title,
             description=description,
@@ -1101,7 +1110,11 @@ def public_submit(request):
             assigned_to=user,
             auto_resolved=False,
             sla_due_at=_sla_due_at_for_priority('medium'),
+            contact=contact,
         )
+        if contact:
+            from Frontline_agent.contacts import recompute_contact_stats
+            recompute_contact_stats(contact)
 
         # Optional attachment — single file for now. Validates MIME + size against
         # the tenant's widget config; stores under media/frontline_widget_uploads/<company>/.
@@ -4023,4 +4036,580 @@ def frontline_agent_performance(request):
     except Exception as e:
         logger.exception("frontline_agent_performance failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Email Inbound channel (Phase 3)
+#
+# Providers: sendgrid, mailgun, generic.
+# URL: POST /frontline/webhooks/inbound-email/<provider>/
+# Auth: signature verification per provider (see inbound_email.verify_signature).
+# Processing: webhook resolves Company + existing Ticket synchronously, then
+# enqueues the heavy work (attachment persistence, SLA math) on Celery.
+# ============================================================================
+
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+
+
+def _message_id_for(ticket_id: int) -> str:
+    """Stable Message-ID for an outbound reply. Used for threading + dedupe."""
+    host = (getattr(settings, 'FRONTLINE_INBOUND_EMAIL_DOMAIN', '') or 'frontline.local').strip('@')
+    return f"<fl-t{ticket_id}-{uuid.uuid4().hex[:12]}@{host}>"
+
+
+def _serialize_ticket_message(msg: 'TicketMessage') -> dict:
+    return {
+        'id': msg.id,
+        'ticket_id': msg.ticket_id,
+        'direction': msg.direction,
+        'channel': msg.channel,
+        'from_address': msg.from_address,
+        'from_name': msg.from_name,
+        'to_addresses': msg.to_addresses or [],
+        'cc_addresses': msg.cc_addresses or [],
+        'subject': msg.subject,
+        'body_text': msg.body_text,
+        'body_html': msg.body_html,
+        'message_id': msg.message_id,
+        'in_reply_to': msg.in_reply_to,
+        'references': msg.references or [],
+        'is_auto_reply': msg.is_auto_reply,
+        'created_at': msg.created_at.isoformat() if msg.created_at else None,
+        'attachments': [
+            {
+                'id': a.id,
+                'filename': a.filename,
+                'content_type': a.content_type,
+                'size_bytes': a.size_bytes,
+            }
+            for a in getattr(msg, '_prefetched_attachments', msg.attachments.all())
+        ],
+    }
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([])
+@authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle])
+def inbound_email_webhook(request, provider):
+    """Receive inbound email from a provider webhook, turn it into a ticket.
+
+    Returns 202 Accepted on success so the provider stops retrying; returns
+    403 on signature failure, 400 on parse failure, 404 when the mail can't
+    be routed to a known company."""
+    import base64
+    import hashlib as _h
+    from Frontline_agent import inbound_email as ie
+    from Frontline_agent.tasks import process_inbound_email
+
+    provider = (provider or '').lower()
+    try:
+        if not ie.verify_signature(provider, request):
+            logger.warning("Inbound email webhook: signature failed (provider=%s)", provider)
+            return JsonResponse({'status': 'error', 'message': 'Invalid signature'}, status=403)
+    except Exception:
+        logger.exception("Inbound email signature verification crashed")
+        return JsonResponse({'status': 'error', 'message': 'Signature verify error'}, status=403)
+
+    try:
+        parsed = ie.parse_inbound(provider, request)
+    except ValueError as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    except Exception:
+        logger.exception("Inbound email parse failed (provider=%s)", provider)
+        return JsonResponse({'status': 'error', 'message': 'Parse failed'}, status=400)
+
+    if not parsed.from_address:
+        return JsonResponse({'status': 'error', 'message': 'Missing From address'}, status=400)
+
+    # Ignore bounces / vacation replies — they create garbage threads.
+    if parsed.is_auto_reply:
+        logger.info("Inbound email: dropping auto-reply from %s", parsed.from_address)
+        return JsonResponse({'status': 'ignored', 'reason': 'auto_reply'}, status=202)
+
+    company, _match_addr = ie.match_company(parsed)
+    if not company:
+        logger.info("Inbound email: no company match for recipients=%s", parsed.to_addresses)
+        return JsonResponse({'status': 'error', 'message': 'Unknown recipient'}, status=404)
+
+    existing_ticket, _ = ie.find_existing_ticket(parsed, company)
+
+    attachments_payload = []
+    for att in parsed.attachments:
+        content = att.get('content') or b''
+        if not content:
+            continue
+        attachments_payload.append({
+            'filename': att.get('filename', 'attachment.bin'),
+            'content_type': att.get('content_type', 'application/octet-stream'),
+            'content_b64': base64.b64encode(content).decode('ascii'),
+            'sha256': _h.sha256(content).hexdigest(),
+            'size_bytes': len(content),
+        })
+
+    payload = {
+        'provider': parsed.provider,
+        'company_id': company.id,
+        'existing_ticket_id': existing_ticket.id if existing_ticket else None,
+        'from_address': parsed.from_address,
+        'from_name': parsed.from_name,
+        'to_addresses': parsed.to_addresses,
+        'cc_addresses': parsed.cc_addresses,
+        'subject': parsed.subject,
+        'body_text': parsed.body_text,
+        'body_html': parsed.body_html,
+        'message_id': parsed.message_id,
+        'in_reply_to': parsed.in_reply_to,
+        'references': parsed.references,
+        'raw_headers': parsed.raw_headers,
+        'is_auto_reply': parsed.is_auto_reply,
+        'attachments': attachments_payload,
+    }
+
+    try:
+        process_inbound_email.delay(payload)
+    except Exception:
+        # If Celery broker is down, fall back to inline processing so the email
+        # isn't dropped. Still returns 202 so the provider doesn't hammer us.
+        logger.exception("Celery dispatch failed — falling back to inline processing")
+        try:
+            process_inbound_email(payload)  # bound task; call task logic directly
+        except Exception:
+            logger.exception("Inline process_inbound_email also failed")
+
+    return JsonResponse(
+        {'status': 'accepted', 'company_id': company.id,
+         'existing_ticket_id': existing_ticket.id if existing_ticket else None},
+        status=202,
+    )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def list_ticket_messages(request, ticket_id):
+    """Return the full thread for a ticket (inbound + outbound, oldest-first)."""
+    try:
+        ticket = _get_company_ticket_or_404(request, ticket_id)
+        if not ticket:
+            return Response({'status': 'error', 'message': 'Ticket not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        qs = (TicketMessage.objects.filter(ticket=ticket)
+              .prefetch_related('attachments')
+              .order_by('created_at'))
+        data = [_serialize_ticket_message(m) for m in qs]
+        return Response({'status': 'success', 'data': data})
+    except Exception:
+        logger.exception("list_ticket_messages failed")
+        return Response({'status': 'error', 'message': 'Failed to list messages'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def reply_to_ticket(request, ticket_id):
+    """Send an outbound email reply on a ticket. Persists a TicketMessage row,
+    sends via Django's email backend, and stamps threading headers so the
+    customer's reply comes back onto the same ticket.
+
+    Body: {"body_text": "...", "body_html": "...", "to": ["x@y.com"], "cc": [...]}.
+    If `to` is omitted, defaults to the from_address of the most recent inbound message.
+    """
+    from django.core.mail import EmailMultiAlternatives
+    from Frontline_agent.inbound_email import sanitize_html, build_subject_tag
+
+    try:
+        ticket = _get_company_ticket_or_404(request, ticket_id)
+        if not ticket:
+            return Response({'status': 'error', 'message': 'Ticket not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        body_text = (data.get('body_text') or '').strip()
+        body_html = sanitize_html(data.get('body_html') or '')
+        if not body_text and not body_html:
+            return Response({'status': 'error', 'message': 'body_text or body_html is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        to_addresses = data.get('to') or []
+        cc_addresses = data.get('cc') or []
+
+        # Default "to" = last inbound sender on the thread.
+        if not to_addresses:
+            last_inbound = (TicketMessage.objects
+                            .filter(ticket=ticket, direction='inbound')
+                            .order_by('-created_at').first())
+            if last_inbound and last_inbound.from_address:
+                to_addresses = [last_inbound.from_address]
+        if not to_addresses:
+            return Response({'status': 'error', 'message': 'No recipient available'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Threading references: collect every prior message_id on the thread so
+        # the customer's client shows it as one conversation.
+        prior_ids = list(
+            TicketMessage.objects.filter(ticket=ticket)
+            .exclude(message_id='')
+            .order_by('created_at')
+            .values_list('message_id', flat=True)
+        )
+        last_msg_id = prior_ids[-1] if prior_ids else ''
+        references_header = ' '.join(f'<{mid}>' for mid in prior_ids) if prior_ids else ''
+
+        # Build subject with stable tag.
+        tag = build_subject_tag(ticket.id)
+        subject = ticket.title or '(no subject)'
+        if tag not in subject:
+            subject = f"Re: {subject} {tag}"
+
+        # Compose sender.
+        company = ticket.company
+        from_email = ((company.support_from_email or '').strip()
+                      if company else '') or getattr(settings, 'DEFAULT_FROM_EMAIL',
+                                                     'noreply@example.com')
+
+        # Stamp a Message-ID we control so the customer's reply threads back.
+        new_message_id = _message_id_for(ticket.id).strip('<>')
+
+        headers = {
+            'Message-ID': f'<{new_message_id}>',
+        }
+        if last_msg_id:
+            headers['In-Reply-To'] = f'<{last_msg_id}>'
+        if references_header:
+            headers['References'] = references_header
+
+        # Ensure replies land on the tenant's inbox. If slug is set, use
+        # support+<slug>@<domain>, otherwise fall back to support_from_email.
+        inbound_domain = getattr(settings, 'FRONTLINE_INBOUND_EMAIL_DOMAIN', '') or ''
+        reply_to = ''
+        if company and company.support_inbox_slug and inbound_domain:
+            reply_to = f"support+{company.support_inbox_slug}@{inbound_domain}"
+        elif company and company.support_from_email:
+            reply_to = company.support_from_email
+        if reply_to:
+            headers['Reply-To'] = reply_to
+
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=body_text or _html_to_text_fallback(body_html),
+            from_email=from_email,
+            to=to_addresses,
+            cc=cc_addresses,
+            headers=headers,
+        )
+        if body_html:
+            email.attach_alternative(body_html, 'text/html')
+
+        try:
+            email.send(fail_silently=False)
+        except Exception as exc:
+            logger.exception("reply_to_ticket: SMTP send failed")
+            return Response(
+                {'status': 'error', 'message': f'Email send failed: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        msg = TicketMessage.objects.create(
+            ticket=ticket,
+            direction='outbound',
+            channel='email',
+            from_address=from_email[:320],
+            to_addresses=to_addresses,
+            cc_addresses=cc_addresses,
+            subject=subject[:998],
+            body_text=body_text[:500000],
+            body_html=body_html[:500000],
+            message_id=new_message_id[:998],
+            in_reply_to=last_msg_id[:998] if last_msg_id else '',
+            references=prior_ids,
+            raw_payload={'reply_to': reply_to},
+            author_company_user=request.user if hasattr(request.user, 'email') else None,
+        )
+
+        # Reply is "first response" → touch ticket so SLA reporting updates.
+        if ticket.status in ('new',):
+            ticket.status = 'open'
+        ticket.save(update_fields=['status', 'updated_at'])
+
+        return Response({'status': 'success', 'data': _serialize_ticket_message(msg)},
+                        status=status.HTTP_201_CREATED)
+
+    except Exception:
+        logger.exception("reply_to_ticket failed")
+        return Response({'status': 'error', 'message': 'Failed to send reply'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _html_to_text_fallback(html: str) -> str:
+    """Ultra-cheap HTML → text used only when caller omits body_text."""
+    if not html:
+        return ''
+    return re.sub(r'<[^>]+>', '', html).strip()
+
+
+# ============================================================================
+# Contacts + Customer 360 (Phase 3 Batch 2)
+#
+# Every contact is scoped to one Company. Email is unique per company and
+# always lowercased. Denormalized counters (`total_tickets_count`,
+# `first_seen_at`, `last_seen_at`) are recomputed on ticket mutations via
+# `Frontline_agent/contacts.py`.
+# ============================================================================
+
+
+def _serialize_contact(contact: 'Contact', *, include_counts: bool = True) -> dict:
+    return {
+        'id': contact.id,
+        'company_id': contact.company_id,
+        'email': contact.email,
+        'name': contact.name,
+        'phone': contact.phone,
+        'tags': contact.tags or [],
+        'custom_fields': contact.custom_fields or {},
+        'first_seen_at': contact.first_seen_at.isoformat() if contact.first_seen_at else None,
+        'last_seen_at': contact.last_seen_at.isoformat() if contact.last_seen_at else None,
+        'total_tickets_count': contact.total_tickets_count if include_counts else None,
+        'external_id': contact.external_id or None,
+        'external_source': contact.external_source or None,
+        'external_synced_at': contact.external_synced_at.isoformat() if contact.external_synced_at else None,
+        'created_at': contact.created_at.isoformat() if contact.created_at else None,
+        'updated_at': contact.updated_at.isoformat() if contact.updated_at else None,
+    }
+
+
+def _get_company_contact_or_404(request, contact_id):
+    """Company-scoped lookup. Returns Contact or None."""
+    try:
+        return Contact.objects.get(pk=contact_id, company=request.user.company)
+    except Contact.DoesNotExist:
+        return None
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def list_contacts(request):
+    """List contacts for the caller's company. Supports ?q=<substring> on
+    email/name, ?tag=<tag>, pagination via ?limit / ?offset (defaults 50 / 0)."""
+    try:
+        company = request.user.company
+        qs = Contact.objects.filter(company=company)
+
+        q = (request.GET.get('q') or '').strip()
+        if q:
+            qs = qs.filter(Q(email__icontains=q) | Q(name__icontains=q))
+
+        tag = (request.GET.get('tag') or '').strip()
+        if tag:
+            # JSONField containment — works on MSSQL via __contains lookup.
+            qs = qs.filter(tags__contains=tag)
+
+        try:
+            limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+        except ValueError:
+            limit = 50
+        try:
+            offset = max(0, int(request.GET.get('offset') or 0))
+        except ValueError:
+            offset = 0
+
+        total = qs.count()
+        rows = [_serialize_contact(c) for c in qs.order_by('-last_seen_at', '-created_at')[offset:offset + limit]]
+        return Response({
+            'status': 'success',
+            'data': rows,
+            'pagination': {'total': total, 'limit': limit, 'offset': offset},
+        })
+    except Exception:
+        logger.exception("list_contacts failed")
+        return Response({'status': 'error', 'message': 'Failed to list contacts'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def create_contact(request):
+    """Manually create / upsert a Contact (e.g. imported from a CSV)."""
+    try:
+        data = request.data or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email or '@' not in email:
+            return Response({'status': 'error', 'message': 'Valid email is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        from Frontline_agent.contacts import upsert_contact_from_email
+        contact = upsert_contact_from_email(
+            company=request.user.company,
+            email=email,
+            name=(data.get('name') or '').strip(),
+            phone=(data.get('phone') or '').strip(),
+            touch_last_seen=False,
+        )
+        if not contact:
+            return Response({'status': 'error', 'message': 'Failed to create contact'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Optional tags / custom_fields on first create
+        dirty = []
+        tags = data.get('tags')
+        if isinstance(tags, list) and tags != contact.tags:
+            contact.tags = [str(t)[:100] for t in tags][:50]
+            dirty.append('tags')
+        custom = data.get('custom_fields')
+        if isinstance(custom, dict):
+            merged = dict(contact.custom_fields or {})
+            merged.update({str(k)[:100]: v for k, v in custom.items()})
+            contact.custom_fields = merged
+            dirty.append('custom_fields')
+        if dirty:
+            dirty.append('updated_at')
+            contact.save(update_fields=list(set(dirty)))
+
+        return Response({'status': 'success', 'data': _serialize_contact(contact)},
+                        status=status.HTTP_201_CREATED)
+    except Exception:
+        logger.exception("create_contact failed")
+        return Response({'status': 'error', 'message': 'Failed to create contact'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def get_contact(request, contact_id):
+    """Full contact detail."""
+    contact = _get_company_contact_or_404(request, contact_id)
+    if not contact:
+        return Response({'status': 'error', 'message': 'Contact not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _serialize_contact(contact)})
+
+
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def update_contact(request, contact_id):
+    """Patch name / phone / tags / custom_fields on a contact. Email cannot be
+    changed — create a new contact instead."""
+    contact = _get_company_contact_or_404(request, contact_id)
+    if not contact:
+        return Response({'status': 'error', 'message': 'Contact not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    data = request.data or {}
+    dirty = []
+    if 'name' in data:
+        contact.name = str(data.get('name') or '')[:255]
+        dirty.append('name')
+    if 'phone' in data:
+        contact.phone = str(data.get('phone') or '')[:40]
+        dirty.append('phone')
+    if 'tags' in data:
+        tags = data.get('tags') or []
+        if not isinstance(tags, list):
+            return Response({'status': 'error', 'message': 'tags must be a list'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        contact.tags = [str(t)[:100] for t in tags][:50]
+        dirty.append('tags')
+    if 'custom_fields' in data:
+        custom = data.get('custom_fields') or {}
+        if not isinstance(custom, dict):
+            return Response({'status': 'error', 'message': 'custom_fields must be an object'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        contact.custom_fields = {str(k)[:100]: v for k, v in custom.items()}
+        dirty.append('custom_fields')
+    if dirty:
+        dirty.append('updated_at')
+        contact.save(update_fields=list(set(dirty)))
+    return Response({'status': 'success', 'data': _serialize_contact(contact)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def list_contact_tickets(request, contact_id):
+    """All tickets linked to this contact, newest first. Used by the
+    Customer-360 panel when the user drills into one customer."""
+    contact = _get_company_contact_or_404(request, contact_id)
+    if not contact:
+        return Response({'status': 'error', 'message': 'Contact not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    tickets = (Ticket.objects.filter(contact=contact, company=request.user.company)
+               .order_by('-created_at').only(
+                   'id', 'title', 'status', 'priority', 'category',
+                   'created_at', 'resolved_at', 'sla_due_at', 'auto_resolved',
+               ))
+    rows = [{
+        'id': t.id, 'title': t.title,
+        'status': t.status, 'priority': t.priority, 'category': t.category,
+        'auto_resolved': t.auto_resolved,
+        'created_at': t.created_at.isoformat() if t.created_at else None,
+        'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
+        'sla_due_at': t.sla_due_at.isoformat() if t.sla_due_at else None,
+    } for t in tickets[:500]]
+    return Response({'status': 'success', 'data': rows, 'count': len(rows)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def get_ticket_context(request, ticket_id):
+    """Customer-360 panel for a ticket.
+
+    Returns the ticket's Contact (if any) plus rollup stats (total tickets,
+    open tickets, last contacted at, most recent 5 tickets), designed so the
+    UI can render a sidebar in one request.
+    """
+    try:
+        ticket = _get_company_ticket_or_404(request, ticket_id)
+        if not ticket:
+            return Response({'status': 'error', 'message': 'Ticket not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if not ticket.contact_id:
+            return Response({'status': 'success', 'data': {'contact': None}})
+
+        contact = ticket.contact
+        peer_tickets = (Ticket.objects.filter(contact=contact, company=request.user.company)
+                        .order_by('-created_at')
+                        .only('id', 'title', 'status', 'priority', 'created_at'))
+        # cache the full queryset once, then slice + count locally
+        peer_list = list(peer_tickets[:5])
+        total = contact.total_tickets_count or 0
+        open_count = Ticket.objects.filter(
+            contact=contact, company=request.user.company,
+        ).exclude(status__in=['resolved', 'closed', 'auto_resolved']).count()
+
+        recent = [{
+            'id': t.id, 'title': t.title, 'status': t.status, 'priority': t.priority,
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+        } for t in peer_list]
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'contact': _serialize_contact(contact),
+                'stats': {
+                    'total_tickets': total,
+                    'open_tickets': open_count,
+                    'recent_tickets': recent,
+                },
+            },
+        })
+    except Exception:
+        logger.exception("get_ticket_context failed")
+        return Response({'status': 'error', 'message': 'Failed to load context'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

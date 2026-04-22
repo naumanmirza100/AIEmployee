@@ -67,6 +67,7 @@ import {
   ThumbsDown,
   Bot,
   Maximize2,
+  User,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
@@ -1430,6 +1431,11 @@ const FrontlineDashboard = () => {
   const [notesDialog, setNotesDialog] = useState({ open: false, ticketId: null, ticketTitle: '', notes: [], loading: false });
   const [noteDraft, setNoteDraft] = useState('');
   const [ticketBusyId, setTicketBusyId] = useState(null);
+  // Customer 360 panel — shows contact info, prior ticket count, and recent tickets for the ticket's customer
+  const [customerDialog, setCustomerDialog] = useState({
+    open: false, ticketId: null, ticketTitle: '',
+    loading: false, contact: null, stats: null,
+  });
   const [ticketFilters, setTicketFilters] = useState({ status: '', priority: '', category: '', date_from: '', date_to: '' });
   const [ticketsPagination, setTicketsPagination] = useState({ page: 1, limit: 20, total: 0, total_pages: 1 });
   const [ticketsAging, setTicketsAging] = useState(null); // { breached: [], at_risk: [], count_breached, count_at_risk }
@@ -1721,6 +1727,28 @@ const FrontlineDashboard = () => {
     } catch (err) {
       console.error('Delete note failed', err);
       toast({ title: 'Failed to delete note', variant: 'destructive' });
+    }
+  };
+
+  // Customer 360: fetch contact + stats for a ticket; backend 404s if ticket has no contact yet.
+  const openCustomerDialog = async (ticket) => {
+    setCustomerDialog({
+      open: true, ticketId: ticket.id, ticketTitle: ticket.title,
+      loading: true, contact: null, stats: null,
+    });
+    try {
+      const res = await frontlineAgentService.getTicketContext(ticket.id);
+      const data = res?.data || {};
+      setCustomerDialog((prev) => ({
+        ...prev,
+        loading: false,
+        contact: data.contact || null,
+        stats: data.stats || null,
+      }));
+    } catch (err) {
+      console.error('Load customer context failed', err);
+      setCustomerDialog((prev) => ({ ...prev, loading: false }));
+      toast({ title: 'Failed to load customer context', variant: 'destructive' });
     }
   };
 
@@ -3137,6 +3165,9 @@ const FrontlineDashboard = () => {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openCustomerDialog(t)}>
+                                  <User className="h-4 w-4 mr-2" /> View customer
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => openNotesDialog(t)}>
                                   <StickyNote className="h-4 w-4 mr-2" /> Notes{t.notes_count ? ` (${t.notes_count})` : ''}
                                 </DropdownMenuItem>
@@ -3258,6 +3289,112 @@ const FrontlineDashboard = () => {
                 <Plus className="h-4 w-4 mr-1" /> Add note
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer 360 dialog — contact info + ticket history for the ticket's customer */}
+      <Dialog open={customerDialog.open} onOpenChange={(open) => setCustomerDialog((prev) => ({ ...prev, open }))}>
+        <DialogContent className="max-w-xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Customer</DialogTitle>
+            <DialogDescription className="line-clamp-1">Ticket: {customerDialog.ticketTitle}</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-4 py-2 min-h-0">
+            {customerDialog.loading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : !customerDialog.contact ? (
+              <div className="text-center text-sm text-muted-foreground py-8">
+                No customer record linked to this ticket yet.
+                <div className="text-xs mt-1">Contacts are created automatically from inbound emails and widget submissions.</div>
+              </div>
+            ) : (
+              <>
+                {/* Contact header */}
+                <div className="rounded-md border border-border/50 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <User className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
+                        {customerDialog.contact.name || customerDialog.contact.email}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {customerDialog.contact.email}
+                        {customerDialog.contact.phone ? ` · ${customerDialog.contact.phone}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  {(customerDialog.contact.tags || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-3">
+                      {customerDialog.contact.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                    <div>
+                      <div className="text-muted-foreground">First seen</div>
+                      <div>{customerDialog.contact.first_seen_at
+                        ? new Date(customerDialog.contact.first_seen_at).toLocaleDateString()
+                        : '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Last seen</div>
+                      <div>{customerDialog.contact.last_seen_at
+                        ? new Date(customerDialog.contact.last_seen_at).toLocaleDateString()
+                        : '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">External</div>
+                      <div>{customerDialog.contact.external_source
+                        ? `${customerDialog.contact.external_source} · ${customerDialog.contact.external_id}`
+                        : '—'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats */}
+                {customerDialog.stats && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-md border border-border/50 p-3">
+                      <div className="text-xs text-muted-foreground">Total tickets</div>
+                      <div className="text-2xl font-semibold">{customerDialog.stats.total_tickets}</div>
+                    </div>
+                    <div className="rounded-md border border-border/50 p-3">
+                      <div className="text-xs text-muted-foreground">Open now</div>
+                      <div className="text-2xl font-semibold">{customerDialog.stats.open_tickets}</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent tickets */}
+                {customerDialog.stats?.recent_tickets?.length > 0 && (
+                  <div>
+                    <div className="text-sm font-medium mb-2">Recent tickets</div>
+                    <div className="space-y-1">
+                      {customerDialog.stats.recent_tickets.map((t) => (
+                        <div key={t.id} className="rounded border border-border/40 p-2 text-sm flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate">{t.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              #{t.id} · {t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <Badge variant="outline" className="text-xs">{t.priority}</Badge>
+                            <Badge variant="secondary" className="text-xs">{t.status}</Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

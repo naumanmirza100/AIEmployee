@@ -396,6 +396,18 @@ urlpatterns = [
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/sla/pause/?$', frontline_agent.pause_ticket_sla, name='frontline_pause_ticket_sla'),  # POST
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/sla/resume/?$', frontline_agent.resume_ticket_sla, name='frontline_resume_ticket_sla'),  # POST
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/retriage/?$', frontline_agent.retriage_ticket, name='frontline_retriage_ticket'),  # POST
+    # Ticket email thread (inbound + outbound messages on one ticket)
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/messages/?$', frontline_agent.list_ticket_messages, name='frontline_list_ticket_messages'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/reply/?$', frontline_agent.reply_to_ticket, name='frontline_reply_to_ticket'),  # POST
+    # Inbound email webhook (public, signature-verified). `provider` is one of 'sendgrid', 'mailgun', 'generic'.
+    re_path(r'^frontline/webhooks/inbound-email/(?P<provider>[a-z]+)/?$', frontline_agent.inbound_email_webhook, name='frontline_inbound_email_webhook'),  # POST
+    # Customer 360 — Contacts + ticket context panel
+    re_path(r'^frontline/contacts/?$', frontline_agent.list_contacts, name='frontline_list_contacts'),  # GET
+    re_path(r'^frontline/contacts/create/?$', frontline_agent.create_contact, name='frontline_create_contact'),  # POST
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/?$', frontline_agent.get_contact, name='frontline_get_contact'),  # GET
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/update/?$', frontline_agent.update_contact, name='frontline_update_contact'),  # PATCH/PUT
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/tickets/?$', frontline_agent.list_contact_tickets, name='frontline_list_contact_tickets'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/context/?$', frontline_agent.get_ticket_context, name='frontline_get_ticket_context'),  # GET
     # Notifications
     re_path(r'^frontline/notifications/templates/?$', frontline_agent.list_notification_templates, name='frontline_list_notification_templates'),  # GET
     re_path(r'^frontline/notifications/templates/create/?$', frontline_agent.create_notification_template, name='frontline_create_notification_template'),  # POST

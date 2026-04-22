@@ -518,6 +518,18 @@ class Company(models.Model):
     frontline_widget_config = models.JSONField(default=dict, blank=True,
                                                help_text='Widget theming + pre-chat form + operating hours + captcha toggle.')
 
+    # Inbound email routing.
+    # `support_inbox_slug` is the token used to route mail — e.g. slug 'acme' means
+    # support+acme@<INBOUND_EMAIL_DOMAIN> lands on this tenant. Must be unique and URL-safe.
+    # `support_from_email` is the address outbound ticket replies appear to come from.
+    # `inbound_email_config` holds per-tenant overrides (custom reply-to, signature block, etc.).
+    support_inbox_slug = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True,
+                                          help_text='Unique slug for inbound email routing (e.g. "acme" → support+acme@<domain>).')
+    support_from_email = models.EmailField(blank=True, default='',
+                                           help_text='Outbound "From" address for ticket replies. Falls back to DEFAULT_FROM_EMAIL.')
+    inbound_email_config = models.JSONField(default=dict, blank=True,
+                                            help_text='Per-tenant inbound/outbound email config: {"reply_to": "...", "signature_html": "..."}.')
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']

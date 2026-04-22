@@ -638,6 +638,83 @@ export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
   URL.revokeObjectURL(a.href);
 };
 
+// =========================================================================
+// Contacts + Customer 360 (Phase 3 Batch 2)
+// =========================================================================
+
+/** List contacts for the current company. Params: { q, tag, limit, offset } */
+export const listContacts = async (params = {}) => {
+  try {
+    const q = new URLSearchParams();
+    if (params.q) q.set('q', params.q);
+    if (params.tag) q.set('tag', params.tag);
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    const response = await companyApi.get(`/frontline/contacts${qs ? `?${qs}` : ''}`);
+    return response;
+  } catch (error) {
+    console.error('List contacts error:', error);
+    throw error;
+  }
+};
+
+/** Create / upsert a contact. Body: { email, name?, phone?, tags?, custom_fields? } */
+export const createContact = async (payload) => {
+  try {
+    const response = await companyApi.post('/frontline/contacts/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create contact error:', error);
+    throw error;
+  }
+};
+
+/** Get a single contact by id. */
+export const getContact = async (contactId) => {
+  try {
+    const response = await companyApi.get(`/frontline/contacts/${contactId}`);
+    return response;
+  } catch (error) {
+    console.error('Get contact error:', error);
+    throw error;
+  }
+};
+
+/** Update contact fields (name/phone/tags/custom_fields). Email is immutable. */
+export const updateContact = async (contactId, payload) => {
+  try {
+    const response = await companyApi.patch(`/frontline/contacts/${contactId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update contact error:', error);
+    throw error;
+  }
+};
+
+/** All tickets linked to a contact. */
+export const listContactTickets = async (contactId) => {
+  try {
+    const response = await companyApi.get(`/frontline/contacts/${contactId}/tickets`);
+    return response;
+  } catch (error) {
+    console.error('List contact tickets error:', error);
+    throw error;
+  }
+};
+
+/** Customer-360 panel for a ticket: contact + stats + recent tickets. */
+export const getTicketContext = async (ticketId) => {
+  try {
+    const response = await companyApi.get(`/frontline/tickets/${ticketId}/context`);
+    return response;
+  } catch (error) {
+    console.error('Get ticket context error:', error);
+    throw error;
+  }
+};
+
+
 export default {
   getFrontlineDashboard,
   getFrontlineWidgetConfig,
@@ -705,5 +782,11 @@ export default {
   toggleFrontlineGraphPromptFavorite,
   downloadFrontlineAnalyticsExport,
   getFrontlineAgentPerformance,
+  listContacts,
+  createContact,
+  getContact,
+  updateContact,
+  listContactTickets,
+  getTicketContext,
 };
 

@@ -108,7 +108,7 @@ Things that are actively risky or broken in what's shipped today. These should b
 - [ ] @mentions + assignment notifications
 - [ ] Ticket splitting (one message → two tickets)
 - [x] Snooze / follow-up reminders *(Phase 2 Batch 2: `snoozed_until` field + snooze/unsnooze endpoints + 1h/1d/3d preset actions + Celery `wake_snoozed_tickets` every 5min)*
-- [~] SLA pause while waiting on customer, auto-resume on reply *(Phase 2 Batch 2: manual pause/resume landed — `sla_paused_at`, `sla_paused_accumulated_seconds`, pause/resume endpoints. Auto-resume on customer reply still pending — needs a ticket-messages model first)*
+- [x] SLA pause while waiting on customer, auto-resume on reply *(Phase 2 Batch 2: manual pause/resume. Phase 3 Batch 1: auto-resume now fires inside `process_inbound_email` when a customer reply lands on a paused ticket — `sla_paused_at` cleared + accumulated seconds rolled in.)*
 
 ### 2.3 Notifications
 - [ ] Delivery receipts, open / click tracking, bounce handling (auto-disable bad channel per user)
@@ -175,7 +175,7 @@ Things that are actively risky or broken in what's shipped today. These should b
 ## 3. New Features — Must-have to be sellable
 
 ### 3.1 Multi-Channel Ingestion
-- [ ] Email inbound (IMAP or SES/SendGrid webhook) — threading, attachments, HTML sanitization
+- [x] Email inbound (IMAP or SES/SendGrid webhook) — threading, attachments, HTML sanitization *(Phase 3 Batch 1: `TicketMessage`+`TicketAttachment` models; `Company.support_inbox_slug`/`support_from_email`; `Frontline_agent/inbound_email.py` parsers for SendGrid + Mailgun + generic; Ed25519 / HMAC-SHA256 signature verify; `bleach` HTML sanitization; quoted-reply stripping; threading via `Message-ID`/`In-Reply-To`/`References` + `[FL-<id>]` subject-tag fallback; `process_inbound_email` Celery task auto-resumes SLA; webhook `POST /frontline/webhooks/inbound-email/<provider>/`; `GET /frontline/tickets/<id>/messages/` + `POST /frontline/tickets/<id>/reply/`)*
 - [ ] WhatsApp Business API (Meta Cloud API or Twilio)
 - [ ] SMS inbound (Twilio / MessageBird)
 - [ ] Slack Connect — customer Slack channels → ticket streams
@@ -199,7 +199,7 @@ Things that are actively risky or broken in what's shipped today. These should b
 - [ ] Pipedrive, Zoho
 - [ ] Shopify integration (order history, issue refund from ticket)
 - [ ] WooCommerce, Stripe integrations
-- [ ] Customer profile panel next to every ticket (past tickets, LTV, sentiment history, tier, custom attrs)
+- [~] Customer profile panel next to every ticket (past tickets, LTV, sentiment history, tier, custom attrs) *(Phase 3 Batch 2: `Contact` model — company-scoped, unique email, tags, custom_fields, first/last seen, denormalized total_tickets_count, `external_id`/`external_source` reserved for CRM sync. `Ticket.contact` FK. `Frontline_agent/contacts.py` with `upsert_contact_from_email` wired into inbound email + public widget submit. New endpoints: `GET/POST /frontline/contacts/`, `GET/PATCH /frontline/contacts/<id>/`, `GET /frontline/contacts/<id>/tickets/`, and the Customer-360 panel `GET /frontline/tickets/<id>/context/`. Sentiment history + LTV still pending — need sentiment classifier + billing integration first)*
 - [ ] Identity verification (OTP email/SMS) before sensitive actions
 
 ### 3.4 Tool Calling / Action Execution
