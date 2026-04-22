@@ -41,7 +41,11 @@
       "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" show --stat 7e8a274)",
       "Bash(where python *)",
       "Bash(where python3 *)",
-      "Bash(.venv/Scripts/python.exe *)"
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(node test_reply_draft_frontend_helpers.mjs)",
+      "Bash(npm run *)",
+      "Bash(rm reply_draft_agent/migrations/0002_inboxemail_and_optional_source.py)",
+      "Read(//d/University/work/AI_Employyes/NewAgentForReply/**)"
     ]
   }
 }

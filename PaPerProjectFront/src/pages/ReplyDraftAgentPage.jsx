@@ -189,7 +189,7 @@ const ReplyDraftAgentPage = () => {
   const [editedBody, setEditedBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts
+  const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -386,13 +386,31 @@ const ReplyDraftAgentPage = () => {
     );
   }, [pendingReplies, search]);
 
-  const filteredDrafts = useMemo(() => {
+  const unsentDrafts = useMemo(
+    () => drafts.filter((d) => d.status !== 'sent'),
+    [drafts]
+  );
+
+  const sentDrafts = useMemo(
+    () => drafts.filter((d) => d.status === 'sent'),
+    [drafts]
+  );
+
+  const filteredUnsentDrafts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return drafts;
-    return drafts.filter((d) =>
+    if (!q) return unsentDrafts;
+    return unsentDrafts.filter((d) =>
       [d.to_name, d.to_email, d.subject, d.to_company].some((v) => (v || '').toLowerCase().includes(q))
     );
-  }, [drafts, search]);
+  }, [unsentDrafts, search]);
+
+  const filteredSentDrafts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sentDrafts;
+    return sentDrafts.filter((d) =>
+      [d.to_name, d.to_email, d.subject, d.to_company].some((v) => (v || '').toLowerCase().includes(q))
+    );
+  }, [sentDrafts, search]);
 
   const stats = useMemo(() => ({
     pending: pendingReplies.length,
@@ -468,20 +486,6 @@ const ReplyDraftAgentPage = () => {
         />
 
         <div className="container mx-auto px-4 sm:px-6 py-6 max-w-[1500px]">
-          {/* Page Header */}
-          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-            <Button
-              onClick={refreshAll}
-              variant="outline"
-              size="sm"
-              disabled={refreshing}
-              className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          </div>
-
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
@@ -491,44 +495,72 @@ const ReplyDraftAgentPage = () => {
           </div>
 
           {/* Main Workspace */}
-          <div className="grid grid-cols-12 gap-4 lg:h-[calc(100vh-280px)]">
+          <div className="grid grid-cols-12 gap-4 items-stretch">
             {/* LEFT: List */}
-            <div className="col-span-12 lg:col-span-4 xl:col-span-3 lg:h-full min-h-0">
-              <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col h-full">
+            <div className="col-span-12 lg:col-span-4 xl:col-span-3">
+              <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)]">
                 {/* Tabs */}
-                <div className="p-2 border-b border-white/10 flex gap-1">
-                  <button
-                    onClick={() => setActiveTab('inbox')}
-                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                <div className="p-2 border-b border-white/10 flex items-center gap-2">
+                  <div className="flex-1 flex gap-1">
+                    <button
+                      onClick={() => setActiveTab('inbox')}
+                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                       activeTab === 'inbox'
                         ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-200 border border-cyan-500/30'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
-                  >
-                    <Inbox className="h-4 w-4" />
-                    Inbox
-                    {pendingReplies.length > 0 && (
-                      <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
-                        {pendingReplies.length}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('drafts')}
-                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                    >
+                      <Inbox className="h-4 w-4" />
+                      Inbox
+                      {pendingReplies.length > 0 && (
+                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
+                          {pendingReplies.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('drafts')}
+                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                       activeTab === 'drafts'
                         ? 'bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 text-fuchsia-200 border border-fuchsia-500/30'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
+                    >
+                      <Edit3 className="h-4 w-4" />
+                      Drafts
+                      {drafts.length > 0 && (
+                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
+                          {drafts.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('sent')}
+                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        activeTab === 'sent'
+                          ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-200 border border-emerald-500/30'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Check className="h-4 w-4" />
+                      Sent
+                      {sentDrafts.length > 0 && (
+                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
+                          {sentDrafts.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                  <Button
+                    onClick={refreshAll}
+                    variant="outline"
+                    size="icon"
+                    disabled={refreshing}
+                    title="Refresh inbox and drafts"
+                    className="h-9 w-9 shrink-0 bg-white/5 border-white/10 text-white hover:bg-white/10"
                   >
-                    <Edit3 className="h-4 w-4" />
-                    Drafts
-                    {drafts.length > 0 && (
-                      <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
-                        {drafts.length}
-                      </span>
-                    )}
-                  </button>
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  </Button>
                 </div>
 
                 {/* Search */}
@@ -539,14 +571,20 @@ const ReplyDraftAgentPage = () => {
                       type="text"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder={activeTab === 'inbox' ? 'Search replies…' : 'Search drafts…'}
+                      placeholder={
+                        activeTab === 'inbox'
+                          ? 'Search replies…'
+                          : activeTab === 'drafts'
+                            ? 'Search unsent drafts…'
+                            : 'Search sent replies…'
+                      }
                       className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     />
                   </div>
                 </div>
 
                 {/* List */}
-                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                <div className="custom-scrollbar lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
                   {activeTab === 'inbox' && (
                     <>
                       {filteredInbox.length === 0 ? (
@@ -569,14 +607,34 @@ const ReplyDraftAgentPage = () => {
                   )}
                   {activeTab === 'drafts' && (
                     <>
-                      {filteredDrafts.length === 0 ? (
+                      {filteredUnsentDrafts.length === 0 ? (
                         <EmptyState
                           icon={FileText}
                           title={search ? 'No matches' : 'No drafts yet'}
-                          subtitle={search ? 'Try a different search term.' : 'Generate a draft from the Inbox to start.'}
+                          subtitle={search ? 'Try a different search term.' : 'Drafts generated and not sent will appear here.'}
                         />
                       ) : (
-                        filteredDrafts.map((d) => (
+                        filteredUnsentDrafts.map((d) => (
+                          <DraftItem
+                            key={d.id}
+                            draft={d}
+                            active={selectedDraft?.id === d.id}
+                            onClick={() => handleSelectDraft(d)}
+                          />
+                        ))
+                      )}
+                    </>
+                  )}
+                  {activeTab === 'sent' && (
+                    <>
+                      {filteredSentDrafts.length === 0 ? (
+                        <EmptyState
+                          icon={Send}
+                          title={search ? 'No matches' : 'No sent replies yet'}
+                          subtitle={search ? 'Try a different search term.' : 'Approved drafts that were sent will appear here.'}
+                        />
+                      ) : (
+                        filteredSentDrafts.map((d) => (
                           <DraftItem
                             key={d.id}
                             draft={d}
@@ -592,9 +650,9 @@ const ReplyDraftAgentPage = () => {
             </div>
 
             {/* RIGHT: Detail + Composer */}
-            <div className="col-span-12 lg:col-span-8 xl:col-span-9 lg:h-full min-h-0 lg:overflow-y-auto space-y-4 custom-scrollbar pr-1">
+            <div className="col-span-12 lg:col-span-8 xl:col-span-9 space-y-4 pr-1 lg:h-[calc(100vh-220px)] lg:overflow-y-auto custom-scrollbar">
               {!selectedReply && !selectedDraft && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm min-h-[60vh] flex items-center justify-center">
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm min-h-[68vh] flex items-center justify-center">
                   <div className="text-center max-w-md px-6">
                     <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center mb-5">
                       <MailOpen className="h-10 w-10 text-cyan-300" />
@@ -774,8 +832,8 @@ const ReplyDraftAgentPage = () => {
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Message Body</label>
                           <textarea
-                            className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition disabled:opacity-60 font-sans leading-relaxed"
-                            rows={14}
+                            className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition disabled:opacity-60 font-sans leading-relaxed min-h-[180px] max-h-[48vh] overflow-y-auto resize-y"
+                            rows={9}
                             value={editedBody}
                             onChange={(e) => setEditedBody(e.target.value)}
                             disabled={busy || isReadOnly}
@@ -883,7 +941,7 @@ const EmailBody = ({ body, isIncomingReply }) => {
           <CornerUpLeft className="h-3 w-3" />
           {replyLabel}
         </div>
-        <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto custom-scrollbar">
+        <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed">
           {reply}
         </div>
       </div>
@@ -918,7 +976,7 @@ const EmailBody = ({ body, isIncomingReply }) => {
           <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showQuoted ? 'rotate-180' : ''}`} />
         </button>
         {showQuoted && (
-          <div className="mt-2 pl-4 border-l-2 border-white/15 text-sm text-gray-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto custom-scrollbar">
+          <div className="mt-2 pl-4 border-l-2 border-white/15 text-sm text-gray-400 whitespace-pre-wrap leading-relaxed">
             {cleanedQuote}
           </div>
         )}
