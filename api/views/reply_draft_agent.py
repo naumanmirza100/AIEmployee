@@ -53,30 +53,50 @@ def _enforce_module(company_user):
     return None
 
 
+def _sender_name(lead):
+    if not lead:
+        return ''
+    full = ' '.join(filter(None, [lead.first_name, lead.last_name])).strip()
+    return full or (lead.email.split('@')[0] if lead.email else '')
+
+
 def _serialize_reply(r):
+    lead = r.lead if r.lead_id else None
+    content = r.reply_content or ''
     return {
         'id': r.id,
-        'from': r.lead.email if r.lead_id else '',
-        'subject': r.reply_subject,
-        'preview': (r.reply_content or '')[:200],
+        'from_email': lead.email if lead else '',
+        'from_name': _sender_name(lead),
+        'from_company': lead.company if lead else '',
+        'from_job_title': lead.job_title if lead else '',
+        'subject': r.reply_subject or '(no subject)',
+        'preview': content[:200],
+        'body': content,
         'interest_level': r.interest_level,
         'replied_at': r.replied_at.isoformat() if r.replied_at else None,
         'campaign': r.campaign.name if r.campaign_id else '',
+        'analysis': r.analysis or '',
     }
 
 
 def _serialize_draft(d):
+    lead = d.lead if d.lead_id else None
     return {
         'id': d.id,
         'status': d.status,
         'tone': d.tone,
-        'to': d.lead.email if d.lead_id else '',
+        'to_email': lead.email if lead else '',
+        'to_name': _sender_name(lead),
+        'to_company': lead.company if lead else '',
         'subject': d.get_final_subject(),
         'body': d.get_final_body(),
         'ai_notes': d.ai_notes,
         'original_email_id': d.original_email_id,
+        'original_subject': d.original_email.reply_subject if d.original_email_id else '',
+        'original_body': d.original_email.reply_content if d.original_email_id else '',
         'regeneration_count': d.regeneration_count,
         'created_at': d.created_at.isoformat(),
+        'updated_at': d.updated_at.isoformat() if d.updated_at else None,
         'sent_at': d.sent_at.isoformat() if d.sent_at else None,
         'send_error': d.send_error,
     }

@@ -38,7 +38,10 @@
       "Bash(\".venv/Scripts/python.exe\" manage.py showmigrations core)",
       "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" log --oneline -20 -- core/models.py)",
       "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" log --all --oneline --source -- \"*/0044_add_platform_api_key.py\")",
-      "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" show --stat 7e8a274)"
+      "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" show --stat 7e8a274)",
+      "Bash(where python *)",
+      "Bash(where python3 *)",
+      "Bash(.venv/Scripts/python.exe *)"
     ]
   }
 }

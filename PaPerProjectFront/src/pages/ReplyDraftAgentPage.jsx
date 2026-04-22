@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
@@ -6,9 +6,32 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
-import { Reply, Loader2, Lock, Send, RefreshCw, X, Check, Edit3, Inbox } from 'lucide-react';
+import {
+  Reply,
+  Loader2,
+  Lock,
+  Send,
+  RefreshCw,
+  Check,
+  Edit3,
+  Inbox,
+  MailOpen,
+  Sparkles,
+  Search,
+  FileText,
+  Clock,
+  Building2,
+  AtSign,
+  AlertCircle,
+  Trash2,
+  Zap,
+  ChevronDown,
+  CornerUpLeft,
+  Quote,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   listPendingReplies,
   listDrafts,
@@ -29,6 +52,123 @@ const TONES = [
   { value: 'empathetic',   label: 'Empathetic' },
 ];
 
+const INTEREST_STYLES = {
+  positive:       { label: 'Interested',       className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+  requested_info: { label: 'Needs Info',       className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
+  objection:      { label: 'Objection',        className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+  negative:       { label: 'Not Interested',   className: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
+  unsubscribe:    { label: 'Unsubscribe',      className: 'bg-red-500/15 text-red-300 border-red-500/30' },
+  neutral:        { label: 'Neutral',          className: 'bg-slate-500/15 text-slate-300 border-slate-500/30' },
+  not_analyzed:   { label: 'Not Analyzed',     className: 'bg-white/5 text-gray-400 border-white/10' },
+};
+
+const STATUS_STYLES = {
+  pending:  { label: 'Pending',  className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+  approved: { label: 'Approved', className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
+  sent:     { label: 'Sent',     className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+  rejected: { label: 'Discarded',className: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
+  failed:   { label: 'Failed',   className: 'bg-red-500/15 text-red-300 border-red-500/30' },
+};
+
+const AVATAR_PALETTE = [
+  'from-cyan-500 to-blue-600',
+  'from-fuchsia-500 to-purple-600',
+  'from-emerald-500 to-teal-600',
+  'from-amber-500 to-orange-600',
+  'from-rose-500 to-pink-600',
+  'from-indigo-500 to-violet-600',
+];
+
+const initialsOf = (name, email) => {
+  const base = (name || email || '?').trim();
+  if (!base) return '?';
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+const paletteFor = (seed = '') => {
+  let sum = 0;
+  for (let i = 0; i < seed.length; i++) sum = (sum + seed.charCodeAt(i)) % AVATAR_PALETTE.length;
+  return AVATAR_PALETTE[sum];
+};
+
+const formatRelative = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+const formatDateTime = (iso) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+};
+
+// Split an email body into the sender's new reply vs. the quoted original thread.
+// Handles "On <date>, <addr> wrote:", "-----Original Message-----", "From: ... Sent: ..."
+// headers, and leading `>` quoted blocks.
+const parseReplyBody = (body) => {
+  const empty = { reply: '', quoted: '' };
+  if (!body) return empty;
+  const text = body.replace(/\r\n/g, '\n');
+  const lines = text.split('\n');
+  let splitIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i].trim();
+    if (/^on\s.+\swrote:\s*$/i.test(ln)) { splitIdx = i; break; }
+    if (/^-{2,}\s*original message\s*-{2,}\s*$/i.test(ln)) { splitIdx = i; break; }
+    if (/^from:\s/i.test(ln)) {
+      const next = (lines[i + 1] || '').trim();
+      if (/^(sent|date|to):\s/i.test(next)) { splitIdx = i; break; }
+    }
+    if (ln.startsWith('>')) {
+      let j = i - 1;
+      while (j >= 0 && !lines[j].trim()) j--;
+      splitIdx = (j >= 0 && /wrote:\s*$/i.test(lines[j].trim())) ? j : i;
+      break;
+    }
+  }
+  if (splitIdx === -1) return { reply: text.trim(), quoted: '' };
+  const reply = lines.slice(0, splitIdx).join('\n').replace(/\n+$/g, '').trim();
+  const quoted = lines.slice(splitIdx).join('\n').trim();
+  return { reply, quoted };
+};
+
+// Strip leading '> ' markers so quoted text reads naturally.
+const cleanQuoted = (quoted) =>
+  quoted
+    .split('\n')
+    .map((l) => l.replace(/^>+\s?/, ''))
+    .join('\n')
+    .trim();
+
+const Avatar = ({ name, email, size = 'md' }) => {
+  const dim = size === 'lg' ? 'h-11 w-11 text-sm' : size === 'sm' ? 'h-8 w-8 text-[11px]' : 'h-10 w-10 text-xs';
+  const palette = paletteFor(email || name || '');
+  return (
+    <div className={`${dim} shrink-0 rounded-full bg-gradient-to-br ${palette} flex items-center justify-center font-bold text-white shadow-md ring-1 ring-white/10`}>
+      {initialsOf(name, email)}
+    </div>
+  );
+};
+
+const EmptyState = ({ icon: Icon, title, subtitle }) => (
+  <div className="flex flex-col items-center justify-center text-center py-16 px-6">
+    <div className="h-14 w-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4">
+      <Icon className="h-7 w-7 text-gray-400" />
+    </div>
+    <div className="text-sm font-semibold text-white">{title}</div>
+    {subtitle && <div className="text-xs text-gray-400 mt-1 max-w-xs">{subtitle}</div>}
+  </div>
+);
+
 const ReplyDraftAgentPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -48,7 +188,9 @@ const ReplyDraftAgentPage = () => {
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     const companyUserStr = localStorage.getItem('company_user');
@@ -94,18 +236,48 @@ const ReplyDraftAgentPage = () => {
     }
   }, [toast]);
 
-  useEffect(() => {
-    if (hasAccess) {
-      refreshInbox();
-      refreshDrafts();
+  const refreshAll = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshInbox(), refreshDrafts()]);
+    } finally {
+      setRefreshing(false);
     }
-  }, [hasAccess, refreshInbox, refreshDrafts]);
+  }, [refreshInbox, refreshDrafts]);
+
+  useEffect(() => {
+    if (hasAccess) refreshAll();
+  }, [hasAccess, refreshAll]);
 
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
     localStorage.removeItem('company_user');
     localStorage.removeItem('company_purchased_modules');
     navigate('/company/login');
+  };
+
+  const clearSelection = () => {
+    setSelectedReply(null);
+    setSelectedDraft(null);
+    setEditedSubject('');
+    setEditedBody('');
+    setUserContext('');
+  };
+
+  const handleSelectReply = (r) => {
+    setSelectedReply(r);
+    setSelectedDraft(null);
+    setEditedBody('');
+    setEditedSubject('');
+    setUserContext('');
+  };
+
+  const handleSelectDraft = (d) => {
+    setSelectedDraft(d);
+    setSelectedReply(null);
+    setEditedSubject(d.subject || '');
+    setEditedBody(d.body || '');
+    setTone(d.tone || 'professional');
   };
 
   const handleGenerate = async () => {
@@ -119,7 +291,7 @@ const ReplyDraftAgentPage = () => {
       });
       const d = res?.data;
       if (d?.draft_id) {
-        toast({ title: 'Draft generated' });
+        toast({ title: 'Draft generated', description: 'Review it below before sending.' });
         setEditedSubject(d.subject);
         setEditedBody(d.body);
         setSelectedDraft({
@@ -129,9 +301,13 @@ const ReplyDraftAgentPage = () => {
           body: d.body,
           tone,
           ai_notes: d.reasoning,
+          to_email: selectedReply.from_email,
+          to_name: selectedReply.from_name,
+          to_company: selectedReply.from_company,
+          original_subject: selectedReply.subject,
+          original_body: selectedReply.body,
         });
-        refreshInbox();
-        refreshDrafts();
+        refreshAll();
       }
     } catch (e) {
       toast({ title: 'Generation failed', description: e.message, variant: 'destructive' });
@@ -174,14 +350,9 @@ const ReplyDraftAgentPage = () => {
       if (ap.status !== 'success') throw new Error(ap.message || 'Approve failed');
       const sent = await sendDraft(selectedDraft.id);
       if (sent.status === 'success') {
-        toast({ title: 'Reply sent' });
-        setSelectedDraft(null);
-        setSelectedReply(null);
-        setEditedSubject('');
-        setEditedBody('');
-        setUserContext('');
-        refreshInbox();
-        refreshDrafts();
+        toast({ title: 'Reply sent', description: `Delivered to ${selectedDraft.to_email || 'recipient'}.` });
+        clearSelection();
+        refreshAll();
       } else {
         throw new Error(sent.message || 'Send failed');
       }
@@ -197,15 +368,38 @@ const ReplyDraftAgentPage = () => {
     setBusy(true);
     try {
       await rejectDraft(selectedDraft.id);
-      toast({ title: 'Draft rejected' });
-      setSelectedDraft(null);
+      toast({ title: 'Draft discarded' });
+      clearSelection();
       refreshDrafts();
     } catch (e) {
-      toast({ title: 'Reject failed', description: e.message, variant: 'destructive' });
+      toast({ title: 'Discard failed', description: e.message, variant: 'destructive' });
     } finally {
       setBusy(false);
     }
   };
+
+  const filteredInbox = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return pendingReplies;
+    return pendingReplies.filter((r) =>
+      [r.from_name, r.from_email, r.subject, r.from_company].some((v) => (v || '').toLowerCase().includes(q))
+    );
+  }, [pendingReplies, search]);
+
+  const filteredDrafts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return drafts;
+    return drafts.filter((d) =>
+      [d.to_name, d.to_email, d.subject, d.to_company].some((v) => (v || '').toLowerCase().includes(q))
+    );
+  }, [drafts, search]);
+
+  const stats = useMemo(() => ({
+    pending: pendingReplies.length,
+    draftsPending: drafts.filter((d) => d.status === 'pending').length,
+    sent: drafts.filter((d) => d.status === 'sent').length,
+    failed: drafts.filter((d) => d.status === 'failed').length,
+  }), [pendingReplies, drafts]);
 
   if (loading || checkingAccess || !modulesLoaded) {
     return (
@@ -242,6 +436,18 @@ const ReplyDraftAgentPage = () => {
     );
   }
 
+  const selectedContact = selectedReply
+    ? { name: selectedReply.from_name, email: selectedReply.from_email, company: selectedReply.from_company, jobTitle: selectedReply.from_job_title }
+    : selectedDraft
+      ? { name: selectedDraft.to_name, email: selectedDraft.to_email, company: selectedDraft.to_company }
+      : null;
+
+  const originalEmail = selectedReply || (selectedDraft
+    ? { subject: selectedDraft.original_subject, body: selectedDraft.original_body, replied_at: selectedDraft.created_at }
+    : null);
+
+  const isReadOnly = selectedDraft?.status === 'sent' || selectedDraft?.status === 'rejected';
+
   return (
     <>
       <Helmet><title>Reply Draft Agent | Pay Per Project</title></Helmet>
@@ -261,180 +467,550 @@ const ReplyDraftAgentPage = () => {
           navItems={getAgentNavItems(purchasedModules, 'reply-draft', navigate)}
         />
 
-        <div className="container mx-auto px-3 sm:px-4 py-4 max-w-full overflow-x-hidden">
-          <div className="grid grid-cols-12 gap-4">
-            {/* Left: Inbox + Drafts list */}
-            <div className="col-span-12 md:col-span-4">
-              <Card className="bg-black/40 border-white/10 text-white">
-                <CardHeader className="pb-2">
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant={activeTab === 'inbox' ? 'default' : 'outline'}
-                      onClick={() => setActiveTab('inbox')}
-                    >
-                      <Inbox className="h-4 w-4 mr-1" />
-                      Inbox ({pendingReplies.length})
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={activeTab === 'drafts' ? 'default' : 'outline'}
-                      onClick={() => setActiveTab('drafts')}
-                    >
-                      <Edit3 className="h-4 w-4 mr-1" />
-                      Drafts ({drafts.length})
-                    </Button>
+        <div className="container mx-auto px-4 sm:px-6 py-6 max-w-[1500px]">
+          {/* Page Header */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <Button
+              onClick={refreshAll}
+              variant="outline"
+              size="sm"
+              disabled={refreshing}
+              className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
+            <StatCard icon={FileText} label="Drafts to Review" value={stats.draftsPending} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300" />
+            <StatCard icon={Send} label="Sent" value={stats.sent} tint="from-emerald-500/20 to-teal-500/10" iconTint="text-emerald-300" />
+            <StatCard icon={AlertCircle} label="Failed" value={stats.failed} tint="from-rose-500/20 to-red-500/10" iconTint="text-rose-300" />
+          </div>
+
+          {/* Main Workspace */}
+          <div className="grid grid-cols-12 gap-4 lg:h-[calc(100vh-280px)]">
+            {/* LEFT: List */}
+            <div className="col-span-12 lg:col-span-4 xl:col-span-3 lg:h-full min-h-0">
+              <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col h-full">
+                {/* Tabs */}
+                <div className="p-2 border-b border-white/10 flex gap-1">
+                  <button
+                    onClick={() => setActiveTab('inbox')}
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      activeTab === 'inbox'
+                        ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-200 border border-cyan-500/30'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <Inbox className="h-4 w-4" />
+                    Inbox
+                    {pendingReplies.length > 0 && (
+                      <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
+                        {pendingReplies.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('drafts')}
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      activeTab === 'drafts'
+                        ? 'bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 text-fuchsia-200 border border-fuchsia-500/30'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <Edit3 className="h-4 w-4" />
+                    Drafts
+                    {drafts.length > 0 && (
+                      <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
+                        {drafts.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {/* Search */}
+                <div className="p-3 border-b border-white/10">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder={activeTab === 'inbox' ? 'Search replies…' : 'Search drafts…'}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                    />
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-2 max-h-[70vh] overflow-y-auto">
-                  {activeTab === 'inbox' && pendingReplies.map((r) => (
-                    <div
-                      key={r.id}
-                      onClick={() => { setSelectedReply(r); setSelectedDraft(null); setEditedBody(''); setEditedSubject(''); setUserContext(''); }}
-                      className={`p-2 rounded border cursor-pointer hover:bg-white/5 ${selectedReply?.id === r.id ? 'border-cyan-500 bg-white/5' : 'border-white/10'}`}
-                    >
-                      <div className="text-sm font-medium truncate">{r.from}</div>
-                      <div className="text-xs text-gray-400 truncate">{r.subject}</div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {r.interest_level && <span className="inline-block px-1 rounded bg-cyan-500/20 text-cyan-300 text-[10px] uppercase mr-1">{r.interest_level}</span>}
-                        <span>{r.replied_at ? new Date(r.replied_at).toLocaleString() : ''}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {activeTab === 'inbox' && pendingReplies.length === 0 && (
-                    <div className="text-sm text-gray-400 p-4 text-center">No pending replies</div>
+                </div>
+
+                {/* List */}
+                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                  {activeTab === 'inbox' && (
+                    <>
+                      {filteredInbox.length === 0 ? (
+                        <EmptyState
+                          icon={Inbox}
+                          title={search ? 'No matches' : 'Inbox is clear'}
+                          subtitle={search ? 'Try a different search term.' : 'New replies from your campaigns will appear here.'}
+                        />
+                      ) : (
+                        filteredInbox.map((r) => (
+                          <InboxItem
+                            key={r.id}
+                            reply={r}
+                            active={selectedReply?.id === r.id}
+                            onClick={() => handleSelectReply(r)}
+                          />
+                        ))
+                      )}
+                    </>
                   )}
-                  {activeTab === 'drafts' && drafts.map((d) => (
-                    <div
-                      key={d.id}
-                      onClick={() => { setSelectedDraft(d); setSelectedReply(null); setEditedSubject(d.subject); setEditedBody(d.body); }}
-                      className={`p-2 rounded border cursor-pointer hover:bg-white/5 ${selectedDraft?.id === d.id ? 'border-cyan-500 bg-white/5' : 'border-white/10'}`}
-                    >
-                      <div className="text-sm font-medium truncate">{d.to}</div>
-                      <div className="text-xs text-gray-400 truncate">{d.subject}</div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        <span className="inline-block px-1 rounded bg-white/10 text-[10px] uppercase mr-1">{d.status}</span>
-                        <span>{d.tone}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {activeTab === 'drafts' && drafts.length === 0 && (
-                    <div className="text-sm text-gray-400 p-4 text-center">No drafts yet</div>
+                  {activeTab === 'drafts' && (
+                    <>
+                      {filteredDrafts.length === 0 ? (
+                        <EmptyState
+                          icon={FileText}
+                          title={search ? 'No matches' : 'No drafts yet'}
+                          subtitle={search ? 'Try a different search term.' : 'Generate a draft from the Inbox to start.'}
+                        />
+                      ) : (
+                        filteredDrafts.map((d) => (
+                          <DraftItem
+                            key={d.id}
+                            draft={d}
+                            active={selectedDraft?.id === d.id}
+                            onClick={() => handleSelectDraft(d)}
+                          />
+                        ))
+                      )}
+                    </>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
 
-            {/* Right: Editor */}
-            <div className="col-span-12 md:col-span-8">
-              <Card className="bg-black/40 border-white/10 text-white">
-                <CardHeader>
-                  <CardTitle className="text-lg">
-                    {selectedReply ? 'Draft a Reply' : selectedDraft ? 'Review Draft' : 'Select a reply or draft'}
-                  </CardTitle>
-                  {selectedReply && (
-                    <CardDescription className="text-gray-400">
-                      From: <span className="text-white">{selectedReply.from}</span><br />
-                      Subject: <span className="text-white">{selectedReply.subject}</span>
-                      {selectedReply.preview && (
-                        <div className="mt-2 p-2 bg-white/5 rounded text-xs text-gray-300">
-                          {selectedReply.preview}
-                        </div>
-                      )}
-                    </CardDescription>
-                  )}
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(selectedReply || selectedDraft) && (
-                    <>
-                      <div className="flex gap-2 items-center">
-                        <label className="text-xs text-gray-400 w-20">Tone</label>
-                        <select
-                          className="bg-black/60 border border-white/10 rounded px-2 py-1 text-sm"
-                          value={tone}
-                          onChange={(e) => setTone(e.target.value)}
-                          disabled={busy}
-                        >
-                          {TONES.map((t) => (<option key={t.value} value={t.value}>{t.label}</option>))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-400">Instructions for AI (optional)</label>
-                        <textarea
-                          className="w-full bg-black/60 border border-white/10 rounded p-2 text-sm"
-                          rows={2}
-                          placeholder="e.g. keep it short, mention pricing, schedule a demo..."
-                          value={userContext}
-                          onChange={(e) => setUserContext(e.target.value)}
-                          disabled={busy}
-                        />
-                      </div>
-                      {selectedReply && !selectedDraft && (
-                        <Button onClick={handleGenerate} disabled={busy} className="w-full">
-                          {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Edit3 className="h-4 w-4 mr-2" />}
-                          Generate Draft
-                        </Button>
-                      )}
-                    </>
-                  )}
+            {/* RIGHT: Detail + Composer */}
+            <div className="col-span-12 lg:col-span-8 xl:col-span-9 lg:h-full min-h-0 lg:overflow-y-auto space-y-4 custom-scrollbar pr-1">
+              {!selectedReply && !selectedDraft && (
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm min-h-[60vh] flex items-center justify-center">
+                  <div className="text-center max-w-md px-6">
+                    <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center mb-5">
+                      <MailOpen className="h-10 w-10 text-cyan-300" />
+                    </div>
+                    <h3 className="text-xl font-bold text-white mb-2">Select a message to begin</h3>
+                    <p className="text-sm text-gray-400">
+                      Pick an incoming reply from the <span className="text-cyan-300 font-medium">Inbox</span> to generate an AI draft,
+                      or open an existing <span className="text-fuchsia-300 font-medium">Draft</span> to review and send it.
+                    </p>
+                  </div>
+                </div>
+              )}
 
-                  {selectedDraft && (
-                    <>
-                      <div>
-                        <label className="text-xs text-gray-400">Subject</label>
-                        <input
-                          className="w-full bg-black/60 border border-white/10 rounded p-2 text-sm"
-                          value={editedSubject}
-                          onChange={(e) => setEditedSubject(e.target.value)}
-                          disabled={busy || selectedDraft.status === 'sent'}
-                        />
+              {/* Original Email Viewer */}
+              {(selectedReply || selectedDraft) && originalEmail && (
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                  <div className="p-5 border-b border-white/10">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <Avatar name={selectedContact?.name} email={selectedContact?.email} size="lg" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-base font-semibold text-white truncate">
+                              {selectedContact?.name || selectedContact?.email || 'Unknown sender'}
+                            </span>
+                            {selectedReply?.interest_level && INTEREST_STYLES[selectedReply.interest_level] && (
+                              <Badge variant="outline" className={`${INTEREST_STYLES[selectedReply.interest_level].className} border`}>
+                                {INTEREST_STYLES[selectedReply.interest_level].label}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                            <span className="flex items-center gap-1">
+                              <AtSign className="h-3 w-3" />
+                              {selectedContact?.email || '—'}
+                            </span>
+                            {selectedContact?.company && (
+                              <span className="flex items-center gap-1">
+                                <Building2 className="h-3 w-3" />
+                                {selectedContact.company}
+                                {selectedContact.jobTitle && <span className="text-gray-500"> · {selectedContact.jobTitle}</span>}
+                              </span>
+                            )}
+                            {originalEmail.replied_at && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatDateTime(originalEmail.replied_at)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {selectedReply?.campaign && (
+                        <div className="hidden md:flex items-center gap-1.5 text-xs text-gray-400 bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                          <Zap className="h-3 w-3" />
+                          {selectedReply.campaign}
+                        </div>
+                      )}
+                    </div>
+                    <h2 className="text-lg font-bold text-white leading-snug">
+                      {originalEmail.subject || '(no subject)'}
+                    </h2>
+                  </div>
+
+                  <div className="p-5">
+                    <EmailBody body={originalEmail.body} isIncomingReply={!!selectedReply} />
+                    {selectedReply?.analysis && (
+                      <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
+                        <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="text-xs font-semibold text-cyan-200 mb-0.5">AI Analysis</div>
+                          <div className="text-xs text-gray-300 leading-relaxed">{selectedReply.analysis}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Composer / Draft Editor */}
+              {(selectedReply || selectedDraft) && (
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                  <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-fuchsia-500/30 to-purple-600/30 border border-fuchsia-500/30 flex items-center justify-center">
+                        <Sparkles className="h-4 w-4 text-fuchsia-200" />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-400">Body</label>
-                        <textarea
-                          className="w-full bg-black/60 border border-white/10 rounded p-2 text-sm"
-                          rows={12}
-                          value={editedBody}
-                          onChange={(e) => setEditedBody(e.target.value)}
-                          disabled={busy || selectedDraft.status === 'sent'}
-                        />
+                        <h3 className="text-sm font-bold text-white">
+                          {selectedReply && !selectedDraft
+                            ? 'Generate AI Draft'
+                            : isReadOnly
+                              ? 'Draft Details'
+                              : 'Review & Send Draft'}
+                        </h3>
+                        <p className="text-xs text-gray-400">
+                          {selectedReply && !selectedDraft
+                            ? 'Pick a tone, add guidance, and let the agent draft the reply.'
+                            : isReadOnly
+                              ? 'This draft is read-only.'
+                              : 'Edit the draft below — your changes are what gets sent.'}
+                        </p>
                       </div>
-                      {selectedDraft.ai_notes && (
-                        <div className="text-xs text-gray-400 italic p-2 bg-white/5 rounded">
-                          AI notes: {selectedDraft.ai_notes}
+                    </div>
+                    {selectedDraft && (
+                      <div className="flex items-center gap-2">
+                        {STATUS_STYLES[selectedDraft.status] && (
+                          <Badge variant="outline" className={`${STATUS_STYLES[selectedDraft.status].className} border`}>
+                            {STATUS_STYLES[selectedDraft.status].label}
+                          </Badge>
+                        )}
+                        {selectedDraft.regeneration_count > 0 && (
+                          <Badge variant="outline" className="bg-white/5 text-gray-300 border-white/10">
+                            Regen ×{selectedDraft.regeneration_count}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    {/* Tone + Instructions */}
+                    {!isReadOnly && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="text-xs font-medium text-gray-300 mb-1.5 block">Tone</label>
+                          <select
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                            value={tone}
+                            onChange={(e) => setTone(e.target.value)}
+                            disabled={busy}
+                          >
+                            {TONES.map((t) => (<option key={t.value} value={t.value} className="bg-gray-900">{t.label}</option>))}
+                          </select>
                         </div>
-                      )}
-                      {selectedDraft.status !== 'sent' && (
-                        <div className="flex gap-2 flex-wrap">
-                          <Button onClick={handleRegenerate} disabled={busy} variant="outline">
-                            {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                            Regenerate
-                          </Button>
-                          <Button onClick={handleApproveAndSend} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700">
-                            {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-                            Approve & Send
-                          </Button>
-                          <Button onClick={handleReject} disabled={busy} variant="outline" className="text-red-400 border-red-400/40">
-                            <X className="h-4 w-4 mr-2" />
-                            Discard
-                          </Button>
+                        <div className="md:col-span-2">
+                          <label className="text-xs font-medium text-gray-300 mb-1.5 block">
+                            {selectedDraft ? 'Additional instructions (regenerate)' : 'Instructions for AI'}
+                            <span className="text-gray-500 font-normal"> — optional</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={userContext}
+                            onChange={(e) => setUserContext(e.target.value)}
+                            disabled={busy}
+                            placeholder="e.g. keep it brief, propose a demo next Tuesday…"
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                          />
                         </div>
-                      )}
-                      {selectedDraft.status === 'sent' && (
-                        <div className="flex items-center gap-2 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-emerald-300 text-sm">
-                          <Check className="h-4 w-4" />
-                          Sent on {selectedDraft.sent_at ? new Date(selectedDraft.sent_at).toLocaleString() : '—'}
+                      </div>
+                    )}
+
+                    {/* Generate button when no draft yet */}
+                    {selectedReply && !selectedDraft && (
+                      <Button
+                        onClick={handleGenerate}
+                        disabled={busy}
+                        className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 h-11"
+                      >
+                        {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                        {busy ? 'Drafting reply…' : 'Generate AI Draft'}
+                      </Button>
+                    )}
+
+                    {/* Draft editor */}
+                    {selectedDraft && (
+                      <>
+                        <div>
+                          <label className="text-xs font-medium text-gray-300 mb-1.5 block">Subject</label>
+                          <input
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition disabled:opacity-60"
+                            value={editedSubject}
+                            onChange={(e) => setEditedSubject(e.target.value)}
+                            disabled={busy || isReadOnly}
+                          />
                         </div>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+                        <div>
+                          <label className="text-xs font-medium text-gray-300 mb-1.5 block">Message Body</label>
+                          <textarea
+                            className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition disabled:opacity-60 font-sans leading-relaxed"
+                            rows={14}
+                            value={editedBody}
+                            onChange={(e) => setEditedBody(e.target.value)}
+                            disabled={busy || isReadOnly}
+                          />
+                          <div className="text-xs text-gray-500 mt-1.5 flex items-center justify-between">
+                            <span>{editedBody.length} characters · ~{editedBody.trim().split(/\s+/).filter(Boolean).length} words</span>
+                            {selectedDraft.updated_at && (
+                              <span>Last updated {formatRelative(selectedDraft.updated_at)}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {selectedDraft.ai_notes && (
+                          <div className="p-3 rounded-lg bg-fuchsia-500/5 border border-fuchsia-500/20 flex gap-2.5">
+                            <Sparkles className="h-4 w-4 text-fuchsia-300 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-semibold text-fuchsia-200 mb-0.5">AI Reasoning</div>
+                              <div className="text-xs text-gray-300 leading-relaxed italic">{selectedDraft.ai_notes}</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {selectedDraft.status === 'sent' && (
+                          <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-sm flex items-center gap-2">
+                            <Check className="h-4 w-4" />
+                            Sent on {formatDateTime(selectedDraft.sent_at)} to {selectedDraft.to_email}
+                          </div>
+                        )}
+
+                        {selectedDraft.status === 'failed' && selectedDraft.send_error && (
+                          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-xs flex gap-2">
+                            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="font-semibold mb-0.5">Send failed</div>
+                              <div className="text-red-300/80">{selectedDraft.send_error}</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {!isReadOnly && (
+                          <div className="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-white/10">
+                            <Button
+                              onClick={handleReject}
+                              disabled={busy}
+                              variant="outline"
+                              className="bg-transparent border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Discard
+                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                onClick={handleRegenerate}
+                                disabled={busy}
+                                variant="outline"
+                                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+                              >
+                                {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                                Regenerate
+                              </Button>
+                              <Button
+                                onClick={handleApproveAndSend}
+                                disabled={busy || !editedBody.trim() || !editedSubject.trim()}
+                                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold shadow-lg shadow-emerald-500/20"
+                              >
+                                {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                                Approve & Send
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+      `}</style>
     </>
+  );
+};
+
+const EmailBody = ({ body, isIncomingReply }) => {
+  const [showQuoted, setShowQuoted] = useState(false);
+  if (!body || !body.trim()) {
+    return <div className="text-sm text-gray-500 italic">No content.</div>;
+  }
+  const { reply, quoted } = parseReplyBody(body);
+  const replyLabel = isIncomingReply ? "Their reply" : "Message";
+
+  // Nothing was detected as a quote — render the whole body as the message.
+  if (!quoted) {
+    return (
+      <div>
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+          <CornerUpLeft className="h-3 w-3" />
+          {replyLabel}
+        </div>
+        <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto custom-scrollbar">
+          {reply}
+        </div>
+      </div>
+    );
+  }
+
+  const cleanedQuote = cleanQuoted(quoted);
+
+  return (
+    <div className="space-y-3">
+      {reply && (
+        <div>
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+            <CornerUpLeft className="h-3 w-3" />
+            {replyLabel}
+          </div>
+          <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed bg-cyan-500/5 border border-cyan-500/15 rounded-lg p-3">
+            {reply}
+          </div>
+        </div>
+      )}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowQuoted((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition"
+        >
+          <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <Quote className="h-3 w-3" />
+            Original email (quoted)
+          </span>
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showQuoted ? 'rotate-180' : ''}`} />
+        </button>
+        {showQuoted && (
+          <div className="mt-2 pl-4 border-l-2 border-white/15 text-sm text-gray-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto custom-scrollbar">
+            {cleanedQuote}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const StatCard = ({ icon: Icon, label, value, tint, iconTint }) => (
+  <div className={`rounded-xl bg-gradient-to-br ${tint} border border-white/10 p-4 flex items-center gap-3 backdrop-blur-sm`}>
+    <div className="h-10 w-10 rounded-lg bg-black/30 border border-white/10 flex items-center justify-center">
+      <Icon className={`h-5 w-5 ${iconTint}`} />
+    </div>
+    <div className="min-w-0">
+      <div className="text-xs text-gray-400 font-medium truncate">{label}</div>
+      <div className="text-xl font-bold text-white leading-tight">{value}</div>
+    </div>
+  </div>
+);
+
+const InboxItem = ({ reply, active, onClick }) => {
+  const style = INTEREST_STYLES[reply.interest_level] || INTEREST_STYLES.not_analyzed;
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-3 py-3 border-b border-white/5 flex gap-3 transition-all ${
+        active ? 'bg-gradient-to-r from-cyan-500/10 to-transparent border-l-2 border-l-cyan-400' : 'hover:bg-white/5 border-l-2 border-l-transparent'
+      }`}
+    >
+      <Avatar name={reply.from_name} email={reply.from_email} size="md" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2 mb-0.5">
+          <span className={`text-sm font-semibold truncate ${active ? 'text-white' : 'text-gray-100'}`}>
+            {reply.from_name || reply.from_email || 'Unknown'}
+          </span>
+          <span className="text-[10px] text-gray-500 shrink-0">{formatRelative(reply.replied_at)}</span>
+        </div>
+        <div className="text-xs text-gray-300 truncate font-medium mb-1">
+          {reply.subject || '(no subject)'}
+        </div>
+        <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
+          {reply.preview || 'No preview available'}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
+            {style.label}
+          </span>
+          {reply.campaign && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
+              <Zap className="h-2.5 w-2.5" />
+              {reply.campaign}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+};
+
+const DraftItem = ({ draft, active, onClick }) => {
+  const style = STATUS_STYLES[draft.status] || STATUS_STYLES.pending;
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-3 py-3 border-b border-white/5 flex gap-3 transition-all ${
+        active ? 'bg-gradient-to-r from-fuchsia-500/10 to-transparent border-l-2 border-l-fuchsia-400' : 'hover:bg-white/5 border-l-2 border-l-transparent'
+      }`}
+    >
+      <Avatar name={draft.to_name} email={draft.to_email} size="md" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2 mb-0.5">
+          <span className="text-sm font-semibold truncate text-gray-100">
+            To: {draft.to_name || draft.to_email || 'Unknown'}
+          </span>
+          <span className="text-[10px] text-gray-500 shrink-0">{formatRelative(draft.created_at)}</span>
+        </div>
+        <div className="text-xs text-gray-300 truncate font-medium mb-1">
+          {draft.subject || '(no subject)'}
+        </div>
+        <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
+          {(draft.body || '').slice(0, 120) || 'Empty draft'}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
+            {style.label}
+          </span>
+          <span className="inline-flex items-center text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 capitalize">
+            {draft.tone}
+          </span>
+        </div>
+      </div>
+    </button>
   );
 };
 
