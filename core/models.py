@@ -505,6 +505,18 @@ class Company(models.Model):
     # Comma-separated list of origins allowed to use the widget key (e.g. "https://acme.com,https://www.acme.com").
     # When blank, all origins are accepted (back-compat). Populated origins enforce origin/referer check.
     frontline_allowed_origins = models.TextField(blank=True, default='')
+    # Customer-configurable widget appearance + behaviour. Defaults are injected in
+    # the GET /frontline/widget/public-config/ endpoint so a blank row still renders a usable widget.
+    # Shape: {
+    #   "theme": {"primary_color": "#7c3aed", "launcher_text": "Chat with us", "position": "bottom-right", "logo_url": null},
+    #   "pre_chat_form": {"enabled": true, "fields": ["name", "email"]},
+    #   "operating_hours": {"enabled": false, "timezone_name": "UTC",
+    #                        "schedule": {"mon": [["09:00","17:00"]], "tue": [...], ...},
+    #                        "offline_message": "We're offline. Leave a message and we'll reply."},
+    #   "require_captcha": false
+    # }
+    frontline_widget_config = models.JSONField(default=dict, blank=True,
+                                               help_text='Widget theming + pre-chat form + operating hours + captcha toggle.')
 
     class Meta:
         verbose_name_plural = 'Companies'
@@ -527,6 +539,7 @@ class CompanyUser(models.Model):
         ('frontline_agent', 'Frontline Agent'),
         ('marketing_agent', 'Marketing Agent'),
         ('operations_agent', 'Operations Agent'),
+        ('reply_draft_agent', 'Reply Draft Agent'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
@@ -584,6 +597,7 @@ class CompanyModulePurchase(models.Model):
         ('project_manager_agent', 'Project Manager Agent'),
         ('frontline_agent', 'Frontline Agent'),
         ('operations_agent', 'Operations Agent'),
+        ('reply_draft_agent', 'Reply Draft Agent'),
     ]
     
     STATUS_CHOICES = [
@@ -1730,3 +1744,272 @@ class TaskAttachment(models.Model):
     
     def __str__(self):
         return f"{self.file_name} - {self.task.title}"
+
+
+# ============================================================================
+# API Key Management + Per-Agent Token Quotas
+# ============================================================================
+
+AGENT_CHOICES = [
+    ('recruitment_agent', 'Recruitment Agent'),
+    ('marketing_agent', 'Marketing Agent'),
+    ('project_manager_agent', 'Project Manager Agent'),
+    ('frontline_agent', 'Frontline Agent'),
+    ('operations_agent', 'Operations Agent'),
+    ('reply_draft_agent', 'Reply Draft Agent'),
+]
+
+PROVIDER_CHOICES = [
+    ('openai', 'OpenAI'),
+    ('claude', 'Claude / Anthropic'),
+    ('gemini', 'Google Gemini'),
+    ('groq', 'Groq (Llama)'),
+    ('grok', 'xAI Grok'),
+]
+
+DEFAULT_FREE_TOKENS = 1_000_000
+
+
+class CompanyAPIKey(models.Model):
+    """LLM provider key used by one company for one agent.
+
+    Two modes:
+      - `byok`: user supplied their own key, we don't meter or block them
+        (we only show an info-only usage counter).
+      - `managed`: admin assigned a platform-owned key to this company/agent
+        combination; usage is metered against AgentTokenQuota and hard-blocked
+        when the included quota is exhausted.
+    """
+    MODE_CHOICES = [
+        ('byok', 'Bring Your Own Key'),
+        ('managed', 'Managed by Admin'),
+    ]
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('revoked', 'Revoked'),
+    ]
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='api_keys')
+    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES)
+    encrypted_key = models.TextField(help_text='Fernet-encrypted provider key')
+    key_prefix = models.CharField(max_length=8, blank=True, help_text='First 4 chars, shown in UI')
+    key_suffix = models.CharField(max_length=8, blank=True, help_text='Last 4 chars, shown in UI')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    assigned_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_api_keys',
+        help_text='Superadmin who assigned this managed key (null for BYOK)',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['company', 'agent_name', 'mode']
+        indexes = [
+            models.Index(fields=['company', 'agent_name', 'status']),
+        ]
+        verbose_name = 'Company API Key'
+        verbose_name_plural = 'Company API Keys'
+
+    def __str__(self):
+        return f"{self.company.name} / {self.agent_name} / {self.mode}"
+
+    def get_plaintext_key(self) -> str:
+        from core.crypto_utils import decrypt_secret
+        return decrypt_secret(self.encrypted_key)
+
+    def set_plaintext_key(self, plaintext: str) -> None:
+        from core.crypto_utils import encrypt_secret
+        self.encrypted_key = encrypt_secret(plaintext)
+        self.key_prefix = plaintext[:4] if plaintext else ''
+        self.key_suffix = plaintext[-4:] if plaintext and len(plaintext) > 4 else ''
+
+    @property
+    def masked_display(self) -> str:
+        if not self.key_prefix and not self.key_suffix:
+            return ''
+        return f"{self.key_prefix}{'*' * 8}{self.key_suffix}"
+
+
+class AgentTokenQuota(models.Model):
+    """Per-(company, agent) included-token balance for managed-key usage.
+
+    A row is created when the company PURCHASES the agent (not on signup).
+    Initial `included_tokens` is copied from `AdminPricingConfig.free_tokens_on_purchase`
+    for that agent at purchase time (snapshot — later pricing changes don't
+    retroactively affect this customer).
+
+    BYOK usage is recorded in LLMUsage but does NOT decrement this counter —
+    only managed-mode calls do. When used_tokens reaches included_tokens the
+    agent is hard-blocked until the user either adds their own BYOK key or
+    an admin approves a managed-key request.
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='agent_quotas')
+    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
+    # DB was renamed out-of-band to platform_* / managed_* variants. Model field
+    # names kept stable for code compatibility; db_column maps to the actual column.
+    included_tokens = models.BigIntegerField(default=DEFAULT_FREE_TOKENS, db_column='platform_included_tokens')
+    used_tokens = models.BigIntegerField(default=0, db_column='platform_used_tokens')
+    byok_tokens_info = models.BigIntegerField(
+        default=0,
+        help_text='Info-only counter of tokens spent via BYOK (not billable).',
+    )
+    last_reset_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['company', 'agent_name']
+        indexes = [
+            models.Index(fields=['company', 'agent_name']),
+        ]
+        verbose_name = 'Agent Token Quota'
+        verbose_name_plural = 'Agent Token Quotas'
+
+    def __str__(self):
+        return f"{self.company.name} / {self.agent_name}: {self.used_tokens}/{self.included_tokens}"
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.included_tokens - self.used_tokens)
+
+    @property
+    def is_exhausted(self) -> bool:
+        return self.used_tokens >= self.included_tokens
+
+
+class KeyRequest(models.Model):
+    """User → superadmin request to be assigned a managed key for an agent."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
+    requested_by = models.ForeignKey(CompanyUser, on_delete=models.CASCADE, related_name='key_requests')
+    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
+    note = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    resolved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='resolved_key_requests',
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    admin_note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'status']),
+            models.Index(fields=['status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.company.name} / {self.agent_name} / {self.status}"
+
+
+class AdminPricingConfig(models.Model):
+    """Superadmin-editable per-agent pricing + default free quota.
+
+    Snapshot-style: pricing applies going forward; existing subscriptions
+    should snapshot the numbers they were sold at.
+    """
+    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES, unique=True)
+    monthly_flat_usd = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    service_charge_usd = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text='Platform service fee added on top of provider cost (managed mode).',
+    )
+    free_tokens_on_purchase = models.BigIntegerField(
+        default=DEFAULT_FREE_TOKENS,
+        help_text='Free tokens granted when a company purchases this agent '
+                  '(NOT on signup). Superadmin can change this per agent.',
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='pricing_updates',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Admin Pricing Config'
+        verbose_name_plural = 'Admin Pricing Configs'
+
+    def __str__(self):
+        return f"{self.get_agent_name_display()} — ${self.monthly_flat_usd}/mo"
+
+
+class PlatformAPIKey(models.Model):
+    """Platform-wide default LLM key per provider.
+
+    One row per provider (openai / claude / gemini / grok). Used automatically
+    as the "free tokens" key for every company — the company's AgentTokenQuota
+    decrements as calls are made, and when it hits zero the company is
+    hard-blocked until they add BYOK or admin grants a per-company override
+    (CompanyAPIKey with mode='managed').
+
+    Resolver order:
+      1. Company BYOK (no quota)
+      2. Company-specific managed override (if assigned)
+      3. Platform key for this agent's provider (default path)
+      4. Hard block
+    """
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('revoked', 'Revoked'),
+    ]
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, unique=True)
+    encrypted_key = models.TextField(help_text='Fernet-encrypted provider key')
+    key_prefix = models.CharField(max_length=8, blank=True)
+    key_suffix = models.CharField(max_length=8, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='platform_key_updates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Platform API Key'
+        verbose_name_plural = 'Platform API Keys'
+
+    def __str__(self):
+        return f"Platform {self.get_provider_display()} ({self.status})"
+
+    def get_plaintext_key(self) -> str:
+        from core.crypto_utils import decrypt_secret
+        return decrypt_secret(self.encrypted_key)
+
+    def set_plaintext_key(self, plaintext: str) -> None:
+        from core.crypto_utils import encrypt_secret
+        self.encrypted_key = encrypt_secret(plaintext)
+        self.key_prefix = plaintext[:4] if plaintext else ''
+        self.key_suffix = plaintext[-4:] if plaintext and len(plaintext) > 4 else ''
+
+    @property
+    def masked_display(self) -> str:
+        if not self.key_prefix and not self.key_suffix:
+            return ''
+        return f"{self.key_prefix}{'*' * 8}{self.key_suffix}"
+
+
+# Per-agent default provider — which PlatformAPIKey to use as the fallback.
+# Matches what each agent's existing _call_llm uses today, so the resolver
+# returns a key the agent actually knows how to consume. Superadmin can make
+# this DB-configurable in a later iteration if a company needs a different
+# provider for a specific agent.
+AGENT_DEFAULT_PROVIDER = {
+    'recruitment_agent': 'groq',
+    'marketing_agent': 'groq',
+    'project_manager_agent': 'groq',
+    'frontline_agent': 'openai',
+    'operations_agent': 'groq',
+}

@@ -1,5 +1,6 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import Hero from '@/components/home/Hero';
 import TrustBadges from '@/components/home/TrustBadges';
@@ -20,6 +21,17 @@ import ModuleCardsSection from '@/components/home/ModuleCardsSection';
 
 const HomePage = () => {
   const { t } = useTranslation();
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    if (hash) {
+      const el = document.querySelector(hash);
+      if (el) {
+        // Delay so the section is mounted before scroll
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+      }
+    }
+  }, [hash]);
 
   return (
     <>

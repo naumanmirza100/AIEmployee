@@ -225,20 +225,30 @@ class Command(BaseCommand):
         return self._send_sequence_email(contact, campaign, sequence, next_step, next_step_number, step_count, dry_run)
 
     def _reply_was_to_sub_sequence_email(self, contact, campaign):
-        """True if the contact's most recent reply was to a sub-sequence email."""
+        """True if the contact's most recent reply was to a sub-sequence email.
+
+        Trusts Reply.sub_sequence (set authoritatively in reply_processor when the
+        triggering email was matched to a sub-seq template). Falls back to a
+        template-based check only if that field is null — using any() so a template
+        shared across main and sub still counts as sub when any linked step is sub.
+        """
         latest = (
             Reply.objects.filter(campaign=campaign, lead=contact.lead)
-            .select_related('triggering_email', 'triggering_email__email_template')
+            .select_related('sub_sequence', 'triggering_email', 'triggering_email__email_template')
             .order_by('-replied_at')
             .first()
         )
-        if not latest or not latest.triggering_email_id or not latest.triggering_email.email_template_id:
+        if not latest:
+            return False
+        if latest.sub_sequence_id is not None:
+            return True
+        if not latest.triggering_email_id or not latest.triggering_email.email_template_id:
             return False
         template = latest.triggering_email.email_template
         steps = list(template.sequence_steps.select_related('sequence').all())
         if not steps:
             return False
-        return all(step.sequence.is_sub_sequence for step in steps)
+        return any(step.sequence.is_sub_sequence for step in steps)
 
     def _process_sub_sequence_contact(self, contact, campaign, dry_run):
         """Process a contact in a sub-sequence (after they replied). Returns 'sent', 'skipped', or 'stopped'"""

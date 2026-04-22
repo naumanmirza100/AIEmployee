@@ -343,7 +343,116 @@ class EmailService:
                 'error': str(e),
                 **({'send_history_id': send_history.id} if send_history else {}),
             }
-    
+
+    def send_raw_email(
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        email_account: Optional['EmailAccount'] = None,
+        owner=None,
+        in_reply_to: Optional[str] = None,
+        references: Optional[str] = None,
+        campaign: Optional[Campaign] = None,
+        lead: Optional[Lead] = None,
+        html_body: Optional[str] = None,
+    ) -> Dict:
+        """Send a one-off email with subject/body directly (no template rendering).
+
+        Used by the reply-draft agent where the body is already composed.
+        If in_reply_to is provided, sets RFC 5322 threading headers so the
+        message lands in the recipient's existing thread.
+        """
+        if not to_email:
+            return {'success': False, 'error': 'to_email is required'}
+
+        from marketing_agent.models import EmailAccount as _EmailAccount
+        if not email_account:
+            qs = _EmailAccount.objects.filter(is_active=True)
+            if owner is not None:
+                qs = qs.filter(owner=owner)
+            email_account = qs.order_by('-is_default', '-created_at').first()
+        if not email_account:
+            return {'success': False, 'error': 'No active email account found.'}
+
+        self.check_rate_limit()
+
+        send_history = None
+        if campaign is not None and lead is not None:
+            send_history = EmailSendHistory.objects.create(
+                campaign=campaign,
+                lead=lead,
+                email_template=None,
+                subject=subject,
+                recipient_email=to_email,
+                status='pending',
+                is_ab_test=False,
+                ab_test_variant='',
+                is_followup=False,
+                followup_sequence_number=0,
+            )
+            send_history.tracking_token = send_history.generate_tracking_token()
+            send_history.save()
+
+        try:
+            from django.core.mail.backends.smtp import EmailBackend
+            smtp_backend = EmailBackend(
+                host=email_account.smtp_host,
+                port=email_account.smtp_port,
+                username=email_account.smtp_username,
+                password=email_account.smtp_password,
+                use_tls=email_account.use_tls,
+                use_ssl=email_account.use_ssl,
+                fail_silently=False,
+            )
+
+            import uuid
+            from_email = email_account.email
+            domain = from_email.split('@')[1] if '@' in from_email else 'localhost'
+            message_id = f"<{uuid.uuid4().hex}@{domain}>"
+
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=body,
+                from_email=from_email,
+                to=[to_email],
+                connection=smtp_backend,
+            )
+            email.extra_headers['Message-ID'] = message_id
+            if in_reply_to:
+                wrapped = in_reply_to if in_reply_to.startswith('<') else f"<{in_reply_to}>"
+                email.extra_headers['In-Reply-To'] = wrapped
+                email.extra_headers['References'] = references or wrapped
+
+            if html_body:
+                email.attach_alternative(html_body, 'text/html')
+
+            email.send()
+
+            if send_history:
+                send_history.status = 'sent'
+                send_history.sent_at = timezone.now()
+                send_history.message_id = message_id.strip('<>')
+                send_history.save()
+
+            self.sent_count += 1
+            logger.info(f"Raw email sent to {to_email} (subject: {subject[:60]})")
+            result = {'success': True, 'message_id': message_id.strip('<>')}
+            if send_history:
+                result['send_history_id'] = send_history.id
+            return result
+        except Exception as e:
+            if send_history:
+                send_history.status = 'failed'
+                send_history.error_message = str(e)
+                send_history.save()
+            logger.error(f"Error sending raw email to {to_email}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                **({'send_history_id': send_history.id} if send_history else {}),
+            }
+
     def _add_email_tracking(self, html_content: str, send_history: EmailSendHistory) -> str:
         """
         Add tracking pixel and wrap links with tracking URLs

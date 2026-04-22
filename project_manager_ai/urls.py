@@ -55,6 +55,9 @@ urlpatterns = [
     
     # Marketing Agent
     path('marketing/', include('marketing_agent.urls')),
+
+    # Reply Draft Agent
+    path('reply-draft/', include('reply_draft_agent.urls')),
     
     # Simple token tracking (root level - /token?t=TOKEN for opens, /token?t=TOKEN&url=... for clicks)
     path('token/', views_email_tracking.simple_track_open, name='root_simple_track_open'),

@@ -2527,6 +2527,8 @@ def recruitment_qa(request):
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         qa_agent = RecruitmentQAAgent(groq_client=groq_client)
+        qa_agent.company_id = getattr(company_user, 'company_id', None)
+        qa_agent.agent_key_name = 'recruitment_agent'
         result = qa_agent.process(question=question, company_user=company_user)
         return Response({
             'status': 'success',

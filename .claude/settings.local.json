@@ -28,7 +28,17 @@
       "Bash(grep -n \"TODO\\\\|FIXME\\\\|XXX\\\\|hardcoded\\\\|magic number\\\\|raise Exception\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)",
       "Bash(find /c/Study/Others/Projectsss/AIEmploees/AIEmployee/PaPerProjectFront/src/components/pm-agent -name \"*.jsx\" -exec wc -l {} +)",
       "Bash(grep -rn \"max_tokens\\\\|temperature\\\\|model.*=\\\\|hardcoded\\\\|xxx\\\\|fixme\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)",
-      "Bash(grep -n \"max_tokens\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)"
+      "Bash(grep -n \"max_tokens\" /c/Study/Others/Projectsss/AIEmploees/AIEmployee/project_manager_agent/ai_agents/*.py)",
+      "Bash(\".venv/Scripts/python.exe\" manage.py check)",
+      "Bash(\".venv/Scripts/python.exe\" manage.py makemigrations reply_draft_agent)",
+      "Bash(\".venv/Scripts/python.exe\" -c \"from django.urls import reverse; import django; import os; os.environ.setdefault\\('DJANGO_SETTINGS_MODULE', 'project_manager_ai.settings'\\); django.setup\\(\\); from django.urls import get_resolver; r = get_resolver\\(\\); [print\\(p\\) for p in r.reverse_dict if isinstance\\(p, str\\) and 'reply' in str\\(p\\).lower\\(\\)]\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(\".venv/Scripts/python.exe\" manage.py makemigrations core)",
+      "Bash(\".venv/Scripts/python.exe\" manage.py showmigrations core)",
+      "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" log --oneline -20 -- core/models.py)",
+      "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" log --all --oneline --source -- \"*/0044_add_platform_api_key.py\")",
+      "Bash(git -C \"D:/University/work/AI_Employyes/NewAgentForReply/AIEmployee\" show --stat 7e8a274)"
     ]
   }
 }

@@ -34,11 +34,14 @@ class KnowledgeService:
         company_id: Optional[int] = None,
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
+        max_age_days: Optional[int] = None,
+        company_user_id: Optional[int] = None,
     ) -> Dict:
         """
         Search knowledge base (FAQs, policies, manuals, uploaded documents) for relevant information.
         scope_document_type: optional list of document types to restrict uploaded docs (e.g. ['policy']).
         scope_document_ids: optional list of document IDs to restrict uploaded docs to specific documents.
+        max_age_days: optional recency filter — only uploaded docs updated within this window are searched.
         """
         logger.info(f"Searching knowledge base for: {query[:100]} (company_id: {company_id}, scope: type={scope_document_type}, ids={scope_document_ids})")
         
@@ -87,6 +90,8 @@ class KnowledgeService:
                     query, company_id, max_results,
                     scope_document_type=scope_document_type,
                     scope_document_ids=scope_document_ids,
+                    max_age_days=max_age_days,
+                    company_user_id=company_user_id,
                 )
                 documents_count = len(documents)
                 for doc in documents:
@@ -131,26 +136,46 @@ class KnowledgeService:
         max_results: int,
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
+        max_age_days: Optional[int] = None,
+        company_user_id: Optional[int] = None,
     ) -> List[Dict]:
         """
         Search uploaded documents for company using hybrid search (chunk embeddings + keyword) and RRF.
         Returns the top_k chunks re-ranked by language model.
+        Enforces: superseded-revision exclusion, processing_status='ready', and
+        per-document visibility (company vs private → allowed_users).
         """
         try:
             from Frontline_agent.models import Document, DocumentChunk
             from django.db.models import Q
+            from django.utils import timezone
+            from datetime import timedelta
             import json
-            
+
             # Base document filter
             all_documents = Document.objects.filter(
                 company_id=company_id,
                 is_indexed=True,
-                processed=True
+                processed=True,
+                superseded_by__isnull=True,          # skip old revisions
+                processing_status='ready',           # skip in-flight / failed docs
             )
+            # Visibility gate: 'company' docs are available to any company user.
+            # 'private' docs require the asker to be in allowed_users.
+            if company_user_id is not None:
+                all_documents = all_documents.filter(
+                    Q(visibility='company') | Q(visibility='private', allowed_users__id=company_user_id)
+                ).distinct()
+            else:
+                # No user context (e.g. public widget): company-wide visibility only.
+                all_documents = all_documents.filter(visibility='company')
             if scope_document_type:
                 all_documents = all_documents.filter(document_type__in=scope_document_type)
             if scope_document_ids:
                 all_documents = all_documents.filter(id__in=scope_document_ids)
+            if max_age_days is not None and max_age_days > 0:
+                cutoff = timezone.now() - timedelta(days=int(max_age_days))
+                all_documents = all_documents.filter(updated_at__gte=cutoff)
                 
             doc_ids = list(all_documents.values_list('id', flat=True))
             if not doc_ids:
@@ -316,129 +341,170 @@ Chunks:
         company_id: Optional[int] = None,
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
+        min_similarity: Optional[float] = None,
+        max_age_days: Optional[int] = None,
+        max_results: int = 5,
+        company_user_id: Optional[int] = None,
     ) -> Dict:
         """
         Get answer to a question from knowledge base and uploaded documents.
-        scope_document_type / scope_document_ids restrict search to specific document types or IDs.
+
+        Filters:
+        - scope_document_type / scope_document_ids: restrict uploaded-doc search
+        - min_similarity: override the default confidence threshold (0.0–1.0).
+          Matches with a lower score are treated as "no verified info" and escalate.
+        - max_age_days: skip uploaded documents not updated within this many days.
+        - max_results: number of top chunks to feed to the LLM (default 5).
         """
-        logger.info(f"Getting answer for question: {question[:100]} (company_id: {company_id}, scope: type={scope_document_type}, ids={scope_document_ids})")
-        
-        # Check if embeddings are available for semantic search
-        use_semantic = self.embedding_service.is_available()
-        if use_semantic:
-            logger.info("Using semantic search (embeddings) for query")
-        else:
-            logger.info("Using keyword search (embeddings not available)")
-        
-        # Try full question first - this will use semantic search if embeddings are available
+        from django.conf import settings as _dj_settings
+        default_threshold = float(getattr(_dj_settings, 'FRONTLINE_RAG_MIN_CONFIDENCE', 0.3))
+        threshold = float(min_similarity) if min_similarity is not None else default_threshold
+
+        logger.info(
+            "Getting answer: q=%s company_id=%s scope_type=%s scope_ids=%s "
+            "threshold=%.2f max_age_days=%s max_results=%d",
+            question[:100], company_id, scope_document_type, scope_document_ids,
+            threshold, max_age_days, max_results,
+        )
+
+        # Try full question first - will use semantic search if embeddings are available
         search_results = self.search_knowledge(
-            question, max_results=5, company_id=company_id,
+            question, max_results=max_results, company_id=company_id,
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
+            max_age_days=max_age_days,
+            company_user_id=company_user_id,
         )
-        
-        # If no results, try extracting keywords and searching again
+
+        # Keyword fallback if initial search came up empty
         if not search_results['success'] or search_results['count'] == 0:
-            # Extract keywords (remove common words)
             import re
-            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'what', 'when', 'where', 'who', 'why', 'how', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'}
+            stop_words = {
+                'the','a','an','and','or','but','in','on','at','to','for','of','with','by',
+                'is','are','was','were','be','been','being','have','has','had','do','does','did',
+                'will','would','should','could','may','might','must','can','what','when','where',
+                'who','why','how','this','that','these','those','i','you','he','she','it','we',
+                'they','me','him','her','us','them'
+            }
             words = re.findall(r'\b\w+\b', question.lower())
             keywords = [w for w in words if w not in stop_words and len(w) > 2]
-            
-            if keywords:
-                # Try searching with individual keywords
-                for keyword in keywords[:3]:  # Try top 3 keywords
-                    keyword_results = self.search_knowledge(
-                        keyword, max_results=3, company_id=company_id,
-                        scope_document_type=scope_document_type,
-                        scope_document_ids=scope_document_ids,
-                    )
-                    if keyword_results['success'] and keyword_results['count'] > 0:
-                        search_results = keyword_results
-                        logger.info(f"Found results using keyword: {keyword}")
-                        break
-        
-        if search_results['success'] and search_results['count'] > 0:
-            # Get the most relevant result
-            best_match = search_results['results'][0]
-            # similarity_score can be None for FAQ/policy/manual (non-document) results
-            _raw = best_match.get('similarity_score')
-            similarity_score = _raw if _raw is not None else 0.0
-            
-            # Check if similarity is too low - might be irrelevant document
-            if similarity_score < 0.2:
-                logger.warning(f"Similarity score too low ({similarity_score}), document might not be relevant")
-            
-            if best_match['type'] == 'faq':
-                answer = best_match.get('answer', '')
-            elif best_match['type'] == 'document':
-                # For documents, we now use the context from the intelligent chunking
-                # Combine top 3 chunks to give LLM maximum context
-                content_chunks = []
-                for res in search_results['results'][:3]:
-                    if res.get('type', res.get('document_type', 'document')) == 'document' and res.get('content'):
-                        content_chunks.append(f"--- Document: {res.get('title', 'Unknown')} ---\n{res.get('content')}")
-                
-                content = "\n\n".join(content_chunks)
-                document_id = best_match.get('id') or best_match.get('document_id')
-                
-                # Check minimum similarity if semantic search is used
-                if similarity_score < 0.2 and not content:
-                    logger.warning(f"Document {document_id} has low similarity ({similarity_score}) and no content.")
-                    return {
-                        'success': True,
-                        'answer': None,
-                        'has_verified_info': False,
-                        'message': 'No verified information found in knowledge base'
-                    }
+            for keyword in keywords[:3]:
+                kw_results = self.search_knowledge(
+                    keyword, max_results=max(3, max_results // 2), company_id=company_id,
+                    scope_document_type=scope_document_type,
+                    scope_document_ids=scope_document_ids,
+                    max_age_days=max_age_days,
+                    company_user_id=company_user_id,
+                )
+                if kw_results['success'] and kw_results['count'] > 0:
+                    search_results = kw_results
+                    logger.info(f"Found results using keyword: {keyword}")
+                    break
 
-                # Use the chunk content retrieved by _search_documents
-                answer = content
-                logger.info(f"Using document chunk content (length: {len(answer)}, doc_id: {document_id})")
-            else:
-                answer = best_match.get('content', '')
-            
-            # Ensure we have actual content
-            if not answer or len(answer.strip()) == 0:
-                logger.warning(f"Document found but content is empty. Document ID: {best_match.get('id')}")
-                answer = "I found a document in the knowledge base, but it appears to be empty or could not be processed."
-            
-            # Build citation for "Source: doc name / section"
-            doc_id = best_match.get('id') or best_match.get('document_id')
-            doc_title = best_match.get('title', '')
-            source_label = best_match.get('source', 'PayPerProject Database')
-            if best_match.get('type') == 'faq':
-                citation_title = best_match.get('question', '') or 'FAQ'
-            elif best_match.get('type') in ('policy', 'manual'):
-                citation_title = best_match.get('title', '') or (best_match.get('policy_type') or best_match.get('manual_type') or 'Document')
-            else:
-                citation_title = doc_title or 'Uploaded Document'
-            citation_display = f"{source_label}" + (f" – {citation_title}" if citation_title else "")
-            citations = [{
-                'source': source_label,
-                'document_title': citation_title or None,
-                'document_id': doc_id if best_match.get('type') == 'document' else None,
-                'type': best_match.get('type', 'unknown'),
-            }]
-            logger.info(f"Found answer in knowledge base (type: {best_match.get('type')}, answer length: {len(answer)}, similarity: {best_match.get('similarity_score', 'N/A')})")
-            return {
-                'success': True,
-                'answer': answer,
-                'source': citation_display,
-                'type': best_match.get('type', 'unknown'),
-                'has_verified_info': True,
-                'document_id': doc_id if best_match.get('type') == 'document' else None,
-                'document_title': doc_title or citation_title or None,
-                'citations': citations,
-            }
-        else:
+        if not (search_results['success'] and search_results['count'] > 0):
             logger.info("No verified information found in knowledge base")
             return {
-                'success': True,
-                'answer': None,
-                'has_verified_info': False,
-                'message': 'No verified information found in knowledge base'
+                'success': True, 'answer': None, 'has_verified_info': False,
+                'confidence': 'none', 'citations': [],
+                'message': 'No verified information found in knowledge base',
             }
+
+        best_match = search_results['results'][0]
+        best_type = best_match.get('type', 'unknown')
+        best_score = best_match.get('similarity_score')
+        best_score_f = float(best_score) if best_score is not None else 0.0
+
+        # Confidence enforcement: for document matches, reject below threshold.
+        # FAQ / policy / manual entries are curated — trust them regardless of score.
+        if best_type == 'document' and best_score_f < threshold:
+            logger.info(
+                "Top document match below confidence threshold (%.3f < %.3f) — escalating",
+                best_score_f, threshold,
+            )
+            return {
+                'success': True, 'answer': None, 'has_verified_info': False,
+                'confidence': 'low', 'best_score': round(best_score_f, 3),
+                'threshold': round(threshold, 3),
+                'citations': [],
+                'message': 'No sufficiently confident match found in knowledge base',
+            }
+
+        # Build answer content + multi-source citations
+        if best_type == 'faq':
+            answer = best_match.get('answer', '')
+            citations = [{
+                'type': 'faq',
+                'source': best_match.get('source', 'PayPerProject Database'),
+                'title': best_match.get('question') or 'FAQ',
+                'document_id': None,
+                'chunk_id': None,
+                'score': None,
+                'snippet': (answer[:200] if answer else None),
+            }]
+        elif best_type == 'document':
+            # Aggregate the top `max_results` document chunks (LLM sees them all)
+            doc_chunks = [r for r in search_results['results']
+                          if r.get('type') == 'document' and r.get('content')]
+            # Order already reflects RRF + LLM rerank; take up to max_results
+            doc_chunks = doc_chunks[:max_results]
+
+            content_parts = [
+                f"--- Document: {r.get('title', 'Unknown')} ---\n{r.get('content')}"
+                for r in doc_chunks
+            ]
+            answer = "\n\n".join(content_parts) or ''
+
+            citations = [{
+                'type': 'document',
+                'source': r.get('source', 'Uploaded Document'),
+                'title': r.get('title') or 'Uploaded Document',
+                'document_id': r.get('document_id') or r.get('id'),
+                'chunk_id': r.get('chunk_id'),
+                'score': round(float(r['similarity_score']), 3) if r.get('similarity_score') is not None else None,
+                'snippet': (r.get('content') or '')[:200],
+            } for r in doc_chunks]
+            logger.info(
+                "Using %d document chunks as context (top score: %.3f)",
+                len(doc_chunks), best_score_f,
+            )
+        else:
+            # Policy / manual / other curated sources
+            answer = best_match.get('content', '') or ''
+            label = best_match.get('title') or (
+                best_match.get('policy_type') or best_match.get('manual_type') or 'Document'
+            )
+            citations = [{
+                'type': best_type,
+                'source': best_match.get('source', 'PayPerProject Database'),
+                'title': label,
+                'document_id': None,
+                'chunk_id': None,
+                'score': None,
+                'snippet': (answer[:200] if answer else None),
+            }]
+
+        if not answer or not answer.strip():
+            logger.warning("Top match produced empty content (id=%s)", best_match.get('id'))
+            answer = "I found a document in the knowledge base, but it appears to be empty or could not be processed."
+
+        primary = citations[0]
+        source_display = f"{primary['source']}"
+        if primary.get('title'):
+            source_display += f" – {primary['title']}"
+
+        return {
+            'success': True,
+            'answer': answer,
+            'has_verified_info': True,
+            'confidence': 'high' if best_score_f >= max(threshold + 0.2, 0.5) else 'medium',
+            'best_score': round(best_score_f, 3) if best_type == 'document' else None,
+            'threshold': round(threshold, 3),
+            'source': source_display,
+            'type': best_type,
+            'document_id': primary.get('document_id'),
+            'document_title': primary.get('title'),
+            'citations': citations,
+        }
 
 
 class TicketAutomationService:

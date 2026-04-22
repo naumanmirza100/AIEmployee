@@ -32,6 +32,23 @@ export const getFrontlineWidgetConfig = async () => {
   }
 };
 
+/** Save widget theming + operating hours + pre-chat + allowed_origins. */
+export const updateFrontlineWidgetConfig = async ({ config, allowedOrigins } = {}) => {
+  const payload = {};
+  if (config !== undefined) payload.config = config;
+  if (allowedOrigins !== undefined) payload.allowed_origins = allowedOrigins;
+  const response = await companyApi.patch('/frontline/widget-config/update', payload);
+  return response;
+};
+
+/** Fetch the public widget config — for use by the embedded widget itself.
+ * Not auth'd; passes widget_key via query param. */
+export const getPublicWidgetConfig = async (widgetKey) => {
+  const base = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const res = await fetch(`${base}/frontline/widget/public-config/?widget_key=${encodeURIComponent(widgetKey)}`);
+  return res.json();
+};
+
 /**
  * List documents
  */
@@ -61,24 +78,30 @@ export const getDocument = async (documentId) => {
 /**
  * Upload document
  */
-export const uploadDocument = async (file, title, description, documentType = 'knowledge_base') => {
+export const uploadDocument = async (file, title, description, documentType = 'knowledge_base', options = {}) => {
   try {
     const token = localStorage.getItem('company_auth_token');
-    
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('title', title || file.name);
     formData.append('description', description || '');
     formData.append('document_type', documentType);
-    
+    // Optional new fields (Phase 2 Batch 5): visibility, retention, new-version, chunking
+    if (options.visibility) formData.append('visibility', options.visibility);
+    if (options.retentionDays) formData.append('retention_days', String(options.retentionDays));
+    if (options.parentDocumentId) formData.append('parent_document_id', String(options.parentDocumentId));
+    if (options.chunkSize) formData.append('chunk_size', String(options.chunkSize));
+    if (options.chunkOverlap != null) formData.append('chunk_overlap', String(options.chunkOverlap));
+
     const response = await fetch(`${API_BASE_URL}/frontline/documents/upload/`, {
       method: 'POST',
       headers: token ? { 'Authorization': `Token ${token}` } : {},
       body: formData,
     });
-    
+
     const data = await response.json();
-    if (!response.ok) {
+    if (!response.ok && response.status !== 202) {
       throw new Error(data.message || data.error || `HTTP ${response.status}`);
     }
     if (data.status === 'error') {
@@ -89,6 +112,18 @@ export const uploadDocument = async (file, title, description, documentType = 'k
     console.error('Upload document error:', error);
     throw error;
   }
+};
+
+/** Poll a document's async processing status. */
+export const getDocumentStatus = async (documentId) => {
+  const response = await companyApi.get(`/frontline/documents/${documentId}/status`);
+  return response;
+};
+
+/** Update document metadata (title/description/visibility/retention_days/allowed_user_ids). */
+export const updateDocumentMetadata = async (documentId, patch) => {
+  const response = await companyApi.patch(`/frontline/documents/${documentId}/metadata`, patch);
+  return response;
 };
 
 /**
@@ -276,6 +311,115 @@ export const listTicketTasks = async () => {
   }
 };
 
+/** List internal notes on a ticket. */
+export const listTicketNotes = async (ticketId) => {
+  const response = await companyApi.get(`/frontline/tickets/${ticketId}/notes`);
+  return response;
+};
+
+/** Add an internal note to a ticket. */
+export const createTicketNote = async (ticketId, body, isInternal = true) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/notes/create`, {
+    body,
+    is_internal: isInternal,
+  });
+  return response;
+};
+
+/** Update a ticket note (author only). */
+export const updateTicketNote = async (ticketId, noteId, body) => {
+  const response = await companyApi.patch(`/frontline/tickets/${ticketId}/notes/${noteId}`, { body });
+  return response;
+};
+
+/** Delete a ticket note (author only). */
+export const deleteTicketNote = async (ticketId, noteId) => {
+  const response = await companyApi.delete(`/frontline/tickets/${ticketId}/notes/${noteId}`);
+  return response;
+};
+
+/** Snooze a ticket. Accepts either { hours } or { snoozedUntil: ISO string }. */
+export const snoozeTicket = async (ticketId, { hours, snoozedUntil } = {}) => {
+  const payload = snoozedUntil ? { snoozed_until: snoozedUntil } : { hours };
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/snooze`, payload);
+  return response;
+};
+
+/** Clear a ticket's snooze. */
+export const unsnoozeTicket = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/unsnooze`, {});
+  return response;
+};
+
+/** Pause / resume SLA clock. */
+export const pauseTicketSla = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/sla/pause`, {});
+  return response;
+};
+export const resumeTicketSla = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/sla/resume`, {});
+  return response;
+};
+
+/** Re-run LLM triage on a ticket (e.g. after description update). */
+export const retriageTicket = async (ticketId) => {
+  const response = await companyApi.post(`/frontline/tickets/${ticketId}/retriage`, {});
+  return response;
+};
+
+// ---------- Meetings (Phase 2 Batch 6) ----------
+
+/** List meetings. Params: status, date_from, date_to, organizer_id, page, limit. */
+export const listMeetings = async (params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  const response = await companyApi.get(`/frontline/meetings${q ? `?${q}` : ''}`);
+  return response;
+};
+
+/** Create a meeting. `auto_jitsi` defaults to true on the server side. */
+export const createMeeting = async (payload) => {
+  const response = await companyApi.post('/frontline/meetings/create', payload);
+  return response;
+};
+
+/** Get a single meeting (includes transcript). */
+export const getMeeting = async (meetingId) => {
+  const response = await companyApi.get(`/frontline/meetings/${meetingId}`);
+  return response;
+};
+
+export const updateMeeting = async (meetingId, patch) => {
+  const response = await companyApi.patch(`/frontline/meetings/${meetingId}/update`, patch);
+  return response;
+};
+
+export const deleteMeeting = async (meetingId) => {
+  const response = await companyApi.delete(`/frontline/meetings/${meetingId}/delete`);
+  return response;
+};
+
+/** Check if a candidate slot conflicts for listed participants.
+ * `participantCompanyUserIds` is an array of CompanyUser ids. */
+export const checkMeetingAvailability = async (startIso, durationMinutes = 60, participantCompanyUserIds = []) => {
+  const q = new URLSearchParams({
+    start: startIso,
+    duration_minutes: String(durationMinutes),
+    participant_company_user_ids: participantCompanyUserIds.join(','),
+  }).toString();
+  const response = await companyApi.get(`/frontline/meetings/availability?${q}`);
+  return response;
+};
+
+/** LLM-extract action items from the meeting transcript. When `createTickets=true`,
+ * each extracted item also becomes a ticket. */
+export const extractMeetingActionItems = async (meetingId, createTickets = false) => {
+  const response = await companyApi.post(
+    `/frontline/meetings/${meetingId}/extract-action-items`,
+    { create_tickets: createTickets },
+  );
+  return response;
+};
+
 /**
  * Update a ticket task (e.g. mark as resolved)
  */
@@ -310,6 +454,29 @@ export const deleteNotificationTemplate = async (templateId) => {
   const response = await companyApi.delete(`/frontline/notifications/templates/${templateId}/delete`);
   return response;
 };
+
+/** Render a template with sample placeholder values (no send). */
+export const previewNotificationTemplate = async (templateId, context = {}) => {
+  const response = await companyApi.post(
+    `/frontline/notifications/templates/${templateId}/preview`,
+    { context },
+  );
+  return response;
+};
+
+/** List dead-lettered (permanently failed) notifications for this company. */
+export const listDeadLetteredNotifications = async (params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  const response = await companyApi.get(`/frontline/notifications/dead-lettered${q ? `?${q}` : ''}`);
+  return response;
+};
+
+/** Kick a dead-lettered or failed notification back into the pending queue. */
+export const retryDeadLetteredNotification = async (notificationId) => {
+  const response = await companyApi.post(`/frontline/notifications/${notificationId}/retry`, {});
+  return response;
+};
+
 export const listScheduledNotifications = async (params = {}) => {
   const q = new URLSearchParams(params).toString();
   const response = await companyApi.get(`/frontline/notifications/scheduled${q ? `?${q}` : ''}`);
@@ -357,6 +524,24 @@ export const deleteWorkflow = async (workflowId) => {
   const response = await companyApi.delete(`/frontline/workflows/${workflowId}/delete`);
   return response;
 };
+/** Dry-run a workflow with a given context. No side effects. */
+export const dryRunWorkflow = async (workflowId, context = {}) => {
+  const response = await companyApi.post(`/frontline/workflows/${workflowId}/dry-run`, { context });
+  return response;
+};
+
+/** List historical versions of a workflow (most recent first). */
+export const listWorkflowVersions = async (workflowId) => {
+  const response = await companyApi.get(`/frontline/workflows/${workflowId}/versions`);
+  return response;
+};
+
+/** Roll a workflow back to a prior version (snapshots current state first). */
+export const rollbackWorkflow = async (workflowId, version) => {
+  const response = await companyApi.post(`/frontline/workflows/${workflowId}/versions/${version}/rollback`, {});
+  return response;
+};
+
 export const executeWorkflow = async (workflowId, context) => {
   const response = await companyApi.post(`/frontline/workflows/${workflowId}/execute`, { context });
   return response;
@@ -426,6 +611,16 @@ export const toggleFrontlineGraphPromptFavorite = async (promptId, isFavorite) =
   return response;
 };
 /** Download analytics export as CSV (uses auth token from localStorage). */
+/** Per-agent performance summary (tickets assigned/resolved, avg resolution, SLA breaches). */
+export const getFrontlineAgentPerformance = async (dateFrom, dateTo) => {
+  const q = new URLSearchParams();
+  if (dateFrom) q.set('date_from', dateFrom);
+  if (dateTo) q.set('date_to', dateTo);
+  const qs = q.toString();
+  const response = await companyApi.get(`/frontline/analytics/agent-performance${qs ? `?${qs}` : ''}`);
+  return response;
+};
+
 export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
   const params = new URLSearchParams();
   if (dateFrom) params.set('date_from', dateFrom);
@@ -446,10 +641,14 @@ export const downloadFrontlineAnalyticsExport = async (dateFrom, dateTo) => {
 export default {
   getFrontlineDashboard,
   getFrontlineWidgetConfig,
+  updateFrontlineWidgetConfig,
+  getPublicWidgetConfig,
   listDocuments,
   getDocument,
   uploadDocument,
   deleteDocument,
+  getDocumentStatus,
+  updateDocumentMetadata,
   knowledgeQA,
   listQAChats,
   createQAChat,
@@ -460,11 +659,30 @@ export default {
   createTicket,
   listTicketTasks,
   updateTicketTask,
+  listTicketNotes,
+  createTicketNote,
+  updateTicketNote,
+  deleteTicketNote,
+  snoozeTicket,
+  unsnoozeTicket,
+  pauseTicketSla,
+  resumeTicketSla,
+  retriageTicket,
+  listMeetings,
+  createMeeting,
+  getMeeting,
+  updateMeeting,
+  deleteMeeting,
+  checkMeetingAvailability,
+  extractMeetingActionItems,
   listNotificationTemplates,
   createNotificationTemplate,
   getNotificationTemplate,
   updateNotificationTemplate,
   deleteNotificationTemplate,
+  previewNotificationTemplate,
+  listDeadLetteredNotifications,
+  retryDeadLetteredNotification,
   listScheduledNotifications,
   scheduleNotification,
   sendNotificationNow,
@@ -474,6 +692,9 @@ export default {
   updateWorkflow,
   deleteWorkflow,
   executeWorkflow,
+  dryRunWorkflow,
+  listWorkflowVersions,
+  rollbackWorkflow,
   listWorkflowExecutions,
   getFrontlineAnalytics,
   askFrontlineAnalytics,
@@ -483,5 +704,6 @@ export default {
   deleteFrontlineGraphPrompt,
   toggleFrontlineGraphPromptFavorite,
   downloadFrontlineAnalyticsExport,
+  getFrontlineAgentPerformance,
 };
 

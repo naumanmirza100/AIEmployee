@@ -730,6 +730,8 @@ def ask_qa_question(request):
         # Run agent
         from operations_agent.agents.knowledge_qa_agent import OperationsKnowledgeQAAgent
         agent = OperationsKnowledgeQAAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
         result = agent.answer(
             question=question,
             company_id=company.id,

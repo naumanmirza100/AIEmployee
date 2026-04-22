@@ -375,8 +375,8 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
         except Exception as e:
             logger.warning(f'Could not create Reply record: {str(e)}')
         
-        # Find sub-sequence for main sequence replies
-        # Also switch sub-sequence when they reply to a sub-seq email with a *different* interest (e.g. first Unsubscribe, then "yes thanks" → Interested)
+        # Find sub-sequence for main sequence replies only.
+        # Sub-sequence replies do not assign or switch sub-sequences (design rule).
         sub_sequence = None
         interest_mapping = {
             'positive': 'positive',
@@ -407,28 +407,9 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
             if sub_sequences.exists():
                 sub_sequence = sub_sequences.first()
                 logger.info(f"Found sub-sequence '{sub_sequence.name}' for contact {lead.email}")
-        elif is_sub_sequence_reply and contact.sub_sequence and contact.sequence and target_interest != 'any':
-            # Reply was to a sub-sequence email but the new interest is different → switch to that sub-sequence
-            if contact.sub_sequence.interest_level != target_interest:
-                sub_sequences = EmailSequence.objects.filter(
-                    parent_sequence=contact.sequence,
-                    is_sub_sequence=True,
-                    is_active=True,
-                    interest_level=target_interest
-                )
-                if not sub_sequences.exists():
-                    sub_sequences = EmailSequence.objects.filter(
-                        parent_sequence=contact.sequence,
-                        is_sub_sequence=True,
-                        is_active=True,
-                        interest_level='any'
-                    )
-                if sub_sequences.exists():
-                    sub_sequence = sub_sequences.first()
-                    logger.info(
-                        f"Sub-sequence reply from {lead.email} with new interest '{target_interest}' "
-                        f"(was '{contact.sub_sequence.interest_level}'). Switching to sub-sequence '{sub_sequence.name}'."
-                    )
+        # Design rule: replies to sub-sequence emails do nothing — no switch, no restart.
+        # The tick cleanup in send_sequence_emails clears the sub-sequence so no further
+        # emails go out. The lead resumes only if they reply to a main-sequence email.
 
         # Mark as replied
         was_already_in_sub_sequence = bool(contact.sub_sequence)
