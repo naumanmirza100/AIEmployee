@@ -456,3 +456,174 @@ def process_scheduled_notifications():
         )
     return {'processed': processed, 'sent': sent, 'deferred': deferred,
             'failed': failed, 'dead_lettered': dead}
+
+
+# --------------------------------------------------------------------------
+# Inbound email → ticket
+# --------------------------------------------------------------------------
+
+@shared_task(name='Frontline_agent.tasks.process_inbound_email',
+             bind=True, max_retries=3, default_retry_delay=30)
+def process_inbound_email(self, payload: dict):
+    """Turn a normalized inbound-email payload into a Ticket + TicketMessage.
+
+    Payload shape matches the dict produced by `inbound_email.ParsedInboundEmail`
+    with `company_id` resolved by the webhook view. Attachments are passed as
+    a list of {filename, content_type, content_b64, sha256, size_bytes} and
+    materialized into TicketAttachment rows + files under MEDIA_ROOT.
+
+    Side effects on a customer reply:
+      - Re-open a ticket that is resolved/closed/auto_resolved.
+      - Auto-resume SLA if the ticket was previously sla_paused_at.
+      - Update `updated_at` via save().
+    """
+    import base64
+    from pathlib import Path
+    from django.conf import settings as _s
+    from django.contrib.auth.models import User
+    from Frontline_agent.models import Ticket, TicketMessage, TicketAttachment
+    from Frontline_agent.inbound_email import sanitize_html, strip_quoted_reply
+
+    try:
+        company_id = payload.get('company_id')
+        if not company_id:
+            logger.warning("process_inbound_email: no company_id in payload")
+            return {'status': 'ignored', 'reason': 'no_company_id'}
+
+        from core.models import Company
+        company = Company.objects.filter(pk=company_id, is_active=True).first()
+        if not company:
+            return {'status': 'ignored', 'reason': 'company_inactive'}
+
+        from_addr = (payload.get('from_address') or '').strip().lower()
+        subject = (payload.get('subject') or '').strip() or '(no subject)'
+        body_text_raw = payload.get('body_text') or ''
+        body_html_raw = payload.get('body_html') or ''
+        body_text = strip_quoted_reply(body_text_raw)
+        body_html = sanitize_html(body_html_raw)
+
+        ticket_id = payload.get('existing_ticket_id')
+        ticket = Ticket.objects.filter(pk=ticket_id, company=company).first() if ticket_id else None
+
+        # Upsert Contact + attach to ticket. Cheap — one get_or_create + a small update.
+        from Frontline_agent.contacts import upsert_contact_from_email, link_ticket_to_contact
+        contact = upsert_contact_from_email(
+            company=company,
+            email=from_addr,
+            name=(payload.get('from_name') or '').strip(),
+        )
+
+        if not ticket:
+            # New thread — create a ticket.
+            creator_user = _ensure_system_user()
+            ticket = Ticket.objects.create(
+                title=subject[:200],
+                description=(body_text or body_html_raw or '')[:10000],
+                status='new',
+                priority='medium',
+                company=company,
+                created_by=creator_user,
+                intent='email_inbound',
+                entities={'from_email': from_addr},
+                contact=contact,
+            )
+            if contact:
+                # Keep denormalized counters fresh after the insert.
+                link_ticket_to_contact(ticket, contact)
+            logger.info("Inbound email → new ticket %s for company %s", ticket.id, company.id)
+        else:
+            # Reply on an existing thread — re-open + resume SLA if needed.
+            changed_fields = []
+            if ticket.status in ('resolved', 'closed', 'auto_resolved'):
+                ticket.status = 'open'
+                ticket.resolved_at = None
+                changed_fields += ['status', 'resolved_at']
+            if ticket.sla_paused_at:
+                paused_delta = (timezone.now() - ticket.sla_paused_at).total_seconds()
+                ticket.sla_paused_accumulated_seconds = (
+                    (ticket.sla_paused_accumulated_seconds or 0) + int(paused_delta)
+                )
+                ticket.sla_paused_at = None
+                changed_fields += ['sla_paused_at', 'sla_paused_accumulated_seconds']
+            if changed_fields:
+                changed_fields.append('updated_at')
+                ticket.save(update_fields=list(set(changed_fields)))
+            # If this pre-existing ticket had no contact (created before this feature),
+            # attach it now so the Customer-360 panel picks it up.
+            if contact and not ticket.contact_id:
+                link_ticket_to_contact(ticket, contact)
+            elif contact:
+                # Just refresh the denormalized last_seen_at / count
+                from Frontline_agent.contacts import recompute_contact_stats
+                recompute_contact_stats(contact)
+
+        # Create the inbound TicketMessage row.
+        msg = TicketMessage.objects.create(
+            ticket=ticket,
+            direction='inbound',
+            channel='email',
+            from_address=from_addr[:320],
+            from_name=(payload.get('from_name') or '')[:255],
+            to_addresses=payload.get('to_addresses') or [],
+            cc_addresses=payload.get('cc_addresses') or [],
+            subject=subject[:998],
+            body_text=body_text[:500000],
+            body_html=body_html[:500000],
+            message_id=(payload.get('message_id') or '')[:998],
+            in_reply_to=(payload.get('in_reply_to') or '')[:998],
+            references=payload.get('references') or [],
+            raw_payload={'provider': payload.get('provider'), 'headers': payload.get('raw_headers') or {}},
+            is_auto_reply=bool(payload.get('is_auto_reply')),
+        )
+
+        # Persist attachments.
+        base_dir = Path(_s.MEDIA_ROOT) / 'frontline_ticket_attachments' / str(company.id) / str(ticket.id)
+        base_dir.mkdir(parents=True, exist_ok=True)
+        for att in payload.get('attachments') or []:
+            try:
+                content_b64 = att.get('content_b64') or ''
+                raw_bytes = base64.b64decode(content_b64) if content_b64 else b''
+                if not raw_bytes:
+                    continue
+                sha = att.get('sha256') or ''
+                if not sha:
+                    import hashlib as _h
+                    sha = _h.sha256(raw_bytes).hexdigest()
+                filename = (att.get('filename') or 'attachment.bin')[:240]
+                # sanitize to avoid traversal
+                from Frontline_agent.document_processor import DocumentProcessor
+                safe_name = DocumentProcessor.sanitize_filename(filename)
+                out_path = base_dir / f"{sha[:16]}-{safe_name}"
+                with open(out_path, 'wb') as fh:
+                    fh.write(raw_bytes)
+                TicketAttachment.objects.create(
+                    ticket_message=msg,
+                    filename=filename,
+                    content_type=att.get('content_type', '')[:120],
+                    size_bytes=len(raw_bytes),
+                    storage_path=str(out_path.relative_to(_s.MEDIA_ROOT)),
+                    sha256=sha[:64],
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist attachment on msg %s: %s", msg.id, exc)
+
+        return {'status': 'ok', 'ticket_id': ticket.id, 'message_id': msg.id,
+                'was_new_ticket': ticket_id is None}
+
+    except Exception as exc:
+        logger.exception("process_inbound_email failed: %s", exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            return {'status': 'failed', 'error': str(exc)[:400]}
+
+
+def _ensure_system_user():
+    """Return a single reusable 'frontline-inbound' Django user to own tickets
+    created from inbound email. Created on first call; idempotent."""
+    from django.contrib.auth.models import User
+    user, _ = User.objects.get_or_create(
+        username='frontline_inbound',
+        defaults={'email': 'noreply-inbound@frontline.local', 'is_active': True},
+    )
+    return user

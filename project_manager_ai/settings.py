@@ -485,6 +485,27 @@ HCAPTCHA_SITE_KEY = os.getenv('HCAPTCHA_SITE_KEY', '')
 HCAPTCHA_SECRET = os.getenv('HCAPTCHA_SECRET', '')
 
 # --------------------
+# Frontline Agent — inbound email channel (Phase 3)
+# --------------------
+# Domain receiving customer email (e.g. 'support.acme.ai'). MX for this domain
+# should be pointed at the chosen provider (SendGrid Inbound Parse, Mailgun
+# Routes, etc.) and traffic forwarded to
+# /api/frontline/webhooks/inbound-email/<provider>/.
+# Per-tenant routing: support+<Company.support_inbox_slug>@<this_domain>.
+FRONTLINE_INBOUND_EMAIL_DOMAIN = os.getenv('FRONTLINE_INBOUND_EMAIL_DOMAIN', '')
+
+# SendGrid Inbound Parse Ed25519 public key (base64). Leave blank to fall back to
+# the shared-secret scheme below (simpler for dev / reverse-proxy setups).
+SENDGRID_INBOUND_PUBLIC_KEY = os.getenv('SENDGRID_INBOUND_PUBLIC_KEY', '')
+
+# Mailgun signing key (from Mailgun dashboard → Webhooks → "HTTP webhook signing key").
+MAILGUN_SIGNING_KEY = os.getenv('MAILGUN_SIGNING_KEY', '')
+
+# Shared secret header verification used when no provider key is configured, and
+# the only mode accepted for the 'generic' provider outside DEBUG.
+FRONTLINE_INBOUND_SHARED_SECRET = os.getenv('FRONTLINE_INBOUND_SHARED_SECRET', '')
+
+# --------------------
 # Logging: redact PII/secrets before they hit any handler
 # --------------------
 LOGGING = {
