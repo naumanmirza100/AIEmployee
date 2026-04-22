@@ -46,7 +46,22 @@ class Ticket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     sla_due_at = models.DateTimeField(null=True, blank=True, help_text='Target response time for SLA; used for aging alerts')
-    
+
+    # Snooze: when set in the future, the ticket is dormant; Celery wakes it when the time passes.
+    snoozed_until = models.DateTimeField(null=True, blank=True, db_index=True,
+                                         help_text='If set and in the future, ticket is snoozed and hidden from queues.')
+
+    # SLA pause: sla_paused_at is the moment we stopped the clock (e.g. waiting on customer).
+    # sla_paused_accumulated_seconds tracks total paused time across multiple pause/resume cycles.
+    sla_paused_at = models.DateTimeField(null=True, blank=True,
+                                         help_text='If set, the SLA clock is currently paused since this time.')
+    sla_paused_accumulated_seconds = models.IntegerField(default=0,
+                                                         help_text='Total accumulated paused seconds across all pause/resume cycles.')
+
+    # Triage bookkeeping: track when the ticket was last re-triaged.
+    last_triaged_at = models.DateTimeField(null=True, blank=True,
+                                           help_text='When triage was last run (create or re-triage on update).')
+
     # Internal entities for analytics/workflow
     intent = models.CharField(max_length=100, blank=True, null=True, help_text='Extracted intention of the user')
     entities = models.JSONField(default=dict, blank=True, help_text='Extracted entities like user_id, product, etc.')
@@ -58,10 +73,37 @@ class Ticket(models.Model):
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['created_at']),
             models.Index(fields=['sla_due_at']),
+            models.Index(fields=['snoozed_until']),
         ]
-    
+
     def __str__(self):
         return f"{self.title} - {self.get_status_display()}"
+
+    def is_snoozed(self):
+        """True if the ticket is currently within its snooze window."""
+        return bool(self.snoozed_until and self.snoozed_until > timezone.now())
+
+
+class TicketNote(models.Model):
+    """Internal / private note on a ticket. Agents use these to discuss with
+    each other without the customer seeing. `is_internal=False` is reserved
+    for a future customer-visible comment type."""
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='notes')
+    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='frontline_ticket_notes')
+    body = models.TextField()
+    is_internal = models.BooleanField(default=True, help_text='True = private agent note. Reserved False for future customer-visible comments.')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['ticket', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"Note on ticket #{self.ticket_id} by {self.author_id}"
 
 
 class KnowledgeBase(models.Model):
@@ -175,6 +217,7 @@ class ScheduledNotification(models.Model):
         ('sent', 'Sent'),
         ('failed', 'Failed'),
         ('cancelled', 'Cancelled'),
+        ('dead_lettered', 'Dead-lettered'),
     ]
     company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='frontline_scheduled_notifications', null=True, blank=True)
     template = models.ForeignKey(NotificationTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name='scheduled_notifications')
@@ -188,12 +231,25 @@ class ScheduledNotification(models.Model):
     error_message = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Retry + DLQ bookkeeping
+    attempts = models.IntegerField(default=0, help_text='Number of send attempts made so far.')
+    max_attempts = models.IntegerField(default=3, help_text='Upper bound on retry attempts before dead-lettering.')
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True,
+                                         help_text='Earliest time the Celery worker may attempt the next retry.')
+    last_error = models.TextField(blank=True, null=True, help_text='Error message from the most recent failed attempt.')
+    dead_lettered_at = models.DateTimeField(null=True, blank=True, db_index=True,
+                                            help_text='When this notification exhausted retries and was dead-lettered.')
+    deferred_reason = models.CharField(max_length=50, blank=True, default='',
+                                       help_text="If non-empty, send was deferred (e.g. 'quiet_hours').")
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-scheduled_at']
         indexes = [
             models.Index(fields=['status', 'scheduled_at']),
             models.Index(fields=['company']),
+            models.Index(fields=['status', 'next_retry_at']),
+            models.Index(fields=['dead_lettered_at']),
         ]
 
     def __str__(self):
@@ -209,6 +265,11 @@ class FrontlineWorkflow(models.Model):
     steps = models.JSONField(default=list, help_text='List of steps: [{"type": "send_email", "template_id": 1}, {"type": "update_ticket", "status": "open"}]')
     requires_approval = models.BooleanField(default=False, help_text='If True, execution halts until approved by admin')
     is_active = models.BooleanField(default=True)
+    # Workflow-level budget: if execution exceeds this many seconds, the run is aborted.
+    # 0 or null means "no timeout" (existing behaviour).
+    timeout_seconds = models.IntegerField(default=0, help_text='Max wall-clock seconds for one run. 0 = unlimited.')
+    # Incremented on every edit; paired with FrontlineWorkflowVersion snapshots.
+    version = models.IntegerField(default=1, help_text='Incremented when the workflow definition is changed.')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -218,6 +279,25 @@ class FrontlineWorkflow(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class FrontlineWorkflowVersion(models.Model):
+    """Immutable snapshot of a FrontlineWorkflow at a point in time.
+    Created whenever the workflow is updated; supports rollback."""
+    workflow = models.ForeignKey(FrontlineWorkflow, on_delete=models.CASCADE, related_name='versions')
+    version = models.IntegerField(help_text='Matches FrontlineWorkflow.version at the time of snapshot.')
+    snapshot = models.JSONField(help_text='Frozen copy of name/description/trigger_conditions/steps/requires_approval/is_active/timeout_seconds.')
+    saved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='frontline_workflow_versions_saved')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-version']
+        indexes = [models.Index(fields=['workflow', 'version'])]
+        unique_together = [('workflow', 'version')]
+
+    def __str__(self):
+        return f"{self.workflow_id} v{self.version}"
 
 
 class FrontlineWorkflowExecution(models.Model):
@@ -262,29 +342,47 @@ class FrontlineMeeting(models.Model):
         ('cancelled', 'Cancelled'),
         ('rescheduled', 'Rescheduled'),
     ]
-    
+
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE,
+                                null=True, blank=True,
+                                related_name='frontline_meetings',
+                                help_text='Tenant that owns this meeting.')
     organizer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='frontline_organized_meetings')
     participants = models.ManyToManyField(User, related_name='frontline_meetings', blank=True)
     scheduled_at = models.DateTimeField()
     duration_minutes = models.IntegerField(default=60)
+    timezone_name = models.CharField(max_length=64, default='UTC',
+                                     help_text='IANA tz name for display; scheduled_at is always UTC in DB.')
     meeting_link = models.URLField(blank=True, null=True)
     location = models.CharField(max_length=500, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
     notes = models.TextField(blank=True)
     transcript = models.TextField(blank=True)
+
+    # Reminder bookkeeping — populated by the Celery task so we send each reminder once.
+    reminder_24h_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_15m_sent_at = models.DateTimeField(null=True, blank=True)
+
+    # LLM-extracted action items. Each entry: {text, owner_user_id?, due_date?, ticket_id?}.
+    action_items = models.JSONField(default=list, blank=True,
+                                    help_text='Action items extracted from transcript.')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-scheduled_at']
         indexes = [
             models.Index(fields=['status', 'scheduled_at']),
             models.Index(fields=['organizer']),
+            models.Index(fields=['company', 'scheduled_at']),
+            models.Index(fields=['scheduled_at', 'reminder_24h_sent_at']),
+            models.Index(fields=['scheduled_at', 'reminder_15m_sent_at']),
         ]
-    
+
     def __str__(self):
         return f"{self.title} - {self.scheduled_at}"
 
@@ -310,6 +408,18 @@ class Document(models.Model):
         ('other', 'Other'),
     ]
     
+    PROCESSING_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('ready', 'Ready'),
+        ('failed', 'Failed'),
+    ]
+
+    VISIBILITY_CHOICES = [
+        ('company', 'Company (all users in the company)'),
+        ('private', 'Private (allowed_users only)'),
+    ]
+
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES, default='knowledge_base')
@@ -328,9 +438,37 @@ class Document(models.Model):
     embedding_model = models.CharField(max_length=100, blank=True, null=True, help_text="Model used to generate embedding (e.g., text-embedding-3-large)")
     related_ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
     related_knowledge = models.ForeignKey(KnowledgeBase, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+
+    # Background-processing state. `processed` stays for back-compat; `processing_status`
+    # is the source of truth for the async pipeline.
+    processing_status = models.CharField(max_length=20, choices=PROCESSING_STATUS_CHOICES, default='ready',
+                                         db_index=True,
+                                         help_text="Async processing state. Defaults 'ready' for back-compat.")
+    processing_error = models.TextField(blank=True, default='', help_text="Last error from background processing.")
+    chunks_processed = models.IntegerField(default=0, help_text="Chunks indexed so far (for progress display).")
+    chunks_total = models.IntegerField(default=0, help_text="Total chunks to index (for progress display).")
+
+    # Versioning: uploading a new revision supersedes the old one in retrieval.
+    version = models.IntegerField(default=1)
+    parent_document = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                                        related_name='revisions',
+                                        help_text="Original document if this is a newer revision.")
+    superseded_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name='superseded_revisions', db_index=True,
+                                      help_text="Points to the newer revision. Set → excluded from retrieval.")
+
+    # Per-doc access control.
+    visibility = models.CharField(max_length=20, choices=VISIBILITY_CHOICES, default='company')
+    allowed_users = models.ManyToManyField('core.CompanyUser', blank=True, related_name='frontline_accessible_documents',
+                                           help_text="When visibility='private', only these users can retrieve the doc.")
+
+    # Retention (days). 0 or null = keep forever. Prune job deletes expired docs.
+    retention_days = models.IntegerField(null=True, blank=True,
+                                         help_text="Delete this document after N days from created_at. Blank/0 = keep forever.")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-created_at']
@@ -339,8 +477,10 @@ class Document(models.Model):
             models.Index(fields=['created_at']),
             models.Index(fields=['company', 'is_indexed']),
             models.Index(fields=['file_hash']),
+            models.Index(fields=['processing_status']),
+            models.Index(fields=['superseded_by']),
         ]
-    
+
     def __str__(self):
         return self.title
 
@@ -496,6 +636,14 @@ class FrontlineNotificationPreferences(models.Model):
     ticket_assigned_email = models.BooleanField(default=True, help_text='Email when a ticket is assigned to you')
     # Workflow / template emails (e.g. send_email step or template trigger)
     workflow_email_enabled = models.BooleanField(default=True, help_text='Receive emails from workflow steps and template triggers')
+
+    # Quiet hours — sends during the window are deferred to the next allowed slot.
+    timezone_name = models.CharField(max_length=64, default='UTC',
+                                     help_text="IANA timezone name for quiet-hour calculations (e.g. 'America/New_York').")
+    quiet_hours_enabled = models.BooleanField(default=False)
+    quiet_hours_start = models.CharField(max_length=5, default='22:00', help_text='HH:MM 24h, local to timezone_name.')
+    quiet_hours_end = models.CharField(max_length=5, default='08:00', help_text='HH:MM 24h. If end < start the window wraps past midnight.')
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

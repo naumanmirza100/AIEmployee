@@ -562,6 +562,11 @@ def project_pilot(request):
 
         chat_history = _get_chat_history(request)
         agent = AgentRegistry.get_agent("project_pilot")
+        # Route LLM call through the company key/quota resolver. Resolver will
+        # raise QuotaExhausted (402) or NoKeyAvailable (403) on hard-block —
+        # core/drf_exceptions converts those to clean JSON responses.
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
@@ -2047,6 +2052,8 @@ def knowledge_qa(request):
 
         chat_history = request.data.get("chat_history") or []
         agent = AgentRegistry.get_agent("knowledge_qa")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             question=question,
             context=context,
@@ -3116,6 +3123,11 @@ def project_pilot_from_file(request):
 
         chat_history = _get_chat_history(request)
         agent = AgentRegistry.get_agent("project_pilot")
+        # Route LLM call through the company key/quota resolver. Resolver will
+        # raise QuotaExhausted (402) or NoKeyAvailable (403) on hard-block —
+        # core/drf_exceptions converts those to clean JSON responses.
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)

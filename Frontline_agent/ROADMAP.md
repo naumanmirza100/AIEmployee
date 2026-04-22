@@ -26,7 +26,7 @@ Things that are actively risky or broken in what's shipped today. These should b
 ### 1.1 Security loopholes
 - [ ] **`SECRET_KEY` hardcoded in `project_manager_ai/settings.py`, `DEBUG=True`, `ALLOWED_HOSTS=['*']`** — move to env, rotate the leaked key, set `DEBUG=False` + explicit hosts in prod
 - [x] **No rate limiting on public `/frontline/public/*` endpoints** — abuse + cost escalation vector *(Batch 1: FrontlinePublicThrottle, 20/hour by IP)*
-- [ ] **No rate limiting on auth endpoints** — brute-force on `CompanyUserToken`
+- [x] **No rate limiting on auth endpoints** — brute-force on `CompanyUserToken` *(Phase 2 Batch 9: `CompanyAuthThrottle` @ 10/hour per IP applied to login + register)*
 - [x] **No rate limiting on LLM-backed endpoints** — single tenant can blow up the bill *(Batch 1: FrontlineLLMThrottle on qa/summarize/extract/create-ticket/search, 60/hour per user; upload separately 30/hour)*
 - [ ] **No CAPTCHA on public widget / form** — bot spam creates tickets and chats
 - [x] **Widget key not origin-validated** — key scraped from embed snippet works from any domain; validate `Origin`/`Referer` against tenant-allowed domains *(Batch 1: added `Company.frontline_allowed_origins`, enforced in `_get_company_by_widget_key`; empty = back-compat)*
@@ -35,14 +35,14 @@ Things that are actively risky or broken in what's shipped today. These should b
 - [x] **Upload filenames not sanitized** — verify no path-traversal when constructing storage path *(Batch 1: `DocumentProcessor.sanitize_filename` via `get_valid_filename`)*
 - [ ] **Token rotation / revocation** — no mechanism to force-logout on compromise; tokens appear long-lived
 - [ ] **CSRF posture on public endpoints** — audit which public POSTs accept cross-origin without a token
-- [ ] **Sensitive data in logs** — audit log statements for PII, tokens, customer message bodies; add a redaction filter
-- [ ] **Meeting links not validated** — any URL accepted into `meeting_link`; risk of phishing links routed through notifications
+- [x] **Sensitive data in logs** — audit log statements for PII, tokens, customer message bodies; add a redaction filter *(Phase 2 Batch 9: `Frontline_agent.logging_filters.RedactPIIFilter` wired into Django's LOGGING config; redacts email, bearer/API/Stripe/AWS/JWT/card-number patterns + password= keys)*
+- [x] **Meeting links not validated** — any URL accepted into `meeting_link`; risk of phishing links routed through notifications *(Phase 2 Batch 9: `_validate_meeting_link` — requires http/https + netloc; localhost/private ranges blocked in non-DEBUG)*
 
 ### 1.2 Prompt injection & LLM safety
-- [ ] **Customer content flows straight into LLM prompts** with no instruction isolation — ticket descriptions, doc content, notification personalization context all unfiltered
+- [x] **Customer content flows straight into LLM prompts** with no instruction isolation *(Phase 2 Batch 9: `prompt_safety.sanitize_user_input` scrubs invisible chars + collapses known injection phrases; `wrap_untrusted` wraps all user data in labelled tags; `ANTI_INJECTION_SYSTEM_ADDENDUM` appended to system prompt; applied to `get_knowledge_prompt` and `_extract_ticket_intent`)*
 - [ ] **LLM-personalized notifications are an exfil / phishing vector** — attacker-controlled ticket content can shape outbound email copy to other customers
-- [ ] **Document content poisoning of RAG** — a malicious uploaded doc containing "ignore previous instructions…" leaks into every Q&A answer retrieved from it; mitigate with delimited prompts + retrieval provenance + output scanning
-- [ ] **No output sanitization before rendering LLM text in admin UI / emails** — stored-XSS risk in dashboards; HTML-escape all LLM output before rendering
+- [~] **Document content poisoning of RAG** — *(Phase 2 Batch 9: partial — all retrieved content flows through the same wrapped-tag prompt, but per-chunk `<source_N>` wrapping is not yet applied in `get_knowledge_prompt`; retrieval provenance via citations shipped in Phase 2 Batch 1. Output scanning still pending)*
+- [~] **No output sanitization before rendering LLM text in admin UI / emails** *(Phase 2 Batch 9: `prompt_safety.escape_llm_output_html` helper available; React dashboard auto-escapes JSX, so UI path is safe. Email HTML render path still pending — call the helper before injecting LLM text into HTML bodies)*
 - [ ] **No jailbreak / prompt-injection test suite** — add red-team prompts to the eval harness
 - [ ] **System prompt leakable via prompt-injection** — test and harden
 
@@ -86,85 +86,87 @@ Things that are actively risky or broken in what's shipped today. These should b
 ## 2. Improvements to Existing Features
 
 ### 2.1 RAG / Knowledge Q&A
-- [ ] Move embeddings to pgvector (or Qdrant/Weaviate)
-- [ ] Add cross-encoder reranker (e.g., BAAI bge-reranker or Cohere rerank) on top-N
-- [ ] Return citations `{answer, sources: [{doc_id, chunk_id, snippet, score}]}` with every answer
-- [ ] Render citations as inline footnotes in the UI
-- [ ] Query rewriting / HyDE pass before retrieval
+- [ ] Move embeddings to vector store (note: MSSQL not Postgres, so not pgvector — Qdrant/Azure Cognitive Search/FAISS)
+- [~] Add cross-encoder reranker on top-N *(existing LLM reranker via gpt-4o-mini already in `services._llm_rerank`; swap to true cross-encoder later)*
+- [x] Return citations `{answer, sources: [{doc_id, chunk_id, snippet, score}]}` with every answer *(Phase 2 Batch 1: multi-source citations from all chunks fed to LLM, not just top-1)*
+- [x] Render citations as inline footnotes in the UI *(Phase 2 Batch 1: numbered list with title/snippet/score in QA chat)*
+- [x] Query rewriting / HyDE pass before retrieval *(Phase 2 Batch 1: `FrontlineAgent._rewrite_query`; opt-in via `enable_rewrite`, auto-retries on weak retrieval)*
 - [ ] Semantic / structure-aware chunking (preserve headings, tables, avoid mid-sentence cuts)
-- [ ] Metadata filters on retrieval (access level, category, recency, tags)
-- [ ] Formalize confidence threshold → "I don't know" + auto-escalate
+- [x] Metadata filters on retrieval (access level, category, recency, tags) *(Phase 2 Batch 1: `min_similarity`, `max_age_days`, `max_results`, plus existing `scope_document_type`/`scope_document_ids`)*
+- [x] Formalize confidence threshold → "I don't know" + auto-escalate *(Phase 2 Batch 1: `FRONTLINE_RAG_MIN_CONFIDENCE` setting, returns `confidence: 'low'` + `best_score` + `threshold`; UI shows escalation hint)*
 - [ ] Multi-turn conversation memory in Q&A chat
-- [ ] Configurable chunk size / overlap per tenant & per doc type
+- [x] Configurable chunk size / overlap per tenant & per doc type *(Phase 2 Batch 1: `FRONTLINE_CHUNK_SIZE`/`FRONTLINE_CHUNK_OVERLAP` settings + optional `chunk_size`/`chunk_overlap` upload params, clamped to safe bounds)*
 - [ ] KB feedback loop: thumbs-down → weekly review queue; flagged chunks re-indexed or marked stale
 
 ### 2.2 Ticket Triage & Auto-Resolution
 - [ ] Duplicate detection via embedding similarity + merge flow
 - [ ] Weekly cluster report: "28 tickets this week = 'reset password'" → suggest KB article
-- [ ] Re-triage on new messages (priority/category shouldn't be frozen at creation)
+- [x] Re-triage on new messages (priority/category shouldn't be frozen at creation) *(Phase 2 Batch 2: `POST /frontline/tickets/<id>/retriage/` + Re-triage action in dashboard)*
 - [ ] Skills-based routing (language, product area, tier, availability, least-busy)
 - [ ] Per-tenant configurable tags & custom fields
-- [ ] Internal notes / private comments
+- [x] Internal notes / private comments *(Phase 2 Batch 2: `TicketNote` model + notes CRUD endpoints + notes dialog in dashboard)*
 - [ ] @mentions + assignment notifications
 - [ ] Ticket splitting (one message → two tickets)
-- [ ] Snooze / follow-up reminders
-- [ ] SLA pause while waiting on customer, auto-resume on reply
+- [x] Snooze / follow-up reminders *(Phase 2 Batch 2: `snoozed_until` field + snooze/unsnooze endpoints + 1h/1d/3d preset actions + Celery `wake_snoozed_tickets` every 5min)*
+- [~] SLA pause while waiting on customer, auto-resume on reply *(Phase 2 Batch 2: manual pause/resume landed — `sla_paused_at`, `sla_paused_accumulated_seconds`, pause/resume endpoints. Auto-resume on customer reply still pending — needs a ticket-messages model first)*
 
 ### 2.3 Notifications
 - [ ] Delivery receipts, open / click tracking, bounce handling (auto-disable bad channel per user)
-- [ ] Retry with backoff + dead-letter queue
-- [ ] Timezone-aware quiet hours (no sends 10pm–8am local)
+- [x] Retry with backoff + dead-letter queue *(Phase 2 Batch 3: `attempts`/`max_attempts`/`next_retry_at`/`dead_lettered_at`/`last_error` on ScheduledNotification; Celery `process_scheduled_notifications` every 60s; exponential backoff 5m/30m/2h; DLQ list + retry endpoints)*
+- [x] Timezone-aware quiet hours (no sends 10pm–8am local) *(Phase 2 Batch 3: `timezone_name` + `quiet_hours_enabled/start/end` on preferences; sender defers to next allowed window; send_now returns `202 Accepted` with deferred_at)*
 - [ ] Template versioning + rollback
 - [ ] A/B test two template versions, measure response rate
-- [ ] Preview mode with sample data
-- [ ] One-click unsubscribe + hosted preference center (GDPR / CAN-SPAM)
+- [x] Preview mode with sample data *(Phase 2 Batch 3: `POST /frontline/notifications/templates/<id>/preview/` returns rendered subject+body with sample defaults)*
+- [~] One-click unsubscribe + hosted preference center (GDPR / CAN-SPAM) *(Phase 2 Batch 3: signed-token public endpoint `/frontline/unsubscribe/` landed + `{{unsubscribe_url}}` auto-injected; hosted HTML preference-center page still pending — today returns JSON, a simple confirmation page is a small add)*
 - [ ] Rich email templates (MJML or drag-and-drop editor)
 
 ### 2.4 Workflows / SOPs
-- [ ] Retry config per step (attempts, backoff)
-- [ ] Conditional branching (`if priority==high else …`)
+- [x] Retry config per step (attempts, backoff) *(Phase 2 Batch 4: per-step `retries` + `backoff_seconds` honoured in `_execute_step_list`; caps at 5 retries / 300s backoff)*
+- [x] Conditional branching (`if priority==high else …`) *(Phase 2 Batch 4: new `branch` step type + `workflow_conditions.py` DSL supporting `==/!=/>/</in/not_in/contains/startswith/endswith/is_empty` and nested `all/any/not` combinators)*
 - [ ] Parallel (fan-out / fan-in) steps
 - [ ] Visual workflow builder (drag-and-drop graph)
-- [ ] Workflow versioning + dry-run mode
-- [ ] Expanded step catalog: HTTP webhook, Slack message, create calendar event, run script, wait-for-event, wait-for-duration
-- [ ] Execution timeout (kill runaway workflows)
+- [x] Workflow versioning + dry-run mode *(Phase 2 Batch 4: `FrontlineWorkflowVersion` snapshots on every update; `/versions/`, `/versions/<N>/rollback/`, and `/dry-run/` endpoints)*
+- [~] Expanded step catalog *(Phase 2 Batch 4: already had `send_email`, `update_ticket`, `webhook`/`http_webhook`, `slack`, `assign`; added `wait`/`wait_for_duration`. Still pending: `create_calendar_event`, `run_script`, `wait_for_event`)*
+- [x] Execution timeout (kill runaway workflows) *(Phase 2 Batch 4: `FrontlineWorkflow.timeout_seconds` + monotonic check per step; aborts with `workflow_timeout` error)*
 - [ ] One-click approvals via email / Slack (not only dashboard)
 
 ### 2.5 Document Processing
-- [ ] MIME + magic-byte validation (covered in 1.1, re-check here)
-- [ ] Virus scanning pipeline (covered in 1.1)
+- [x] MIME + magic-byte validation *(Phase 1 Batch 1)*
+- [ ] Virus scanning pipeline (needs ClamAV/VirusTotal infra)
 - [ ] OCR for scanned PDFs / images (Tesseract or cloud OCR)
 - [ ] Table extraction as structured data (preserve rows/columns)
 - [ ] Image & screenshot support with vision LLM
-- [ ] Background processing via Celery/RQ
-- [ ] Processing status UI (progress bar, partial results)
-- [ ] Document versioning; supersede old chunks, re-embed new ones
-- [ ] Per-document access control (role/group), enforced in retrieval
-- [ ] Configurable retention (auto-delete after N days)
+- [x] Background processing via Celery/RQ *(Phase 2 Batch 5: `process_document` Celery task; upload now returns `202 Accepted` and enqueues; chunks+embeddings generated in the worker)*
+- [~] Processing status UI (progress bar, partial results) *(Phase 2 Batch 5: `GET /frontline/documents/<id>/status/` exposes `processing_status`, `chunks_processed/total`, `progress_percent`, error. Frontend progress bar still to wire up)*
+- [x] Document versioning; supersede old chunks, re-embed new ones *(Phase 2 Batch 5: `version`/`parent_document`/`superseded_by` fields; upload with `parent_document_id` creates v+1 and supersedes the old row; retrieval skips superseded)*
+- [x] Per-document access control (role/group), enforced in retrieval *(Phase 2 Batch 5: `visibility='company'|'private'` + `allowed_users` M2M; `KnowledgeService._search_documents` enforces; public widget limited to company-visibility docs)*
+- [x] Configurable retention (auto-delete after N days) *(Phase 2 Batch 5: per-doc `retention_days` field + daily `prune_expired_documents` Celery task that deletes expired docs + underlying files)*
 
 ### 2.6 Meetings
 - [ ] Google Calendar + Outlook/Microsoft Graph two-way sync
-- [ ] Video-link auto-generation (Zoom, Google Meet, MS Teams)
-- [ ] Availability / free-busy lookup for slot suggestions
-- [ ] 24h + 15-min reminder auto-sends
+- [~] Video-link auto-generation *(Phase 2 Batch 6: Jitsi Meet auto-links on create when `meeting_link` empty & `auto_jitsi=true`; Zoom/Google Meet/MS Teams still pending — they need per-tenant OAuth / API keys)*
+- [~] Availability / free-busy lookup *(Phase 2 Batch 6: internal availability check across existing FrontlineMeeting rows via `GET /frontline/meetings/availability/`. External-calendar free-busy still pending)*
+- [x] 24h + 15-min reminder auto-sends *(Phase 2 Batch 6: `send_meeting_reminders` Celery task every 5min; `reminder_24h_sent_at`/`reminder_15m_sent_at` bookkeeping; reminders reset when `scheduled_at` is edited)*
 - [ ] Recording + auto-transcription (Whisper or vendor); feed transcripts to KB
-- [ ] Extract action items from transcripts → tasks/tickets
+- [x] Extract action items from transcripts → tasks/tickets *(Phase 2 Batch 6: `POST /frontline/meetings/<id>/extract-action-items/` — LLM parses transcript → JSON list stored on `action_items`; optional `create_tickets: true` promotes each item to a frontline Ticket)*
+
+**Bonus:** full company-user CRUD for meetings (list / create / get / update / delete / transcript) is now wired into the company-user API — previously meetings existed only in an old internal view unreachable from the dashboard.
 
 ### 2.7 Analytics
-- [ ] Scheduled weekly / monthly PDF + email digests per tenant
+- [~] Scheduled weekly / monthly PDF + email digests per tenant *(Phase 2 Batch 8: weekly plain-text digest landed — `send_weekly_analytics_digest` Celery task emails every active company user with 7-day KPIs. PDF rendering + monthly cadence still pending)*
 - [ ] Drill-down from chart → filtered ticket list
 - [ ] Cohort & funnel analysis
-- [ ] CSV / Excel export
-- [ ] Agent performance metrics (response time, resolution rate, CSAT)
+- [x] CSV / Excel export *(Phase 2 Batch 8: rebuilt `GET /frontline/analytics/export/` — now company-scoped (was user-scoped, a multi-tenant bug), supports `entity=tickets|meetings`, richer fields incl. SLA + notes_count)*
+- [x] Agent performance metrics (response time, resolution rate, CSAT) *(Phase 2 Batch 8: `GET /frontline/analytics/agent-performance/` — per-agent tickets_assigned/resolved/auto_resolved, resolution_rate, avg_resolution_seconds, sla_breached_count. CSAT integration deferred until CSAT survey ships)*
 - [ ] Custom dashboards per tenant; save + share layouts
 
 ### 2.8 Embed Widget
-- [ ] Rate limiting + CAPTCHA on public endpoints (covered in 1.1)
-- [ ] Widget theming: colors, logo, position, launcher text
-- [ ] Optional pre-chat form (name / email)
+- [x] Rate limiting + CAPTCHA on public endpoints *(rate-limiting Phase 1 Batch 1; hCaptcha verification Phase 2 Batch 7 — gated by `Company.frontline_widget_config.require_captcha` + `HCAPTCHA_SECRET` env)*
+- [x] Widget theming: colors, logo, position, launcher text *(Phase 2 Batch 7: stored in `Company.frontline_widget_config.theme`; surfaced via `GET /frontline/widget/public-config/`)*
+- [x] Optional pre-chat form (name / email) *(Phase 2 Batch 7: `pre_chat_form.enabled` + `fields` list in config)*
 - [ ] Proactive messages (URL / time-on-page / exit intent)
-- [ ] File uploads from widget
-- [ ] Operating hours + offline form
+- [x] File uploads from widget *(Phase 2 Batch 7: multipart on `public_submit`; MIME + size validated against widget config; saved to `media/frontline_widget_uploads/<company>/`)*
+- [x] Operating hours + offline form *(Phase 2 Batch 7: per-weekday tz-aware schedule; public endpoints return `status: 'closed'` with tenant-configured `offline_message` outside hours)*
 - [ ] Multi-language auto-detect
 - [ ] Installation snippets for WordPress, Shopify, Wix, plain HTML, React, Next.js
 

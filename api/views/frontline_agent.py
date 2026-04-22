@@ -34,8 +34,9 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
 from Frontline_agent.models import (
-    Document, Ticket, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
+    Document, Ticket, TicketNote, KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
+    FrontlineWorkflowVersion, FrontlineMeeting,
     SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences, DocumentChunk,
 )
 from Frontline_agent.document_processor import DocumentProcessor
@@ -43,6 +44,32 @@ from core.Fronline_agent.frontline_agent import FrontlineAgent
 from core.Fronline_agent.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_rag_params(data):
+    """Pull optional RAG tuning params from a request dict. Returns
+    (min_similarity, max_age_days, max_results, enable_rewrite) with safe defaults
+    and hard caps so callers can't request runaway LLM work.
+    """
+    def _as_float(v, lo=0.0, hi=1.0):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return max(lo, min(hi, f))
+
+    def _as_int(v, lo, hi):
+        try:
+            i = int(v)
+        except (TypeError, ValueError):
+            return None
+        return max(lo, min(hi, i))
+
+    min_similarity = _as_float(data.get('min_similarity')) if data.get('min_similarity') is not None else None
+    max_age_days = _as_int(data.get('max_age_days'), 1, 3650) if data.get('max_age_days') is not None else None
+    max_results = _as_int(data.get('max_results'), 1, 10) or 5
+    enable_rewrite = bool(data.get('enable_rewrite', False))
+    return min_similarity, max_age_days, max_results, enable_rewrite
 
 
 def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
@@ -281,19 +308,22 @@ def frontline_dashboard(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def frontline_widget_config(request):
-    """Get or create widget key and return embed URLs/snippet for chat widget and web form."""
+    """Get the authenticated tenant's widget config (for the admin UI).
+    Returns widget_key, allowed_origins CSV, and the resolved widget config dict."""
     try:
+        from Frontline_agent.widget_utils import resolved_widget_config
         company_user = request.user
         company = company_user.company
         if not company.frontline_widget_key:
             company.frontline_widget_key = str(uuid.uuid4())
             company.save(update_fields=['frontline_widget_key'])
-        key = company.frontline_widget_key
-        # Frontend builds full embed URLs from its own origin (window.location.origin)
         return Response({
             'status': 'success',
             'data': {
-                'widget_key': key,
+                'widget_key': company.frontline_widget_key,
+                'allowed_origins': getattr(company, 'frontline_allowed_origins', '') or '',
+                'config': resolved_widget_config(company),
+                'hcaptcha_site_key': (getattr(settings, 'HCAPTCHA_SITE_KEY', '') or None),
             }
         }, status=status.HTTP_200_OK)
     except Exception as e:
@@ -302,6 +332,76 @@ def frontline_widget_config(request):
             {'status': 'error', 'message': 'Failed to load widget config', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(["PATCH"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_frontline_widget_config(request):
+    """Save the tenant's widget theming + operating hours + pre-chat config.
+    Also accepts `allowed_origins` (CSV) for origin pinning."""
+    try:
+        from Frontline_agent.widget_utils import DEFAULT_WIDGET_CONFIG, resolved_widget_config
+        company = request.user.company
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+
+        if 'allowed_origins' in data:
+            company.frontline_allowed_origins = str(data['allowed_origins'] or '')[:2000]
+
+        if 'config' in data and isinstance(data['config'], dict):
+            # Shallow-validate against the known top-level keys so garbage fields
+            # don't poison the JSON column. Deep structure is the tenant's call.
+            allowed_top_level = set(DEFAULT_WIDGET_CONFIG.keys())
+            saved = company.frontline_widget_config or {}
+            for k, v in data['config'].items():
+                if k in allowed_top_level:
+                    saved[k] = v
+            company.frontline_widget_config = saved
+
+        company.save(update_fields=['frontline_allowed_origins',
+                                    'frontline_widget_config', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'allowed_origins': company.frontline_allowed_origins,
+            'config': resolved_widget_config(company),
+        }})
+    except Exception as e:
+        logger.exception("update_frontline_widget_config failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([])
+@authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle])
+def public_widget_config(request):
+    """Public endpoint the embed script calls on page load to fetch theming,
+    pre-chat form definition, operating-hours status, and whether a CAPTCHA is
+    required for the next POST. Auth is the widget_key itself."""
+    try:
+        from Frontline_agent.widget_utils import resolved_widget_config, is_within_operating_hours
+        # Tolerate the key arriving via query, header, or body.
+        company, err = _get_company_by_widget_key(request)
+        if err:
+            return err
+        cfg = resolved_widget_config(company)
+        is_open, reason = is_within_operating_hours(cfg)
+        return Response({'status': 'success', 'data': {
+            'theme': cfg.get('theme'),
+            'pre_chat_form': cfg.get('pre_chat_form'),
+            'operating_hours': {
+                'enabled': bool((cfg.get('operating_hours') or {}).get('enabled')),
+                'is_open': is_open,
+                'offline_message': (cfg.get('operating_hours') or {}).get('offline_message'),
+            },
+            'require_captcha': bool(cfg.get('require_captcha')),
+            'hcaptcha_site_key': (getattr(settings, 'HCAPTCHA_SITE_KEY', '') or None),
+            'max_attachment_bytes': cfg.get('max_attachment_bytes'),
+            'allowed_attachment_mime': cfg.get('allowed_attachment_mime'),
+        }})
+    except Exception as e:
+        logger.exception("public_widget_config failed")
+        return Response({'status': 'error', 'message': 'Failed to load widget config'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
@@ -346,6 +446,15 @@ def list_documents(request):
                         'file_size': d.file_size,
                         'is_indexed': d.is_indexed,
                         'processed': d.processed,
+                        'processing_status': d.processing_status,
+                        'chunks_processed': d.chunks_processed,
+                        'chunks_total': d.chunks_total,
+                        'processing_error': d.processing_error or None,
+                        'version': d.version,
+                        'parent_document_id': d.parent_document_id,
+                        'superseded_by_id': d.superseded_by_id,
+                        'visibility': d.visibility,
+                        'retention_days': d.retention_days,
                         'created_at': d.created_at.isoformat(),
                         'updated_at': d.updated_at.isoformat(),
                     }
@@ -432,120 +541,191 @@ def upload_document(request):
         with open(file_path, 'wb') as f:
             f.write(file_bytes)
         
-        # Process document (use the sanitized filename for consistent format detection)
-        processor = DocumentProcessor()
-        file_format = processor.get_file_format(safe_filename)
+        # Derive file format from the sanitized filename (consistent with stored file).
+        file_format = DocumentProcessor.get_file_format(safe_filename)
 
-        processing_result = processor.process_document(str(file_path), safe_filename)
-        
-        if not processing_result['success']:
-            # Delete file if processing failed
-            if file_path.exists():
-                file_path.unlink()
-            return Response(
-                {'status': 'error', 'message': f"Failed to process document: {processing_result.get('error')}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Get extracted text (FULL content - no truncation for storage)
-        extracted_text = processing_result.get('extracted_text', '')
-        logger.info(f"Document extracted: {len(extracted_text)} characters from {title}")
-        
-        # Generate embedding for semantic search via chunks
-        embedding_service = EmbeddingService()
-        embedding_model = embedding_service.embedding_model if embedding_service.is_available() else None
-        
-        # Create document record first
-        document_data = {
-            'title': title,
-            'description': description,
-            'document_type': document_type,
-            'file_path': str(file_path.relative_to(settings.MEDIA_ROOT)),
-            'file_size': uploaded_file.size,
-            'mime_type': uploaded_file.content_type,
-            'file_format': file_format,
-            'uploaded_by': user,
-            'company': company,
-            'document_content': extracted_text,
-            'is_indexed': True,
-            'file_hash': processing_result.get('file_hash', ''),
-            'processed': True,
-            'embedding_model': embedding_model,
-            'processed_data': {
-                'extraction_success': True,
+        # Clamp chunking / retention / visibility params from the request against safe bounds.
+        def _clamp_int(raw, lo, hi, fallback):
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return fallback
+            return max(lo, min(hi, v))
+
+        default_size = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE', 4000))
+        default_overlap = int(getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 200))
+        size_min = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE_MIN', 500))
+        size_max = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE_MAX', 16000))
+        chunk_size = _clamp_int(request.POST.get('chunk_size'), size_min, size_max, default_size)
+        chunk_overlap = _clamp_int(
+            request.POST.get('chunk_overlap'), 0, max(0, chunk_size - 1), default_overlap,
+        )
+
+        retention_days = request.POST.get('retention_days')
+        retention_days = _clamp_int(retention_days, 1, 36500, None) if retention_days else None
+
+        visibility = (request.POST.get('visibility') or 'company').strip().lower()
+        if visibility not in ('company', 'private'):
+            visibility = 'company'
+
+        # Optional: new version of an existing doc. parent_document_id must belong
+        # to the same company; its superseded_by pointer is updated after creation.
+        parent_document = None
+        parent_document_id = request.POST.get('parent_document_id')
+        if parent_document_id:
+            parent_document = Document.objects.filter(
+                id=parent_document_id, company=company,
+            ).first()
+            if not parent_document:
+                return Response(
+                    {'status': 'error', 'message': 'parent_document_id not found for this company'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        document = Document.objects.create(
+            title=title,
+            description=description,
+            document_type=document_type,
+            file_path=str(file_path.relative_to(settings.MEDIA_ROOT)),
+            file_size=uploaded_file.size,
+            mime_type=uploaded_file.content_type,
+            file_format=file_format,
+            uploaded_by=user,
+            company=company,
+            file_hash=file_hash_full,
+            processing_status='pending',
+            visibility=visibility,
+            retention_days=retention_days,
+            parent_document=parent_document,
+            version=(parent_document.version + 1) if parent_document else 1,
+            processed_data={
                 'file_format': file_format,
-                'embedding_generated': embedding_service.is_available(),
-            }
-        }
-        
-        document = Document.objects.create(**document_data)
-        
-        # Chunk text and generate embeddings
-        if extracted_text:
-            text_to_chunk = f"{title}\n{description}\n{extracted_text}".strip()
-            # Intelligent Chunking: ~4000 characters, 200 character overlap
-            chunk_size = 4000
-            overlap = 200
-            chunks = []
-            start = 0
-            while start < len(text_to_chunk):
-                end = start + chunk_size
-                chunks.append(text_to_chunk[start:end])
-                start += chunk_size - overlap
-                
-            logger.info(f"Split document {title} into {len(chunks)} chunks.")
-            
-            if embedding_service.is_available():
-                # Process chunks in batches to avoid overwhelming the API
-                batch_size = 20
-                for i in range(0, len(chunks), batch_size):
-                    batch_chunks = chunks[i:i+batch_size]
-                    embeddings = embedding_service.generate_embeddings_batch(batch_chunks)
-                    
-                    for j, (chunk_text, embedding) in enumerate(zip(batch_chunks, embeddings)):
-                        if embedding:
-                            DocumentChunk.objects.create(
-                                document=document,
-                                chunk_index=i+j,
-                                chunk_text=chunk_text,
-                                embedding=json.dumps(embedding)
-                            )
-                        else:
-                            DocumentChunk.objects.create(
-                                document=document,
-                                chunk_index=i+j,
-                                chunk_text=chunk_text,
-                                embedding=None
-                            )
-                logger.info(f"Successfully generated and stored embeddings for chunks.")
-            else:
-                for j, chunk_text in enumerate(chunks):
-                    DocumentChunk.objects.create(
-                        document=document,
-                        chunk_index=j,
-                        chunk_text=chunk_text,
-                        embedding=None
-                    )
-                logger.info("Embedding service unavailable, stored chunks without embeddings.")
-        
+                'chunk_size': chunk_size,
+                'chunk_overlap': chunk_overlap,
+            },
+        )
+
+        # If this is a new version, point the old one at the new one so retrieval skips it.
+        if parent_document:
+            parent_document.superseded_by = document
+            parent_document.save(update_fields=['superseded_by', 'updated_at'])
+
+        # Optional private allowlist: assign the uploader so they always retain access.
+        if visibility == 'private':
+            document.allowed_users.add(company_user)
+
+        # Enqueue async parse+chunk+embed. Worker updates processing_status / progress fields.
+        from Frontline_agent.tasks import process_document as _process_document
+        _process_document.delay(document.id)
+
         return Response({
-            'status': 'success',
+            'status': 'accepted',
             'data': {
                 'document_id': document.id,
                 'title': document.title,
                 'file_format': document.file_format,
-                'is_indexed': document.is_indexed,
-                'processed': document.processed,
-                'message': 'Document uploaded and processed successfully'
-            }
-        }, status=status.HTTP_201_CREATED)
-        
+                'processing_status': document.processing_status,
+                'version': document.version,
+                'parent_document_id': document.parent_document_id,
+                'visibility': document.visibility,
+                'retention_days': document.retention_days,
+                'message': 'Upload accepted. Processing in the background — poll the status endpoint.',
+                'status_url': f"/api/frontline/documents/{document.id}/status/",
+            },
+        }, status=status.HTTP_202_ACCEPTED)
+
     except Exception as e:
         logger.exception("upload_document failed")
         return Response(
             {'status': 'error', 'message': 'Failed to upload document', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def document_processing_status(request, document_id):
+    """Poll a document's async-processing state. Client should stop polling once
+    `processing_status` is 'ready' or 'failed'."""
+    try:
+        company = request.user.company
+        d = Document.objects.filter(id=document_id, company=company).first()
+        if not d:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        total = max(1, d.chunks_total or 0)
+        return Response({'status': 'success', 'data': {
+            'id': d.id,
+            'processing_status': d.processing_status,
+            'chunks_processed': d.chunks_processed,
+            'chunks_total': d.chunks_total,
+            'progress_percent': round(100.0 * (d.chunks_processed or 0) / total, 1) if d.chunks_total else (
+                100.0 if d.processing_status == 'ready' else 0.0
+            ),
+            'processing_error': d.processing_error or None,
+            'version': d.version,
+            'parent_document_id': d.parent_document_id,
+            'superseded_by_id': d.superseded_by_id,
+            'visibility': d.visibility,
+            'retention_days': d.retention_days,
+        }})
+    except Exception as e:
+        logger.exception("document_processing_status failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_document_metadata(request, document_id):
+    """Update non-content metadata: title, description, document_type, visibility,
+    allowed_users, retention_days. File content and chunks are untouched — upload a
+    new version to replace content."""
+    try:
+        company = request.user.company
+        d = Document.objects.filter(id=document_id, company=company).first()
+        if not d:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+
+        if 'title' in data:
+            d.title = str(data['title'])[:200]
+        if 'description' in data:
+            d.description = str(data['description'])
+        if 'document_type' in data:
+            valid = {c[0] for c in Document.DOCUMENT_TYPE_CHOICES}
+            dt = str(data['document_type'])
+            if dt in valid:
+                d.document_type = dt
+        if 'visibility' in data:
+            v = str(data['visibility']).lower()
+            if v in ('company', 'private'):
+                d.visibility = v
+        if 'retention_days' in data:
+            raw = data['retention_days']
+            try:
+                d.retention_days = max(1, min(36500, int(raw))) if raw else None
+            except (TypeError, ValueError):
+                pass
+
+        d.save()
+
+        # Replace allowed_users set if provided (only meaningful when private).
+        if 'allowed_user_ids' in data and isinstance(data['allowed_user_ids'], list):
+            ids = [int(x) for x in data['allowed_user_ids'] if str(x).isdigit()]
+            valid_users = CompanyUser.objects.filter(id__in=ids, company=company)
+            d.allowed_users.set(valid_users)
+
+        return Response({'status': 'success', 'data': {
+            'id': d.id,
+            'title': d.title,
+            'visibility': d.visibility,
+            'retention_days': d.retention_days,
+            'allowed_user_ids': list(d.allowed_users.values_list('id', flat=True)),
+        }})
+    except Exception as e:
+        logger.exception("update_document_metadata failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
@@ -785,6 +965,42 @@ def _get_company_by_widget_key(request):
     return company, None
 
 
+def _client_ip(request):
+    """Extract the caller's IP honouring a single level of X-Forwarded-For
+    (common case for our deployment). Falls back to REMOTE_ADDR."""
+    xff = (request.META.get('HTTP_X_FORWARDED_FOR') or '').strip()
+    if xff:
+        return xff.split(',')[0].strip()
+    return (request.META.get('REMOTE_ADDR') or '').strip()
+
+
+def _check_widget_gates(request, company, body_data):
+    """Enforce operating hours + CAPTCHA on a widget POST. Returns Response on
+    reject, None on pass."""
+    from Frontline_agent.widget_utils import (
+        resolved_widget_config, is_within_operating_hours, verify_hcaptcha,
+    )
+    cfg = resolved_widget_config(company)
+
+    is_open, _reason = is_within_operating_hours(cfg)
+    if not is_open:
+        return Response({
+            'status': 'closed',
+            'message': (cfg.get('operating_hours') or {}).get('offline_message')
+                        or "We're offline right now. Please try again later.",
+        }, status=status.HTTP_200_OK)
+
+    if cfg.get('require_captcha'):
+        token = (body_data or {}).get('captcha_token') or request.headers.get('X-Captcha-Token') or ''
+        ok, reason = verify_hcaptcha(token, remote_ip=_client_ip(request))
+        if not ok:
+            return Response(
+                {'status': 'error', 'message': 'CAPTCHA verification failed', 'reason': reason},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    return None
+
+
 @api_view(["POST"])
 @permission_classes([])
 @authentication_classes([])
@@ -796,6 +1012,9 @@ def public_qa(request):
         if err:
             return err
         data = json.loads(request.body) if request.body else {}
+        gate = _check_widget_gates(request, company, data)
+        if gate is not None:
+            return gate
         question = (data.get('question') or '').strip()
         if not question:
             return Response(
@@ -808,12 +1027,17 @@ def public_qa(request):
         scope_document_ids = data.get('scope_document_ids')
         if scope_document_ids is not None:
             scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
+        min_similarity, max_age_days, max_results, enable_rewrite = _parse_rag_params(data)
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(
             question,
             company_id=company.id,
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
+            min_similarity=min_similarity,
+            max_age_days=max_age_days,
+            max_results=max_results,
+            enable_rewrite=enable_rewrite,
         )
         return Response({
             'status': 'success',
@@ -832,12 +1056,22 @@ def public_qa(request):
 @authentication_classes([])
 @throttle_classes([FrontlinePublicThrottle])
 def public_submit(request):
-    """Public web form submit (contact/support). Creates a ticket for the company. No auth. Body: widget_key, name, email, message."""
+    """Public web form submit (contact/support). Creates a ticket for the company. No auth.
+
+    Accepts either application/json or multipart/form-data (for optional attachment).
+    Body / form fields: widget_key, name, email, message, captcha_token, [file]."""
     try:
         company, err = _get_company_by_widget_key(request)
         if err:
             return err
-        data = json.loads(request.body) if request.body else {}
+        # Handle both JSON and multipart: prefer request.data, fall back to json.loads.
+        if request.content_type and 'multipart' in request.content_type:
+            data = dict(request.POST.items())
+        else:
+            data = json.loads(request.body) if request.body else {}
+        gate = _check_widget_gates(request, company, data)
+        if gate is not None:
+            return gate
         name = (data.get('name') or data.get('full_name') or '').strip()
         email = (data.get('email') or '').strip()
         message = (data.get('message') or data.get('question') or data.get('description') or '').strip()
@@ -868,12 +1102,47 @@ def public_submit(request):
             auto_resolved=False,
             sla_due_at=_sla_due_at_for_priority('medium'),
         )
+
+        # Optional attachment — single file for now. Validates MIME + size against
+        # the tenant's widget config; stores under media/frontline_widget_uploads/<company>/.
+        attachment_info = None
+        uploaded_file = request.FILES.get('file') if hasattr(request, 'FILES') else None
+        if uploaded_file:
+            from Frontline_agent.widget_utils import resolved_widget_config
+            cfg = resolved_widget_config(company)
+            max_bytes = int(cfg.get('max_attachment_bytes') or 10 * 1024 * 1024)
+            allowed_mime = set(cfg.get('allowed_attachment_mime') or [])
+            if uploaded_file.size > max_bytes:
+                attachment_info = {'skipped': True, 'reason': 'too_large',
+                                   'size': uploaded_file.size, 'max': max_bytes}
+            elif allowed_mime and (uploaded_file.content_type or '').lower() not in {m.lower() for m in allowed_mime}:
+                attachment_info = {'skipped': True, 'reason': 'disallowed_mime',
+                                   'mime': uploaded_file.content_type}
+            else:
+                try:
+                    safe_name = DocumentProcessor.sanitize_filename(uploaded_file.name)
+                    upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_widget_uploads' / str(company.id)
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    stored = upload_dir / f"t{ticket.id}_{safe_name}"
+                    with open(stored, 'wb') as fh:
+                        for chunk in uploaded_file.chunks():
+                            fh.write(chunk)
+                    rel = str(stored.relative_to(settings.MEDIA_ROOT))
+                    # Append the attachment path to the ticket description so agents see it.
+                    ticket.description = (ticket.description or '') + f"\n\n[Attachment] {rel}"
+                    ticket.save(update_fields=['description', 'updated_at'])
+                    attachment_info = {'stored_path': rel, 'size': uploaded_file.size,
+                                       'mime': uploaded_file.content_type}
+                except Exception as exc:
+                    logger.warning("public_submit attachment save failed: %s", exc)
+                    attachment_info = {'skipped': True, 'reason': 'save_failed'}
+
         _run_notification_triggers(company.id, 'ticket_created', ticket)
         _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
         return Response({
             'status': 'success',
             'message': 'Submitted successfully. We will get back to you soon.',
-            'data': {'ticket_id': ticket.id}
+            'data': {'ticket_id': ticket.id, 'attachment': attachment_info},
         }, status=status.HTTP_201_CREATED)
     except Exception as e:
         logger.exception("public_submit failed")
@@ -910,7 +1179,10 @@ def knowledge_qa(request):
         scope_document_ids = data.get('scope_document_ids')
         if scope_document_ids is not None:
             scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
-        
+
+        # Optional retrieval tuning params (all safely defaulted if absent)
+        min_similarity, max_age_days, max_results, enable_rewrite = _parse_rag_params(data)
+
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(
@@ -918,6 +1190,11 @@ def knowledge_qa(request):
             company_id=company.id,
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
+            min_similarity=min_similarity,
+            max_age_days=max_age_days,
+            max_results=max_results,
+            enable_rewrite=enable_rewrite,
+            company_user_id=company_user.id,
         )
         
         # When agent doesn't have verified info, create a ticket task assigned to this company user
@@ -1132,7 +1409,20 @@ def list_tickets(request):
         at_risk_threshold = now + timedelta(hours=2)  # due within 2 hours = at risk
         resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
 
+        # Bulk count notes to avoid N+1 on the per-ticket serialization
+        ticket_ids = [t.id for t in tickets]
+        notes_count_map = {}
+        if ticket_ids:
+            from django.db.models import Count
+            notes_count_map = dict(
+                TicketNote.objects.filter(ticket_id__in=ticket_ids)
+                .values_list('ticket_id')
+                .annotate(c=Count('id'))
+                .values_list('ticket_id', 'c')
+            )
+
         def _ticket_row(t):
+            is_snoozed = bool(t.snoozed_until and t.snoozed_until > now)
             row = {
                 'id': t.id,
                 'title': t.title,
@@ -1146,10 +1436,18 @@ def list_tickets(request):
                 'updated_at': t.updated_at.isoformat(),
                 'resolved_at': t.resolved_at.isoformat() if t.resolved_at else None,
                 'sla_due_at': t.sla_due_at.isoformat() if t.sla_due_at else None,
+                'snoozed_until': t.snoozed_until.isoformat() if t.snoozed_until else None,
+                'is_snoozed': is_snoozed,
+                'sla_paused_at': t.sla_paused_at.isoformat() if t.sla_paused_at else None,
+                'is_sla_paused': t.sla_paused_at is not None,
+                'last_triaged_at': t.last_triaged_at.isoformat() if t.last_triaged_at else None,
+                'notes_count': notes_count_map.get(t.id, 0),
                 'intent': t.intent,
                 'entities': t.entities,
             }
-            if t.sla_due_at and t.status not in resolved_statuses:
+            # Aging: a paused or snoozed ticket cannot be "at risk" — its clock is not running
+            if (t.sla_due_at and t.status not in resolved_statuses
+                    and not is_snoozed and t.sla_paused_at is None):
                 row['sla_breached'] = t.sla_due_at < now
                 row['sla_at_risk'] = t.sla_due_at <= at_risk_threshold and t.sla_due_at >= now
             else:
@@ -1190,7 +1488,10 @@ def list_tickets_aging(request):
         qs = Ticket.objects.filter(
             created_by=user,
             sla_due_at__isnull=False,
+            sla_paused_at__isnull=True,  # paused tickets don't age
         ).exclude(status__in=resolved_statuses).order_by('sla_due_at')
+        # Exclude snoozed tickets (snoozed_until in the future)
+        qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lte=now))
         breached = [t for t in qs if t.sla_due_at < now]
         at_risk = [t for t in qs if t.sla_due_at >= now and t.sla_due_at <= at_risk_threshold]
         data = {
@@ -1250,6 +1551,293 @@ def update_ticket_task(request, ticket_id):
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ---------- Ticket lifecycle helpers (Phase 2 Batch 2) ----------
+
+def _get_company_ticket_or_404(request, ticket_id):
+    """Fetch a ticket that belongs to the caller's company. Returns (ticket, error_response)."""
+    company_user = request.user
+    company = company_user.company
+    ticket = Ticket.objects.filter(id=ticket_id, company=company).first()
+    if not ticket:
+        return None, Response(
+            {'status': 'error', 'message': 'Ticket not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return ticket, None
+
+
+def _serialize_note(n):
+    return {
+        'id': n.id,
+        'body': n.body,
+        'is_internal': n.is_internal,
+        'author_id': n.author_id,
+        'author_name': (n.author.get_full_name() or n.author.username) if n.author else None,
+        'created_at': n.created_at.isoformat(),
+        'updated_at': n.updated_at.isoformat(),
+    }
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_ticket_notes(request, ticket_id):
+    """List notes on a ticket (company-scoped)."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        notes = ticket.notes.select_related('author').all()
+        return Response({'status': 'success', 'data': [_serialize_note(n) for n in notes]})
+    except Exception as e:
+        logger.exception("list_ticket_notes failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_ticket_note(request, ticket_id):
+    """Add an internal note to a ticket. Body: {body: str, is_internal?: bool}."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        body = (data.get('body') or '').strip()
+        if not body:
+            return Response({'status': 'error', 'message': 'body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        author = _get_or_create_user_for_company_user(request.user)
+        note = TicketNote.objects.create(
+            ticket=ticket,
+            author=author,
+            body=body,
+            is_internal=bool(data.get('is_internal', True)),
+        )
+        return Response({'status': 'success', 'data': _serialize_note(note)}, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception("create_ticket_note failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_or_delete_ticket_note(request, ticket_id, note_id):
+    """Edit or delete a note. Only the author can modify their own note."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        author = _get_or_create_user_for_company_user(request.user)
+        note = TicketNote.objects.filter(id=note_id, ticket=ticket).first()
+        if not note:
+            return Response({'status': 'error', 'message': 'Note not found'}, status=status.HTTP_404_NOT_FOUND)
+        if note.author_id and note.author_id != author.id:
+            return Response({'status': 'error', 'message': 'Only the note author can modify it'},
+                            status=status.HTTP_403_FORBIDDEN)
+        if request.method == 'DELETE':
+            note.delete()
+            return Response({'status': 'success'})
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        body = (data.get('body') or '').strip()
+        if not body:
+            return Response({'status': 'error', 'message': 'body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        note.body = body
+        if 'is_internal' in data:
+            note.is_internal = bool(data['is_internal'])
+        note.save(update_fields=['body', 'is_internal', 'updated_at'])
+        return Response({'status': 'success', 'data': _serialize_note(note)})
+    except Exception as e:
+        logger.exception("update_or_delete_ticket_note failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def snooze_ticket(request, ticket_id):
+    """Snooze a ticket. Body accepts either:
+    - {"snoozed_until": "2026-04-20T09:00:00Z"}  (ISO-8601)
+    - {"hours": 24}  (snooze for N hours from now)
+    """
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        until = None
+        if data.get('snoozed_until'):
+            try:
+                from datetime import datetime
+                raw = data['snoozed_until'].replace('Z', '+00:00')
+                until = datetime.fromisoformat(raw)
+                if until.tzinfo is None:
+                    until = timezone.make_aware(until, timezone.utc)
+            except Exception:
+                return Response({'status': 'error', 'message': 'Invalid snoozed_until (ISO-8601 expected)'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        elif data.get('hours') is not None:
+            try:
+                hours = float(data['hours'])
+            except (TypeError, ValueError):
+                return Response({'status': 'error', 'message': 'hours must be a number'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if hours <= 0 or hours > 24 * 90:  # cap at ~90 days
+                return Response({'status': 'error', 'message': 'hours must be > 0 and <= 2160'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            until = timezone.now() + timedelta(hours=hours)
+        else:
+            return Response({'status': 'error', 'message': 'snoozed_until or hours required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if until <= timezone.now():
+            return Response({'status': 'error', 'message': 'snoozed_until must be in the future'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        ticket.snoozed_until = until
+        ticket.save(update_fields=['snoozed_until', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id, 'snoozed_until': ticket.snoozed_until.isoformat(),
+        }})
+    except Exception as e:
+        logger.exception("snooze_ticket failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def unsnooze_ticket(request, ticket_id):
+    """Clear a ticket's snooze — it returns to the active queue immediately."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        ticket.snoozed_until = None
+        ticket.save(update_fields=['snoozed_until', 'updated_at'])
+        return Response({'status': 'success', 'data': {'id': ticket.id, 'snoozed_until': None}})
+    except Exception as e:
+        logger.exception("unsnooze_ticket failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pause_ticket_sla(request, ticket_id):
+    """Pause the SLA clock (e.g. waiting on customer). Idempotent — re-pausing is a no-op."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        if ticket.sla_paused_at is None:
+            ticket.sla_paused_at = timezone.now()
+            ticket.save(update_fields=['sla_paused_at', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id,
+            'sla_paused_at': ticket.sla_paused_at.isoformat() if ticket.sla_paused_at else None,
+            'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
+        }})
+    except Exception as e:
+        logger.exception("pause_ticket_sla failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def resume_ticket_sla(request, ticket_id):
+    """Resume the SLA clock. Extends sla_due_at by the paused duration so the
+    SLA target reflects actual working time, not calendar time."""
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        if ticket.sla_paused_at is None:
+            return Response({'status': 'success', 'data': {
+                'id': ticket.id,
+                'sla_paused_at': None,
+                'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
+                'message': 'SLA was not paused',
+            }})
+        paused_for = (timezone.now() - ticket.sla_paused_at).total_seconds()
+        paused_for = max(0, int(paused_for))
+        ticket.sla_paused_accumulated_seconds = (ticket.sla_paused_accumulated_seconds or 0) + paused_for
+        # Push the due date out by the paused duration so SLA math is preserved
+        if ticket.sla_due_at:
+            ticket.sla_due_at = ticket.sla_due_at + timedelta(seconds=paused_for)
+        ticket.sla_paused_at = None
+        ticket.save(update_fields=['sla_paused_at', 'sla_paused_accumulated_seconds', 'sla_due_at', 'updated_at'])
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id,
+            'sla_paused_at': None,
+            'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
+            'sla_due_at': ticket.sla_due_at.isoformat() if ticket.sla_due_at else None,
+            'paused_for_seconds': paused_for,
+        }})
+    except Exception as e:
+        logger.exception("resume_ticket_sla failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
+def retriage_ticket(request, ticket_id):
+    """Re-run classification (category + priority + intent + entities) on a ticket.
+
+    Typically called after the description has been updated. If the LLM suggests
+    a different category/priority, the ticket is updated accordingly.
+    """
+    try:
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
+        company = request.user.company
+        agent = FrontlineAgent(company_id=company.id)
+        llm_extraction = agent._extract_ticket_intent(ticket.title, ticket.description) or {}
+        classification = agent.ticket_service.classify_ticket(ticket.title, ticket.description)
+
+        old_category, old_priority = ticket.category, ticket.priority
+        updated_fields = ['last_triaged_at', 'updated_at']
+
+        valid_categories = {'technical', 'billing', 'account', 'feature_request', 'bug', 'other'}
+        valid_priorities = {'low', 'medium', 'high', 'urgent'}
+
+        suggested_cat = (llm_extraction.get('suggested_category')
+                         or classification.get('category') or '').lower()
+        suggested_pri = (llm_extraction.get('suggested_priority')
+                         or classification.get('priority') or '').lower()
+
+        if suggested_cat in valid_categories and suggested_cat != ticket.category:
+            ticket.category = suggested_cat
+            updated_fields.append('category')
+        if suggested_pri in valid_priorities and suggested_pri != ticket.priority:
+            ticket.priority = suggested_pri
+            updated_fields.append('priority')
+        if llm_extraction.get('intent'):
+            ticket.intent = llm_extraction['intent']
+            updated_fields.append('intent')
+        if llm_extraction.get('entities'):
+            ticket.entities = llm_extraction['entities']
+            updated_fields.append('entities')
+
+        ticket.last_triaged_at = timezone.now()
+        ticket.save(update_fields=list(set(updated_fields)))
+
+        return Response({'status': 'success', 'data': {
+            'id': ticket.id,
+            'old_category': old_category, 'new_category': ticket.category,
+            'old_priority': old_priority, 'new_priority': ticket.priority,
+            'intent': ticket.intent,
+            'entities': ticket.entities,
+            'last_triaged_at': ticket.last_triaged_at.isoformat(),
+        }})
+    except Exception as e:
+        logger.exception("retriage_ticket failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -1482,6 +2070,17 @@ def _send_notification_email(recipient_email, subject, body):
         return False
 
 
+def _build_unsubscribe_url(company_user_id, scope='email'):
+    """Produce a public one-click unsubscribe URL. Requires SITE_URL (or BACKEND_URL)
+    in settings so the link works from an email client."""
+    from Frontline_agent.notification_utils import make_unsubscribe_token
+    token = make_unsubscribe_token(company_user_id, scope)
+    base = (getattr(settings, 'SITE_URL', '')
+            or getattr(settings, 'BACKEND_URL', '')
+            or '').rstrip('/')
+    return f"{base}/api/frontline/unsubscribe/?t={token}"
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1608,6 +2207,10 @@ def get_notification_preferences(request):
             'ticket_updated_email': prefs.ticket_updated_email,
             'ticket_assigned_email': prefs.ticket_assigned_email,
             'workflow_email_enabled': prefs.workflow_email_enabled,
+            'timezone_name': prefs.timezone_name,
+            'quiet_hours_enabled': prefs.quiet_hours_enabled,
+            'quiet_hours_start': prefs.quiet_hours_start,
+            'quiet_hours_end': prefs.quiet_hours_end,
             'updated_at': prefs.updated_at.isoformat(),
         }
         return Response({'status': 'success', 'data': data})
@@ -1647,6 +2250,16 @@ def update_notification_preferences(request):
             prefs.ticket_assigned_email = bool(data['ticket_assigned_email'])
         if 'workflow_email_enabled' in data:
             prefs.workflow_email_enabled = bool(data['workflow_email_enabled'])
+        # Quiet-hours controls
+        if 'timezone_name' in data:
+            tz_name = str(data['timezone_name'] or 'UTC').strip()[:64]
+            prefs.timezone_name = tz_name or 'UTC'
+        if 'quiet_hours_enabled' in data:
+            prefs.quiet_hours_enabled = bool(data['quiet_hours_enabled'])
+        if 'quiet_hours_start' in data:
+            prefs.quiet_hours_start = str(data['quiet_hours_start'] or '22:00')[:5]
+        if 'quiet_hours_end' in data:
+            prefs.quiet_hours_end = str(data['quiet_hours_end'] or '08:00')[:5]
         prefs.save()
         return Response({
             'status': 'success',
@@ -1657,6 +2270,10 @@ def update_notification_preferences(request):
                 'ticket_updated_email': prefs.ticket_updated_email,
                 'ticket_assigned_email': prefs.ticket_assigned_email,
                 'workflow_email_enabled': prefs.workflow_email_enabled,
+                'timezone_name': prefs.timezone_name,
+                'quiet_hours_enabled': prefs.quiet_hours_enabled,
+                'quiet_hours_start': prefs.quiet_hours_start,
+                'quiet_hours_end': prefs.quiet_hours_end,
                 'updated_at': prefs.updated_at.isoformat(),
             },
         })
@@ -1763,6 +2380,31 @@ def send_notification_now(request):
                 context.setdefault('ticket_id', related_ticket.id)
                 context.setdefault('ticket_title', related_ticket.title)
                 context.setdefault('resolution', related_ticket.resolution or '')
+
+        # Quiet-hours: if the recipient is in a quiet window, queue it for the Celery
+        # worker to deliver when the window closes rather than sending right now.
+        from Frontline_agent.notification_utils import (
+            get_recipient_preferences, in_quiet_hours, next_allowed_send_time,
+        )
+        prefs = get_recipient_preferences(company.id, recipient_email)
+        now = timezone.now()
+        if prefs and in_quiet_hours(prefs, now):
+            deferred_until = next_allowed_send_time(prefs, now)
+            n = ScheduledNotification.objects.create(
+                company=company, template=template, scheduled_at=deferred_until,
+                status='pending', recipient_email=recipient_email,
+                related_ticket=related_ticket, context=context,
+                next_retry_at=deferred_until, deferred_reason='quiet_hours',
+            )
+            return Response({
+                'status': 'deferred',
+                'message': 'Recipient is in quiet hours — queued for delivery.',
+                'data': {'id': n.id, 'scheduled_at': deferred_until.isoformat(),
+                         'reason': 'quiet_hours'},
+            }, status=status.HTTP_202_ACCEPTED)
+
+        if prefs:
+            context.setdefault('unsubscribe_url', _build_unsubscribe_url(prefs.company_user_id))
         body = _render_template_body(template.body, context)
         personalized_body = _generate_llm_notification_body(template, context, company.id)
         if personalized_body:
@@ -1789,99 +2431,839 @@ def send_notification_now(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# ---------- Notifications: preview / DLQ / retry / unsubscribe (Phase 2 Batch 3) ----------
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def preview_notification_template(request, template_id):
+    """Render a template with a sample context (no send, no DB write).
+    Body: {context?: {...}}  — placeholders not present in context render as empty.
+    Returns the resolved subject + body so admins can eyeball the output before saving."""
+    try:
+        company = request.user.company
+        template = NotificationTemplate.objects.filter(id=template_id, company=company).first()
+        if not template:
+            return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        context = data.get('context') or {}
+        # Friendly sample defaults for common placeholders so preview isn't all blank
+        sample_defaults = {
+            'ticket_id': 42,
+            'ticket_title': 'Sample ticket title',
+            'customer_name': 'Jane Customer',
+            'resolution': 'This is a sample resolution body.',
+            'recipient_email': 'sample@example.com',
+            'unsubscribe_url': f"{(getattr(settings, 'SITE_URL', '') or '').rstrip('/')}/api/frontline/unsubscribe/?t=SAMPLE",
+        }
+        for k, v in sample_defaults.items():
+            context.setdefault(k, v)
+        return Response({'status': 'success', 'data': {
+            'subject': _render_template_body(template.subject, context),
+            'body': _render_template_body(template.body, context),
+            'channel': template.channel,
+            'context_used': context,
+        }})
+    except Exception as e:
+        logger.exception("preview_notification_template failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_dead_lettered_notifications(request):
+    """Return the dead-letter queue for this company (paged)."""
+    try:
+        company = request.user.company
+        page = max(1, int(request.GET.get('page', 1)))
+        limit = min(100, max(1, int(request.GET.get('limit', 20))))
+        qs = ScheduledNotification.objects.filter(
+            company=company, status='dead_lettered',
+        ).order_by('-dead_lettered_at')
+        total = qs.count()
+        offset = (page - 1) * limit
+        rows = [{
+            'id': n.id,
+            'recipient_email': n.recipient_email,
+            'template_id': n.template_id,
+            'template_name': n.template.name if n.template else None,
+            'attempts': n.attempts,
+            'max_attempts': n.max_attempts,
+            'last_error': n.last_error,
+            'scheduled_at': n.scheduled_at.isoformat() if n.scheduled_at else None,
+            'dead_lettered_at': n.dead_lettered_at.isoformat() if n.dead_lettered_at else None,
+            'related_ticket_id': n.related_ticket_id,
+        } for n in qs[offset:offset + limit]]
+        return Response({'status': 'success', 'data': rows, 'pagination': {
+            'page': page, 'limit': limit, 'total': total,
+            'total_pages': (total + limit - 1) // limit if limit else 1,
+        }})
+    except Exception as e:
+        logger.exception("list_dead_lettered_notifications failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def retry_dead_lettered_notification(request, notification_id):
+    """Move a dead-lettered or failed notification back to pending with a fresh attempts budget."""
+    try:
+        company = request.user.company
+        n = ScheduledNotification.objects.filter(id=notification_id, company=company).first()
+        if not n:
+            return Response({'status': 'error', 'message': 'Notification not found'}, status=status.HTTP_404_NOT_FOUND)
+        if n.status not in ('dead_lettered', 'failed'):
+            return Response({'status': 'error', 'message': 'Only dead-lettered or failed notifications can be retried'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        n.status = 'pending'
+        n.attempts = 0
+        n.next_retry_at = timezone.now()
+        n.dead_lettered_at = None
+        n.last_error = ''
+        n.deferred_reason = ''
+        n.save(update_fields=['status', 'attempts', 'next_retry_at',
+                              'dead_lettered_at', 'last_error', 'deferred_reason'])
+        return Response({'status': 'success', 'data': {'id': n.id, 'status': n.status}})
+    except Exception as e:
+        logger.exception("retry_dead_lettered_notification failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([])
+@authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle])
+def public_unsubscribe(request):
+    """Public one-click unsubscribe endpoint. No auth — identifies the recipient
+    by a signed token.
+
+    GET  → return the recipient's current prefs (lightweight JSON confirmation page).
+    POST → flip email_enabled to False and confirm.
+    """
+    try:
+        from Frontline_agent.notification_utils import read_unsubscribe_token
+        from Frontline_agent.models import FrontlineNotificationPreferences
+        from core.models import CompanyUser
+
+        token = (request.GET.get('t') or (request.data or {}).get('t') or '').strip()
+        decoded = read_unsubscribe_token(token)
+        if not decoded:
+            return Response({'status': 'error', 'message': 'Invalid or expired unsubscribe link.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        company_user_id, scope = decoded
+
+        company_user = CompanyUser.objects.filter(id=company_user_id, is_active=True).first()
+        if not company_user:
+            return Response({'status': 'error', 'message': 'Recipient not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(company_user=company_user)
+
+        if request.method == 'GET':
+            return Response({'status': 'success', 'data': {
+                'recipient_email': company_user.email,
+                'email_enabled': prefs.email_enabled,
+                'scope': scope,
+                'message': ('You are currently opted IN to emails.'
+                            if prefs.email_enabled else 'You are already unsubscribed.'),
+            }})
+
+        # POST: perform unsubscribe
+        if scope == 'email':
+            prefs.email_enabled = False
+            prefs.save(update_fields=['email_enabled', 'updated_at'])
+        # Reserved: other scopes (e.g. sms) could toggle other channels here.
+        return Response({'status': 'success', 'data': {
+            'recipient_email': company_user.email,
+            'email_enabled': prefs.email_enabled,
+            'message': 'You have been unsubscribed. It may take a few minutes for in-flight messages to stop.',
+        }})
+    except Exception as e:
+        logger.exception("public_unsubscribe failed")
+        return Response({'status': 'error', 'message': 'Failed to process unsubscribe'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------- Meetings (Phase 2 Batch 6) ----------
+
+
+def _generate_jitsi_link():
+    """Produce a fresh Jitsi Meet URL. Uses a long random slug so it's effectively
+    unguessable for outsiders. Customers who prefer Zoom/Meet/Teams supply their
+    own meeting_link in the create payload."""
+    import secrets
+    slug = f"fl-{secrets.token_urlsafe(12)}"
+    return f"https://meet.jit.si/{slug}"
+
+
+def _validate_meeting_link(raw):
+    """Validate a meeting_link URL. Returns (clean_or_None, error_or_None).
+
+    Rules: scheme must be http or https; netloc must be present; localhost +
+    private ranges are allowed only when settings.DEBUG is True, since a link
+    that points at 127.0.0.1 is almost always a misconfiguration in prod and a
+    potential SSRF tripwire if any downstream code fetches the URL."""
+    if raw in (None, ''):
+        return None, None
+    s = str(raw).strip()
+    if len(s) > 2000:
+        return None, 'meeting_link is too long (max 2000 chars)'
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(s)
+    except Exception:
+        return None, 'meeting_link is not a valid URL'
+    if p.scheme not in ('http', 'https'):
+        return None, "meeting_link must use http:// or https://"
+    if not p.netloc:
+        return None, 'meeting_link is missing a host'
+    host = (p.hostname or '').lower()
+    if not settings.DEBUG:
+        blocked = {'localhost', '127.0.0.1', '0.0.0.0', '::1'}
+        if host in blocked or host.endswith('.localhost') or host.startswith('169.254.'):
+            return None, 'meeting_link host is not allowed'
+    return s, None
+
+
+def _serialize_meeting(m, include_transcript=False):
+    row = {
+        'id': m.id,
+        'title': m.title,
+        'description': m.description,
+        'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+        'duration_minutes': m.duration_minutes,
+        'timezone_name': m.timezone_name,
+        'meeting_link': m.meeting_link,
+        'location': m.location,
+        'status': m.status,
+        'organizer_id': m.organizer_id,
+        'participant_user_ids': list(m.participants.values_list('id', flat=True)),
+        'reminder_24h_sent_at': m.reminder_24h_sent_at.isoformat() if m.reminder_24h_sent_at else None,
+        'reminder_15m_sent_at': m.reminder_15m_sent_at.isoformat() if m.reminder_15m_sent_at else None,
+        'action_items': m.action_items or [],
+        'notes': m.notes,
+        'created_at': m.created_at.isoformat(),
+        'updated_at': m.updated_at.isoformat(),
+    }
+    if include_transcript:
+        row['transcript'] = m.transcript or ''
+    return row
+
+
+def _get_company_meeting_or_404(request, meeting_id):
+    company = request.user.company
+    m = FrontlineMeeting.objects.filter(id=meeting_id, company=company).first()
+    if not m:
+        return None, Response({'status': 'error', 'message': 'Meeting not found'},
+                              status=status.HTTP_404_NOT_FOUND)
+    return m, None
+
+
+def _parse_iso_aware(raw):
+    """Parse an ISO-8601 string to a tz-aware UTC datetime, or None."""
+    if not raw:
+        return None
+    try:
+        from datetime import datetime
+        s = raw.replace('Z', '+00:00') if isinstance(raw, str) else raw
+        dt = datetime.fromisoformat(s) if isinstance(s, str) else s
+        if dt.tzinfo is None:
+            dt = timezone.make_aware(dt, timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_meetings(request):
+    """List meetings for the caller's company.
+
+    Query params: status, date_from, date_to (ISO-8601), organizer_id, page, limit.
+    """
+    try:
+        company = request.user.company
+        qs = FrontlineMeeting.objects.filter(company=company).order_by('-scheduled_at')
+
+        st = request.GET.get('status')
+        if st:
+            qs = qs.filter(status=st)
+        date_from = _parse_iso_aware(request.GET.get('date_from'))
+        if date_from:
+            qs = qs.filter(scheduled_at__gte=date_from)
+        date_to = _parse_iso_aware(request.GET.get('date_to'))
+        if date_to:
+            qs = qs.filter(scheduled_at__lte=date_to)
+        organizer_id = request.GET.get('organizer_id')
+        if organizer_id:
+            qs = qs.filter(organizer_id=organizer_id)
+
+        page = max(1, int(request.GET.get('page', 1)))
+        limit = min(100, max(1, int(request.GET.get('limit', 20))))
+        total = qs.count()
+        offset = (page - 1) * limit
+        rows = [_serialize_meeting(m) for m in qs[offset:offset + limit]]
+        return Response({'status': 'success', 'data': rows, 'pagination': {
+            'page': page, 'limit': limit, 'total': total,
+            'total_pages': (total + limit - 1) // limit if limit else 1,
+        }})
+    except Exception as e:
+        logger.exception("list_meetings failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_meeting(request):
+    """Create a meeting. If `meeting_link` is empty and `auto_jitsi` is not False,
+    a fresh Jitsi link is auto-generated."""
+    try:
+        company_user = request.user
+        company = company_user.company
+        organizer = _get_or_create_user_for_company_user(company_user)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+
+        title = (data.get('title') or '').strip()
+        scheduled_raw = data.get('scheduled_at')
+        if not title or not scheduled_raw:
+            return Response({'status': 'error', 'message': 'title and scheduled_at are required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        scheduled_at = _parse_iso_aware(scheduled_raw)
+        if not scheduled_at:
+            return Response({'status': 'error', 'message': 'Invalid scheduled_at (ISO-8601 expected)'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        duration_minutes = max(5, min(24 * 60, int(data.get('duration_minutes') or 60)))
+        meeting_link = (data.get('meeting_link') or '').strip()
+        auto_jitsi = bool(data.get('auto_jitsi', True))
+        if meeting_link:
+            clean, err_msg = _validate_meeting_link(meeting_link)
+            if err_msg:
+                return Response({'status': 'error', 'message': err_msg},
+                                status=status.HTTP_400_BAD_REQUEST)
+            meeting_link = clean
+        elif auto_jitsi:
+            meeting_link = _generate_jitsi_link()
+        tz_name = (data.get('timezone_name') or 'UTC').strip()[:64] or 'UTC'
+
+        m = FrontlineMeeting.objects.create(
+            title=title[:200],
+            description=data.get('description') or '',
+            company=company,
+            organizer=organizer,
+            scheduled_at=scheduled_at,
+            duration_minutes=duration_minutes,
+            timezone_name=tz_name,
+            meeting_link=meeting_link or None,
+            location=(data.get('location') or '')[:500],
+            status='scheduled',
+        )
+
+        # Participants: accept either company_user_ids (preferred) or participant_user_ids (raw User ids).
+        company_user_ids = data.get('participant_company_user_ids') or []
+        user_ids = list(data.get('participant_user_ids') or [])
+        if company_user_ids:
+            for cuid in company_user_ids:
+                cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
+                if cu:
+                    user_ids.append(_get_or_create_user_for_company_user(cu).id)
+        if user_ids:
+            from django.contrib.auth.models import User as _User
+            m.participants.set(_User.objects.filter(id__in=set(user_ids)))
+
+        return Response({'status': 'success', 'data': _serialize_meeting(m)},
+                        status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception("create_meeting failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_meeting(request, meeting_id):
+    """Get a single meeting (includes transcript)."""
+    try:
+        m, err = _get_company_meeting_or_404(request, meeting_id)
+        if err:
+            return err
+        return Response({'status': 'success', 'data': _serialize_meeting(m, include_transcript=True)})
+    except Exception as e:
+        logger.exception("get_meeting failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_meeting(request, meeting_id):
+    """Update meeting fields. Re-sending a reminder after edit is signalled by the
+    caller via clearing reminder_24h_sent_at / reminder_15m_sent_at."""
+    try:
+        m, err = _get_company_meeting_or_404(request, meeting_id)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+
+        if 'title' in data:
+            m.title = str(data['title'])[:200]
+        if 'description' in data:
+            m.description = str(data['description'])
+        if 'scheduled_at' in data:
+            dt = _parse_iso_aware(data['scheduled_at'])
+            if not dt:
+                return Response({'status': 'error', 'message': 'Invalid scheduled_at'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            m.scheduled_at = dt
+            # Schedule change → reset reminder flags so Celery will re-send.
+            m.reminder_24h_sent_at = None
+            m.reminder_15m_sent_at = None
+        if 'duration_minutes' in data:
+            try:
+                m.duration_minutes = max(5, min(24 * 60, int(data['duration_minutes'])))
+            except (TypeError, ValueError):
+                pass
+        if 'timezone_name' in data:
+            m.timezone_name = str(data['timezone_name'])[:64] or 'UTC'
+        if 'meeting_link' in data:
+            raw = (str(data['meeting_link']) or '').strip()
+            if raw:
+                clean, err_msg = _validate_meeting_link(raw)
+                if err_msg:
+                    return Response({'status': 'error', 'message': err_msg},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                m.meeting_link = clean
+            else:
+                m.meeting_link = None
+        if 'location' in data:
+            m.location = str(data['location'])[:500]
+        if 'status' in data:
+            valid = {c[0] for c in FrontlineMeeting.STATUS_CHOICES}
+            if data['status'] in valid:
+                m.status = data['status']
+        if 'notes' in data:
+            m.notes = str(data['notes'])
+        if 'transcript' in data:
+            m.transcript = str(data['transcript'])
+
+        m.save()
+
+        if 'participant_company_user_ids' in data:
+            company = request.user.company
+            user_ids = []
+            for cuid in data['participant_company_user_ids']:
+                cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
+                if cu:
+                    user_ids.append(_get_or_create_user_for_company_user(cu).id)
+            from django.contrib.auth.models import User as _User
+            m.participants.set(_User.objects.filter(id__in=set(user_ids)))
+
+        return Response({'status': 'success', 'data': _serialize_meeting(m)})
+    except Exception as e:
+        logger.exception("update_meeting failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_meeting(request, meeting_id):
+    """Delete a meeting."""
+    try:
+        m, err = _get_company_meeting_or_404(request, meeting_id)
+        if err:
+            return err
+        m.delete()
+        return Response({'status': 'success'})
+    except Exception as e:
+        logger.exception("delete_meeting failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def check_meeting_availability(request):
+    """Check whether a candidate meeting slot conflicts with existing meetings for
+    any of the listed participants.
+
+    Query params:
+      start             ISO-8601, required
+      duration_minutes  default 60
+      participant_company_user_ids   comma-separated company-user IDs
+
+    Returns: {available: bool, conflicts: [{meeting_id, user_id, scheduled_at, title}]}.
+    """
+    try:
+        company = request.user.company
+        start = _parse_iso_aware(request.GET.get('start'))
+        if not start:
+            return Response({'status': 'error', 'message': 'Valid start (ISO-8601) is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            duration = max(5, min(24 * 60, int(request.GET.get('duration_minutes', 60))))
+        except (TypeError, ValueError):
+            duration = 60
+        end = start + timedelta(minutes=duration)
+
+        cu_ids = [int(x) for x in (request.GET.get('participant_company_user_ids', '') or '').split(',') if x.strip().isdigit()]
+        user_ids = []
+        for cuid in cu_ids:
+            cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
+            if cu:
+                user_ids.append(_get_or_create_user_for_company_user(cu).id)
+        if not user_ids:
+            return Response({'status': 'success', 'data': {'available': True, 'conflicts': []}})
+
+        # Find meetings in the same company that overlap [start, end) and involve any of the users
+        # (either as organizer or as participant).
+        from django.db.models import Q as _Q
+        candidates = FrontlineMeeting.objects.filter(
+            company=company,
+            status__in=['scheduled', 'rescheduled'],
+            scheduled_at__lt=end,
+        ).filter(_Q(organizer_id__in=user_ids) | _Q(participants__id__in=user_ids)).distinct()
+
+        conflicts = []
+        for m in candidates:
+            m_end = m.scheduled_at + timedelta(minutes=(m.duration_minutes or 60))
+            if m_end > start:  # overlap
+                # Which user(s) clash?
+                involved = set()
+                if m.organizer_id in user_ids:
+                    involved.add(m.organizer_id)
+                involved.update(m.participants.filter(id__in=user_ids).values_list('id', flat=True))
+                for uid in involved:
+                    conflicts.append({
+                        'meeting_id': m.id,
+                        'user_id': uid,
+                        'scheduled_at': m.scheduled_at.isoformat(),
+                        'duration_minutes': m.duration_minutes,
+                        'title': m.title,
+                    })
+
+        return Response({'status': 'success', 'data': {
+            'available': not conflicts,
+            'conflicts': conflicts,
+        }})
+    except Exception as e:
+        logger.exception("check_meeting_availability failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
+def extract_meeting_action_items(request, meeting_id):
+    """Extract action items from the meeting's transcript using the LLM.
+
+    Stores the list on `meeting.action_items`. Optional body: {create_tickets: bool}
+    — when true, each extracted item also becomes a frontline Ticket so an agent can
+    act on it and track SLA."""
+    try:
+        company = request.user.company
+        m, err = _get_company_meeting_or_404(request, meeting_id)
+        if err:
+            return err
+        transcript = (m.transcript or '').strip()
+        if not transcript:
+            return Response({'status': 'error', 'message': 'Meeting has no transcript to extract from'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        create_tickets = bool(data.get('create_tickets', False))
+
+        # Single cheap LLM call. Strict JSON output; best-effort parse.
+        agent = FrontlineAgent(company_id=company.id)
+        prompt = (
+            "From the meeting transcript delimited by <transcript>, extract a list of concrete "
+            "action items. Each item must be something someone agreed to do. Return ONLY a JSON "
+            "array, no markdown. Each item: {\"text\": string, \"owner_name\": string|null, "
+            "\"due_date\": \"YYYY-MM-DD\"|null}. Return at most 15 items.\n\n"
+            f"<transcript>\n{transcript[:12000]}\n</transcript>"
+        )
+        raw = agent._call_llm(
+            prompt=prompt,
+            system_prompt="You extract structured action items from meeting transcripts. Output valid JSON only.",
+            temperature=0.2,
+            max_tokens=900,
+        )
+        items = []
+        if raw:
+            s = raw.strip()
+            if s.startswith('```'):
+                s = s.split('```', 2)[1]
+                if s.startswith('json'):
+                    s = s[4:]
+                s = s.strip('` \n')
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    items = [{
+                        'text': str(it.get('text') or '')[:500],
+                        'owner_name': (str(it.get('owner_name')) if it.get('owner_name') else None),
+                        'due_date': (str(it.get('due_date')) if it.get('due_date') else None),
+                    } for it in parsed if isinstance(it, dict) and it.get('text')]
+            except Exception as exc:
+                logger.warning("Action-item LLM output unparseable: %s; raw=%r", exc, raw[:200])
+
+        m.action_items = items
+        m.save(update_fields=['action_items', 'updated_at'])
+
+        created_ticket_ids = []
+        if create_tickets and items:
+            creator = _get_or_create_user_for_company_user(request.user)
+            for it in items:
+                t = Ticket.objects.create(
+                    title=f"[Meeting follow-up] {it['text'][:160]}",
+                    description=(f"Action item from meeting '{m.title}' on "
+                                 f"{m.scheduled_at.isoformat() if m.scheduled_at else '(unknown date)'}\n\n"
+                                 f"Text: {it['text']}\n"
+                                 f"Owner: {it.get('owner_name') or 'Unassigned'}\n"
+                                 f"Due: {it.get('due_date') or 'None'}"),
+                    status='open',
+                    priority='medium',
+                    category='other',
+                    company=company,
+                    created_by=creator,
+                )
+                created_ticket_ids.append(t.id)
+                it['ticket_id'] = t.id
+            # Save again with ticket_id references baked in.
+            m.action_items = items
+            m.save(update_fields=['action_items', 'updated_at'])
+
+        return Response({'status': 'success', 'data': {
+            'meeting_id': m.id,
+            'action_items': items,
+            'count': len(items),
+            'created_ticket_ids': created_ticket_ids,
+        }})
+    except Exception as e:
+        logger.exception("extract_meeting_action_items failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ---------- Workflow / SOP Runner ----------
 
-def _execute_workflow_steps(workflow, context_data, user):
-    """Execute workflow steps in order. Returns (success, result_data, error_message)."""
-    steps = workflow.steps or []
-    result_data = {'steps_completed': 0, 'results': []}
-    for i, step in enumerate(steps):
+
+def _run_single_step(step, step_index, step_path, workflow, context_data, simulate):
+    """Execute a single non-branch step. Returns (ok, result_entry, fatal_error_str_or_None).
+
+    `simulate=True` reports what would happen without any side effects — no emails,
+    no webhooks, no DB writes.
+    """
+    step_type = (step.get('type') or '').lower()
+    base = {'step': step_index, 'step_path': step_path, 'type': step_type}
+
+    if step_type == 'send_email':
+        template_id = step.get('template_id')
+        raw_recipient = (step.get('recipient_email') or context_data.get('recipient_email') or '{{recipient_email}}').strip()
+        recipient = _render_template_body(raw_recipient, context_data).strip()
+        if not (template_id and recipient):
+            return False, {**base, 'done': False, 'error': 'Missing template_id or recipient'}, None
+        template = NotificationTemplate.objects.filter(id=template_id).first()
+        if not template:
+            return False, {**base, 'done': False, 'error': 'Template not found'}, None
+        if not _should_send_notification_to_recipient(workflow.company_id, recipient, 'email', None):
+            return True, {**base, 'done': True, 'skipped': 'recipient_preferences'}, None
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True, 'recipient': recipient,
+                          'template_id': template_id}, None
+        merged = {**context_data, **step.get('context', {})}
+        body = _render_template_body(template.body, merged)
+        personalized_body = _generate_llm_notification_body(template, merged, workflow.company_id)
+        if personalized_body:
+            body = personalized_body
+        subject = _render_template_body(template.subject, merged)
+        ok = _send_notification_email(recipient, subject, body)
+        if not ok:
+            return False, {**base, 'done': False, 'error': 'Email send failed'}, None
+        return True, {**base, 'done': True}, None
+
+    if step_type == 'update_ticket':
+        ticket_id = context_data.get('ticket_id') or step.get('ticket_id')
+        if not ticket_id:
+            return False, {**base, 'done': False, 'error': 'Missing ticket_id'}, None
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True, 'ticket_id': ticket_id,
+                          'would_set': {k: step[k] for k in ('status', 'resolution') if k in step}}, None
+        ticket = Ticket.objects.filter(id=ticket_id).first()
+        if not ticket:
+            return False, {**base, 'done': False, 'error': 'Ticket not found'}, None
+        if 'status' in step:
+            ticket.status = step['status']
+        if 'resolution' in step:
+            ticket.resolution = step['resolution']
+        ticket.save()
+        return True, {**base, 'done': True}, None
+
+    if step_type in ('webhook', 'http_webhook'):
+        url = (step.get('url') or '').strip()
+        if not url:
+            return False, {**base, 'done': False, 'error': 'Missing url'}, None
+        method = (step.get('method') or 'POST').upper()
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True, 'url': url, 'method': method}, None
+        merged = {**context_data, **step.get('context', {})}
+        body_raw = step.get('body') or '{}'
+        try:
+            body_str = _render_template_body(body_raw, merged) if isinstance(body_raw, str) else json.dumps(body_raw)
+            payload = body_str.encode('utf-8') if body_str else b''
+        except Exception:
+            payload = b'{}'
+        headers = dict(step.get('headers') or {})
+        if payload and 'Content-Type' not in {h.lower() for h in headers}:
+            headers['Content-Type'] = 'application/json'
+        req = Request(url, data=payload if method != 'GET' else None, method=method, headers=headers)
+        try:
+            with urlopen(req, timeout=int(step.get('timeout_seconds', 30))) as resp:
+                status_code = resp.status
+            if status_code >= 400:
+                return False, {**base, 'done': False, 'status_code': status_code,
+                               'error': f'HTTP {status_code}'}, None
+            return True, {**base, 'done': True, 'status_code': status_code}, None
+        except (URLError, HTTPError, OSError) as e:
+            return False, {**base, 'done': False, 'error': str(e)}, None
+
+    if step_type == 'slack':
+        webhook_url = (step.get('webhook_url') or '').strip()
+        if not webhook_url:
+            return False, {**base, 'done': False, 'error': 'Missing webhook_url'}, None
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True, 'webhook_url': webhook_url}, None
+        merged = {**context_data, **step.get('context', {})}
+        text = _render_template_body(step.get('text') or 'Workflow step executed.', merged)
+        payload = json.dumps({'text': text}).encode('utf-8')
+        req = Request(webhook_url, data=payload, method='POST', headers={'Content-Type': 'application/json'})
+        try:
+            with urlopen(req, timeout=15) as resp:
+                status_code = resp.status
+            return True, {**base, 'done': True, 'status_code': status_code}, None
+        except (URLError, HTTPError, OSError) as e:
+            return False, {**base, 'done': False, 'error': str(e)}, None
+
+    if step_type == 'assign':
+        ticket_id = context_data.get('ticket_id') or step.get('ticket_id')
+        assign_to_company_user_id = step.get('assign_to_company_user_id')
+        if not (ticket_id and assign_to_company_user_id is not None):
+            return False, {**base, 'done': False, 'error': 'Missing ticket_id or assign_to_company_user_id'}, None
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True,
+                          'ticket_id': ticket_id, 'assignee': assign_to_company_user_id}, None
+        ticket = Ticket.objects.filter(id=ticket_id).first()
+        company_user = CompanyUser.objects.filter(
+            id=assign_to_company_user_id, company=workflow.company, is_active=True,
+        ).first()
+        if not (ticket and company_user):
+            return False, {**base, 'done': False, 'error': 'Ticket or assignee not found'}, None
+        assign_user = _get_or_create_user_for_company_user(company_user)
+        ticket.assigned_to = assign_user
+        ticket.save()
+        return True, {**base, 'done': True}, None
+
+    if step_type in ('wait', 'wait_for_duration'):
+        # Cap at 300s per step to avoid stuck workers. For long waits use an external scheduler.
+        seconds = max(0, min(300, int(step.get('seconds') or 0)))
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True, 'seconds': seconds}, None
+        if seconds > 0:
+            import time as _t
+            _t.sleep(seconds)
+        return True, {**base, 'done': True, 'waited_seconds': seconds}, None
+
+    # Unknown step types are no-ops (forward-compat)
+    return True, {**base, 'done': True, 'note': 'unknown step type treated as no-op'}, None
+
+
+def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic, timeout, path_prefix=''):
+    """Walk a list of steps linearly. Handles `branch` recursively. Enforces the
+    workflow timeout by checking monotonic time between steps.
+
+    Returns (success_bool, result_list, fatal_error_str_or_None).
+    """
+    import time as _t
+    from Frontline_agent.workflow_conditions import evaluate as _eval_cond
+
+    results = []
+    for i, step in enumerate(steps or []):
+        step_path = f"{path_prefix}{i}"
         step_type = (step.get('type') or '').lower()
-        if step_type == 'send_email':
-            template_id = step.get('template_id')
-            raw_recipient = (step.get('recipient_email') or context_data.get('recipient_email') or '{{recipient_email}}').strip()
-            recipient = _render_template_body(raw_recipient, context_data).strip()
-            if template_id and recipient:
-                template = NotificationTemplate.objects.filter(id=template_id).first()
-                if template and _should_send_notification_to_recipient(workflow.company_id, recipient, 'email', None):
-                    merged = {**context_data, **step.get('context', {})}
-                    body = _render_template_body(template.body, merged)
-                    personalized_body = _generate_llm_notification_body(template, merged, workflow.company_id)
-                    if personalized_body:
-                        body = personalized_body
-                    subject = _render_template_body(template.subject, merged)
-                    _send_notification_email(recipient, subject, body)
-            result_data['results'].append({'step': i, 'type': step_type, 'done': True})
-        elif step_type == 'update_ticket':
-            ticket_id = context_data.get('ticket_id') or step.get('ticket_id')
-            if ticket_id:
-                ticket = Ticket.objects.filter(id=ticket_id).first()
-                if ticket:
-                    if 'status' in step:
-                        ticket.status = step['status']
-                    if 'resolution' in step:
-                        ticket.resolution = step['resolution']
-                    ticket.save()
-            result_data['results'].append({'step': i, 'type': step_type, 'done': True})
-        elif step_type == 'webhook':
-            url = (step.get('url') or '').strip()
-            if url:
-                merged = {**context_data, **step.get('context', {})}
-                body_raw = step.get('body') or '{}'
-                try:
-                    body_str = _render_template_body(body_raw, merged) if isinstance(body_raw, str) else json.dumps(body_raw)
-                    payload = body_str.encode('utf-8') if body_str else b''
-                except Exception:
-                    payload = b'{}'
-                method = (step.get('method') or 'POST').upper()
-                headers = dict(step.get('headers') or {})
-                if payload and 'Content-Type' not in {h.lower() for h in headers}:
-                    headers['Content-Type'] = 'application/json'
-                req = Request(url, data=payload if method != 'GET' else None, method=method, headers=headers)
-                try:
-                    with urlopen(req, timeout=30) as resp:
-                        result_data['results'].append({'step': i, 'type': step_type, 'done': True, 'status_code': resp.status})
-                except (URLError, HTTPError, OSError) as e:
-                    logger.warning("Workflow webhook step failed: %s", e)
-                    result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': str(e)})
-            else:
-                result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': 'Missing url'})
-        elif step_type == 'slack':
-            webhook_url = (step.get('webhook_url') or '').strip()
-            if webhook_url:
-                merged = {**context_data, **step.get('context', {})}
-                text = _render_template_body(step.get('text') or 'Workflow step executed.', merged)
-                payload = json.dumps({'text': text}).encode('utf-8')
-                req = Request(webhook_url, data=payload, method='POST', headers={'Content-Type': 'application/json'})
-                try:
-                    with urlopen(req, timeout=15) as resp:
-                        result_data['results'].append({'step': i, 'type': step_type, 'done': True})
-                except (URLError, HTTPError, OSError) as e:
-                    logger.warning("Workflow Slack step failed: %s", e)
-                    result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': str(e)})
-            else:
-                result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': 'Missing webhook_url'})
-        elif step_type == 'assign':
-            ticket_id = context_data.get('ticket_id') or step.get('ticket_id')
-            assign_to_company_user_id = step.get('assign_to_company_user_id')
-            if ticket_id and assign_to_company_user_id is not None:
-                ticket = Ticket.objects.filter(id=ticket_id).first()
-                company_user = CompanyUser.objects.filter(
-                    id=assign_to_company_user_id,
-                    company=workflow.company,
-                    is_active=True,
-                ).first()
-                if ticket and company_user:
-                    assign_user = _get_or_create_user_for_company_user(company_user)
-                    ticket.assigned_to = assign_user
-                    ticket.save()
-                result_data['results'].append({'step': i, 'type': step_type, 'done': True})
-            else:
-                result_data['results'].append({'step': i, 'type': step_type, 'done': False, 'error': 'Missing ticket_id or assign_to_company_user_id'})
-        else:
-            result_data['results'].append({'step': i, 'type': step_type, 'done': True})
-        result_data['steps_completed'] = i + 1
-    return True, result_data, None
+
+        # Timeout check before each step — don't bother starting if we're already past budget.
+        if timeout and (_t.monotonic() - start_monotonic) > timeout:
+            results.append({'step': i, 'step_path': step_path, 'type': step_type,
+                            'done': False, 'error': 'workflow_timeout'})
+            return False, results, 'workflow_timeout'
+
+        if step_type == 'branch':
+            cond = step.get('condition')
+            branch_taken = 'if_true' if _eval_cond(cond, context_data) else 'if_false'
+            nested = step.get(branch_taken) or []
+            results.append({'step': i, 'step_path': step_path, 'type': 'branch',
+                            'done': True, 'branch_taken': branch_taken, 'nested_count': len(nested)})
+            nested_ok, nested_results, nested_err = _execute_step_list(
+                nested, workflow, context_data, simulate, start_monotonic, timeout,
+                path_prefix=f"{step_path}.{branch_taken}.",
+            )
+            results.extend(nested_results)
+            if not nested_ok:
+                return False, results, nested_err
+            continue
+
+        # Regular step — run with per-step retry configuration.
+        retries = max(0, min(5, int(step.get('retries', 0))))
+        backoff_seconds = max(0, min(300, int(step.get('backoff_seconds', 5))))
+        attempt = 0
+        while True:
+            attempt += 1
+            ok, result_entry, fatal = _run_single_step(step, i, step_path, workflow, context_data, simulate)
+            result_entry['attempt'] = attempt
+            if ok:
+                results.append(result_entry)
+                break
+            if attempt > retries:
+                results.append(result_entry)
+                # A failed non-retryable step aborts the run so downstream steps don't
+                # fire on a broken precondition. Branch steps are the only way to
+                # "continue on failure" — users can wrap this step in a branch.
+                return False, results, result_entry.get('error', 'step_failed')
+            if timeout and (_t.monotonic() - start_monotonic) > timeout:
+                results.append({**result_entry, 'error': 'workflow_timeout'})
+                return False, results, 'workflow_timeout'
+            if simulate:
+                # In dry-run we don't actually wait; just note the retry would happen.
+                results.append({**result_entry, 'would_retry_in_seconds': backoff_seconds})
+                continue
+            if backoff_seconds:
+                import time as _t2
+                _t2.sleep(backoff_seconds)
+
+    return True, results, None
+
+
+def _execute_workflow_steps(workflow, context_data, user, simulate=False):
+    """Execute a workflow's steps. Returns (success, result_data, error_message).
+
+    Honours `workflow.timeout_seconds` (0 = unlimited), per-step retries with
+    backoff, and a recursive `branch` step type. Pass `simulate=True` to run a
+    dry-run that produces the same report shape without side effects.
+    """
+    import time as _t
+    steps = workflow.steps or []
+    timeout = int(getattr(workflow, 'timeout_seconds', 0) or 0)
+    start = _t.monotonic()
+    ok, results, err = _execute_step_list(
+        steps, workflow, context_data, simulate, start, timeout,
+    )
+    return ok, {'steps_completed': sum(1 for r in results if r.get('done')),
+                'results': results, 'simulated': simulate,
+                'elapsed_seconds': round(_t.monotonic() - start, 3)}, err
 
 
 @api_view(["GET"])
@@ -1892,7 +3274,14 @@ def list_workflows(request):
     try:
         company = request.user.company
         qs = FrontlineWorkflow.objects.filter(company=company).order_by('-updated_at')
-        data = [{'id': w.id, 'name': w.name, 'description': w.description, 'trigger_conditions': w.trigger_conditions, 'steps': w.steps, 'is_active': w.is_active, 'created_at': w.created_at.isoformat(), 'updated_at': w.updated_at.isoformat()} for w in qs]
+        data = [{
+            'id': w.id, 'name': w.name, 'description': w.description,
+            'trigger_conditions': w.trigger_conditions, 'steps': w.steps,
+            'is_active': w.is_active, 'requires_approval': w.requires_approval,
+            'timeout_seconds': getattr(w, 'timeout_seconds', 0) or 0,
+            'version': w.version,
+            'created_at': w.created_at.isoformat(), 'updated_at': w.updated_at.isoformat(),
+        } for w in qs]
         return Response({'status': 'success', 'data': data})
     except Exception as e:
         logger.exception("list_workflows failed")
@@ -1930,22 +3319,53 @@ def get_workflow(request, workflow_id):
         w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
         if not w:
             return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name, 'description': w.description, 'trigger_conditions': w.trigger_conditions, 'steps': w.steps, 'is_active': w.is_active}})
+        return Response({'status': 'success', 'data': {
+            'id': w.id, 'name': w.name, 'description': w.description,
+            'trigger_conditions': w.trigger_conditions, 'steps': w.steps,
+            'is_active': w.is_active,
+            'requires_approval': w.requires_approval,
+            'timeout_seconds': getattr(w, 'timeout_seconds', 0) or 0,
+            'version': w.version,
+        }})
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _snapshot_workflow(w, saved_by=None):
+    """Create an immutable FrontlineWorkflowVersion from the current workflow state."""
+    FrontlineWorkflowVersion.objects.create(
+        workflow=w,
+        version=w.version or 1,
+        snapshot={
+            'name': w.name,
+            'description': w.description,
+            'trigger_conditions': w.trigger_conditions,
+            'steps': w.steps,
+            'requires_approval': w.requires_approval,
+            'is_active': w.is_active,
+            'timeout_seconds': getattr(w, 'timeout_seconds', 0) or 0,
+        },
+        saved_by=saved_by,
+    )
 
 
 @api_view(["PATCH", "PUT"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def update_workflow(request, workflow_id):
-    """Update a workflow."""
+    """Update a workflow. Snapshots the previous state to FrontlineWorkflowVersion
+    before applying changes so rollback is always available."""
     try:
         company = request.user.company
         w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
         if not w:
             return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+
+        # Snapshot the current state before mutating so we can roll back.
+        user = _get_or_create_user_for_company_user(request.user)
+        _snapshot_workflow(w, saved_by=user)
+
         if 'name' in data:
             w.name = (data['name'] or '')[:200]
         if 'description' in data:
@@ -1956,9 +3376,103 @@ def update_workflow(request, workflow_id):
             w.steps = data['steps']
         if 'is_active' in data:
             w.is_active = bool(data['is_active'])
+        if 'requires_approval' in data:
+            w.requires_approval = bool(data['requires_approval'])
+        if 'timeout_seconds' in data:
+            try:
+                ts = int(data['timeout_seconds'] or 0)
+            except (TypeError, ValueError):
+                ts = 0
+            w.timeout_seconds = max(0, min(3600, ts))  # cap 1 hour
+        w.version = (w.version or 1) + 1
         w.save()
-        return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name}})
+        return Response({'status': 'success', 'data': {
+            'id': w.id, 'name': w.name, 'version': w.version,
+        }})
     except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_workflow_versions(request, workflow_id):
+    """List historical versions of a workflow (most recent first)."""
+    try:
+        company = request.user.company
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
+        versions = w.versions.select_related('saved_by').order_by('-version')[:100]
+        return Response({'status': 'success', 'data': [{
+            'id': v.id,
+            'version': v.version,
+            'created_at': v.created_at.isoformat(),
+            'saved_by_id': v.saved_by_id,
+            'saved_by_name': (v.saved_by.get_full_name() or v.saved_by.username) if v.saved_by else None,
+            'snapshot': v.snapshot,
+        } for v in versions]})
+    except Exception as e:
+        logger.exception("list_workflow_versions failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def rollback_workflow(request, workflow_id, version):
+    """Rollback a workflow to a previous version. The current state is snapshotted
+    first so rollback itself is reversible."""
+    try:
+        company = request.user.company
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
+        v = w.versions.filter(version=int(version)).first()
+        if not v:
+            return Response({'status': 'error', 'message': 'Version not found'}, status=status.HTTP_404_NOT_FOUND)
+        user = _get_or_create_user_for_company_user(request.user)
+        _snapshot_workflow(w, saved_by=user)
+        snap = v.snapshot or {}
+        w.name = snap.get('name', w.name)
+        w.description = snap.get('description', w.description)
+        w.trigger_conditions = snap.get('trigger_conditions', w.trigger_conditions)
+        w.steps = snap.get('steps', w.steps)
+        w.requires_approval = snap.get('requires_approval', w.requires_approval)
+        w.is_active = snap.get('is_active', w.is_active)
+        w.timeout_seconds = snap.get('timeout_seconds', getattr(w, 'timeout_seconds', 0))
+        w.version = (w.version or 1) + 1
+        w.save()
+        return Response({'status': 'success', 'data': {
+            'id': w.id, 'version': w.version, 'rolled_back_to_version': v.version,
+        }})
+    except Exception as e:
+        logger.exception("rollback_workflow failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def dry_run_workflow(request, workflow_id):
+    """Simulate a workflow execution with a given context. Side-effect-free: no emails,
+    webhooks, or DB writes. Returns the same result_data shape with `simulated: true`
+    entries showing what *would* happen."""
+    try:
+        company = request.user.company
+        user = _get_or_create_user_for_company_user(request.user)
+        w = FrontlineWorkflow.objects.filter(company=company, id=workflow_id).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        context_data = data.get('context') or {}
+        success, result_data, err = _execute_workflow_steps(w, context_data, user, simulate=True)
+        return Response({'status': 'success', 'data': {
+            'workflow_id': w.id, 'simulated': True,
+            'success': success, 'error': err, 'result_data': result_data,
+        }})
+    except Exception as e:
+        logger.exception("dry_run_workflow failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -2344,13 +3858,113 @@ def frontline_analytics(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def frontline_analytics_export(request):
-    """Export analytics (tickets) as CSV. Query params: date_from, date_to."""
+    """Export analytics as CSV.
+
+    Query params:
+      - entity: tickets (default) | meetings
+      - date_from / date_to: YYYY-MM-DD
+      - status, priority, category (tickets only)
+    Now correctly scoped to the caller's company instead of just their own tickets."""
     try:
-        company_user = request.user
-        user = _get_or_create_user_for_company_user(company_user)
+        company = request.user.company
+        entity = (request.GET.get('entity') or 'tickets').lower()
         date_from_str = request.GET.get('date_from')
         date_to_str = request.GET.get('date_to')
-        qs = Ticket.objects.filter(created_by=user).order_by('-created_at')
+
+        def _apply_date_range(qs, field='created_at'):
+            if date_from_str:
+                try:
+                    qs = qs.filter(**{f"{field}__date__gte": datetime.strptime(date_from_str, '%Y-%m-%d').date()})
+                except ValueError:
+                    pass
+            if date_to_str:
+                try:
+                    qs = qs.filter(**{f"{field}__date__lte": datetime.strptime(date_to_str, '%Y-%m-%d').date()})
+                except ValueError:
+                    pass
+            return qs
+
+        response = HttpResponse(content_type='text/csv')
+        writer = csv.writer(response)
+
+        if entity == 'meetings':
+            qs = FrontlineMeeting.objects.filter(company=company).order_by('-scheduled_at')
+            qs = _apply_date_range(qs, field='scheduled_at')
+            response['Content-Disposition'] = 'attachment; filename="frontline_meetings_export.csv"'
+            writer.writerow(['id', 'title', 'scheduled_at', 'duration_minutes', 'status',
+                             'organizer_id', 'participant_count', 'action_item_count',
+                             'reminder_24h_sent_at', 'reminder_15m_sent_at', 'created_at'])
+            for m in qs[:5000].iterator():
+                writer.writerow([
+                    m.id, m.title, m.scheduled_at.isoformat() if m.scheduled_at else '',
+                    m.duration_minutes, m.status, m.organizer_id,
+                    m.participants.count(),
+                    len(m.action_items or []),
+                    m.reminder_24h_sent_at.isoformat() if m.reminder_24h_sent_at else '',
+                    m.reminder_15m_sent_at.isoformat() if m.reminder_15m_sent_at else '',
+                    m.created_at.isoformat(),
+                ])
+            return response
+
+        # Default: tickets — company-scoped
+        qs = Ticket.objects.filter(company=company).order_by('-created_at')
+        qs = _apply_date_range(qs, field='created_at')
+        for f in ('status', 'priority', 'category'):
+            v = request.GET.get(f)
+            if v:
+                qs = qs.filter(**{f: v})
+        qs = qs[:5000]
+        response['Content-Disposition'] = 'attachment; filename="frontline_tickets_export.csv"'
+        writer.writerow([
+            'id', 'title', 'description', 'status', 'priority', 'category',
+            'auto_resolved', 'resolution_confidence', 'assigned_to_id',
+            'created_by_id', 'intent', 'created_at', 'updated_at', 'resolved_at',
+            'sla_due_at', 'notes_count',
+        ])
+        # Bulk-count notes in one query to avoid N+1.
+        from django.db.models import Count as _Count
+        ticket_ids = list(qs.values_list('id', flat=True))
+        notes_map = dict(
+            TicketNote.objects.filter(ticket_id__in=ticket_ids)
+            .values_list('ticket_id')
+            .annotate(c=_Count('id'))
+            .values_list('ticket_id', 'c')
+        ) if ticket_ids else {}
+        for t in Ticket.objects.filter(id__in=ticket_ids).order_by('-created_at').iterator():
+            writer.writerow([
+                t.id, t.title, (t.description or '')[:500],
+                t.status, t.priority, t.category,
+                t.auto_resolved, t.resolution_confidence, t.assigned_to_id,
+                t.created_by_id, t.intent or '',
+                t.created_at.isoformat(), t.updated_at.isoformat(),
+                t.resolved_at.isoformat() if t.resolved_at else '',
+                t.sla_due_at.isoformat() if t.sla_due_at else '',
+                notes_map.get(t.id, 0),
+            ])
+        return response
+    except Exception as e:
+        logger.exception("frontline_analytics_export failed")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def frontline_agent_performance(request):
+    """Per-agent performance metrics for the company. Date range via date_from/date_to.
+
+    Returns a list of agents with:
+      - tickets_assigned, resolved, auto_resolved
+      - avg_resolution_seconds (wall-clock between created_at and resolved_at)
+      - resolution_rate (resolved / assigned)
+      - sla_breached_count (resolved later than sla_due_at)
+    """
+    try:
+        company = request.user.company
+        date_from_str = request.GET.get('date_from')
+        date_to_str = request.GET.get('date_to')
+
+        qs = Ticket.objects.filter(company=company, assigned_to__isnull=False)
         if date_from_str:
             try:
                 qs = qs.filter(created_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
@@ -2361,15 +3975,52 @@ def frontline_analytics_export(request):
                 qs = qs.filter(created_at__date__lte=datetime.strptime(date_to_str, '%Y-%m-%d').date())
             except ValueError:
                 pass
-        qs = qs[:5000]
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="frontline_tickets_export.csv"'
-        writer = csv.writer(response)
-        writer.writerow(['id', 'title', 'description', 'status', 'priority', 'category', 'auto_resolved', 'created_at', 'updated_at', 'resolved_at'])
-        for t in qs:
-            writer.writerow([t.id, t.title, (t.description or '')[:500], t.status, t.priority, t.category, t.auto_resolved, t.created_at.isoformat(), t.updated_at.isoformat(), t.resolved_at.isoformat() if t.resolved_at else ''])
-        return response
+
+        resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
+        agents = {}  # assigned_to_id → counters
+        for t in qs.only('id', 'assigned_to_id', 'status', 'auto_resolved',
+                         'created_at', 'resolved_at', 'sla_due_at').iterator():
+            aid = t.assigned_to_id
+            a = agents.setdefault(aid, {
+                'assigned_to_id': aid,
+                'tickets_assigned': 0, 'resolved': 0, 'auto_resolved': 0,
+                'resolution_seconds_sum': 0, 'resolution_count': 0,
+                'sla_breached_count': 0,
+            })
+            a['tickets_assigned'] += 1
+            if t.auto_resolved:
+                a['auto_resolved'] += 1
+            if t.status in resolved_statuses and t.resolved_at:
+                a['resolved'] += 1
+                delta = (t.resolved_at - t.created_at).total_seconds()
+                if delta >= 0:
+                    a['resolution_seconds_sum'] += delta
+                    a['resolution_count'] += 1
+                if t.sla_due_at and t.resolved_at > t.sla_due_at:
+                    a['sla_breached_count'] += 1
+
+        # Resolve user display names in one query.
+        from django.contrib.auth.models import User as _User
+        user_map = {u.id: (u.get_full_name() or u.username)
+                    for u in _User.objects.filter(id__in=list(agents.keys()))}
+
+        rows = []
+        for aid, a in agents.items():
+            avg = (a['resolution_seconds_sum'] / a['resolution_count']) if a['resolution_count'] else None
+            rate = (a['resolved'] / a['tickets_assigned']) if a['tickets_assigned'] else 0.0
+            rows.append({
+                'assigned_to_id': aid,
+                'assigned_to_name': user_map.get(aid),
+                'tickets_assigned': a['tickets_assigned'],
+                'resolved': a['resolved'],
+                'auto_resolved': a['auto_resolved'],
+                'resolution_rate': round(rate, 3),
+                'avg_resolution_seconds': round(avg, 1) if avg is not None else None,
+                'sla_breached_count': a['sla_breached_count'],
+            })
+        rows.sort(key=lambda r: r['tickets_assigned'], reverse=True)
+        return Response({'status': 'success', 'data': rows})
     except Exception as e:
-        logger.exception("frontline_analytics_export failed")
+        logger.exception("frontline_agent_performance failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -118,21 +118,51 @@ class BaseAgent:
         # Cumulative token tracking for this agent instance
         self.total_tokens_used = 0
     
+    def _resolve_company_client(self):
+        """If the agent has a company_id + agent_key_name set, route through
+        the key/quota resolver. Returns (client, ctx) or (None, None) to fall
+        back to the default Groq env-key client. Raises on hard-block so the
+        view layer can surface a 402/403."""
+        company_id = getattr(self, 'company_id', None)
+        agent_key_name = getattr(self, 'agent_key_name', None)
+        if not company_id or not agent_key_name:
+            return None, None
+        try:
+            from core.models import Company
+            from core.api_key_service import resolve_for_call
+            company = Company.objects.get(pk=company_id)
+            ctx = resolve_for_call(company, agent_key_name)
+        except Exception:
+            raise  # QuotaExhausted / NoKeyAvailable / Company.DoesNotExist — let the view handle
+        try:
+            if ctx.provider == 'groq':
+                from groq import Groq
+                return Groq(api_key=ctx.api_key), ctx
+            # Provider mismatch (e.g. admin set an openai key but agent speaks groq):
+            # fall back to env so we don't silently use a wrong-protocol client.
+            logger.warning("PM agent got non-groq key (%s); falling back to env", ctx.provider)
+            return None, None
+        except Exception as e:
+            logger.warning("Failed to build client from resolved key: %s — using env fallback", e)
+            return None, None
+
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024):
         """
         Make a call to the Groq LLM API.
-        
+
         Args:
             prompt (str): User prompt/question
             system_prompt (str): System prompt for context
             temperature (float): Sampling temperature (0-1)
             max_tokens (int): Maximum tokens in response
-            
+
         Returns:
             str: LLM response text
         """
         import time as _time
         _start = _time.time()
+        client, key_ctx = self._resolve_company_client()
+        call_client = client or self.client
         try:
             messages = []
 
@@ -146,8 +176,8 @@ class BaseAgent:
                 "role": "user",
                 "content": prompt
             })
-            
-            response = self.client.chat.completions.create(
+
+            response = call_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=temperature,
@@ -196,6 +226,14 @@ class BaseAgent:
                 success=True,
             )
 
+            # Decrement per-agent token quota if we used a resolved key
+            if key_ctx and usage_dict and usage_dict.get('total_tokens'):
+                try:
+                    from core.api_key_service import record_usage
+                    record_usage(key_ctx, usage_dict['total_tokens'])
+                except Exception as e:
+                    logger.warning("quota decrement failed: %s", e)
+
             return response.choices[0].message.content
 
         except Exception as e:
@@ -213,7 +251,7 @@ class BaseAgent:
                 logger.warning(f"{self.agent_name}: Primary model '{self.model}' failed ({e}), trying fallback '{self.fallback_model}'")
                 _fallback_start = _time.time()
                 try:
-                    response = self.client.chat.completions.create(
+                    response = call_client.chat.completions.create(
                         model=self.fallback_model,
                         messages=messages,
                         temperature=temperature,
@@ -239,6 +277,12 @@ class BaseAgent:
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
                         success=True,
                     )
+                    if key_ctx and fb_usage_dict and fb_usage_dict.get('total_tokens'):
+                        try:
+                            from core.api_key_service import record_usage
+                            record_usage(key_ctx, fb_usage_dict['total_tokens'])
+                        except Exception as e:
+                            logger.warning("quota decrement failed on fallback: %s", e)
                     return response.choices[0].message.content
                 except Exception as fallback_err:
                     logger.error(f"{self.agent_name}: Fallback model also failed: {fallback_err}")
