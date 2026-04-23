@@ -296,6 +296,20 @@ const ReplyDraftAgentPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAccess]);
 
+  // Auto-refresh inbox + drafts every 30s (silent — no spinner flicker).
+  // Matches the polling pattern used in CampaignDetail / EmailSendingStatusPage
+  // so new incoming mail surfaced by the 5-min sync_inbox_task appears without
+  // requiring a manual click.
+  const POLL_INTERVAL_MS = 30 * 1000;
+  useEffect(() => {
+    if (!hasAccess) return;
+    const interval = setInterval(() => {
+      refreshInbox();
+      refreshDrafts();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [hasAccess, refreshInbox, refreshDrafts]);
+
   // Re-fetch the inbox whenever the user changes a filter.
   useEffect(() => {
     if (hasAccess) refreshInbox();
@@ -597,14 +611,17 @@ const ReplyDraftAgentPage = () => {
                 </p>
               </div>
             </div>
-            <Button
-              onClick={refreshAll}
-              disabled={refreshing}
-              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </Button>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400 hidden sm:inline">Auto-refreshes every 30s</span>
+              <Button
+                onClick={refreshAll}
+                disabled={refreshing}
+                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </Button>
+            </div>
           </div>
 
           {/* Contextual Stats */}

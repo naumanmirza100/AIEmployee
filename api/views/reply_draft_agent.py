@@ -141,9 +141,21 @@ def _serialize_draft(d):
     }
 
 
-def _parse_days_filter(value):
-    """Return a timezone-aware cutoff datetime, or None for 'all time'."""
-    if value is None or value == '' or str(value).lower() == 'all':
+DEFAULT_INBOX_DAYS = 30
+
+
+def _parse_days_filter(value, *, default_days=DEFAULT_INBOX_DAYS):
+    """Return a timezone-aware cutoff datetime, or None for 'all time'.
+
+    Missing / blank input falls back to ``default_days`` so the inbox is
+    naturally capped to a rolling window instead of returning everything ever
+    stored. Pass ``'all'`` explicitly to disable the window.
+    """
+    if value is None or value == '':
+        if default_days is None or default_days <= 0:
+            return None
+        return timezone.now() - timedelta(days=default_days)
+    if str(value).lower() == 'all':
         return None
     try:
         days = int(value)
@@ -186,22 +198,6 @@ def _visible_campaigns(user_ids):
     return Campaign.objects.filter(owner_id__in=user_ids).order_by('-created_at')
 
 
-def _known_lead_emails(user_ids):
-    """Emails of every Lead attached to any Campaign in this company.
-
-    Used to decide which InboxEmail rows should surface in the Reply Draft UI.
-    """
-    if not user_ids:
-        return set()
-    campaign_ids = Campaign.objects.filter(owner_id__in=user_ids).values_list('id', flat=True)
-    emails = (
-        Lead.objects.filter(campaigns__in=list(campaign_ids))
-        .values_list('email', flat=True)
-        .distinct()
-    )
-    return {e.lower() for e in emails if e}
-
-
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -220,15 +216,12 @@ def dashboard(request):
             id__in=live_drafts_qs.filter(original_email_id__isnull=False).values_list('original_email_id', flat=True)
         ).count()
 
-        lead_emails = _known_lead_emails(user_ids)
-        pending_inbox_count = 0
-        if lead_emails:
-            pending_inbox_count = (
-                InboxEmail.objects
-                .filter(owner_id__in=user_ids, from_email__in=lead_emails)
-                .exclude(id__in=live_drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True))
-                .count()
-            )
+        pending_inbox_count = (
+            InboxEmail.objects
+            .filter(owner_id__in=user_ids)
+            .exclude(id__in=live_drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True))
+            .count()
+        )
 
         stats = {
             'pending_replies': pending_reply_count + pending_inbox_count,
@@ -260,14 +253,15 @@ def dashboard(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_pending_replies(request):
-    """Inbox view: campaign replies + generic inbox emails from known campaign leads.
+    """Inbox view: campaign replies + every generic inbox email in the window.
 
-    Non-lead mail (newsletters, personal mail, etc.) is filtered out — only
-    senders that appear as a Lead on any campaign in this company are shown.
+    Generic inbox mail is no longer gated on the sender being a known lead —
+    the Reply Draft UI surfaces the full mailbox so the user can draft a reply
+    to anything. Use ``days`` to widen or disable the rolling window.
 
     Query params:
       - campaign: campaign id, or 'none' (generic inbox only), or blank (all)
-      - days: 1 / 7 / 30 / 'all' (default: all)
+      - days: 1 / 7 / 30 / 'all' (default: 30)
     """
     gate = _enforce_module(request.user)
     if gate is not None:
@@ -311,21 +305,20 @@ def list_pending_replies(request):
         for r in reply_qs.order_by('-replied_at')[:150]:
             items.append((r.replied_at, _serialize_reply(r)))
 
-    # Generic inbox emails — only show messages whose sender is a Lead in this
-    # company's campaigns. Excluded entirely when the user picked a specific campaign.
+    # Generic inbox emails — every mail that landed in any of this company's
+    # accounts in the window. Excluded entirely when the user picked a specific
+    # campaign (that filter is inherently lead-scoped).
     specific_campaign_selected = bool(campaign_param) and campaign_param != 'none'
     if not specific_campaign_selected:
-        lead_emails = _known_lead_emails(user_ids)
-        if lead_emails:
-            inbox_qs = (
-                InboxEmail.objects.filter(owner_id__in=user_ids, from_email__in=lead_emails)
-                .exclude(id__in=drafted_inbox_ids)
-                .select_related('email_account')
-            )
-            if days_cutoff is not None:
-                inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
-            for m in inbox_qs.order_by('-received_at')[:150]:
-                items.append((m.received_at, _serialize_inbox_email(m)))
+        inbox_qs = (
+            InboxEmail.objects.filter(owner_id__in=user_ids)
+            .exclude(id__in=drafted_inbox_ids)
+            .select_related('email_account')
+        )
+        if days_cutoff is not None:
+            inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
+        for m in inbox_qs.order_by('-received_at')[:300]:
+            items.append((m.received_at, _serialize_inbox_email(m)))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
     payload = [entry for _, entry in items[:200]]

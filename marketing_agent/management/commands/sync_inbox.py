@@ -20,7 +20,7 @@ from email.utils import parsedate_to_datetime
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import IntegrityError
-from marketing_agent.models import EmailAccount, EmailSendHistory, CampaignContact, Reply, Campaign, Lead
+from marketing_agent.models import EmailAccount, EmailSendHistory, CampaignContact, Reply, Campaign
 from marketing_agent.views import mark_contact_replied
 from reply_draft_agent.models import InboxEmail
 import logging
@@ -85,16 +85,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('[WARNING] Please enable IMAP sync in Email Accounts settings.'))
             return
         
-        # Known lead emails across ALL campaigns (not just active ones) — used to
-        # decide which non-campaign-reply messages are worth storing as generic
-        # InboxEmail rows. Senders outside this set are ignored entirely so the
-        # Reply Draft UI only surfaces mail from leads the company is working with.
-        campaign_leads = Lead.objects.filter(campaigns__isnull=False).distinct()
-        known_lead_emails = set(lead.email.lower() for lead in campaign_leads if lead.email)
-
-        self.stdout.write(f'Found {len(known_lead_emails)} known lead email(s) across all campaigns')
-        self.stdout.write('   Non-lead mail will be skipped; only lead mail is stored as InboxEmail.')
-
         total_replies_found = 0
         total_replies_processed = 0
         total_inbox_stored = 0
@@ -111,7 +101,7 @@ class Command(BaseCommand):
 
             try:
                 replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
-                    account, dry_run, known_lead_emails, since_days=since_days,
+                    account, dry_run, since_days=since_days,
                 )
                 total_replies_found += replies_found
                 total_replies_processed += replies_processed
@@ -127,23 +117,20 @@ class Command(BaseCommand):
         self.stdout.write(f'Total generic inbox emails stored: {total_inbox_stored}')
         self.stdout.write(f'{"="*60}\n')
 
-    def sync_account_inbox(self, account, dry_run=False, known_lead_emails=None, since_days=None):
+    def sync_account_inbox(self, account, dry_run=False, since_days=None):
         """
         Sync inbox for a single email account.
 
         Campaign replies (matched by In-Reply-To / References / Subject) go into
-        the Reply table via the existing path. Mail from a known lead that is
-        not a campaign reply is stored as an InboxEmail row so the Reply Draft
-        Agent can surface it in the UI.
+        the Reply table via the existing path. Every other incoming message is
+        stored as an InboxEmail row so the Reply Draft Agent can surface the
+        full mailbox for the last N days.
         """
         if since_days is None or since_days < 1:
             since_days = self.DEFAULT_SINCE_DAYS
         replies_found = 0
         replies_processed = 0
         inbox_stored = 0
-
-        if known_lead_emails is None:
-            known_lead_emails = set()
 
         try:
             # Connect to IMAP server
@@ -229,12 +216,9 @@ class Command(BaseCommand):
                             self.stdout.write(f'     [SKIP] Skipped (dry run)')
                         continue
 
-                    # Step 2: generic inbox mail — only store if the sender is a
-                    # lead on any of this company's campaigns. Skip everything else.
+                    # Step 2: generic inbox mail — store every message so the
+                    # Reply Draft UI surfaces the full mailbox (last N days).
                     if dry_run:
-                        continue
-
-                    if sender_email.lower() not in known_lead_emails:
                         continue
 
                     if self.store_inbox_email(msg, account, sender_email):
