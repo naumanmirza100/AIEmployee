@@ -72,6 +72,39 @@ class Ticket(models.Model):
                                 null=True, blank=True, related_name='tickets',
                                 help_text='First-class customer record for this ticket.')
 
+    # Hand-off state (Phase 3 §3.2).
+    # 'none' = bot-handled (default). 'pending' = AI couldn't answer and a human needs to pick
+    # it up; 'accepted' = a human agent claimed it; 'resolved' = hand-off finished.
+    HANDOFF_STATUS_CHOICES = [
+        ('none', 'None'),
+        ('pending', 'Pending agent'),
+        ('accepted', 'Accepted by agent'),
+        ('resolved', 'Resolved by agent'),
+    ]
+    HANDOFF_REASON_CHOICES = [
+        ('', 'N/A'),
+        ('low_confidence', 'Low QA confidence'),
+        ('customer_requested', 'Customer asked for a human'),
+        ('manual_escalation', 'Agent escalated manually'),
+        ('sla_risk', 'SLA at risk'),
+    ]
+    handoff_status = models.CharField(max_length=12, choices=HANDOFF_STATUS_CHOICES,
+                                      default='none', db_index=True,
+                                      help_text='Hand-off lifecycle state.')
+    handoff_reason = models.CharField(max_length=24, choices=HANDOFF_REASON_CHOICES,
+                                      default='', blank=True,
+                                      help_text='Why the hand-off was triggered.')
+    handoff_context = models.JSONField(default=dict, blank=True,
+                                       help_text='Snapshot at hand-off: question, AI answer, confidence, etc.')
+    handoff_requested_at = models.DateTimeField(null=True, blank=True,
+                                                help_text='When the ticket first entered pending hand-off.')
+    handoff_accepted_at = models.DateTimeField(null=True, blank=True,
+                                               help_text='When an agent claimed the hand-off.')
+    handoff_accepted_by = models.ForeignKey(User, on_delete=models.SET_NULL,
+                                            null=True, blank=True,
+                                            related_name='frontline_handoffs_accepted',
+                                            help_text='Agent who accepted the hand-off.')
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-created_at']
@@ -81,6 +114,7 @@ class Ticket(models.Model):
             models.Index(fields=['sla_due_at']),
             models.Index(fields=['snoozed_until']),
             models.Index(fields=['contact', 'created_at']),
+            models.Index(fields=['handoff_status', 'handoff_requested_at']),
         ]
 
     def __str__(self):

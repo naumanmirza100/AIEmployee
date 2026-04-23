@@ -703,6 +703,74 @@ export const listContactTickets = async (contactId) => {
   }
 };
 
+// =========================================================================
+// Ticket thread messages + outbound reply (Phase 3 Batch 1)
+// =========================================================================
+
+/** List all messages (inbound + outbound, oldest first) on a ticket thread. */
+export const listTicketMessages = async (ticketId) => {
+  try {
+    const response = await companyApi.get(`/frontline/tickets/${ticketId}/messages`);
+    return response;
+  } catch (error) {
+    console.error('List ticket messages error:', error);
+    throw error;
+  }
+};
+
+/** Send an outbound email reply on a ticket.
+ *  Body: { body_text, body_html?, to?, cc? }  (to defaults to the last inbound sender) */
+export const replyToTicket = async (ticketId, payload) => {
+  try {
+    const response = await companyApi.post(`/frontline/tickets/${ticketId}/reply`, payload);
+    return response;
+  } catch (error) {
+    console.error('Reply to ticket error:', error);
+    throw error;
+  }
+};
+
+// =========================================================================
+// Hand-off queue + reply-draft assist (Phase 3 Batch 4)
+// =========================================================================
+
+/** List hand-off queue. Params: { status: 'pending'|'accepted'|'all', mine?: boolean } */
+export const listHandoffQueue = async (params = {}) => {
+  try {
+    const q = new URLSearchParams();
+    if (params.status) q.set('status', params.status);
+    if (params.mine) q.set('mine', '1');
+    const qs = q.toString();
+    const response = await companyApi.get(`/frontline/tickets/handoffs${qs ? `?${qs}` : ''}`);
+    return response;
+  } catch (error) {
+    console.error('List handoff queue error:', error);
+    throw error;
+  }
+};
+
+/** Claim a pending hand-off — assigns the ticket to the caller. */
+export const acceptHandoff = async (ticketId) => {
+  try {
+    const response = await companyApi.post(`/frontline/tickets/${ticketId}/accept-handoff`);
+    return response;
+  } catch (error) {
+    console.error('Accept handoff error:', error);
+    throw error;
+  }
+};
+
+/** Ask the LLM to draft a reply for a ticket, grounded in the thread + KB. */
+export const suggestTicketReply = async (ticketId) => {
+  try {
+    const response = await companyApi.post(`/frontline/tickets/${ticketId}/suggest-reply`);
+    return response;
+  } catch (error) {
+    console.error('Suggest ticket reply error:', error);
+    throw error;
+  }
+};
+
 /** Customer-360 panel for a ticket: contact + stats + recent tickets. */
 export const getTicketContext = async (ticketId) => {
   try {
@@ -788,5 +856,10 @@ export default {
   updateContact,
   listContactTickets,
   getTicketContext,
+  listTicketMessages,
+  replyToTicket,
+  listHandoffQueue,
+  acceptHandoff,
+  suggestTicketReply,
 };
 

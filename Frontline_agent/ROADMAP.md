@@ -188,13 +188,13 @@ Things that are actively risky or broken in what's shipped today. These should b
 - [ ] Unified inbox UI; replies route back on original channel
 
 ### 3.2 Agent Hand-off & Human Co-pilot
-- [ ] Seamless hand-off with full context + draft suggestion when confidence is low or customer asks for human
-- [ ] Live AI co-pilot for human agents (drafts replies, surfaces KB, flags sentiment, suggests macros)
+- [x] Seamless hand-off with full context + draft suggestion when confidence is low or customer asks for human *(Phase 3 Batch 4: `Ticket.handoff_status`/`handoff_reason`/`handoff_context`/`handoff_requested_at`/`handoff_accepted_at`/`handoff_accepted_by` (migration 0026). `Frontline_agent/handoff.py` with `detect_handoff_request` (keyword matcher for "talk to human/agent/rep" phrases) + `trigger_handoff`/`accept_handoff`/`resolve_handoff` state machine. Auto-wired into `public_qa` (widget — customer asks → pending ticket created), `knowledge_qa` (low-confidence → KB-gap ticket flagged), and `process_inbound_email` (incoming email body scanned). Endpoints: `GET /frontline/tickets/handoffs/?status=pending|accepted|all&mine=1`, `POST /frontline/tickets/<id>/accept-handoff/`)*
+- [~] Live AI co-pilot for human agents (drafts replies, surfaces KB, flags sentiment, suggests macros) *(Phase 3 Batch 4: reply-draft assist live — `POST /frontline/tickets/<id>/suggest-reply/` pulls the last 10 thread messages + a KB grounding snippet from `FrontlineAgent.answer_question`, generates a 120-word draft via the LLM. Sentiment flagging + macro suggestion still pending)*
 - [ ] Macros / canned responses with placeholders + LLM suggestions
 - [ ] Shared inbox UI (assigned-to-me, unassigned, team queues)
 
 ### 3.3 Customer 360 / CRM Integrations
-- [ ] HubSpot two-way sync
+- [~] HubSpot two-way sync *(Phase 3 Batch 3: **one-way push** live — per-tenant Private App access token stored on `Company.hubspot_config`; `Frontline_agent/crm/hubspot.py` client (search-by-email + upsert); Celery task `sync_contact_to_hubspot` with exponential retry + auto-disable on 401/403; `post_save` signal on Contact mirrors changes automatically; `external_id`/`external_source='hubspot'`/`external_synced_at` populated on success; REST endpoints `GET /frontline/crm/hubspot/status/`, `PATCH /frontline/crm/hubspot/config/`, `POST /frontline/crm/hubspot/test/`, `POST /frontline/crm/hubspot/sync-all/`. Pull (HubSpot → us) + deal/company sync still pending)*
 - [ ] Salesforce two-way sync
 - [ ] Pipedrive, Zoho
 - [ ] Shopify integration (order history, issue refund from ticket)

@@ -531,6 +531,19 @@ def process_inbound_email(self, payload: dict):
                 # Keep denormalized counters fresh after the insert.
                 link_ticket_to_contact(ticket, contact)
             logger.info("Inbound email → new ticket %s for company %s", ticket.id, company.id)
+
+        # Hand-off detection: any inbound message that asks for a human escalates
+        # the ticket. Cheap check, runs for both new threads and replies.
+        try:
+            from Frontline_agent.handoff import detect_handoff_request, trigger_handoff
+            if detect_handoff_request(body_text or body_html_raw or subject):
+                trigger_handoff(
+                    ticket, reason='customer_requested',
+                    context={'channel': 'email', 'from_email': from_addr,
+                             'customer_text': (body_text or '')[:2000]},
+                )
+        except Exception:
+            logger.exception("inbound-email handoff detection failed")
         else:
             # Reply on an existing thread — re-open + resume SLA if needed.
             changed_fields = []
@@ -627,3 +640,84 @@ def _ensure_system_user():
         defaults={'email': 'noreply-inbound@frontline.local', 'is_active': True},
     )
     return user
+
+
+# --------------------------------------------------------------------------
+# HubSpot contact sync (Phase 3 §3.3)
+# --------------------------------------------------------------------------
+
+@shared_task(name='Frontline_agent.tasks.sync_contact_to_hubspot',
+             bind=True, max_retries=4, default_retry_delay=60)
+def sync_contact_to_hubspot(self, contact_id: int):
+    """Push one Contact row into the tenant's HubSpot portal.
+
+    Idempotent — `HubSpotClient.upsert_contact` searches by email first so
+    re-runs don't duplicate the record. Non-retriable errors (bad token /
+    bad payload) flip `hubspot_config.enabled = False` to stop the bleed,
+    and record the message in `last_error` so the UI can surface it.
+    """
+    from Frontline_agent.models import Contact
+    from Frontline_agent.crm.hubspot import HubSpotClient, HubSpotError
+    from django.utils import timezone as _tz
+
+    contact = Contact.objects.select_related('company').filter(pk=contact_id).first()
+    if not contact:
+        return {'status': 'missing', 'contact_id': contact_id}
+    company = contact.company
+    if not company:
+        return {'status': 'no_company', 'contact_id': contact_id}
+
+    cfg = company.hubspot_config or {}
+    if not cfg.get('enabled') or not cfg.get('access_token'):
+        return {'status': 'disabled', 'contact_id': contact_id}
+
+    try:
+        client = HubSpotClient(access_token=cfg['access_token'])
+        hs_id = client.upsert_contact(
+            email=contact.email,
+            name=contact.name or '',
+            phone=contact.phone or '',
+        )
+        # Persist the mirror id so we can do updates instead of searches next time.
+        contact.external_source = 'hubspot'
+        contact.external_id = (hs_id or '')[:128]
+        contact.external_synced_at = _tz.now()
+        contact.save(update_fields=['external_source', 'external_id',
+                                    'external_synced_at', 'updated_at'])
+        # Clear any sticky error on success.
+        if cfg.get('last_error'):
+            cfg['last_error'] = ''
+            company.hubspot_config = cfg
+            company.save(update_fields=['hubspot_config', 'updated_at'])
+        return {'status': 'ok', 'contact_id': contact.id, 'hubspot_id': hs_id}
+    except HubSpotError as exc:
+        msg = str(exc)[:400]
+        if not exc.retriable:
+            # Shut sync off for this tenant so we don't keep calling with a bad token.
+            cfg['enabled'] = False
+            cfg['last_error'] = msg
+            company.hubspot_config = cfg
+            company.save(update_fields=['hubspot_config', 'updated_at'])
+            logger.warning("HubSpot sync disabled for company %s: %s", company.id, msg)
+            return {'status': 'disabled_after_error', 'error': msg}
+        # Retriable — back off with Celery's retry machinery.
+        try:
+            raise self.retry(exc=exc, countdown=min(60 * (2 ** self.request.retries), 1800))
+        except self.MaxRetriesExceededError:
+            cfg['last_error'] = msg
+            company.hubspot_config = cfg
+            company.save(update_fields=['hubspot_config', 'updated_at'])
+            return {'status': 'failed', 'error': msg}
+
+
+@shared_task(name='Frontline_agent.tasks.hubspot_sync_all_contacts')
+def hubspot_sync_all_contacts(company_id: int, batch_size: int = 200):
+    """Backfill task — enqueue a per-contact sync for every Contact in a company.
+    Invoked by `POST /frontline/crm/hubspot/sync-all/`. Each row is its own
+    Celery job so failures on one don't block the rest."""
+    from Frontline_agent.models import Contact
+    ids = list(Contact.objects.filter(company_id=company_id).values_list('id', flat=True))
+    for i in range(0, len(ids), batch_size):
+        for cid in ids[i:i + batch_size]:
+            sync_contact_to_hubspot.delay(cid)
+    return {'enqueued': len(ids), 'company_id': company_id}
