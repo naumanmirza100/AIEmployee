@@ -249,6 +249,10 @@ class OperationsGeneratedDocument(models.Model):
     )
     version = models.PositiveIntegerField(default=1)
     edit_history = models.JSONField(default=list, blank=True)
+    tokens_used = models.JSONField(
+        default=dict, blank=True,
+        help_text='Groq usage for the latest generation: prompt/completion/total tokens.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

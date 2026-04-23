@@ -35,9 +35,11 @@ import React from 'react';
 import ApplyForProjectsPage from '@/pages/ApplyForProjectsPage';
 import LoginPage from '@/pages/LoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import SuperAdminApiKeysPage from '@/pages/SuperAdminApiKeysPage';
 import CompanyRegisterPage from '@/pages/CompanyRegisterPage';
 import CompanyLoginPage from '@/pages/CompanyLoginPage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
+import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
 import MarketingAgentPage from '@/pages/MarketingAgentPage';
@@ -50,6 +52,7 @@ import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
+import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
@@ -75,15 +78,23 @@ import { useTranslation } from 'react-i18next';
           <Routes location={location}>
             {/* Admin routes without header/footer */}
             <Route path="/login" element={<LoginPage />} />
-            <Route 
-              path="/admin/dashboard" 
+            <Route
+              path="/admin/dashboard"
               element={
                 <ProtectedRoute requireAdmin={true}>
                   <AdminDashboardPage />
                 </ProtectedRoute>
-              } 
+              }
             />
-            
+            <Route
+              path="/admin/api-keys"
+              element={
+                <ProtectedRoute requireAdmin={true}>
+                  <SuperAdminApiKeysPage />
+                </ProtectedRoute>
+              }
+            />
+
             {/* User Dashboard (for company-created users) */}
             <Route 
               path="/user/dashboard" 
@@ -98,6 +109,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/register" element={<CompanyRegisterPage />} />
             <Route path="/company/login" element={<CompanyLoginPage />} />
             <Route path="/company/dashboard" element={<CompanyDashboardPage />} />
+            <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
             
             {/* Project Manager routes without header/footer */}
             <Route 
@@ -151,6 +163,10 @@ import { useTranslation } from 'react-i18next';
             <Route path="/operations/knowledge-qa" element={<OperationsAgentPage />} />
             <Route path="/operations/authoring" element={<OperationsAgentPage />} />
             <Route path="/operations/notifications" element={<OperationsAgentPage />} />
+
+            {/* Reply Draft Agent routes without header/footer */}
+            <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
+            <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

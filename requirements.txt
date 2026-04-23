@@ -22,6 +22,8 @@ pdfplumber==0.10.3
 python-docx==0.8.11
 python-pptx==0.6.21
 reportlab==4.0.0
+xhtml2pdf==0.2.17
+Pillow>=10.0.0 --prefer-binary
 markdown==3.5.0
 pandas==2.1.1 --prefer-binary
 openpyxl==3.1.2

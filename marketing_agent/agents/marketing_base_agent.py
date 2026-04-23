@@ -95,6 +95,33 @@ class MarketingBaseAgent:
         self.agent_name = self.__class__.__name__
         self.last_token_usage = None
         self.last_llm_used = False
+
+    def _resolve_company_client(self, wanted_provider='groq'):
+        """Opt-in per-company key + quota routing. Subclass instances can set
+        `self.company_id` and `self.agent_key_name` (e.g. 'marketing_agent') to
+        enable the BYOK / platform-key flow. Returns (client, ctx) or (None,
+        None) when no routing applies. Hard-blocks (QuotaExhausted,
+        NoKeyAvailable) propagate."""
+        company_id = getattr(self, 'company_id', None)
+        agent_key_name = getattr(self, 'agent_key_name', None)
+        if not company_id or not agent_key_name:
+            return None, None
+        from core.models import Company
+        from core.api_key_service import resolve_for_call
+        company = Company.objects.get(pk=company_id)
+        ctx = resolve_for_call(company, agent_key_name)
+        try:
+            if ctx.provider == 'groq':
+                from groq import Groq
+                return Groq(api_key=ctx.api_key), ctx
+            if ctx.provider == 'openai' and wanted_provider == 'openai':
+                from openai import OpenAI
+                return OpenAI(api_key=ctx.api_key), ctx
+            logger.warning("marketing agent got %s key but wanted %s — using env fallback", ctx.provider, wanted_provider)
+            return None, None
+        except Exception as e:
+            logger.warning("Failed to build resolved client: %s", e)
+            return None, None
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
@@ -266,7 +293,9 @@ class MarketingBaseAgent:
         Returns:
             str: LLM response text
         """
-        if not self.groq_client:
+        resolved_client, key_ctx = self._resolve_company_client(wanted_provider='groq')
+        call_client = resolved_client or self.groq_client
+        if not call_client:
             raise ValueError(
                 "GROQ_API_KEY or GROQ_REC_API_KEY not found in environment variables. "
                 "Set one of them in your .env file to use LLM features."
@@ -280,7 +309,7 @@ class MarketingBaseAgent:
         max_retries = 2  # 3 attempts total
         for attempt in range(max_retries + 1):
             try:
-                response = self.groq_client.chat.completions.create(
+                response = call_client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=temperature,
@@ -320,6 +349,12 @@ class MarketingBaseAgent:
                     'total_tokens': total_tokens,
                     'estimated': estimated,
                 }
+                if key_ctx and total_tokens:
+                    try:
+                        from core.api_key_service import record_usage
+                        record_usage(key_ctx, total_tokens)
+                    except Exception as e:
+                        logger.warning("marketing quota decrement failed: %s", e)
                 return content
             except Exception as e:
                 last_error = e

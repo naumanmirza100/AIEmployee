@@ -33,6 +33,9 @@ class FrontlineAgent(BaseAgent):
         """Initialize Frontline Agent"""
         super().__init__()
         self.company_id = company_id
+        # Opt into the company key/quota resolver — BaseAgent._call_llm will
+        # route through BYOK → quota gate → managed → platform key.
+        self.agent_key_name = 'frontline_agent'
         self.knowledge_service = KnowledgeService(company_id=company_id)
         self.ticket_service = TicketAutomationService()
         self.system_prompt = FRONTLINE_SYSTEM_PROMPT

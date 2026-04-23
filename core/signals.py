@@ -6,7 +6,7 @@ Handles automatic email sending and notifications on model changes.
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User
-from .models import Task, TaskActivityLog, Notification
+from .models import Task, TaskActivityLog, Notification, CompanyModulePurchase
 from .email_service import EmailService
 
 
@@ -189,6 +189,29 @@ def task_post_save_handler(sender, instance, created, **kwargs):
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Error creating activity log: {str(e)}")
+
+
+@receiver(post_save, sender=CompanyModulePurchase)
+def provision_agent_quota_on_purchase(sender, instance, created, **kwargs):
+    """On agent purchase, auto-create AgentTokenQuota with 1M free tokens.
+
+    Snapshots `included_tokens` from AdminPricingConfig.free_tokens_on_purchase
+    so later pricing changes don't retroactively affect this customer.
+    Idempotent: re-purchase/renewal leaves existing used_tokens untouched.
+    """
+    if kwargs.get('raw'):
+        return
+    if not created or instance.status != 'active':
+        return
+    try:
+        from core.api_key_service import provision_quota_on_purchase
+        provision_quota_on_purchase(instance.company, instance.module_name)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(
+            "Failed to provision quota for %s/%s: %s",
+            instance.company_id, instance.module_name, e,
+        )
 
 
 # Note: We need to connect these signals in apps.py to ensure they're loaded

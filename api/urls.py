@@ -32,8 +32,11 @@ from api.views import company_projects_tasks
 from api.views import user_project_manager
 from api.views import recruitment_agent
 from api.views import marketing_agent
+from api.views import reply_draft_agent as reply_draft_api
 from api.views import frontline_agent
 from api.views import module_purchase
+from api.views import company_api_keys
+from api.views import admin_api_keys
 from api.views import operations_agent
 from api.views.health import health_check
 
@@ -475,6 +478,28 @@ urlpatterns = [
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/rename/?$', operations_agent.rename_qa_chat, name='operations_qa_rename_chat'),  # PATCH
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/delete/?$', operations_agent.delete_qa_chat, name='operations_qa_delete_chat'),  # DELETE
 
+    # Operations Document Authoring endpoints
+    re_path(r'^operations/authoring/generate/?$', operations_agent.generate_document, name='operations_authoring_generate'),  # POST
+    re_path(r'^operations/authoring/documents/?$', operations_agent.list_generated_documents, name='operations_authoring_list'),  # GET
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/?$', operations_agent.get_generated_document, name='operations_authoring_get'),  # GET
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/update/?$', operations_agent.update_generated_document, name='operations_authoring_update'),  # PATCH
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/delete/?$', operations_agent.delete_generated_document, name='operations_authoring_delete'),  # DELETE
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/regenerate/?$', operations_agent.regenerate_document, name='operations_authoring_regenerate'),  # POST
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/export/pdf/?$', operations_agent.export_generated_document_pdf, name='operations_authoring_export_pdf'),  # GET
+    re_path(r'^operations/authoring/generate/stream/?$', operations_agent.stream_generate_document, name='operations_authoring_generate_stream'),  # POST
+
+    # Operations Analytics
+    re_path(r'^operations/analytics/?$', operations_agent.operations_analytics, name='operations_analytics'),  # GET
+    # Reply Draft Agent endpoints
+    re_path(r'^reply-draft/dashboard/?$', reply_draft_api.dashboard, name='reply_draft_dashboard'),
+    re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
+    re_path(r'^reply-draft/drafts/?$', reply_draft_api.list_drafts, name='reply_draft_list_drafts'),
+    re_path(r'^reply-draft/drafts/generate/?$', reply_draft_api.generate_draft, name='reply_draft_generate'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/regenerate/?$', reply_draft_api.regenerate_draft, name='reply_draft_regenerate'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/approve/?$', reply_draft_api.approve_draft, name='reply_draft_approve'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/reject/?$', reply_draft_api.reject_draft, name='reply_draft_reject'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/send/?$', reply_draft_api.send_draft, name='reply_draft_send'),
+
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
@@ -483,4 +508,31 @@ urlpatterns = [
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
+
+    # Company API Key management (user-side: BYOK + key requests)
+    re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET
+    re_path(r'^company/agent-keys/byok/?$', company_api_keys.upsert_byok_key, name='upsert_byok_key'),  # POST
+    re_path(r'^company/agent-keys/byok/(?P<agent_name>[a-z_]+)/?$', company_api_keys.revoke_byok_key, name='revoke_byok_key'),  # DELETE
+    re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
+    re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
+
+    # Super Admin — API keys, pricing, quotas, requests
+    re_path(r'^admin/api-keys/overview/?$', admin_api_keys.admin_overview, name='admin_overview'),  # GET
+    re_path(r'^admin/api-keys/?$', admin_api_keys.list_all_keys, name='admin_list_keys'),  # GET
+    re_path(r'^admin/api-keys/assign/?$', admin_api_keys.assign_managed_key, name='admin_assign_key'),  # POST
+    re_path(r'^admin/api-keys/(?P<key_id>\d+)/revoke/?$', admin_api_keys.revoke_key, name='admin_revoke_key'),  # POST
+    re_path(r'^admin/pricing-config/?$', admin_api_keys.list_pricing, name='admin_list_pricing'),  # GET
+    re_path(r'^admin/pricing-config/(?P<agent_name>[a-z_]+)/?$', admin_api_keys.update_pricing, name='admin_update_pricing'),  # PUT
+    re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
+    re_path(r'^admin/token-quotas/(?P<quota_id>\d+)/?$', admin_api_keys.adjust_quota, name='admin_adjust_quota'),  # PATCH
+    re_path(r'^admin/key-requests/?$', admin_api_keys.list_requests, name='admin_list_requests'),  # GET
+    re_path(r'^admin/key-requests/(?P<request_id>\d+)/reject/?$', admin_api_keys.reject_request, name='admin_reject_request'),  # POST
+
+    # Platform keys (shared default keys, one per provider)
+    re_path(r'^admin/platform-keys/?$', admin_api_keys.list_platform_keys, name='admin_list_platform_keys'),  # GET
+    re_path(r'^admin/platform-keys/upsert/?$', admin_api_keys.upsert_platform_key, name='admin_upsert_platform_key'),  # POST
+    re_path(r'^admin/platform-keys/(?P<provider>[a-z]+)/revoke/?$', admin_api_keys.revoke_platform_key, name='admin_revoke_platform_key'),  # POST
+
+    # Company picker for admin forms
+    re_path(r'^admin/companies-list/?$', admin_api_keys.list_companies_simple, name='admin_list_companies'),  # GET
 ]
