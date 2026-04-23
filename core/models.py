@@ -530,6 +530,13 @@ class Company(models.Model):
     inbound_email_config = models.JSONField(default=dict, blank=True,
                                             help_text='Per-tenant inbound/outbound email config: {"reply_to": "...", "signature_html": "..."}.')
 
+    # HubSpot CRM integration (Phase 3 §3.3).
+    # Shape: {"enabled": true, "access_token": "<private-app-token>", "portal_id": "<optional>", "last_error": ""}
+    # Access token is stored in the clear — tenant-owned Private App token that the tenant can revoke
+    # any time from HubSpot settings; acceptable for MVP. Encryption-at-rest (KMS) is a follow-up.
+    hubspot_config = models.JSONField(default=dict, blank=True,
+                                      help_text='HubSpot private-app config: {enabled, access_token, portal_id, last_error}.')
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']

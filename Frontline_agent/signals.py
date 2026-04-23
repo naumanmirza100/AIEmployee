@@ -1,12 +1,13 @@
 """
 Signals for Frontline Agent.
 Runs workflow triggers on ticket update (post_save) so any ticket update path fires triggers.
+Also mirrors Contact rows to HubSpot when the tenant has the integration enabled.
 """
 import logging
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from .models import Ticket
+from .models import Ticket, Contact
 
 logger = logging.getLogger(__name__)
 
@@ -36,3 +37,31 @@ def run_workflow_triggers_on_ticket_update(sender, instance, created, **kwargs):
         )
     except Exception as e:
         logger.exception("run_workflow_triggers_on_ticket_update failed: %s", e)
+
+
+@receiver(post_save, sender=Contact)
+def mirror_contact_to_hubspot(sender, instance, created, **kwargs):
+    """Fan-out: push Contact changes to HubSpot when the tenant opted in.
+
+    Dispatches a Celery job — keeps the request path fast and isolates CRM
+    outages from our own writes. We deliberately fire on both create and
+    update so downstream edits (name, phone, tags) flow through.
+    """
+    try:
+        company = getattr(instance, 'company', None)
+        if not company:
+            return
+        cfg = getattr(company, 'hubspot_config', None) or {}
+        if not cfg.get('enabled') or not cfg.get('access_token'):
+            return
+        # Avoid recursion: the sync task itself saves `external_id`/`external_synced_at`
+        # on the Contact, which fires this signal again. Detect that case by
+        # checking `update_fields` — the sync only updates those three fields plus updated_at.
+        update_fields = kwargs.get('update_fields') or set()
+        sync_cols = {'external_source', 'external_id', 'external_synced_at', 'updated_at'}
+        if update_fields and set(update_fields).issubset(sync_cols):
+            return
+        from Frontline_agent.tasks import sync_contact_to_hubspot
+        sync_contact_to_hubspot.delay(instance.id)
+    except Exception as e:
+        logger.exception("mirror_contact_to_hubspot dispatch failed: %s", e)

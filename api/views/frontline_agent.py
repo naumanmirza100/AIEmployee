@@ -193,6 +193,16 @@ def _get_or_create_user_for_company_user(company_user):
         return user
 
 
+def _ensure_handoff_system_user():
+    """Single shared Django User for tickets created by unauthenticated widget
+    hand-off requests. Idempotent."""
+    user, _ = User.objects.get_or_create(
+        username='frontline_handoff_bot',
+        defaults={'email': 'noreply-handoff@frontline.local', 'is_active': True},
+    )
+    return user
+
+
 def _sla_due_at_for_priority(priority):
     """Return SLA due datetime for a ticket priority (urgent=4h, high=8h, medium=24h, low=48h)."""
     from datetime import timedelta
@@ -1042,6 +1052,42 @@ def public_qa(request):
             max_results=max_results,
             enable_rewrite=enable_rewrite,
         )
+
+        # Hand-off: customer explicitly asked for a human → create a pending-handoff
+        # ticket so an agent picks it up. Requires a customer identifier — fall back
+        # to the widget session visitor_email when the embed widget supplies one.
+        try:
+            from Frontline_agent.handoff import detect_handoff_request, trigger_handoff
+            from Frontline_agent.contacts import upsert_contact_from_email
+            if detect_handoff_request(question):
+                visitor_email = (data.get('visitor_email') or data.get('email') or '').strip()
+                visitor_name = (data.get('visitor_name') or data.get('name') or '').strip()
+                contact = (upsert_contact_from_email(company, visitor_email, visitor_name)
+                           if visitor_email else None)
+                handoff_user = _ensure_handoff_system_user()
+                ticket = Ticket.objects.create(
+                    title=f"Hand-off: {question[:60]}{'...' if len(question) > 60 else ''}",
+                    description=question,
+                    status='new', priority='medium', category='other',
+                    company=company, created_by=handoff_user, assigned_to=handoff_user,
+                    contact=contact,
+                    sla_due_at=_sla_due_at_for_priority('medium'),
+                )
+                trigger_handoff(
+                    ticket, reason='customer_requested',
+                    context={
+                        'question': question,
+                        'ai_answer': (result.get('answer') or '')[:4000],
+                        'channel': 'widget',
+                        'from_email': visitor_email,
+                    },
+                )
+                result = dict(result)
+                result['handoff_requested'] = True
+                result['handoff_ticket_id'] = ticket.id
+        except Exception:
+            logger.exception("public_qa handoff detection failed")
+
         return Response({
             'status': 'success',
             'data': result
@@ -1236,6 +1282,22 @@ def knowledge_qa(request):
                 ticket_task_created = True
                 ticket_task_id = ticket.id
                 logger.info(f"Created KB-gap ticket task {ticket.id} for company_user {company_user.id}, question: {question[:50]}")
+                # Mark this ticket as handed off so it shows up in the handoff queue.
+                try:
+                    from Frontline_agent.handoff import trigger_handoff
+                    trigger_handoff(
+                        ticket, reason='low_confidence',
+                        context={
+                            'question': question,
+                            'ai_answer': (result.get('answer') or '')[:4000],
+                            'confidence': result.get('confidence'),
+                            'best_score': result.get('best_score'),
+                            'threshold': result.get('threshold'),
+                            'channel': 'dashboard',
+                        },
+                    )
+                except Exception:
+                    logger.exception("KB-gap trigger_handoff failed")
                 _run_notification_triggers(company.id, 'ticket_created', ticket)
                 _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
             except Exception as e:
@@ -4612,4 +4674,365 @@ def get_ticket_context(request, ticket_id):
         logger.exception("get_ticket_context failed")
         return Response({'status': 'error', 'message': 'Failed to load context'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# HubSpot CRM integration (Phase 3 Batch 3, §3.3)
+#
+# Auth mode: per-tenant HubSpot Private App access token stored in
+# Company.hubspot_config. All endpoints are auth-gated by
+# CompanyUserTokenAuthentication + IsCompanyUserOnly — token never leaves
+# the tenant's Company row.
+# ============================================================================
+
+
+def _hubspot_status_payload(company) -> dict:
+    """Redact the token so the UI can render the status panel without exposing it."""
+    cfg = company.hubspot_config or {}
+    token = cfg.get('access_token') or ''
+    return {
+        'enabled': bool(cfg.get('enabled')),
+        'has_token': bool(token),
+        'token_preview': (token[:6] + '…' + token[-4:]) if len(token) > 12 else '',
+        'portal_id': cfg.get('portal_id') or None,
+        'last_error': cfg.get('last_error') or '',
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def hubspot_status(request):
+    """Return whether HubSpot sync is enabled for this tenant + redacted token."""
+    return Response({'status': 'success', 'data': _hubspot_status_payload(request.user.company)})
+
+
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def hubspot_update_config(request):
+    """Update the tenant's HubSpot config.
+
+    Body: {"enabled": bool, "access_token"?: string, "portal_id"?: string}
+
+    Passing `access_token: null` clears the stored token. Passing `enabled: true`
+    without a token (stored or in this request) is rejected.
+    """
+    company = request.user.company
+    data = request.data or {}
+    cfg = dict(company.hubspot_config or {})
+
+    if 'access_token' in data:
+        raw = data.get('access_token')
+        if raw is None:
+            cfg.pop('access_token', None)
+        else:
+            token = str(raw).strip()
+            if token and not token.startswith(('pat-', 'Bearer ')):
+                # Loose sanity check: HubSpot Private App tokens start with 'pat-'
+                return Response(
+                    {'status': 'error',
+                     'message': 'Token does not look like a HubSpot Private App token (pat-…).'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cfg['access_token'] = token
+    if 'portal_id' in data:
+        cfg['portal_id'] = str(data.get('portal_id') or '').strip()[:32] or None
+
+    if 'enabled' in data:
+        enabled = bool(data.get('enabled'))
+        if enabled and not cfg.get('access_token'):
+            return Response(
+                {'status': 'error', 'message': 'Cannot enable sync without an access token.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        cfg['enabled'] = enabled
+        # Clear sticky errors when operator re-enables after a fix.
+        if enabled and cfg.get('last_error'):
+            cfg['last_error'] = ''
+
+    company.hubspot_config = cfg
+    company.save(update_fields=['hubspot_config', 'updated_at'])
+    return Response({'status': 'success', 'data': _hubspot_status_payload(company)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def hubspot_test_connection(request):
+    """Authenticated probe against the tenant's HubSpot portal. Uses the token
+    stored on Company.hubspot_config — does not accept a token in the request
+    body so we never log it."""
+    from Frontline_agent.crm.hubspot import HubSpotClient, HubSpotError
+
+    cfg = request.user.company.hubspot_config or {}
+    token = cfg.get('access_token')
+    if not token:
+        return Response({'status': 'error', 'message': 'No access token configured.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        client = HubSpotClient(access_token=token)
+        ok = client.ping()
+    except HubSpotError as exc:
+        return Response({'status': 'error', 'message': str(exc)[:400]},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response({'status': 'success', 'data': {'ok': bool(ok)}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def hubspot_sync_all(request):
+    """Enqueue a backfill job: every Contact in the tenant is pushed to HubSpot.
+
+    Returns immediately with the count enqueued; progress is observable via
+    Contact.external_synced_at timestamps (set by the worker on success).
+    """
+    from Frontline_agent.tasks import hubspot_sync_all_contacts
+
+    company = request.user.company
+    cfg = company.hubspot_config or {}
+    if not cfg.get('enabled') or not cfg.get('access_token'):
+        return Response(
+            {'status': 'error', 'message': 'HubSpot sync is not enabled for this company.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    count = Contact.objects.filter(company=company).count()
+    try:
+        hubspot_sync_all_contacts.delay(company.id)
+    except Exception:
+        # Broker down → run inline so small tenants still get a result.
+        logger.exception("hubspot_sync_all: Celery dispatch failed, running inline")
+        hubspot_sync_all_contacts(company.id)
+    return Response({'status': 'success', 'data': {'enqueued': count}})
+
+
+# ============================================================================
+# Agent hand-off + reply draft assist (Phase 3 Batch 4, §3.2)
+#
+# `GET  /frontline/tickets/handoffs/`            — queue (pending + accepted)
+# `POST /frontline/tickets/<id>/accept-handoff/` — claim a pending hand-off
+# `POST /frontline/tickets/<id>/suggest-reply/`  — LLM drafts an outbound reply
+#   using the ticket thread + knowledge base
+# ============================================================================
+
+
+def _serialize_ticket_for_handoff(t: 'Ticket') -> dict:
+    """Compact ticket projection for the hand-off queue. Pulls the contact
+    inline so the UI doesn't need a second roundtrip."""
+    return {
+        'id': t.id,
+        'title': t.title,
+        'status': t.status,
+        'priority': t.priority,
+        'category': t.category,
+        'handoff_status': t.handoff_status,
+        'handoff_reason': t.handoff_reason,
+        'handoff_context': t.handoff_context or {},
+        'handoff_requested_at': t.handoff_requested_at.isoformat() if t.handoff_requested_at else None,
+        'handoff_accepted_at': t.handoff_accepted_at.isoformat() if t.handoff_accepted_at else None,
+        'handoff_accepted_by_id': t.handoff_accepted_by_id,
+        'assigned_to_id': t.assigned_to_id,
+        'created_at': t.created_at.isoformat() if t.created_at else None,
+        'sla_due_at': t.sla_due_at.isoformat() if t.sla_due_at else None,
+        'contact': (
+            {
+                'id': t.contact.id,
+                'email': t.contact.email,
+                'name': t.contact.name,
+            } if t.contact_id else None
+        ),
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def list_handoff_queue(request):
+    """Return pending + accepted hand-offs for the caller's company.
+
+    Query params:
+      ?status=pending|accepted|all   (default: pending)
+      ?mine=1                         (only show ones I accepted / am assigned to)
+    """
+    try:
+        company = request.user.company
+        status_q = (request.GET.get('status') or 'pending').lower()
+        qs = Ticket.objects.filter(company=company).select_related('contact')
+        if status_q == 'pending':
+            qs = qs.filter(handoff_status='pending')
+        elif status_q == 'accepted':
+            qs = qs.filter(handoff_status='accepted')
+        elif status_q == 'all':
+            qs = qs.filter(handoff_status__in=['pending', 'accepted'])
+        else:
+            return Response({'status': 'error', 'message': 'Invalid status filter'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if request.GET.get('mine') == '1':
+            me = _get_or_create_user_for_company_user(request.user)
+            qs = qs.filter(Q(handoff_accepted_by=me) | Q(assigned_to=me))
+
+        qs = qs.order_by('-handoff_requested_at', '-created_at')[:200]
+        rows = [_serialize_ticket_for_handoff(t) for t in qs]
+        return Response({'status': 'success', 'data': rows, 'count': len(rows)})
+    except Exception:
+        logger.exception("list_handoff_queue failed")
+        return Response({'status': 'error', 'message': 'Failed to list hand-offs'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def accept_ticket_handoff(request, ticket_id):
+    """Agent claims a pending hand-off. Assigns the ticket to them and moves
+    the hand-off to `accepted`."""
+    from Frontline_agent.handoff import accept_handoff
+    ticket = _get_company_ticket_or_404(request, ticket_id)
+    if not ticket:
+        return Response({'status': 'error', 'message': 'Ticket not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if ticket.handoff_status != 'pending':
+        return Response(
+            {'status': 'error',
+             'message': f"Ticket is not pending hand-off (current: {ticket.handoff_status})"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    me = _get_or_create_user_for_company_user(request.user)
+    changed = accept_handoff(ticket, me)
+    if not changed:
+        return Response({'status': 'error', 'message': 'Could not accept hand-off'},
+                        status=status.HTTP_409_CONFLICT)
+    return Response({
+        'status': 'success',
+        'data': _serialize_ticket_for_handoff(ticket),
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineLLMThrottle])
+def suggest_ticket_reply(request, ticket_id):
+    """LLM-drafts an outbound reply for the agent to edit and send.
+
+    Pulls the existing ticket thread (inbound + outbound messages) + the
+    ticket description, then asks the LLM to produce a concise, professional
+    reply grounded in the knowledge base where possible. Returns the draft
+    only — does not send anything.
+    """
+    try:
+        ticket = _get_company_ticket_or_404(request, ticket_id)
+        if not ticket:
+            return Response({'status': 'error', 'message': 'Ticket not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        company = request.user.company
+
+        # Build a compact thread view — newest messages carry the most signal but
+        # keep older ones for tone/context. Cap tightly so we don't blow the token budget.
+        msgs = (TicketMessage.objects.filter(ticket=ticket)
+                .order_by('-created_at')[:10])
+        thread_parts = []
+        for m in reversed(list(msgs)):
+            who = 'Customer' if m.direction == 'inbound' else 'Agent'
+            text = (m.body_text or _html_to_text_fallback(m.body_html) or '').strip()
+            if text:
+                thread_parts.append(f"{who}: {text[:1500]}")
+        thread_str = "\n\n".join(thread_parts) or ticket.description[:4000]
+
+        # Pull a KB grounding snippet from the knowledge service — best-effort.
+        kb_snippet = ''
+        try:
+            agent = FrontlineAgent(company_id=company.id)
+            last_customer = next((m for m in msgs if m.direction == 'inbound'), None)
+            query = (last_customer.body_text if last_customer else ticket.title) or ticket.description
+            kb_result = agent.answer_question(
+                query[:1000],
+                company_id=company.id,
+                max_results=3,
+                enable_rewrite=False,
+            )
+            if isinstance(kb_result, dict) and kb_result.get('answer'):
+                kb_snippet = (kb_result['answer'] or '')[:2000]
+        except Exception:
+            logger.exception("suggest-reply KB lookup failed")
+
+        customer_name = ''
+        if ticket.contact_id and getattr(ticket.contact, 'name', ''):
+            customer_name = ticket.contact.name
+
+        prompt = _build_suggest_reply_prompt(
+            ticket_title=ticket.title,
+            thread=thread_str,
+            kb_snippet=kb_snippet,
+            customer_name=customer_name,
+        )
+
+        try:
+            agent = FrontlineAgent(company_id=company.id)
+            draft = agent._call_llm(
+                prompt=prompt,
+                system_prompt=(
+                    "You are a senior customer-support agent. Draft concise, "
+                    "professional replies grounded in the knowledge base. Never "
+                    "invent facts. If the KB doesn't cover a detail, say you'll "
+                    "investigate and follow up."
+                ),
+                temperature=0.4,
+                max_tokens=500,
+            )
+        except Exception as exc:
+            logger.exception("suggest-reply LLM call failed")
+            return Response(
+                {'status': 'error', 'message': f'LLM call failed: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        draft_text = (draft or '').strip()
+        if not draft_text:
+            return Response(
+                {'status': 'error', 'message': 'LLM returned an empty draft'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'draft': draft_text,
+                'grounding_used': bool(kb_snippet),
+                'messages_considered': len(thread_parts),
+            },
+        })
+    except Exception:
+        logger.exception("suggest_ticket_reply failed")
+        return Response({'status': 'error', 'message': 'Failed to draft reply'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _build_suggest_reply_prompt(*, ticket_title: str, thread: str,
+                                kb_snippet: str, customer_name: str) -> str:
+    """Compose the draft-reply prompt. Keep tags unambiguous — they're parsed
+    by the LLM, not regex, but tight tags help steer the output."""
+    greeting = f"Dear {customer_name}," if customer_name else "Hello,"
+    kb_section = (
+        f"<knowledge_base>\n{kb_snippet}\n</knowledge_base>\n\n"
+        if kb_snippet else ""
+    )
+    return (
+        "Draft a reply to the customer based on the conversation below. "
+        "Use the knowledge base when relevant. Keep it under 120 words, "
+        "professional, warm, and action-oriented.\n\n"
+        f"<ticket_title>{ticket_title}</ticket_title>\n\n"
+        f"<conversation>\n{thread}\n</conversation>\n\n"
+        f"{kb_section}"
+        f"Start with: '{greeting}' and sign off with '— Support Team'."
+    )
 

@@ -408,6 +408,15 @@ urlpatterns = [
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/update/?$', frontline_agent.update_contact, name='frontline_update_contact'),  # PATCH/PUT
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/tickets/?$', frontline_agent.list_contact_tickets, name='frontline_list_contact_tickets'),  # GET
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/context/?$', frontline_agent.get_ticket_context, name='frontline_get_ticket_context'),  # GET
+    # Hand-off queue + reply-draft assist (Phase 3 §3.2)
+    re_path(r'^frontline/tickets/handoffs/?$', frontline_agent.list_handoff_queue, name='frontline_list_handoff_queue'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/accept-handoff/?$', frontline_agent.accept_ticket_handoff, name='frontline_accept_ticket_handoff'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/suggest-reply/?$', frontline_agent.suggest_ticket_reply, name='frontline_suggest_ticket_reply'),  # POST
+    # HubSpot CRM integration (Phase 3 §3.3)
+    re_path(r'^frontline/crm/hubspot/status/?$', frontline_agent.hubspot_status, name='frontline_hubspot_status'),  # GET
+    re_path(r'^frontline/crm/hubspot/config/?$', frontline_agent.hubspot_update_config, name='frontline_hubspot_update_config'),  # PATCH/PUT
+    re_path(r'^frontline/crm/hubspot/test/?$', frontline_agent.hubspot_test_connection, name='frontline_hubspot_test_connection'),  # POST
+    re_path(r'^frontline/crm/hubspot/sync-all/?$', frontline_agent.hubspot_sync_all, name='frontline_hubspot_sync_all'),  # POST
     # Notifications
     re_path(r'^frontline/notifications/templates/?$', frontline_agent.list_notification_templates, name='frontline_list_notification_templates'),  # GET
     re_path(r'^frontline/notifications/templates/create/?$', frontline_agent.create_notification_template, name='frontline_create_notification_template'),  # POST
