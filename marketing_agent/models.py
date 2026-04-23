@@ -649,7 +649,11 @@ class EmailAccount(models.Model):
     imap_username = models.CharField(max_length=255, blank=True, help_text='IMAP username (usually same as email)')
     imap_password = models.CharField(max_length=500, blank=True, help_text='IMAP password')
     enable_imap_sync = models.BooleanField(default=False, help_text='Enable automatic IMAP sync for reply detection')
-    
+    imap_sync_days = models.PositiveIntegerField(
+        default=30,
+        help_text='How many days of mail to pull on each IMAP sync. Used by the Reply Draft Agent inbox view.',
+    )
+
     # Status
     is_active = models.BooleanField(default=True, help_text='Is this account active and ready to use?')
     is_default = models.BooleanField(default=False, help_text='Use this as default account for sending')

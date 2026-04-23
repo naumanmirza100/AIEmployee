@@ -45,13 +45,17 @@ import {
   approveDraft,
   rejectDraft,
   sendDraft,
+  getReplyItem,
 } from '@/services/replyDraftService';
 
-const DAYS_FILTERS = [
-  { value: '',   label: 'All time' },
-  { value: '1',  label: 'Last 24h' },
-  { value: '7',  label: 'Last 7 days' },
-  { value: '30', label: 'Last 30 days' },
+// Pure view filter for the inbox list — Celery pre-syncs the full 120-day
+// window on a cron (see marketing_agent/management/commands/sync_inbox.py),
+// so switching the dropdown just slices already-cached rows and is instant.
+const TIME_WINDOW_OPTIONS = [
+  { value: 30,  label: 'Last 30 days' },
+  { value: 60,  label: 'Last 60 days' },
+  { value: 90,  label: 'Last 90 days' },
+  { value: 120, label: 'Last 120 days' },
 ];
 
 const TONES = [
@@ -201,11 +205,12 @@ const ReplyDraftAgentPage = () => {
   const [editedBody, setEditedBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
+  const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
   const [campaigns, setCampaigns] = useState([]);
   const [campaignFilter, setCampaignFilter] = useState(''); // '' = all, 'none' = generic only, or campaign id
-  const [daysFilter, setDaysFilter] = useState('');           // '' = all, '1' | '7' | '30'
   const [leads, setLeads] = useState([]);
   const [leadsHasRepliedFilter, setLeadsHasRepliedFilter] = useState(''); // '' | 'yes' | 'no'
   const [leadsCampaignFilter, setLeadsCampaignFilter] = useState('');     // separate from inbox campaign filter
@@ -238,13 +243,16 @@ const ReplyDraftAgentPage = () => {
   }, [navigate, toast]);
 
   const refreshInbox = useCallback(async () => {
+    setInboxLoading(true);
     try {
-      const res = await listPendingReplies({ campaign: campaignFilter, days: daysFilter });
+      const res = await listPendingReplies({ campaign: campaignFilter, days: String(syncDays) });
       setPendingReplies(res?.data || []);
     } catch (e) {
       toast({ title: 'Failed to load inbox', description: e.message, variant: 'destructive' });
+    } finally {
+      setInboxLoading(false);
     }
-  }, [toast, campaignFilter, daysFilter]);
+  }, [toast, campaignFilter, syncDays]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -313,7 +321,7 @@ const ReplyDraftAgentPage = () => {
   // Re-fetch the inbox whenever the user changes a filter.
   useEffect(() => {
     if (hasAccess) refreshInbox();
-  }, [hasAccess, campaignFilter, daysFilter, refreshInbox]);
+  }, [hasAccess, campaignFilter, syncDays, refreshInbox]);
 
   // Re-fetch leads whenever the leads-scoped filters change and we're viewing them.
   useEffect(() => {
@@ -335,12 +343,25 @@ const ReplyDraftAgentPage = () => {
     setUserContext('');
   };
 
-  const handleSelectReply = (r) => {
+  const handleSelectReply = async (r) => {
+    // Show the row immediately with just preview content, then fetch the
+    // full body in the background. List endpoint omits body for speed
+    // (see backend _serialize_{reply,inbox_email}).
     setSelectedReply(r);
     setSelectedDraft(null);
     setEditedBody('');
     setEditedSubject('');
     setUserContext('');
+    if (!r || r.body !== undefined) return;
+    try {
+      const res = await getReplyItem(r.source, r.id);
+      const full = res?.data;
+      if (full) {
+        setSelectedReply((current) => (current && current.id === r.id && current.source === r.source ? { ...current, ...full } : current));
+      }
+    } catch (e) {
+      console.error('Failed to load email body', e);
+    }
   };
 
   const handleSelectDraft = (d) => {
@@ -611,7 +632,7 @@ const ReplyDraftAgentPage = () => {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap justify-end">
               <span className="text-xs text-gray-400 hidden sm:inline">Auto-refreshes every 30s</span>
               <Button
                 onClick={refreshAll}
@@ -761,14 +782,14 @@ const ReplyDraftAgentPage = () => {
                         ))}
                       </select>
                       <select
-                        value={daysFilter}
-                        onChange={(e) => setDaysFilter(e.target.value)}
-                        title="Filter by time"
+                        value={syncDays}
+                        onChange={(e) => setSyncDays(Number(e.target.value))}
+                        title="Filter the inbox to a rolling time window. Mail is pre-synced in the background, so switching is instant."
                         className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                       >
-                        {DAYS_FILTERS.map((d) => (
-                          <option key={d.value || 'all'} value={d.value} className="bg-gray-900">
-                            {d.label}
+                        {TIME_WINDOW_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value} className="bg-gray-900">
+                            {o.label}
                           </option>
                         ))}
                       </select>
@@ -777,6 +798,15 @@ const ReplyDraftAgentPage = () => {
 
                 </div>
 
+                {/* Loading strip — subtle indeterminate bar while the inbox refetches.
+                    Triggered by dropdown changes + the 30s poll; sits above the list so
+                    it doesn't push rows around. */}
+                {inboxLoading && activeTab === 'inbox' && (
+                  <div className="relative h-0.5 overflow-hidden bg-white/5">
+                    <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-cyan-400/70 to-transparent animate-[inbox-loading_1.2s_ease-in-out_infinite]" />
+                  </div>
+                )}
+
                 {/* List */}
                 <div className="custom-scrollbar lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
                   {activeTab === 'inbox' && (
@@ -784,12 +814,12 @@ const ReplyDraftAgentPage = () => {
                       {filteredInbox.length === 0 ? (
                         <EmptyState
                           icon={Inbox}
-                          title={search ? 'No matches' : (campaignFilter || daysFilter ? 'Nothing in this filter' : 'Inbox is clear')}
+                          title={search ? 'No matches' : (campaignFilter ? 'Nothing in this filter' : 'Inbox is clear')}
                           subtitle={
                             search
                               ? 'Try a different search term.'
-                              : (campaignFilter || daysFilter)
-                                ? 'Try widening the campaign or time range.'
+                              : campaignFilter
+                                ? 'Try widening the campaign filter or time window.'
                                 : 'Replies and inbox mail will appear here.'
                           }
                         />
@@ -1121,6 +1151,10 @@ const ReplyDraftAgentPage = () => {
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+        @keyframes inbox-loading {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
       `}</style>
     </>
   );
@@ -1128,6 +1162,17 @@ const ReplyDraftAgentPage = () => {
 
 const EmailBody = ({ body, isIncomingReply }) => {
   const [showQuoted, setShowQuoted] = useState(false);
+  // `body === undefined` means the list endpoint returned just a preview and
+  // the detail fetch is still in flight. Show a gentle loading state instead
+  // of "No content" to avoid misleading the user.
+  if (body === undefined) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-gray-500 italic">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading message…
+      </div>
+    );
+  }
   if (!body || !body.trim()) {
     return <div className="text-sm text-gray-500 italic">No content.</div>;
   }

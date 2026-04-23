@@ -33,7 +33,10 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = 'Sync inbox via IMAP and detect email replies automatically'
 
-    DEFAULT_SINCE_DAYS = 30
+    # Fixed 120-day rolling window. The Reply Draft Agent's dropdown is a
+    # pure view filter over already-cached rows, so we always pull the max
+    # range here and let the UI slice it client-side.
+    DEFAULT_SINCE_DAYS = 120
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -49,20 +52,28 @@ class Command(BaseCommand):
         parser.add_argument(
             '--since-days',
             type=int,
-            default=self.DEFAULT_SINCE_DAYS,
-            help='How many days back to fetch from IMAP (default: 30). Pass a larger number for a one-shot backfill.',
+            default=None,
+            help='Override every account\'s imap_sync_days for this run only. '
+                 'If omitted, each EmailAccount uses its own configured window '
+                 '(default 30). Pass a larger number for a one-shot backfill.',
         )
 
     def handle(self, *args, **options):
         account_id = options.get('account_id')
         dry_run = options.get('dry_run', False)
-        since_days = options.get('since_days') or self.DEFAULT_SINCE_DAYS
-        if since_days < 1:
-            since_days = self.DEFAULT_SINCE_DAYS
+        # --since-days, when passed explicitly, overrides every account's own
+        # imap_sync_days setting for this one run. Useful for one-off deep
+        # syncs. When omitted, each account uses its configured window.
+        cli_since_days = options.get('since_days')
+        if cli_since_days is not None and cli_since_days < 1:
+            cli_since_days = None
 
         self.stdout.write(self.style.SUCCESS('\n=== Starting IMAP Inbox Sync ===\n'))
         self.stdout.write(f'Current time: {timezone.now()}')
-        self.stdout.write(f'IMAP window: last {since_days} day(s)')
+        if cli_since_days:
+            self.stdout.write(f'IMAP window (CLI override): last {cli_since_days} day(s) for every account')
+        else:
+            self.stdout.write(f'IMAP window: last {self.DEFAULT_SINCE_DAYS} day(s) (fixed)')
         
         if dry_run:
             self.stdout.write(self.style.WARNING('[DRY RUN] DRY RUN MODE - No replies will be processed\n'))
@@ -99,9 +110,14 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f'  [WARNING] IMAP settings incomplete for {account.email}. Skipping.'))
                 continue
 
+            # `imap_sync_days` on EmailAccount is retained for rollback safety
+            # but no longer consulted — the rolling window is fixed at
+            # DEFAULT_SINCE_DAYS. `--since-days` still works as a one-shot override.
+            account_since_days = cli_since_days or self.DEFAULT_SINCE_DAYS
+            self.stdout.write(f'  IMAP window for this account: last {account_since_days} day(s)')
             try:
                 replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
-                    account, dry_run, since_days=since_days,
+                    account, dry_run, since_days=account_since_days,
                 )
                 total_replies_found += replies_found
                 total_replies_processed += replies_processed

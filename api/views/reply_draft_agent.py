@@ -13,6 +13,7 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 from django.contrib.auth.models import User
 from django.db.models import Count, Max, Prefetch
+from django.db.models.functions import Substr
 from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
@@ -63,10 +64,18 @@ def _sender_name(lead):
     return full or (lead.email.split('@')[0] if lead.email else '')
 
 
-def _serialize_reply(r):
+def _serialize_reply(r, *, include_body=False):
+    """Serialize a Reply row.
+
+    ``include_body`` is False in the list response (the ``body`` field is deferred
+    and ``preview`` is pre-computed via SQL SUBSTRING in the queryset annotation).
+    The detail endpoint passes True so clicking a row returns the full content.
+    """
     lead = r.lead if r.lead_id else None
-    content = r.reply_content or ''
-    return {
+    preview = getattr(r, '_list_preview', None)
+    if preview is None:
+        preview = (r.reply_content or '')[:200]
+    out = {
         'id': r.id,
         'source': 'reply',
         'from_email': lead.email if lead else '',
@@ -74,19 +83,24 @@ def _serialize_reply(r):
         'from_company': lead.company if lead else '',
         'from_job_title': lead.job_title if lead else '',
         'subject': r.reply_subject or '(no subject)',
-        'preview': content[:200],
-        'body': content,
+        'preview': preview,
         'interest_level': r.interest_level,
         'replied_at': r.replied_at.isoformat() if r.replied_at else None,
         'campaign_id': r.campaign_id,
         'campaign': r.campaign.name if r.campaign_id else '',
         'analysis': r.analysis or '',
     }
+    if include_body:
+        out['body'] = r.reply_content or ''
+    return out
 
 
-def _serialize_inbox_email(m):
-    content = m.body or ''
-    return {
+def _serialize_inbox_email(m, *, include_body=False):
+    """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics."""
+    preview = getattr(m, '_list_preview', None)
+    if preview is None:
+        preview = (m.body or '')[:200]
+    out = {
         'id': m.id,
         'source': 'inbox',
         'from_email': m.from_email,
@@ -94,14 +108,16 @@ def _serialize_inbox_email(m):
         'from_company': '',
         'from_job_title': '',
         'subject': m.subject or '(no subject)',
-        'preview': content[:200],
-        'body': content,
+        'preview': preview,
         'interest_level': m.interest_level,
         'replied_at': m.received_at.isoformat() if m.received_at else None,
         'campaign_id': None,
         'campaign': '',
         'analysis': m.analysis or '',
     }
+    if include_body:
+        out['body'] = m.body or ''
+    return out
 
 
 def _serialize_draft(d):
@@ -141,21 +157,14 @@ def _serialize_draft(d):
     }
 
 
-DEFAULT_INBOX_DAYS = 30
-
-
-def _parse_days_filter(value, *, default_days=DEFAULT_INBOX_DAYS):
+def _parse_days_filter(value):
     """Return a timezone-aware cutoff datetime, or None for 'all time'.
 
-    Missing / blank input falls back to ``default_days`` so the inbox is
-    naturally capped to a rolling window instead of returning everything ever
-    stored. Pass ``'all'`` explicitly to disable the window.
+    Missing / blank / 'all' means no cutoff — the natural cap is whatever is
+    already stored (Celery always pre-syncs the full 120-day window on a cron,
+    so the dropdown is a pure view filter). Specific integers narrow the view.
     """
-    if value is None or value == '':
-        if default_days is None or default_days <= 0:
-            return None
-        return timezone.now() - timedelta(days=default_days)
-    if str(value).lower() == 'all':
+    if value is None or value == '' or str(value).lower() == 'all':
         return None
     try:
         days = int(value)
@@ -261,7 +270,8 @@ def list_pending_replies(request):
 
     Query params:
       - campaign: campaign id, or 'none' (generic inbox only), or blank (all)
-      - days: 1 / 7 / 30 / 'all' (default: 30)
+      - days: 1 / 7 / 30 / 60 / 90 / 120 / 'all' (default: all stored rows;
+              the underlying storage window is set per-account via Sync depth)
     """
     gate = _enforce_module(request.user)
     if gate is not None:
@@ -287,6 +297,12 @@ def list_pending_replies(request):
 
     items = []
 
+    # The body / reply_content columns can be 10-100KB each on MSSQL. Pulling
+    # them for the list view tanked /pending-replies to 30s for 350 rows.
+    # We defer them + pre-compute a 200-char preview via SQL SUBSTRING instead;
+    # the full body is loaded lazily by the detail endpoints when a row is clicked.
+    preview_len = 200
+
     # Campaign replies — included unless the user asked for generic-only ('none').
     if campaign_param != 'none':
         reply_qs = (
@@ -294,6 +310,8 @@ def list_pending_replies(request):
             .filter(lead__owner_id__in=user_ids)
             .exclude(id__in=drafted_reply_ids)
             .select_related('lead', 'campaign')
+            .defer('reply_content')
+            .annotate(_list_preview=Substr('reply_content', 1, preview_len))
         )
         if days_cutoff is not None:
             reply_qs = reply_qs.filter(replied_at__gte=days_cutoff)
@@ -302,7 +320,7 @@ def list_pending_replies(request):
                 reply_qs = reply_qs.filter(campaign_id=int(campaign_param))
             except ValueError:
                 pass
-        for r in reply_qs.order_by('-replied_at')[:150]:
+        for r in reply_qs.order_by('-replied_at')[:2000]:
             items.append((r.replied_at, _serialize_reply(r)))
 
     # Generic inbox emails — every mail that landed in any of this company's
@@ -314,19 +332,58 @@ def list_pending_replies(request):
             InboxEmail.objects.filter(owner_id__in=user_ids)
             .exclude(id__in=drafted_inbox_ids)
             .select_related('email_account')
+            .defer('body')
+            .annotate(_list_preview=Substr('body', 1, preview_len))
         )
         if days_cutoff is not None:
             inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
-        for m in inbox_qs.order_by('-received_at')[:300]:
+        for m in inbox_qs.order_by('-received_at')[:2000]:
             items.append((m.received_at, _serialize_inbox_email(m)))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
-    payload = [entry for _, entry in items[:200]]
+    # Cap at 2000 so a broken client can't pull the entire mailbox; in
+    # practice a 120-day window on a typical business inbox stays well below this.
+    payload = [entry for _, entry in items[:2000]]
 
     return Response({
         'status': 'success',
         'data': payload,
     })
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_inbox_email(request, email_id):
+    """Return a single InboxEmail row including its full body.
+
+    Used by the frontend when the user clicks a row — the list view serves
+    only previews (see list_pending_replies) because pulling body for every
+    row turned MSSQL into a bottleneck.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    m = InboxEmail.objects.filter(id=email_id, owner_id__in=user_ids).select_related('email_account').first()
+    if m is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _serialize_inbox_email(m, include_body=True)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_reply(request, reply_id):
+    """Return a single Reply (campaign reply) row including its full content."""
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    r = Reply.objects.filter(id=reply_id, lead__owner_id__in=user_ids).select_related('lead', 'campaign').first()
+    if r is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _serialize_reply(r, include_body=True)})
 
 
 @api_view(['GET'])

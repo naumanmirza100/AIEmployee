@@ -430,6 +430,8 @@ urlpatterns = [
     # Reply Draft Agent endpoints
     re_path(r'^reply-draft/dashboard/?$', reply_draft_api.dashboard, name='reply_draft_dashboard'),
     re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/?$', reply_draft_api.get_inbox_email, name='reply_draft_get_inbox_email'),
+    re_path(r'^reply-draft/reply/(?P<reply_id>\d+)/?$', reply_draft_api.get_reply, name='reply_draft_get_reply'),
     re_path(r'^reply-draft/campaigns/?$', reply_draft_api.list_campaigns, name='reply_draft_list_campaigns'),
     re_path(r'^reply-draft/leads/?$', reply_draft_api.list_leads, name='reply_draft_list_leads'),
     re_path(r'^reply-draft/drafts/?$', reply_draft_api.list_drafts, name='reply_draft_list_drafts'),

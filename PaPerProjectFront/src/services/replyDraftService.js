@@ -129,3 +129,19 @@ export const sendDraft = async (draftId) => {
     throw error;
   }
 };
+
+// Fetch the full body for a single inbox item. The list endpoint serves
+// only a 200-char preview so the page loads fast; this fills in the full
+// content when the user clicks a row.
+export const getReplyItem = async (source, id) => {
+  try {
+    const path = source === 'inbox'
+      ? `/reply-draft/inbox/${id}`
+      : `/reply-draft/reply/${id}`;
+    return await companyApi.get(path);
+  } catch (error) {
+    console.error('Get reply item error:', error);
+    throw error;
+  }
+};
+
