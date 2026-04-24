@@ -505,6 +505,37 @@ class Company(models.Model):
     # Comma-separated list of origins allowed to use the widget key (e.g. "https://acme.com,https://www.acme.com").
     # When blank, all origins are accepted (back-compat). Populated origins enforce origin/referer check.
     frontline_allowed_origins = models.TextField(blank=True, default='')
+    # Customer-configurable widget appearance + behaviour. Defaults are injected in
+    # the GET /frontline/widget/public-config/ endpoint so a blank row still renders a usable widget.
+    # Shape: {
+    #   "theme": {"primary_color": "#7c3aed", "launcher_text": "Chat with us", "position": "bottom-right", "logo_url": null},
+    #   "pre_chat_form": {"enabled": true, "fields": ["name", "email"]},
+    #   "operating_hours": {"enabled": false, "timezone_name": "UTC",
+    #                        "schedule": {"mon": [["09:00","17:00"]], "tue": [...], ...},
+    #                        "offline_message": "We're offline. Leave a message and we'll reply."},
+    #   "require_captcha": false
+    # }
+    frontline_widget_config = models.JSONField(default=dict, blank=True,
+                                               help_text='Widget theming + pre-chat form + operating hours + captcha toggle.')
+
+    # Inbound email routing.
+    # `support_inbox_slug` is the token used to route mail — e.g. slug 'acme' means
+    # support+acme@<INBOUND_EMAIL_DOMAIN> lands on this tenant. Must be unique and URL-safe.
+    # `support_from_email` is the address outbound ticket replies appear to come from.
+    # `inbound_email_config` holds per-tenant overrides (custom reply-to, signature block, etc.).
+    support_inbox_slug = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True,
+                                          help_text='Unique slug for inbound email routing (e.g. "acme" → support+acme@<domain>).')
+    support_from_email = models.EmailField(blank=True, default='',
+                                           help_text='Outbound "From" address for ticket replies. Falls back to DEFAULT_FROM_EMAIL.')
+    inbound_email_config = models.JSONField(default=dict, blank=True,
+                                            help_text='Per-tenant inbound/outbound email config: {"reply_to": "...", "signature_html": "..."}.')
+
+    # HubSpot CRM integration (Phase 3 §3.3).
+    # Shape: {"enabled": true, "access_token": "<private-app-token>", "portal_id": "<optional>", "last_error": ""}
+    # Access token is stored in the clear — tenant-owned Private App token that the tenant can revoke
+    # any time from HubSpot settings; acceptable for MVP. Encryption-at-rest (KMS) is a follow-up.
+    hubspot_config = models.JSONField(default=dict, blank=True,
+                                      help_text='HubSpot private-app config: {enabled, access_token, portal_id, last_error}.')
 
     class Meta:
         verbose_name_plural = 'Companies'

@@ -262,6 +262,131 @@ export const askQaQuestion = async (question, chatId = null, documentIds = []) =
   }
 };
 
+// ──────────────────────────────────────────────
+// Document Authoring
+// ──────────────────────────────────────────────
+
+/**
+ * Generate a new professional document (non-streaming, blocking)
+ * @param {object} payload { prompt, template_type, tone, title?, reference_document_ids? }
+ */
+export const generateDocument = async (payload) => {
+  try {
+    return await companyApi.post('/operations/authoring/generate', payload);
+  } catch (error) {
+    console.error('Generate document error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Streaming generation — text appears chunk-by-chunk as the AI writes.
+ * @param {object} payload     { prompt, template_type, tone, title?, reference_document_ids? }
+ * @param {object} handlers    { onMeta, onText, onDone, onError, signal }
+ */
+export const streamGenerateDocument = async (payload, handlers = {}) => {
+  const { streamNdjsonPost } = await import('@/utils/streamingClient');
+  const token = localStorage.getItem('company_auth_token');
+  return streamNdjsonPost({
+    url: `${API_BASE_URL}/operations/authoring/generate/stream`,
+    headers: token ? { Authorization: `Token ${token}` } : {},
+    body: payload,
+    ...handlers,
+  });
+};
+
+/** List generated documents */
+export const listGeneratedDocuments = async (params = {}) => {
+  try {
+    return await companyApi.get('/operations/authoring/documents', params);
+  } catch (error) {
+    console.error('List generated documents error:', error);
+    throw error;
+  }
+};
+
+/** Get a single generated document (full content) */
+export const getGeneratedDocument = async (docId) => {
+  try {
+    return await companyApi.get(`/operations/authoring/documents/${docId}/`);
+  } catch (error) {
+    console.error('Get generated document error:', error);
+    throw error;
+  }
+};
+
+/** Update (title and/or content) of a generated document */
+export const updateGeneratedDocument = async (docId, payload) => {
+  try {
+    return await companyApi.patch(`/operations/authoring/documents/${docId}/update`, payload);
+  } catch (error) {
+    console.error('Update generated document error:', error);
+    throw error;
+  }
+};
+
+/** Delete a generated document */
+export const deleteGeneratedDocument = async (docId) => {
+  try {
+    return await companyApi.delete(`/operations/authoring/documents/${docId}/delete`);
+  } catch (error) {
+    console.error('Delete generated document error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Aggregated analytics for the operations module.
+ * @param {string} range  '7d' | '30d' | '90d' | 'all'
+ */
+export const getOperationsAnalytics = async (range = '30d') => {
+  try {
+    return await companyApi.get('/operations/analytics', { range });
+  } catch (error) {
+    console.error('Operations analytics error:', error);
+    throw error;
+  }
+};
+
+/** Regenerate an existing document (fresh AI output, bumps version) */
+export const regenerateDocument = async (docId, payload = {}) => {
+  try {
+    return await companyApi.post(`/operations/authoring/documents/${docId}/regenerate`, payload);
+  } catch (error) {
+    console.error('Regenerate document error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Returns the URL + auth header for directly downloading a generated doc as PDF.
+ * Kept as a helper because we need the token on the fetch call.
+ */
+export const getGeneratedDocumentPdfUrl = (docId) => {
+  return `${API_BASE_URL}/operations/authoring/documents/${docId}/export/pdf`;
+};
+
+/**
+ * Fetch the PDF as a Blob (so we can trigger a download with a proper filename)
+ */
+export const fetchGeneratedDocumentPdf = async (docId) => {
+  const token = localStorage.getItem('company_auth_token');
+  const url = getGeneratedDocumentPdfUrl(docId);
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: token ? { Authorization: `Token ${token}` } : {},
+  });
+  if (!response.ok) {
+    let msg = `HTTP ${response.status}`;
+    try {
+      const j = await response.json();
+      if (j?.message) msg = j.message;
+    } catch (_) { /* ignore */ }
+    throw new Error(msg);
+  }
+  return await response.blob();
+};
+
 export default {
   getDashboardStats,
   uploadDocument,
@@ -279,4 +404,15 @@ export default {
   renameQaChat,
   deleteQaChat,
   askQaQuestion,
+  // Authoring
+  generateDocument,
+  streamGenerateDocument,
+  listGeneratedDocuments,
+  getGeneratedDocument,
+  updateGeneratedDocument,
+  deleteGeneratedDocument,
+  regenerateDocument,
+  getOperationsAnalytics,
+  getGeneratedDocumentPdfUrl,
+  fetchGeneratedDocumentPdf,
 };

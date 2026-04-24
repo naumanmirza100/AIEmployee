@@ -462,6 +462,83 @@ DEEPSEEK_EMBEDDING_MODEL = os.getenv('DEEPSEEK_EMBEDDING_MODEL', 'deepseek/deeps
 EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'auto')  # 'auto', 'openrouter', 'deepseek', 'groq', or 'openai'
 OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
 
+# --------------------
+# Frontline Agent — RAG tuning knobs
+# --------------------
+# Minimum similarity score for a document match to be treated as "verified".
+# Below this, the agent responds with "I don't have verified info" and escalates.
+FRONTLINE_RAG_MIN_CONFIDENCE = float(os.getenv('FRONTLINE_RAG_MIN_CONFIDENCE', '0.3'))
+
+# Chunking parameters used when uploading + indexing documents.
+# Override per-upload by sending chunk_size / chunk_overlap form params.
+FRONTLINE_CHUNK_SIZE = int(os.getenv('FRONTLINE_CHUNK_SIZE', '4000'))
+FRONTLINE_CHUNK_OVERLAP = int(os.getenv('FRONTLINE_CHUNK_OVERLAP', '200'))
+
+# Safety bounds for user-provided chunking params
+FRONTLINE_CHUNK_SIZE_MIN = 500
+FRONTLINE_CHUNK_SIZE_MAX = 16000
+FRONTLINE_CHUNK_OVERLAP_MIN = 0
+
+# hCaptcha (site+secret). When HCAPTCHA_SECRET is empty, CAPTCHA verification is
+# skipped even if a tenant enables `require_captcha` on their widget.
+HCAPTCHA_SITE_KEY = os.getenv('HCAPTCHA_SITE_KEY', '')
+HCAPTCHA_SECRET = os.getenv('HCAPTCHA_SECRET', '')
+
+# --------------------
+# Frontline Agent — inbound email channel (Phase 3)
+# --------------------
+# Domain receiving customer email (e.g. 'support.acme.ai'). MX for this domain
+# should be pointed at the chosen provider (SendGrid Inbound Parse, Mailgun
+# Routes, etc.) and traffic forwarded to
+# /api/frontline/webhooks/inbound-email/<provider>/.
+# Per-tenant routing: support+<Company.support_inbox_slug>@<this_domain>.
+FRONTLINE_INBOUND_EMAIL_DOMAIN = os.getenv('FRONTLINE_INBOUND_EMAIL_DOMAIN', '')
+
+# SendGrid Inbound Parse Ed25519 public key (base64). Leave blank to fall back to
+# the shared-secret scheme below (simpler for dev / reverse-proxy setups).
+SENDGRID_INBOUND_PUBLIC_KEY = os.getenv('SENDGRID_INBOUND_PUBLIC_KEY', '')
+
+# Mailgun signing key (from Mailgun dashboard → Webhooks → "HTTP webhook signing key").
+MAILGUN_SIGNING_KEY = os.getenv('MAILGUN_SIGNING_KEY', '')
+
+# Shared secret header verification used when no provider key is configured, and
+# the only mode accepted for the 'generic' provider outside DEBUG.
+FRONTLINE_INBOUND_SHARED_SECRET = os.getenv('FRONTLINE_INBOUND_SHARED_SECRET', '')
+
+# --------------------
+# Logging: redact PII/secrets before they hit any handler
+# --------------------
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'redact_pii': {
+            '()': 'Frontline_agent.logging_filters.RedactPIIFilter',
+        },
+    },
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s %(levelname)s %(name)s: %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+            'filters': ['redact_pii'],
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    # Django's verbose db / request logs stay at WARNING so the redaction filter
+    # doesn't silently drop SQL debug output in prod.
+    'loggers': {
+        'django.db.backends': {'level': 'WARNING'},
+    },
+}
+
 
 # --------------------
 # Email Configuration
@@ -696,6 +773,43 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 86400.0,  # Every 24 hours
         'options': {'expires': 172800}
     },
+
+    # Wake snoozed frontline tickets - runs every 5 minutes
+    # Clears snoozed_until on tickets whose snooze time has passed
+    'frontline-wake-snoozed-tickets': {
+        'task': 'Frontline_agent.tasks.wake_snoozed_tickets',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600}
+    },
+
+    # Process pending / retry-ready frontline notifications every minute.
+    # Honours quiet hours, applies exponential backoff, dead-letters on exhaustion.
+    'frontline-process-scheduled-notifications': {
+        'task': 'Frontline_agent.tasks.process_scheduled_notifications',
+        'schedule': 60.0,  # Every minute
+        'options': {'expires': 120}
+    },
+
+    # Prune frontline documents that have exceeded their retention window. Daily.
+    'frontline-prune-expired-documents': {
+        'task': 'Frontline_agent.tasks.prune_expired_documents',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800}
+    },
+
+    # Send 24h + 15min meeting reminders for frontline meetings. Every 5 minutes.
+    'frontline-send-meeting-reminders': {
+        'task': 'Frontline_agent.tasks.send_meeting_reminders',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600}
+    },
+
+    # Weekly analytics digest per frontline tenant. Runs once a week.
+    'frontline-weekly-analytics-digest': {
+        'task': 'Frontline_agent.tasks.send_weekly_analytics_digest',
+        'schedule': 604800.0,  # Every 7 days
+        'options': {'expires': 1209600}
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
@@ -756,5 +870,7 @@ REST_FRAMEWORK = {
         'frontline_llm': '60/hour',      # Authenticated LLM-powered endpoints (Q&A, triage, auto-resolve, summarize, extract)
         'frontline_upload': '30/hour',   # Document uploads (expensive: parse + embed)
         'frontline_crud': '300/hour',    # Authenticated CRUD endpoints
+        # Company auth endpoints (login / register) — by IP, to stop credential stuffing
+        'company_auth': '10/hour',
     },
 }

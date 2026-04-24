@@ -358,6 +358,8 @@ urlpatterns = [
     re_path(r'^frontline/public/qa/?$', frontline_agent.public_qa, name='frontline_public_qa'),  # POST
     re_path(r'^frontline/public/submit/?$', frontline_agent.public_submit, name='frontline_public_submit'),  # POST
     re_path(r'^frontline/widget-config/?$', frontline_agent.frontline_widget_config, name='frontline_widget_config'),  # GET
+    re_path(r'^frontline/widget-config/update/?$', frontline_agent.update_frontline_widget_config, name='frontline_update_widget_config'),  # PATCH
+    re_path(r'^frontline/widget/public-config/?$', frontline_agent.public_widget_config, name='frontline_public_widget_config'),  # GET (public, needs widget_key)
     re_path(r'^frontline/dashboard/?$', frontline_agent.frontline_dashboard, name='frontline_dashboard'),  # GET
     re_path(r'^frontline/documents/?$', frontline_agent.list_documents, name='frontline_list_documents'),  # GET
     re_path(r'^frontline/documents/upload/?$', frontline_agent.upload_document, name='frontline_upload_document'),  # POST
@@ -365,6 +367,9 @@ urlpatterns = [
     re_path(r'^frontline/documents/(?P<document_id>\d+)/delete/?$', frontline_agent.delete_document, name='frontline_delete_document'),  # POST
     re_path(r'^frontline/documents/(?P<document_id>\d+)/summarize/?$', frontline_agent.summarize_document, name='frontline_summarize_document'),  # POST
     re_path(r'^frontline/documents/(?P<document_id>\d+)/extract/?$', frontline_agent.extract_document, name='frontline_extract_document'),  # POST
+    # Document lifecycle (Phase 2 Batch 5)
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/status/?$', frontline_agent.document_processing_status, name='frontline_document_status'),  # GET
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/metadata/?$', frontline_agent.update_document_metadata, name='frontline_update_document_metadata'),  # PATCH
     re_path(r'^frontline/knowledge/qa/?$', frontline_agent.knowledge_qa, name='frontline_knowledge_qa'),  # POST
     re_path(r'^frontline/knowledge/feedback/?$', frontline_agent.knowledge_feedback, name='frontline_knowledge_feedback'),  # POST
     re_path(r'^frontline/knowledge/search/?$', frontline_agent.search_knowledge, name='frontline_search_knowledge'),  # GET
@@ -377,13 +382,55 @@ urlpatterns = [
     re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
     re_path(r'^frontline/ticket-tasks/?$', frontline_agent.list_ticket_tasks, name='frontline_list_ticket_tasks'),  # GET
     re_path(r'^frontline/ticket-tasks/(?P<ticket_id>\d+)/?$', frontline_agent.update_ticket_task, name='frontline_update_ticket_task'),  # PATCH/PUT
+    # Meetings (Phase 2 Batch 6)
+    re_path(r'^frontline/meetings/?$', frontline_agent.list_meetings, name='frontline_list_meetings'),  # GET
+    re_path(r'^frontline/meetings/create/?$', frontline_agent.create_meeting, name='frontline_create_meeting'),  # POST
+    re_path(r'^frontline/meetings/availability/?$', frontline_agent.check_meeting_availability, name='frontline_check_meeting_availability'),  # GET
+    re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/?$', frontline_agent.get_meeting, name='frontline_get_meeting'),  # GET
+    re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/update/?$', frontline_agent.update_meeting, name='frontline_update_meeting'),  # PATCH
+    re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/delete/?$', frontline_agent.delete_meeting, name='frontline_delete_meeting'),  # DELETE
+    re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', frontline_agent.extract_meeting_action_items, name='frontline_extract_meeting_action_items'),  # POST
+    # Ticket lifecycle (Phase 2 Batch 2)
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/?$', frontline_agent.list_ticket_notes, name='frontline_list_ticket_notes'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/create/?$', frontline_agent.create_ticket_note, name='frontline_create_ticket_note'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/(?P<note_id>\d+)/?$', frontline_agent.update_or_delete_ticket_note, name='frontline_update_delete_ticket_note'),  # PATCH/DELETE
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/snooze/?$', frontline_agent.snooze_ticket, name='frontline_snooze_ticket'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/unsnooze/?$', frontline_agent.unsnooze_ticket, name='frontline_unsnooze_ticket'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/sla/pause/?$', frontline_agent.pause_ticket_sla, name='frontline_pause_ticket_sla'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/sla/resume/?$', frontline_agent.resume_ticket_sla, name='frontline_resume_ticket_sla'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/retriage/?$', frontline_agent.retriage_ticket, name='frontline_retriage_ticket'),  # POST
+    # Ticket email thread (inbound + outbound messages on one ticket)
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/messages/?$', frontline_agent.list_ticket_messages, name='frontline_list_ticket_messages'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/reply/?$', frontline_agent.reply_to_ticket, name='frontline_reply_to_ticket'),  # POST
+    # Inbound email webhook (public, signature-verified). `provider` is one of 'sendgrid', 'mailgun', 'generic'.
+    re_path(r'^frontline/webhooks/inbound-email/(?P<provider>[a-z]+)/?$', frontline_agent.inbound_email_webhook, name='frontline_inbound_email_webhook'),  # POST
+    # Customer 360 — Contacts + ticket context panel
+    re_path(r'^frontline/contacts/?$', frontline_agent.list_contacts, name='frontline_list_contacts'),  # GET
+    re_path(r'^frontline/contacts/create/?$', frontline_agent.create_contact, name='frontline_create_contact'),  # POST
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/?$', frontline_agent.get_contact, name='frontline_get_contact'),  # GET
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/update/?$', frontline_agent.update_contact, name='frontline_update_contact'),  # PATCH/PUT
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/tickets/?$', frontline_agent.list_contact_tickets, name='frontline_list_contact_tickets'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/context/?$', frontline_agent.get_ticket_context, name='frontline_get_ticket_context'),  # GET
+    # Hand-off queue + reply-draft assist (Phase 3 §3.2)
+    re_path(r'^frontline/tickets/handoffs/?$', frontline_agent.list_handoff_queue, name='frontline_list_handoff_queue'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/accept-handoff/?$', frontline_agent.accept_ticket_handoff, name='frontline_accept_ticket_handoff'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/suggest-reply/?$', frontline_agent.suggest_ticket_reply, name='frontline_suggest_ticket_reply'),  # POST
+    # HubSpot CRM integration (Phase 3 §3.3)
+    re_path(r'^frontline/crm/hubspot/status/?$', frontline_agent.hubspot_status, name='frontline_hubspot_status'),  # GET
+    re_path(r'^frontline/crm/hubspot/config/?$', frontline_agent.hubspot_update_config, name='frontline_hubspot_update_config'),  # PATCH/PUT
+    re_path(r'^frontline/crm/hubspot/test/?$', frontline_agent.hubspot_test_connection, name='frontline_hubspot_test_connection'),  # POST
+    re_path(r'^frontline/crm/hubspot/sync-all/?$', frontline_agent.hubspot_sync_all, name='frontline_hubspot_sync_all'),  # POST
     # Notifications
     re_path(r'^frontline/notifications/templates/?$', frontline_agent.list_notification_templates, name='frontline_list_notification_templates'),  # GET
     re_path(r'^frontline/notifications/templates/create/?$', frontline_agent.create_notification_template, name='frontline_create_notification_template'),  # POST
     re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/?$', frontline_agent.get_notification_template, name='frontline_get_notification_template'),  # GET
     re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/update/?$', frontline_agent.update_notification_template, name='frontline_update_notification_template'),  # PATCH/PUT
     re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/delete/?$', frontline_agent.delete_notification_template, name='frontline_delete_notification_template'),  # DELETE
+    re_path(r'^frontline/notifications/templates/(?P<template_id>\d+)/preview/?$', frontline_agent.preview_notification_template, name='frontline_preview_notification_template'),  # POST
     re_path(r'^frontline/notifications/scheduled/?$', frontline_agent.list_scheduled_notifications, name='frontline_list_scheduled_notifications'),  # GET
+    re_path(r'^frontline/notifications/dead-lettered/?$', frontline_agent.list_dead_lettered_notifications, name='frontline_list_dlq'),  # GET
+    re_path(r'^frontline/notifications/(?P<notification_id>\d+)/retry/?$', frontline_agent.retry_dead_lettered_notification, name='frontline_retry_dlq'),  # POST
+    re_path(r'^frontline/unsubscribe/?$', frontline_agent.public_unsubscribe, name='frontline_public_unsubscribe'),  # GET/POST (public, no auth)
     re_path(r'^frontline/notifications/schedule/?$', frontline_agent.schedule_notification, name='frontline_schedule_notification'),  # POST
     re_path(r'^frontline/notifications/send/?$', frontline_agent.send_notification_now, name='frontline_send_notification_now'),  # POST
     re_path(r'^frontline/notifications/preferences/?$', frontline_agent.get_notification_preferences, name='frontline_get_notification_preferences'),  # GET
@@ -395,6 +442,9 @@ urlpatterns = [
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/update/?$', frontline_agent.update_workflow, name='frontline_update_workflow'),  # PATCH/PUT
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/delete/?$', frontline_agent.delete_workflow, name='frontline_delete_workflow'),  # DELETE
     re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/execute/?$', frontline_agent.execute_workflow, name='frontline_execute_workflow'),  # POST
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/dry-run/?$', frontline_agent.dry_run_workflow, name='frontline_dry_run_workflow'),  # POST
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/versions/?$', frontline_agent.list_workflow_versions, name='frontline_list_workflow_versions'),  # GET
+    re_path(r'^frontline/workflows/(?P<workflow_id>\d+)/versions/(?P<version>\d+)/rollback/?$', frontline_agent.rollback_workflow, name='frontline_rollback_workflow'),  # POST
     re_path(r'^frontline/workflows/executions/?$', frontline_agent.list_workflow_executions, name='frontline_list_workflow_executions'),  # GET
     re_path(r'^frontline/workflows/executions/(?P<execution_id>\d+)/approve/?$', frontline_agent.approve_workflow_execution, name='frontline_approve_workflow_execution'),  # POST
     re_path(r'^frontline/workflows/company-users/?$', frontline_agent.list_workflow_company_users, name='frontline_list_workflow_company_users'),  # GET
@@ -407,6 +457,7 @@ urlpatterns = [
     re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/delete/?$', frontline_agent.frontline_graph_prompts_delete, name='frontline_graph_prompts_delete'),  # DELETE
     re_path(r'^frontline/analytics/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', frontline_agent.frontline_graph_prompts_favorite, name='frontline_graph_prompts_favorite'),  # PATCH
     re_path(r'^frontline/analytics/export/?$', frontline_agent.frontline_analytics_export, name='frontline_analytics_export'),  # GET
+    re_path(r'^frontline/analytics/agent-performance/?$', frontline_agent.frontline_agent_performance, name='frontline_agent_performance'),  # GET
 
     # Operations Agent endpoints
     re_path(r'^operations/dashboard/?$', operations_agent.dashboard_stats, name='operations_dashboard_stats'),  # GET
@@ -427,6 +478,18 @@ urlpatterns = [
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/rename/?$', operations_agent.rename_qa_chat, name='operations_qa_rename_chat'),  # PATCH
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/delete/?$', operations_agent.delete_qa_chat, name='operations_qa_delete_chat'),  # DELETE
 
+    # Operations Document Authoring endpoints
+    re_path(r'^operations/authoring/generate/?$', operations_agent.generate_document, name='operations_authoring_generate'),  # POST
+    re_path(r'^operations/authoring/documents/?$', operations_agent.list_generated_documents, name='operations_authoring_list'),  # GET
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/?$', operations_agent.get_generated_document, name='operations_authoring_get'),  # GET
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/update/?$', operations_agent.update_generated_document, name='operations_authoring_update'),  # PATCH
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/delete/?$', operations_agent.delete_generated_document, name='operations_authoring_delete'),  # DELETE
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/regenerate/?$', operations_agent.regenerate_document, name='operations_authoring_regenerate'),  # POST
+    re_path(r'^operations/authoring/documents/(?P<doc_id>\d+)/export/pdf/?$', operations_agent.export_generated_document_pdf, name='operations_authoring_export_pdf'),  # GET
+    re_path(r'^operations/authoring/generate/stream/?$', operations_agent.stream_generate_document, name='operations_authoring_generate_stream'),  # POST
+
+    # Operations Analytics
+    re_path(r'^operations/analytics/?$', operations_agent.operations_analytics, name='operations_analytics'),  # GET
     # Reply Draft Agent endpoints
     re_path(r'^reply-draft/dashboard/?$', reply_draft_api.dashboard, name='reply_draft_dashboard'),
     re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
