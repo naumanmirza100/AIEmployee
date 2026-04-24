@@ -20,7 +20,7 @@ from email.utils import parsedate_to_datetime
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import IntegrityError
-from marketing_agent.models import EmailAccount, EmailSendHistory, CampaignContact, Reply, Campaign, Lead
+from marketing_agent.models import EmailAccount, EmailSendHistory, CampaignContact, Reply, Campaign
 from marketing_agent.views import mark_contact_replied
 from reply_draft_agent.models import InboxEmail
 import logging
@@ -33,7 +33,10 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = 'Sync inbox via IMAP and detect email replies automatically'
 
-    DEFAULT_SINCE_DAYS = 30
+    # Fixed 120-day rolling window. The Reply Draft Agent's dropdown is a
+    # pure view filter over already-cached rows, so we always pull the max
+    # range here and let the UI slice it client-side.
+    DEFAULT_SINCE_DAYS = 120
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -49,20 +52,28 @@ class Command(BaseCommand):
         parser.add_argument(
             '--since-days',
             type=int,
-            default=self.DEFAULT_SINCE_DAYS,
-            help='How many days back to fetch from IMAP (default: 30). Pass a larger number for a one-shot backfill.',
+            default=None,
+            help='Override every account\'s imap_sync_days for this run only. '
+                 'If omitted, each EmailAccount uses its own configured window '
+                 '(default 30). Pass a larger number for a one-shot backfill.',
         )
 
     def handle(self, *args, **options):
         account_id = options.get('account_id')
         dry_run = options.get('dry_run', False)
-        since_days = options.get('since_days') or self.DEFAULT_SINCE_DAYS
-        if since_days < 1:
-            since_days = self.DEFAULT_SINCE_DAYS
+        # --since-days, when passed explicitly, overrides every account's own
+        # imap_sync_days setting for this one run. Useful for one-off deep
+        # syncs. When omitted, each account uses its configured window.
+        cli_since_days = options.get('since_days')
+        if cli_since_days is not None and cli_since_days < 1:
+            cli_since_days = None
 
         self.stdout.write(self.style.SUCCESS('\n=== Starting IMAP Inbox Sync ===\n'))
         self.stdout.write(f'Current time: {timezone.now()}')
-        self.stdout.write(f'IMAP window: last {since_days} day(s)')
+        if cli_since_days:
+            self.stdout.write(f'IMAP window (CLI override): last {cli_since_days} day(s) for every account')
+        else:
+            self.stdout.write(f'IMAP window: last {self.DEFAULT_SINCE_DAYS} day(s) (fixed)')
         
         if dry_run:
             self.stdout.write(self.style.WARNING('[DRY RUN] DRY RUN MODE - No replies will be processed\n'))
@@ -85,16 +96,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('[WARNING] Please enable IMAP sync in Email Accounts settings.'))
             return
         
-        # Known lead emails across ALL campaigns (not just active ones) — used to
-        # decide which non-campaign-reply messages are worth storing as generic
-        # InboxEmail rows. Senders outside this set are ignored entirely so the
-        # Reply Draft UI only surfaces mail from leads the company is working with.
-        campaign_leads = Lead.objects.filter(campaigns__isnull=False).distinct()
-        known_lead_emails = set(lead.email.lower() for lead in campaign_leads if lead.email)
-
-        self.stdout.write(f'Found {len(known_lead_emails)} known lead email(s) across all campaigns')
-        self.stdout.write('   Non-lead mail will be skipped; only lead mail is stored as InboxEmail.')
-
         total_replies_found = 0
         total_replies_processed = 0
         total_inbox_stored = 0
@@ -109,9 +110,14 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f'  [WARNING] IMAP settings incomplete for {account.email}. Skipping.'))
                 continue
 
+            # `imap_sync_days` on EmailAccount is retained for rollback safety
+            # but no longer consulted — the rolling window is fixed at
+            # DEFAULT_SINCE_DAYS. `--since-days` still works as a one-shot override.
+            account_since_days = cli_since_days or self.DEFAULT_SINCE_DAYS
+            self.stdout.write(f'  IMAP window for this account: last {account_since_days} day(s)')
             try:
                 replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
-                    account, dry_run, known_lead_emails, since_days=since_days,
+                    account, dry_run, since_days=account_since_days,
                 )
                 total_replies_found += replies_found
                 total_replies_processed += replies_processed
@@ -127,23 +133,20 @@ class Command(BaseCommand):
         self.stdout.write(f'Total generic inbox emails stored: {total_inbox_stored}')
         self.stdout.write(f'{"="*60}\n')
 
-    def sync_account_inbox(self, account, dry_run=False, known_lead_emails=None, since_days=None):
+    def sync_account_inbox(self, account, dry_run=False, since_days=None):
         """
         Sync inbox for a single email account.
 
         Campaign replies (matched by In-Reply-To / References / Subject) go into
-        the Reply table via the existing path. Mail from a known lead that is
-        not a campaign reply is stored as an InboxEmail row so the Reply Draft
-        Agent can surface it in the UI.
+        the Reply table via the existing path. Every other incoming message is
+        stored as an InboxEmail row so the Reply Draft Agent can surface the
+        full mailbox for the last N days.
         """
         if since_days is None or since_days < 1:
             since_days = self.DEFAULT_SINCE_DAYS
         replies_found = 0
         replies_processed = 0
         inbox_stored = 0
-
-        if known_lead_emails is None:
-            known_lead_emails = set()
 
         try:
             # Connect to IMAP server
@@ -169,19 +172,29 @@ class Command(BaseCommand):
                 mail.logout()
                 return replies_found, replies_processed, inbox_stored
 
-            email_ids = messages[0].split()
+            # Reverse so we process newest messages first. IMAP SEARCH returns
+            # UIDs oldest-to-newest; if we fetched in that order, the Reply Draft
+            # UI's default "Last 30 days" view stays empty for 30-60s while only
+            # old messages land, then suddenly fills. Newest-first makes each
+            # view window populate progressively in the order users actually care
+            # about — you see today's mail first, week-old next, etc.
+            email_ids = list(reversed(messages[0].split()))
 
             if not email_ids:
                 self.stdout.write(f'  [INFO] No emails in the last {since_days} day(s)')
                 mail.logout()
                 return replies_found, replies_processed, inbox_stored
 
-            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last {since_days} day(s)')
+            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last {since_days} day(s) (processing newest first)')
 
             emails_checked = 0
             emails_skipped_known = 0
+            # Log progress every N messages so long-running syncs (hundreds
+            # of emails on a first-time pull) are observable from celery_worker.log.
+            progress_every = 25
+            total_to_process = len(email_ids)
 
-            for email_id in email_ids:
+            for idx, email_id in enumerate(email_ids, start=1):
                 try:
                     # Stage 1: peek at headers only, bail out if we've already stored this Message-ID.
                     status, hdr_data = mail.fetch(email_id, '(BODY.PEEK[HEADER])')
@@ -229,12 +242,9 @@ class Command(BaseCommand):
                             self.stdout.write(f'     [SKIP] Skipped (dry run)')
                         continue
 
-                    # Step 2: generic inbox mail — only store if the sender is a
-                    # lead on any of this company's campaigns. Skip everything else.
+                    # Step 2: generic inbox mail — store every message so the
+                    # Reply Draft UI surfaces the full mailbox (last N days).
                     if dry_run:
-                        continue
-
-                    if sender_email.lower() not in known_lead_emails:
                         continue
 
                     if self.store_inbox_email(msg, account, sender_email):
@@ -244,6 +254,13 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.ERROR(f'  [ERROR] Error processing email {email_id.decode()}: {str(e)}'))
                     logger.error(f'Error processing email {email_id.decode()}: {str(e)}', exc_info=True)
                     continue
+
+                # Progress heartbeat — so long syncs are visible in celery_worker.log.
+                if idx % progress_every == 0 or idx == total_to_process:
+                    self.stdout.write(
+                        f'  [PROGRESS] {idx}/{total_to_process}  checked={emails_checked}  '
+                        f'skipped={emails_skipped_known}  stored={inbox_stored}  replies={replies_found}'
+                    )
 
             mail.logout()
             self.stdout.write(f'\n  [OK] Finished processing account: {account.email}')

@@ -358,7 +358,7 @@ class Command(BaseCommand):
                 lead.refresh_from_db(fields=['email', 'first_name', 'last_name', 'company', 'job_title'])
 
             if not dry_run:
-                email_account = sub_sequence.email_account
+                email_account = sub_sequence.get_sending_account()
                 result = email_service.send_email(
                     template=next_step.template, lead=lead,
                     campaign=campaign, email_account=email_account
@@ -425,7 +425,7 @@ class Command(BaseCommand):
             lead.refresh_from_db(fields=['email', 'first_name', 'last_name', 'company', 'job_title'])
 
         if not dry_run:
-            email_account = sequence.email_account
+            email_account = sequence.get_sending_account()
             result = email_service.send_email(
                 template=next_step.template, lead=lead,
                 campaign=campaign, email_account=email_account

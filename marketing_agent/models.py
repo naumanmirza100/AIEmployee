@@ -92,7 +92,16 @@ class Campaign(models.Model):
     
     # Leads relationship - using custom through model to specify table name
     leads = models.ManyToManyField('Lead', blank=True, related_name='campaigns', through='CampaignLead')
-    
+
+    # Default sending account for all sequences in this campaign. Individual
+    # sequences may override via EmailSequence.email_account; when that is null
+    # the sequence inherits this value (see EmailSequence.get_sending_account).
+    email_account = models.ForeignKey(
+        'EmailAccount', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='campaigns',
+        help_text='Default email account to send from for sequences in this campaign',
+    )
+
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='marketing_campaigns')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -520,6 +529,19 @@ class EmailSequence(models.Model):
         sequence_type = "Sub-Sequence" if self.is_sub_sequence else "Sequence"
         return f"{sequence_type}: {self.name} - {self.campaign.name}"
 
+    def get_sending_account(self):
+        """Resolve which EmailAccount to send from.
+
+        Priority: sequence.email_account (explicit override) -> campaign.email_account (default).
+        Returns None if neither is set; email_service.send_email then falls back
+        to the owner's default active account.
+        """
+        if self.email_account_id:
+            return self.email_account
+        if self.campaign_id and self.campaign.email_account_id:
+            return self.campaign.email_account
+        return None
+
 
 class EmailSequenceStep(models.Model):
     """Individual step in an email sequence"""
@@ -649,7 +671,11 @@ class EmailAccount(models.Model):
     imap_username = models.CharField(max_length=255, blank=True, help_text='IMAP username (usually same as email)')
     imap_password = models.CharField(max_length=500, blank=True, help_text='IMAP password')
     enable_imap_sync = models.BooleanField(default=False, help_text='Enable automatic IMAP sync for reply detection')
-    
+    imap_sync_days = models.PositiveIntegerField(
+        default=30,
+        help_text='How many days of mail to pull on each IMAP sync. Used by the Reply Draft Agent inbox view.',
+    )
+
     # Status
     is_active = models.BooleanField(default=True, help_text='Is this account active and ready to use?')
     is_default = models.BooleanField(default=False, help_text='Use this as default account for sending')

@@ -13,12 +13,13 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 from django.contrib.auth.models import User
 from django.db.models import Count, Max, Prefetch
+from django.db.models.functions import Substr
 from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
-from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory
+from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail
 from reply_draft_agent.permissions import company_has_module
@@ -63,10 +64,18 @@ def _sender_name(lead):
     return full or (lead.email.split('@')[0] if lead.email else '')
 
 
-def _serialize_reply(r):
+def _serialize_reply(r, *, include_body=False):
+    """Serialize a Reply row.
+
+    ``include_body`` is False in the list response (the ``body`` field is deferred
+    and ``preview`` is pre-computed via SQL SUBSTRING in the queryset annotation).
+    The detail endpoint passes True so clicking a row returns the full content.
+    """
     lead = r.lead if r.lead_id else None
-    content = r.reply_content or ''
-    return {
+    preview = getattr(r, '_list_preview', None)
+    if preview is None:
+        preview = (r.reply_content or '')[:200]
+    out = {
         'id': r.id,
         'source': 'reply',
         'from_email': lead.email if lead else '',
@@ -74,19 +83,24 @@ def _serialize_reply(r):
         'from_company': lead.company if lead else '',
         'from_job_title': lead.job_title if lead else '',
         'subject': r.reply_subject or '(no subject)',
-        'preview': content[:200],
-        'body': content,
+        'preview': preview,
         'interest_level': r.interest_level,
         'replied_at': r.replied_at.isoformat() if r.replied_at else None,
         'campaign_id': r.campaign_id,
         'campaign': r.campaign.name if r.campaign_id else '',
         'analysis': r.analysis or '',
     }
+    if include_body:
+        out['body'] = r.reply_content or ''
+    return out
 
 
-def _serialize_inbox_email(m):
-    content = m.body or ''
-    return {
+def _serialize_inbox_email(m, *, include_body=False):
+    """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics."""
+    preview = getattr(m, '_list_preview', None)
+    if preview is None:
+        preview = (m.body or '')[:200]
+    out = {
         'id': m.id,
         'source': 'inbox',
         'from_email': m.from_email,
@@ -94,14 +108,16 @@ def _serialize_inbox_email(m):
         'from_company': '',
         'from_job_title': '',
         'subject': m.subject or '(no subject)',
-        'preview': content[:200],
-        'body': content,
+        'preview': preview,
         'interest_level': m.interest_level,
         'replied_at': m.received_at.isoformat() if m.received_at else None,
         'campaign_id': None,
         'campaign': '',
         'analysis': m.analysis or '',
     }
+    if include_body:
+        out['body'] = m.body or ''
+    return out
 
 
 def _serialize_draft(d):
@@ -142,7 +158,12 @@ def _serialize_draft(d):
 
 
 def _parse_days_filter(value):
-    """Return a timezone-aware cutoff datetime, or None for 'all time'."""
+    """Return a timezone-aware cutoff datetime, or None for 'all time'.
+
+    Missing / blank / 'all' means no cutoff — the natural cap is whatever is
+    already stored (Celery always pre-syncs the full 120-day window on a cron,
+    so the dropdown is a pure view filter). Specific integers narrow the view.
+    """
     if value is None or value == '' or str(value).lower() == 'all':
         return None
     try:
@@ -186,22 +207,6 @@ def _visible_campaigns(user_ids):
     return Campaign.objects.filter(owner_id__in=user_ids).order_by('-created_at')
 
 
-def _known_lead_emails(user_ids):
-    """Emails of every Lead attached to any Campaign in this company.
-
-    Used to decide which InboxEmail rows should surface in the Reply Draft UI.
-    """
-    if not user_ids:
-        return set()
-    campaign_ids = Campaign.objects.filter(owner_id__in=user_ids).values_list('id', flat=True)
-    emails = (
-        Lead.objects.filter(campaigns__in=list(campaign_ids))
-        .values_list('email', flat=True)
-        .distinct()
-    )
-    return {e.lower() for e in emails if e}
-
-
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -220,15 +225,12 @@ def dashboard(request):
             id__in=live_drafts_qs.filter(original_email_id__isnull=False).values_list('original_email_id', flat=True)
         ).count()
 
-        lead_emails = _known_lead_emails(user_ids)
-        pending_inbox_count = 0
-        if lead_emails:
-            pending_inbox_count = (
-                InboxEmail.objects
-                .filter(owner_id__in=user_ids, from_email__in=lead_emails)
-                .exclude(id__in=live_drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True))
-                .count()
-            )
+        pending_inbox_count = (
+            InboxEmail.objects
+            .filter(owner_id__in=user_ids)
+            .exclude(id__in=live_drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True))
+            .count()
+        )
 
         stats = {
             'pending_replies': pending_reply_count + pending_inbox_count,
@@ -260,14 +262,16 @@ def dashboard(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_pending_replies(request):
-    """Inbox view: campaign replies + generic inbox emails from known campaign leads.
+    """Inbox view: campaign replies + every generic inbox email in the window.
 
-    Non-lead mail (newsletters, personal mail, etc.) is filtered out — only
-    senders that appear as a Lead on any campaign in this company are shown.
+    Generic inbox mail is no longer gated on the sender being a known lead —
+    the Reply Draft UI surfaces the full mailbox so the user can draft a reply
+    to anything. Use ``days`` to widen or disable the rolling window.
 
     Query params:
       - campaign: campaign id, or 'none' (generic inbox only), or blank (all)
-      - days: 1 / 7 / 30 / 'all' (default: all)
+      - days: 1 / 7 / 30 / 60 / 90 / 120 / 'all' (default: all stored rows;
+              the underlying storage window is set per-account via Sync depth)
     """
     gate = _enforce_module(request.user)
     if gate is not None:
@@ -293,6 +297,12 @@ def list_pending_replies(request):
 
     items = []
 
+    # The body / reply_content columns can be 10-100KB each on MSSQL. Pulling
+    # them for the list view tanked /pending-replies to 30s for 350 rows.
+    # We defer them + pre-compute a 200-char preview via SQL SUBSTRING instead;
+    # the full body is loaded lazily by the detail endpoints when a row is clicked.
+    preview_len = 200
+
     # Campaign replies — included unless the user asked for generic-only ('none').
     if campaign_param != 'none':
         reply_qs = (
@@ -300,6 +310,8 @@ def list_pending_replies(request):
             .filter(lead__owner_id__in=user_ids)
             .exclude(id__in=drafted_reply_ids)
             .select_related('lead', 'campaign')
+            .defer('reply_content')
+            .annotate(_list_preview=Substr('reply_content', 1, preview_len))
         )
         if days_cutoff is not None:
             reply_qs = reply_qs.filter(replied_at__gte=days_cutoff)
@@ -308,32 +320,123 @@ def list_pending_replies(request):
                 reply_qs = reply_qs.filter(campaign_id=int(campaign_param))
             except ValueError:
                 pass
-        for r in reply_qs.order_by('-replied_at')[:150]:
+        for r in reply_qs.order_by('-replied_at')[:2000]:
             items.append((r.replied_at, _serialize_reply(r)))
 
-    # Generic inbox emails — only show messages whose sender is a Lead in this
-    # company's campaigns. Excluded entirely when the user picked a specific campaign.
+    # Generic inbox emails — every mail that landed in any of this company's
+    # accounts in the window. Excluded entirely when the user picked a specific
+    # campaign (that filter is inherently lead-scoped).
     specific_campaign_selected = bool(campaign_param) and campaign_param != 'none'
     if not specific_campaign_selected:
-        lead_emails = _known_lead_emails(user_ids)
-        if lead_emails:
-            inbox_qs = (
-                InboxEmail.objects.filter(owner_id__in=user_ids, from_email__in=lead_emails)
-                .exclude(id__in=drafted_inbox_ids)
-                .select_related('email_account')
-            )
-            if days_cutoff is not None:
-                inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
-            for m in inbox_qs.order_by('-received_at')[:150]:
-                items.append((m.received_at, _serialize_inbox_email(m)))
+        inbox_qs = (
+            InboxEmail.objects.filter(owner_id__in=user_ids)
+            .exclude(id__in=drafted_inbox_ids)
+            .select_related('email_account')
+            .defer('body')
+            .annotate(_list_preview=Substr('body', 1, preview_len))
+        )
+        if days_cutoff is not None:
+            inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
+        for m in inbox_qs.order_by('-received_at')[:2000]:
+            items.append((m.received_at, _serialize_inbox_email(m)))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
-    payload = [entry for _, entry in items[:200]]
+    # Cap at 2000 so a broken client can't pull the entire mailbox; in
+    # practice a 120-day window on a typical business inbox stays well below this.
+    payload = [entry for _, entry in items[:2000]]
 
     return Response({
         'status': 'success',
         'data': payload,
     })
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_inbox_email(request, email_id):
+    """Return a single InboxEmail row including its full body.
+
+    Used by the frontend when the user clicks a row — the list view serves
+    only previews (see list_pending_replies) because pulling body for every
+    row turned MSSQL into a bottleneck.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    m = InboxEmail.objects.filter(id=email_id, owner_id__in=user_ids).select_related('email_account').first()
+    if m is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _serialize_inbox_email(m, include_body=True)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_reply(request, reply_id):
+    """Return a single Reply (campaign reply) row including its full content."""
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    r = Reply.objects.filter(id=reply_id, lead__owner_id__in=user_ids).select_related('lead', 'campaign').first()
+    if r is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _serialize_reply(r, include_body=True)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_sync_accounts(request):
+    """Small summary of the email accounts this company is (or should be) syncing.
+
+    Powers a visibility card in the Reply Draft UI — "where does this inbox
+    come from" and "why is the inbox empty" (if no account is configured).
+    Returns both configured and IMAP-ready-but-misconfigured accounts so the
+    UI can flag them.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    accounts = EmailAccount.objects.filter(owner_id__in=user_ids).order_by('-is_default', '-is_active', '-created_at')
+
+    # Single query to avoid N+1 when there are many accounts.
+    from django.db.models import Count
+    inbox_counts = dict(
+        InboxEmail.objects.filter(email_account_id__in=[a.id for a in accounts])
+        .values_list('email_account_id')
+        .order_by()
+        .annotate(c=Count('id'))
+    )
+
+    data = []
+    for a in accounts:
+        imap_ready = bool(a.imap_host and a.imap_username and a.imap_password)
+        will_sync = a.is_active and a.enable_imap_sync and imap_ready
+        inbox_count = inbox_counts.get(a.id, 0)
+        data.append({
+            'id': a.id,
+            'name': a.name,
+            'email': a.email,
+            'account_type': a.account_type,
+            'is_active': a.is_active,
+            'enable_imap_sync': a.enable_imap_sync,
+            'imap_ready': imap_ready,   # has all three credential fields
+            'will_sync': will_sync,
+            'imap_host': a.imap_host or '',
+            'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
+            'test_status': getattr(a, 'test_status', 'not_tested') or 'not_tested',
+            # --- First-sync UX signals ---
+            # inbox_count lets the frontend show a "Syncing your inbox…" card
+            # when the account is configured but no rows have landed yet.
+            'inbox_count': inbox_count,
+            'created_at': a.created_at.isoformat() if a.created_at else None,
+            'updated_at': a.updated_at.isoformat() if a.updated_at else None,
+        })
+    return Response({'status': 'success', 'data': data})
 
 
 @api_view(['GET'])

@@ -45,7 +45,8 @@
       "Bash(node test_reply_draft_frontend_helpers.mjs)",
       "Bash(npm run *)",
       "Bash(rm reply_draft_agent/migrations/0002_inboxemail_and_optional_source.py)",
-      "Read(//d/University/work/AI_Employyes/NewAgentForReply/**)"
+      "Read(//d/University/work/AI_Employyes/NewAgentForReply/**)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")"
     ]
   }
 }

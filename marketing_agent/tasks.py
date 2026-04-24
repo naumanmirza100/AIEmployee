@@ -36,15 +36,21 @@ def send_sequence_emails_task(self):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=300)
-def sync_inbox_task(self):
+def sync_inbox_task(self, account_id=None):
     """
     Celery task to sync inbox and detect email replies.
     Handles: Reply detection, AI analysis, sub-sequence assignment.
-    
-    Scheduled: Every 5-10 minutes via Celery Beat
-    Replaces: Windows Task Scheduler running 'sync_inbox'
+
+    Scheduled: Every 5-10 minutes via Celery Beat (syncs ALL accounts).
+    Also dispatched on-demand from create/update_email_account with a
+    specific account_id for instant single-account sync — so a newly
+    configured mailbox starts populating within ~30s instead of waiting
+    up to 5 minutes for the next beat tick.
     """
     try:
+        if account_id:
+            call_command('sync_inbox', account_id=account_id)
+            return {'status': 'success', 'message': f'Inbox synced for account {account_id}'}
         call_command('sync_inbox')
         return {'status': 'success', 'message': 'Inbox synced'}
     except Exception as e:
@@ -96,11 +102,15 @@ def retry_failed_emails_task(self):
         for email_history in failed_emails:
             try:
                 from marketing_agent.services.email_service import email_service
+                # EmailSendHistory has no email_account FK, so we resolve via
+                # the campaign's default. send_email also falls back to the
+                # owner's default active account when this is None.
+                retry_account = email_history.campaign.email_account if email_history.campaign else None
                 result = email_service.send_email(
                     template=email_history.email_template,
                     lead=email_history.lead,
                     campaign=email_history.campaign,
-                    email_account=email_history.email_account
+                    email_account=retry_account,
                 )
                 if result.get('success'):
                     retried_count += 1
