@@ -46,6 +46,8 @@ import {
   LineChart,
   AreaChart,
   Eye,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import marketingAgentService, {
   getSavedGraphPrompts,
@@ -1232,6 +1234,59 @@ const MarketingDashboard = () => {
                       <p className="text-xs text-destructive mt-1 break-words">{selectedAccount.test_error}</p>
                     )}
                   </div>
+                  {/* IMAP / inbox sync — drives the Reply Draft Agent. */}
+                  <div className="pt-3 border-t space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold">Inbox sync (IMAP)</p>
+                      {selectedAccount.enable_imap_sync ? (
+                        selectedAccount.imap_ready ? (
+                          <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 gap-1">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Syncing
+                          </Badge>
+                        ) : (
+                          <Badge variant="destructive" className="gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Enabled but incomplete
+                          </Badge>
+                        )
+                      ) : (
+                        <Badge variant="secondary">Disabled</Badge>
+                      )}
+                    </div>
+                    {selectedAccount.enable_imap_sync && !selectedAccount.imap_ready && (
+                      <p className="text-xs text-destructive">
+                        IMAP sync is on, but host / username / password aren't all filled in — this account won't actually sync. Click <span className="font-medium">Edit</span> to complete it.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Host</span>
+                        <span className="font-mono text-foreground/90 truncate ml-2" title={selectedAccount.imap_host || '—'}>
+                          {selectedAccount.imap_host || '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Port</span>
+                        <span className="font-mono text-foreground/90">
+                          {selectedAccount.imap_port || '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Username</span>
+                        <span className="font-mono text-foreground/90 truncate ml-2" title={selectedAccount.imap_username || '—'}>
+                          {selectedAccount.imap_username || '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">SSL</span>
+                        <span className="font-mono text-foreground/90">
+                          {selectedAccount.imap_use_ssl ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-3 gap-2 pt-2 border-t">
                     <div className="text-center">
                       <p className="text-lg font-semibold">{selectedAccount.sent_count ?? 0}</p>

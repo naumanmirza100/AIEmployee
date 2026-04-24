@@ -172,19 +172,29 @@ class Command(BaseCommand):
                 mail.logout()
                 return replies_found, replies_processed, inbox_stored
 
-            email_ids = messages[0].split()
+            # Reverse so we process newest messages first. IMAP SEARCH returns
+            # UIDs oldest-to-newest; if we fetched in that order, the Reply Draft
+            # UI's default "Last 30 days" view stays empty for 30-60s while only
+            # old messages land, then suddenly fills. Newest-first makes each
+            # view window populate progressively in the order users actually care
+            # about — you see today's mail first, week-old next, etc.
+            email_ids = list(reversed(messages[0].split()))
 
             if not email_ids:
                 self.stdout.write(f'  [INFO] No emails in the last {since_days} day(s)')
                 mail.logout()
                 return replies_found, replies_processed, inbox_stored
 
-            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last {since_days} day(s)')
+            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last {since_days} day(s) (processing newest first)')
 
             emails_checked = 0
             emails_skipped_known = 0
+            # Log progress every N messages so long-running syncs (hundreds
+            # of emails on a first-time pull) are observable from celery_worker.log.
+            progress_every = 25
+            total_to_process = len(email_ids)
 
-            for email_id in email_ids:
+            for idx, email_id in enumerate(email_ids, start=1):
                 try:
                     # Stage 1: peek at headers only, bail out if we've already stored this Message-ID.
                     status, hdr_data = mail.fetch(email_id, '(BODY.PEEK[HEADER])')
@@ -244,6 +254,13 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.ERROR(f'  [ERROR] Error processing email {email_id.decode()}: {str(e)}'))
                     logger.error(f'Error processing email {email_id.decode()}: {str(e)}', exc_info=True)
                     continue
+
+                # Progress heartbeat — so long syncs are visible in celery_worker.log.
+                if idx % progress_every == 0 or idx == total_to_process:
+                    self.stdout.write(
+                        f'  [PROGRESS] {idx}/{total_to_process}  checked={emails_checked}  '
+                        f'skipped={emails_skipped_known}  stored={inbox_stored}  replies={replies_found}'
+                    )
 
             mail.logout()
             self.stdout.write(f'\n  [OK] Finished processing account: {account.email}')

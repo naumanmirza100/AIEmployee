@@ -2498,6 +2498,9 @@ def list_email_accounts(request):
             clicked_count = sent_qs.filter(status='clicked').count()
             open_rate = round((opened_count / sent_count * 100), 1) if sent_count > 0 else 0
             click_rate = round((clicked_count / sent_count * 100), 1) if sent_count > 0 else 0
+            # IMAP readiness — the Reply Draft inbox only syncs when sync is
+            # enabled AND all three credential fields are present.
+            imap_ready = bool(a.imap_host and a.imap_username and a.imap_password)
             data.append({
                 'id': a.id,
                 'name': a.name,
@@ -2509,6 +2512,13 @@ def list_email_accounts(request):
                 'use_ssl': a.use_ssl,
                 'is_active': a.is_active,
                 'is_default': a.is_default,
+                # IMAP / inbox sync (never includes the password itself)
+                'enable_imap_sync': a.enable_imap_sync,
+                'imap_host': a.imap_host or '',
+                'imap_port': a.imap_port,
+                'imap_use_ssl': a.imap_use_ssl,
+                'imap_username': a.imap_username or '',
+                'imap_ready': imap_ready,
                 'test_status': getattr(a, 'test_status', 'not_tested') or 'not_tested',
                 'test_error': getattr(a, 'test_error', '') or '',
                 'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
@@ -2559,6 +2569,28 @@ def create_email_account(request):
                 {'status': 'error', 'message': 'SMTP password is required.', 'error': 'validation'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # When IMAP sync is enabled, every IMAP field is required — otherwise
+        # sync_inbox silently skips the account and the Reply Draft inbox
+        # stays empty with no feedback to the user.
+        enable_imap_sync = bool(data.get('enable_imap_sync', False))
+        imap_host = (data.get('imap_host') or '').strip()
+        imap_username = (data.get('imap_username') or '').strip()
+        imap_password = data.get('imap_password') or ''
+        if enable_imap_sync:
+            missing = [f for f, v in [
+                ('imap_host', imap_host),
+                ('imap_username', imap_username),
+                ('imap_password', imap_password),
+            ] if not v]
+            if missing:
+                return Response({
+                    'status': 'error',
+                    'message': f'IMAP sync is enabled but these fields are blank: {", ".join(missing)}.',
+                    'error': 'validation',
+                    'fields': missing,
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         account = EmailAccount.objects.create(
             owner=user,
             name=name,
@@ -2571,18 +2603,35 @@ def create_email_account(request):
             use_tls=data.get('use_tls', True),
             use_ssl=data.get('use_ssl', False),
             is_gmail_app_password=data.get('is_gmail_app_password', False),
-            imap_host=data.get('imap_host', ''),
+            imap_host=imap_host,
             imap_port=int(data.get('imap_port')) if data.get('imap_port') else None,
             imap_use_ssl=data.get('imap_use_ssl', True),
-            imap_username=data.get('imap_username', ''),
-            imap_password=data.get('imap_password', ''),
-            enable_imap_sync=data.get('enable_imap_sync', False),
+            imap_username=imap_username,
+            imap_password=imap_password,
+            enable_imap_sync=enable_imap_sync,
             is_active=data.get('is_active', True),
             is_default=data.get('is_default', False),
         )
+
+        # Fire a targeted Celery sync immediately so a newly configured mailbox
+        # starts populating within ~30s instead of waiting up to 5 minutes for
+        # the next beat tick. Safe to swallow — the periodic job is a fallback.
+        sync_queued = False
+        if account.enable_imap_sync and account.imap_host and account.imap_username and account.imap_password:
+            try:
+                from marketing_agent.tasks import sync_inbox_task
+                sync_inbox_task.delay(account_id=account.id)
+                sync_queued = True
+            except Exception:
+                logger.exception('create_email_account: failed to enqueue immediate inbox sync')
+
         return Response({
             'status': 'success',
-            'data': {'account_id': account.id, 'message': 'Email account created successfully.'},
+            'data': {
+                'account_id': account.id,
+                'message': 'Email account created successfully.',
+                'immediate_sync_queued': sync_queued,
+            },
         }, status=status.HTTP_201_CREATED)
     except Exception as e:
         logger.exception("create_email_account failed")
@@ -2665,19 +2714,63 @@ def update_email_account(request, account_id):
         account.use_tls = data.get('use_tls', account.use_tls)
         account.use_ssl = data.get('use_ssl', account.use_ssl)
         account.is_gmail_app_password = data.get('is_gmail_app_password', account.is_gmail_app_password)
-        account.imap_host = data.get('imap_host', account.imap_host or '')
+        # Stage the new IMAP values, then validate cross-field before persisting
+        # so a half-configured IMAP account can't slip through and be silently
+        # skipped by sync_inbox.
+        new_imap_host = (data.get('imap_host', account.imap_host) or '').strip()
+        new_imap_username = (data.get('imap_username', account.imap_username) or '').strip()
+        new_imap_password = data['imap_password'] if data.get('imap_password') else account.imap_password
+        new_enable_imap_sync = data.get('enable_imap_sync', account.enable_imap_sync)
+        if new_enable_imap_sync:
+            missing = [f for f, v in [
+                ('imap_host', new_imap_host),
+                ('imap_username', new_imap_username),
+                ('imap_password', new_imap_password),
+            ] if not v]
+            if missing:
+                return Response({
+                    'status': 'error',
+                    'message': f'IMAP sync is enabled but these fields are blank: {", ".join(missing)}.',
+                    'error': 'validation',
+                    'fields': missing,
+                }, status=status.HTTP_400_BAD_REQUEST)
+        # Detect meaningful IMAP changes so we only trigger an immediate
+        # re-sync when there's actually something new to pull.
+        imap_touched = (
+            new_imap_host != (account.imap_host or '')
+            or new_imap_username != (account.imap_username or '')
+            or new_imap_password != (account.imap_password or '')
+            or bool(new_enable_imap_sync) != bool(account.enable_imap_sync)
+        )
+
+        account.imap_host = new_imap_host
         account.imap_port = int(data.get('imap_port')) if data.get('imap_port') else account.imap_port
         account.imap_use_ssl = data.get('imap_use_ssl', account.imap_use_ssl)
-        account.imap_username = data.get('imap_username', account.imap_username or '')
-        if data.get('imap_password'):
-            account.imap_password = data['imap_password']
-        account.enable_imap_sync = data.get('enable_imap_sync', account.enable_imap_sync)
+        account.imap_username = new_imap_username
+        account.imap_password = new_imap_password
+        account.enable_imap_sync = new_enable_imap_sync
         account.is_active = data.get('is_active', account.is_active)
         account.is_default = data.get('is_default', account.is_default)
         account.save()
+
+        # Fire an immediate targeted sync if IMAP was just turned on, credentials
+        # changed, or the sync toggle flipped. Keeps inbox fresh without waiting
+        # for the 5-min beat tick.
+        sync_queued = False
+        if imap_touched and account.enable_imap_sync and account.imap_host and account.imap_username and account.imap_password:
+            try:
+                from marketing_agent.tasks import sync_inbox_task
+                sync_inbox_task.delay(account_id=account.id)
+                sync_queued = True
+            except Exception:
+                logger.exception('update_email_account: failed to enqueue immediate inbox sync')
+
         return Response({
             'status': 'success',
-            'data': {'message': 'Email account updated successfully.'},
+            'data': {
+                'message': 'Email account updated successfully.',
+                'immediate_sync_queued': sync_queued,
+            },
         }, status=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("update_email_account failed")
@@ -2691,18 +2784,34 @@ def update_email_account(request, account_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def delete_email_account(request, account_id):
-    """Delete an email account."""
+    """Delete an email account.
+
+    Wrapped in a transaction and disables IMAP sync first so the Celery
+    sync_inbox task can't race in and insert a new InboxEmail row between
+    Django's child-delete and parent-delete steps. The DB-level FKs on
+    InboxEmail / ReplyDraft / EmailSequence are also configured to
+    CASCADE / SET NULL (see migration), so even if a row slips in, the
+    parent delete still succeeds.
+    """
+    from django.db import transaction
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        account = EmailAccount.objects.filter(id=account_id, owner=user).first()
-        if not account:
-            return Response(
-                {'status': 'error', 'message': 'Account not found.', 'error': 'not_found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        name = account.name
-        account.delete()
+        with transaction.atomic():
+            account = EmailAccount.objects.select_for_update().filter(
+                id=account_id, owner=user
+            ).first()
+            if not account:
+                return Response(
+                    {'status': 'error', 'message': 'Account not found.', 'error': 'not_found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            name = account.name
+            # Stop new syncs before deletion so Celery doesn't reinsert rows.
+            if account.enable_imap_sync:
+                account.enable_imap_sync = False
+                account.save(update_fields=['enable_imap_sync'])
+            account.delete()
         return Response({
             'status': 'success',
             'data': {'message': f'Email account "{name}" deleted successfully.'},

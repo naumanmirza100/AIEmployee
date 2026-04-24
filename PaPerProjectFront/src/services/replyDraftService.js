@@ -130,6 +130,18 @@ export const sendDraft = async (draftId) => {
   }
 };
 
+// Summary of the email accounts this company syncs from. Drives the
+// visibility card in the Reply Draft UI (show which account is syncing /
+// prompt to add one when none is configured).
+export const listSyncAccounts = async () => {
+  try {
+    return await companyApi.get('/reply-draft/sync-accounts');
+  } catch (error) {
+    console.error('List sync accounts error:', error);
+    throw error;
+  }
+};
+
 // Fetch the full body for a single inbox item. The list endpoint serves
 // only a 200-char preview so the page loads fast; this fills in the full
 // content when the user clicks a row.

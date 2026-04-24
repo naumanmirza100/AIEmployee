@@ -19,7 +19,7 @@ from django.utils import timezone
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
-from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory
+from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail
 from reply_draft_agent.permissions import company_has_module
@@ -384,6 +384,59 @@ def get_reply(request, reply_id):
     if r is None:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
     return Response({'status': 'success', 'data': _serialize_reply(r, include_body=True)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_sync_accounts(request):
+    """Small summary of the email accounts this company is (or should be) syncing.
+
+    Powers a visibility card in the Reply Draft UI — "where does this inbox
+    come from" and "why is the inbox empty" (if no account is configured).
+    Returns both configured and IMAP-ready-but-misconfigured accounts so the
+    UI can flag them.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    accounts = EmailAccount.objects.filter(owner_id__in=user_ids).order_by('-is_default', '-is_active', '-created_at')
+
+    # Single query to avoid N+1 when there are many accounts.
+    from django.db.models import Count
+    inbox_counts = dict(
+        InboxEmail.objects.filter(email_account_id__in=[a.id for a in accounts])
+        .values_list('email_account_id')
+        .order_by()
+        .annotate(c=Count('id'))
+    )
+
+    data = []
+    for a in accounts:
+        imap_ready = bool(a.imap_host and a.imap_username and a.imap_password)
+        will_sync = a.is_active and a.enable_imap_sync and imap_ready
+        inbox_count = inbox_counts.get(a.id, 0)
+        data.append({
+            'id': a.id,
+            'name': a.name,
+            'email': a.email,
+            'account_type': a.account_type,
+            'is_active': a.is_active,
+            'enable_imap_sync': a.enable_imap_sync,
+            'imap_ready': imap_ready,   # has all three credential fields
+            'will_sync': will_sync,
+            'imap_host': a.imap_host or '',
+            'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
+            'test_status': getattr(a, 'test_status', 'not_tested') or 'not_tested',
+            # --- First-sync UX signals ---
+            # inbox_count lets the frontend show a "Syncing your inbox…" card
+            # when the account is configured but no rows have landed yet.
+            'inbox_count': inbox_count,
+            'created_at': a.created_at.isoformat() if a.created_at else None,
+            'updated_at': a.updated_at.isoformat() if a.updated_at else None,
+        })
+    return Response({'status': 'success', 'data': data})
 
 
 @api_view(['GET'])

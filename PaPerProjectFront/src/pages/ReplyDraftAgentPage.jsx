@@ -46,6 +46,7 @@ import {
   rejectDraft,
   sendDraft,
   getReplyItem,
+  listSyncAccounts,
 } from '@/services/replyDraftService';
 
 // Pure view filter for the inbox list — Celery pre-syncs the full 120-day
@@ -206,6 +207,7 @@ const ReplyDraftAgentPage = () => {
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
+  const [syncAccounts, setSyncAccounts] = useState([]);     // email accounts visible to this company (for the "synced from" card)
   const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
@@ -273,6 +275,16 @@ const ReplyDraftAgentPage = () => {
     }
   }, []);
 
+  const refreshSyncAccounts = useCallback(async () => {
+    try {
+      const res = await listSyncAccounts();
+      setSyncAccounts(res?.data || []);
+    } catch (e) {
+      // Non-fatal — the visibility card just won't render.
+      console.error('Failed to load sync accounts', e);
+    }
+  }, []);
+
   const refreshLeads = useCallback(async () => {
     try {
       const res = await listReplyDraftLeads({
@@ -298,6 +310,7 @@ const ReplyDraftAgentPage = () => {
     if (hasAccess) {
       refreshCampaigns();
       refreshAll();
+      refreshSyncAccounts();
       // Hub cards show live counts → always fetch leads at least once on load.
       refreshLeads();
     }
@@ -314,9 +327,12 @@ const ReplyDraftAgentPage = () => {
     const interval = setInterval(() => {
       refreshInbox();
       refreshDrafts();
+      // Keep sync-accounts fresh so the "Syncing your inbox…" banner
+      // hides as soon as InboxEmail rows land from the Celery sync.
+      refreshSyncAccounts();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [hasAccess, refreshInbox, refreshDrafts]);
+  }, [hasAccess, refreshInbox, refreshDrafts, refreshSyncAccounts]);
 
   // Re-fetch the inbox whenever the user changes a filter.
   useEffect(() => {
@@ -683,6 +699,15 @@ const ReplyDraftAgentPage = () => {
               setHasRepliedFilter={setLeadsHasRepliedFilter}
               search={search}
               setSearch={setSearch}
+            />
+          )}
+
+          {/* Sync Source card — tells the user exactly which mailbox feeds
+              this inbox, or prompts them to configure one if it's empty. */}
+          {viewMode === 'workspace' && (
+            <SyncSourceCard
+              accounts={syncAccounts}
+              onConfigure={() => navigate('/marketing/dashboard')}
             />
           )}
 
@@ -1227,6 +1252,177 @@ const EmailBody = ({ body, isIncomingReply }) => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+const FIRST_SYNC_WINDOW_MS = 5 * 60 * 1000;  // hard cap so a stuck sync doesn't leave a banner up forever
+const ACTIVE_SYNC_WINDOW_MS = 2 * 60 * 1000; // show "Syncing in progress" chip for up to 2 min after IMAP config change
+
+const SyncSourceCard = ({ accounts, onConfigure }) => {
+  const total = accounts.length;
+  const syncing = accounts.filter((a) => a.will_sync);
+  const misconfigured = accounts.filter(
+    (a) => a.is_active && a.enable_imap_sync && !a.imap_ready
+  );
+
+  // Live-ticking timer — anchored to each account's updated_at (the moment
+  // its IMAP config was last touched, which is when the immediate Celery
+  // sync got dispatched).
+  const [now, setNow] = useState(() => Date.now());
+  const earliestActivity = syncing.length > 0
+    ? Math.max(...syncing.map((a) => new Date(a.updated_at || a.created_at || 0).getTime()))
+    : 0;
+  const elapsedMs = earliestActivity ? Math.max(0, now - earliestActivity) : 0;
+
+  // "First sync" = will_sync but nothing has landed yet. "Active sync" = just
+  // saved/updated config, rows may still be streaming in even if some have
+  // already landed. Newest-first sync ordering (see sync_inbox.py) means the
+  // 30-day view populates from the start, so we prefer showing the small
+  // progress chip over the big empty banner once inbox_count > 0.
+  const firstSync = syncing.filter((a) => (a.inbox_count || 0) === 0);
+  const firstSyncActive = firstSync.length > 0 && elapsedMs < FIRST_SYNC_WINDOW_MS;
+  const activelySyncing = syncing.length > 0 && elapsedMs < ACTIVE_SYNC_WINDOW_MS;
+  const totalInboxCount = syncing.reduce((s, a) => s + (a.inbox_count || 0), 0);
+
+  const showTimer = firstSyncActive || activelySyncing;
+  useEffect(() => {
+    if (!showTimer) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [showTimer]);
+
+  const mmss = (ms) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  // No email accounts at all → hard block, user must add one.
+  if (total === 0) {
+    return (
+      <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
+        <div className="h-11 w-11 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+          <AlertCircle className="h-5 w-5 text-amber-300" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-amber-100">No email account connected</div>
+          <div className="text-xs text-amber-200/80 mt-0.5">
+            Add a mailbox in the Marketing Agent's <span className="font-medium">Email Accounts</span> settings to start syncing replies here. Without an account, this inbox stays empty.
+          </div>
+        </div>
+        <Button
+          onClick={onConfigure}
+          className="bg-amber-500 hover:bg-amber-400 text-black font-semibold"
+        >
+          Add email account
+        </Button>
+      </div>
+    );
+  }
+
+  // Account exists but IMAP is off or credentials are incomplete → warning.
+  if (syncing.length === 0) {
+    const reason = misconfigured.length > 0
+      ? 'IMAP sync is enabled but credentials are incomplete — inbox won\'t sync until host / username / password are all filled in.'
+      : 'None of your accounts have IMAP sync enabled. Turn it on in the Marketing Agent\'s Email Accounts settings.';
+    return (
+      <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
+        <div className="h-11 w-11 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+          <AlertCircle className="h-5 w-5 text-amber-300" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-amber-100">Inbox sync isn't active</div>
+          <div className="text-xs text-amber-200/80 mt-0.5">{reason}</div>
+          <div className="mt-1 text-xs text-amber-200/60 truncate">
+            {accounts.map((a) => a.email).join(', ')}
+          </div>
+        </div>
+        <Button
+          onClick={onConfigure}
+          variant="outline"
+          className="bg-transparent border-amber-500/40 text-amber-200 hover:bg-amber-500/20"
+        >
+          Fix in settings
+        </Button>
+      </div>
+    );
+  }
+
+  // First-sync in progress — account just saved, IMAP running, nothing in DB yet.
+  // Prominent cyan banner with a live elapsed timer.
+  if (firstSyncActive) {
+    return (
+      <div className="mb-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
+        <div className="h-11 w-11 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center shrink-0">
+          <Loader2 className="h-5 w-5 text-cyan-300 animate-spin" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-cyan-100">
+              Syncing your inbox…
+            </span>
+            <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5">
+              {mmss(elapsedMs)}
+            </span>
+          </div>
+          <div className="text-xs text-cyan-200/80 mt-1">
+            Pulling the last 120 days of mail from{' '}
+            <span className="text-white font-medium">
+              {firstSync.map((a) => a.email).join(', ')}
+            </span>
+            . Usually takes 30–90 seconds — emails will appear below automatically.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Some emails already landed but sync is likely still running (recent config
+  // change). Small cyan "in progress" chip so the user doesn't think the list
+  // below is the final state — more mail may still be streaming in.
+  if (activelySyncing) {
+    return (
+      <div className="mb-4 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+        <div className="h-8 w-8 rounded-lg bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center shrink-0">
+          <Loader2 className="h-4 w-4 text-cyan-300 animate-spin" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs text-cyan-200/90">
+            Syncing in progress —{' '}
+            <span className="text-white font-medium">{totalInboxCount}</span>{' '}
+            email{totalInboxCount === 1 ? '' : 's'} loaded so far from{' '}
+            <span className="text-white font-medium">
+              {syncing.map((a) => a.email).join(', ')}
+            </span>
+            . More may still be landing.
+          </div>
+        </div>
+        <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5 shrink-0">
+          {mmss(elapsedMs)}
+        </span>
+      </div>
+    );
+  }
+
+  // Steady-state happy path — sync is configured and settled. Small green chip.
+  return (
+    <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+      <div className="h-8 w-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
+        <Check className="h-4 w-4 text-emerald-300" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs text-emerald-200/90">
+          Syncing from {syncing.length} account{syncing.length === 1 ? '' : 's'}:{' '}
+          <span className="text-white font-medium">
+            {syncing.map((a) => `${a.email} (${a.account_type || 'smtp'})`).join(', ')}
+          </span>
+        </div>
+      </div>
+      {misconfigured.length > 0 && (
+        <span className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">
+          {misconfigured.length} need attention
+        </span>
+      )}
     </div>
   );
 };
