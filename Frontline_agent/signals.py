@@ -17,11 +17,29 @@ def run_workflow_triggers_on_ticket_update(sender, instance, created, **kwargs):
     """
     When a ticket is updated (not created), run workflow triggers for ticket_updated.
     Uses lazy import to avoid circular import with api.views.frontline_agent.
+
+    Re-entrancy guard: if we're already inside a workflow run (the workflow's
+    own `update_ticket` step is writing), skip. Without this guard a workflow
+    that modifies the ticket it was triggered by can loop — only the trigger
+    condition no longer matching stops it today, which is luck, not a contract.
     """
     if created:
         return
     if not getattr(instance, 'company_id', None):
         return
+    # Check for re-entrancy *before* any DB work so we don't even spin up the view import.
+    try:
+        from .workflow_context import is_workflow_executing, current_workflow_id
+        if is_workflow_executing():
+            logger.debug(
+                "Ticket %s post_save skipped: already inside workflow %s",
+                instance.id, current_workflow_id(),
+            )
+            return
+    except Exception:
+        # If the guard module fails to import, fail open (old behaviour) rather than
+        # dropping all signals. The next code path will still run.
+        logger.exception("workflow_context guard import failed — proceeding without guard")
     try:
         from api.views.frontline_agent import _run_workflow_triggers
         user = getattr(instance, 'created_by', None)

@@ -861,5 +861,7 @@ export default {
   listHandoffQueue,
   acceptHandoff,
   suggestTicketReply,
+  summarizeDocument,
+  extractDocument,
 };
 

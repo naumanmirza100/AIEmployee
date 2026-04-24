@@ -52,3 +52,10 @@ whitenoise==6.4.0
 #   Mailgun (HMAC-SHA256) uses hashlib only, so PyNaCl is optional when that provider is disabled.
 bleach==6.1.0
 PyNaCl==1.5.0
+
+# Vector similarity index for the Knowledge RAG pipeline (§1.6 loophole closeout).
+# MSSQL has no native vector type, so embeddings sit in JSON columns and were
+# scanned O(N) per query. FAISS builds an in-process inner-product index per
+# company so top-k retrieval is O(log N) even at 100k+ chunks. Missing faiss
+# falls back to the JSON scan path.
+faiss-cpu==1.13.1
