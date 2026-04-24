@@ -5,7 +5,7 @@ Usage: python manage.py generate_embeddings [--company-id COMPANY_ID] [--all]
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 from Frontline_agent.models import Document, DocumentChunk
-from core.Fronline_agent.embedding_service import EmbeddingService
+from core.Frontline_agent.embedding_service import EmbeddingService
 import logging
 import json
 

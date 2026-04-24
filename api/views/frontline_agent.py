@@ -43,8 +43,8 @@ from Frontline_agent.models import (
     Contact,
 )
 from Frontline_agent.document_processor import DocumentProcessor
-from core.Fronline_agent.frontline_agent import FrontlineAgent
-from core.Fronline_agent.embedding_service import EmbeddingService
+from core.Frontline_agent.frontline_agent import FrontlineAgent
+from core.Frontline_agent.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,14 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
     """
     Evaluate notification template trigger_config and create ScheduledNotification when
     template has trigger_config.on == event_type (e.g. ticket_created, ticket_updated).
+
+    Deduplication: signals can fire more than once for the same logical event
+    (double `save()` in a single handler, workflow + manual edit landing in the
+    same tick, etc.). We skip creation when an unsent notification already
+    exists for the same (template, ticket, recipient) scheduled within
+    ±`_NOTIFICATION_DEDUP_WINDOW_SECONDS` of the new one — long enough to catch
+    near-simultaneous triggers, short enough that a legitimate second update a
+    few minutes later still fires.
     """
     try:
         templates = NotificationTemplate.objects.filter(
@@ -101,18 +109,65 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
                 'resolution': ticket.resolution or '',
                 'customer_name': getattr(ticket.created_by, 'email', '') or '',
             }
-            ScheduledNotification.objects.create(
+            created, existing_id = _create_scheduled_notification_dedup(
                 company_id=company_id,
                 template=t,
                 scheduled_at=scheduled_at,
-                status='pending',
                 recipient_email=recipient_email,
                 related_ticket=ticket,
                 context=context,
             )
-            logger.info(f"Notification trigger: created scheduled notification for template {t.id} (event={event_type}, ticket={ticket.id})")
+            if created:
+                logger.info(f"Notification trigger: created scheduled notification for template {t.id} (event={event_type}, ticket={ticket.id})")
+            else:
+                logger.info(
+                    f"Notification trigger: deduped — pending id={existing_id} "
+                    f"already covers template={t.id} ticket={ticket.id} recipient={recipient_email}"
+                )
     except Exception as e:
         logger.exception("_run_notification_triggers failed: %s", e)
+
+
+# Near-simultaneous triggers collapse into one notification when they land within
+# this window of each other. 90s comfortably covers signal re-fires + workflow
+# cascades without swallowing a legitimate second update minutes later.
+_NOTIFICATION_DEDUP_WINDOW_SECONDS = 90
+
+
+def _create_scheduled_notification_dedup(*, company_id, template, scheduled_at,
+                                         recipient_email, related_ticket, context):
+    """Create a pending ScheduledNotification unless an equivalent one already
+    exists within the dedup window. Returns ``(created, id)``.
+
+    "Equivalent" = same template, same recipient_email, same related_ticket,
+    status in {pending, deferred-for-quiet-hours}, and scheduled_at within
+    ±_NOTIFICATION_DEDUP_WINDOW_SECONDS. Sent / failed / dead-lettered rows are
+    intentionally NOT considered — if a previous send failed, the next trigger
+    should get a fresh chance.
+    """
+    window = timedelta(seconds=_NOTIFICATION_DEDUP_WINDOW_SECONDS)
+    existing = ScheduledNotification.objects.filter(
+        company_id=company_id,
+        template=template,
+        related_ticket=related_ticket,
+        recipient_email=recipient_email,
+        status='pending',
+        scheduled_at__gte=scheduled_at - window,
+        scheduled_at__lte=scheduled_at + window,
+    ).only('id').first()
+    if existing:
+        return False, existing.id
+
+    n = ScheduledNotification.objects.create(
+        company_id=company_id,
+        template=template,
+        scheduled_at=scheduled_at,
+        status='pending',
+        recipient_email=recipient_email,
+        related_ticket=related_ticket,
+        context=context,
+    )
+    return True, n.id
 
 
 def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old_status=None):
@@ -158,13 +213,24 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
                 if w.requires_approval:
                     logger.info(f"Workflow trigger: workflow {w.id} requires approval. Status: awaiting_approval.")
                 else:
-                    success, result_data, err = _execute_workflow_steps(w, context_data, executed_by_user)
-                    exec_obj.status = 'completed' if success else 'failed'
-                    exec_obj.result_data = result_data or {}
-                    exec_obj.error_message = err
-                    exec_obj.completed_at = timezone.now()
-                    exec_obj.save()
-                    logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
+                    success, result_data, err = _execute_workflow_steps(
+                        w, context_data, executed_by_user, execution=exec_obj,
+                    )
+                    # If the run paused on a `wait`, _execute_workflow_steps already
+                    # persisted pause_state + status='paused' + scheduled the resume
+                    # task. Don't stamp completed/failed in that case.
+                    if result_data and result_data.get('paused'):
+                        logger.info(
+                            f"Workflow trigger: workflow {w.id} paused for "
+                            f"{result_data.get('wait_seconds')}s (exec={exec_obj.id})"
+                        )
+                    else:
+                        exec_obj.status = 'completed' if success else 'failed'
+                        exec_obj.result_data = result_data or {}
+                        exec_obj.error_message = err
+                        exec_obj.completed_at = timezone.now()
+                        exec_obj.save()
+                        logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
             except Exception as e:
                 logger.exception("Workflow trigger: execution failed for workflow %s (ticket %s): %s", w.id, ticket.id, e)
     except Exception as e:
@@ -201,6 +267,34 @@ def _ensure_handoff_system_user():
         defaults={'email': 'noreply-handoff@frontline.local', 'is_active': True},
     )
     return user
+
+
+def _celery_broker_ready(timeout_seconds: float = 1.0) -> bool:
+    """Quick probe: is the Celery broker reachable right now?
+
+    `.delay()` / `.apply_async()` will otherwise block in their default
+    connection-retry loop for ~100s when the broker is down — causing
+    requests to appear to "hang then fail." Callers should probe first and
+    fall back to inline execution when this returns False.
+
+    Implementation: a raw TCP connect to the broker host:port with the
+    requested timeout. Using Kombu's `ensure_connection` here retries twice
+    internally (~4s) even with max_retries=0, so a socket probe is the
+    fastest way to fail fast.
+    """
+    import socket
+    from urllib.parse import urlparse
+    from celery import current_app
+    try:
+        url = current_app.conf.broker_url or ''
+        parsed = urlparse(url)
+        host = parsed.hostname or 'localhost'
+        default_port = 6379 if (parsed.scheme or '').startswith('redis') else 5672
+        port = parsed.port or default_port
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True
+    except Exception:
+        return False
 
 
 def _sla_due_at_for_priority(priority):
@@ -628,8 +722,33 @@ def upload_document(request):
             document.allowed_users.add(company_user)
 
         # Enqueue async parse+chunk+embed. Worker updates processing_status / progress fields.
+        # When the broker is unreachable `.delay()` would block ~100s on Celery's
+        # connect-retry loop and the client would see "failed to upload." Probe first
+        # (500ms budget) and fall back to inline processing so the doc still lands
+        # in the index.
         from Frontline_agent.tasks import process_document as _process_document
-        _process_document.delay(document.id)
+        dispatch_mode = 'async'
+        if _celery_broker_ready(timeout_seconds=0.5):
+            try:
+                _process_document.apply_async(args=[document.id], retry=False)
+            except Exception:
+                logger.exception("process_document: Celery dispatch failed, running inline")
+                dispatch_mode = 'inline'
+        else:
+            logger.warning("process_document: Celery broker unreachable — running inline")
+            dispatch_mode = 'inline'
+
+        if dispatch_mode == 'inline':
+            # Inline fallback: slow for large docs but the upload completes, and the
+            # UI's polling loop on /documents/<id>/status/ will see 'ready' immediately.
+            try:
+                _process_document.apply(args=[document.id])
+            except Exception:
+                logger.exception("process_document inline fallback failed for doc %s", document.id)
+                # Don't 500 the upload — the file IS saved; status will show 'failed'
+                # and the user can retry or the admin can requeue.
+            # Refresh so the response reflects the final (post-processing) state.
+            document.refresh_from_db()
 
         return Response({
             'status': 'accepted',
@@ -642,7 +761,12 @@ def upload_document(request):
                 'parent_document_id': document.parent_document_id,
                 'visibility': document.visibility,
                 'retention_days': document.retention_days,
-                'message': 'Upload accepted. Processing in the background — poll the status endpoint.',
+                'dispatch_mode': dispatch_mode,  # 'async' (Celery) or 'inline' (broker down)
+                'message': (
+                    'Upload processed inline (Celery broker was unreachable).'
+                    if dispatch_mode == 'inline'
+                    else 'Upload accepted. Processing in the background — poll the status endpoint.'
+                ),
                 'status_url': f"/api/frontline/documents/{document.id}/status/",
             },
         }, status=status.HTTP_202_ACCEPTED)
@@ -1484,13 +1608,17 @@ def list_tickets(request):
         at_risk_threshold = now + timedelta(hours=2)  # due within 2 hours = at risk
         resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
 
-        # Bulk count notes to avoid N+1 on the per-ticket serialization
+        # Bulk count notes to avoid N+1 on the per-ticket serialization.
+        # `.order_by()` strips `TicketNote.Meta.ordering=['created_at']` — without
+        # this, MSSQL rejects the GROUP BY query because the auto-added ORDER BY
+        # column isn't aggregated or grouped.
         ticket_ids = [t.id for t in tickets]
         notes_count_map = {}
         if ticket_ids:
             from django.db.models import Count
             notes_count_map = dict(
                 TicketNote.objects.filter(ticket_id__in=ticket_ids)
+                .order_by()
                 .values_list('ticket_id')
                 .annotate(c=Count('id'))
                 .values_list('ticket_id', 'c')
@@ -3127,11 +3255,33 @@ def extract_meeting_action_items(request, meeting_id):
 # ---------- Workflow / SOP Runner ----------
 
 
+class _WorkflowPauseSignal(Exception):
+    """Raised by a `wait` step to pause the executor without blocking the thread.
+
+    Carries ``wait_seconds`` (how long to wait before resuming) and
+    ``remaining_steps`` (flat list of steps left to run; populated as the
+    exception bubbles up through branch recursion — each level prepends its
+    own "steps after this branch" tail).
+
+    Caught at the top level by ``_execute_workflow_steps`` which persists the
+    snapshot onto the execution row and schedules a Celery resume via ETA.
+    """
+    def __init__(self, wait_seconds: int, step_path: str = ''):
+        super().__init__(f"workflow_pause:wait_seconds={wait_seconds}")
+        self.wait_seconds = int(wait_seconds)
+        self.step_path = step_path
+        self.remaining_steps: list = []
+        self.partial_results: list = []
+
+
 def _run_single_step(step, step_index, step_path, workflow, context_data, simulate):
     """Execute a single non-branch step. Returns (ok, result_entry, fatal_error_str_or_None).
 
     `simulate=True` reports what would happen without any side effects — no emails,
     no webhooks, no DB writes.
+
+    May raise ``_WorkflowPauseSignal`` from the `wait` step so the executor can
+    pause and resume asynchronously instead of blocking a worker thread.
     """
     step_type = (step.get('type') or '').lower()
     base = {'step': step_index, 'step_path': step_path, 'type': step_type}
@@ -3243,14 +3393,19 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
         return True, {**base, 'done': True}, None
 
     if step_type in ('wait', 'wait_for_duration'):
-        # Cap at 300s per step to avoid stuck workers. For long waits use an external scheduler.
-        seconds = max(0, min(300, int(step.get('seconds') or 0)))
+        # Bound the wait to something sane (1 day max). Previously the executor
+        # did `time.sleep(seconds)` which blocked the Celery worker thread —
+        # replaced with a Celery-ETA resumption (see `_WorkflowPauseSignal`
+        # + `resume_workflow_execution` task).
+        seconds = max(0, min(86400, int(step.get('seconds') or 0)))
         if simulate:
             return True, {**base, 'done': True, 'simulated': True, 'seconds': seconds}, None
         if seconds > 0:
-            import time as _t
-            _t.sleep(seconds)
-        return True, {**base, 'done': True, 'waited_seconds': seconds}, None
+            # Signal the enclosing executor to pause. Control does NOT return
+            # to this step's retry loop — the step is considered "in progress"
+            # until resume fires.
+            raise _WorkflowPauseSignal(wait_seconds=seconds, step_path=step_path)
+        return True, {**base, 'done': True, 'waited_seconds': 0}, None
 
     # Unknown step types are no-ops (forward-compat)
     return True, {**base, 'done': True, 'note': 'unknown step type treated as no-op'}, None
@@ -3261,12 +3416,18 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
     workflow timeout by checking monotonic time between steps.
 
     Returns (success_bool, result_list, fatal_error_str_or_None).
+
+    May re-raise ``_WorkflowPauseSignal`` (propagating up through branch
+    recursion). Each level appends its own "steps remaining after this
+    branch/wait point" to the signal's ``remaining_steps`` so the top can
+    reconstruct a flat continuation.
     """
     import time as _t
     from Frontline_agent.workflow_conditions import evaluate as _eval_cond
 
     results = []
-    for i, step in enumerate(steps or []):
+    step_list = list(steps or [])
+    for i, step in enumerate(step_list):
         step_path = f"{path_prefix}{i}"
         step_type = (step.get('type') or '').lower()
 
@@ -3282,10 +3443,18 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
             nested = step.get(branch_taken) or []
             results.append({'step': i, 'step_path': step_path, 'type': 'branch',
                             'done': True, 'branch_taken': branch_taken, 'nested_count': len(nested)})
-            nested_ok, nested_results, nested_err = _execute_step_list(
-                nested, workflow, context_data, simulate, start_monotonic, timeout,
-                path_prefix=f"{step_path}.{branch_taken}.",
-            )
+            try:
+                nested_ok, nested_results, nested_err = _execute_step_list(
+                    nested, workflow, context_data, simulate, start_monotonic, timeout,
+                    path_prefix=f"{step_path}.{branch_taken}.",
+                )
+            except _WorkflowPauseSignal as pause:
+                # Inner branch hit a wait. Concatenate *our* outer tail (steps
+                # after this branch) and bubble up. The already-accumulated
+                # results from this level come along in partial_results.
+                pause.partial_results = results + pause.partial_results
+                pause.remaining_steps = list(pause.remaining_steps) + step_list[i + 1:]
+                raise
             results.extend(nested_results)
             if not nested_ok:
                 return False, results, nested_err
@@ -3297,7 +3466,15 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
         attempt = 0
         while True:
             attempt += 1
-            ok, result_entry, fatal = _run_single_step(step, i, step_path, workflow, context_data, simulate)
+            try:
+                ok, result_entry, fatal = _run_single_step(step, i, step_path, workflow, context_data, simulate)
+            except _WorkflowPauseSignal as pause:
+                # `wait` step raised. Append "everything after this step at the
+                # current level" as the remainder; upstream branch frames will
+                # prepend their own tails as the exception climbs.
+                pause.partial_results = list(results)
+                pause.remaining_steps = step_list[i + 1:]
+                raise
             result_entry['attempt'] = attempt
             if ok:
                 results.append(result_entry)
@@ -3316,29 +3493,138 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
                 results.append({**result_entry, 'would_retry_in_seconds': backoff_seconds})
                 continue
             if backoff_seconds:
+                # Retry-backoff still uses time.sleep — capped at 300s and retries
+                # are the slow path. Converting this to Celery ETA too is a
+                # follow-up; the hot path (`wait` step) is now non-blocking.
                 import time as _t2
                 _t2.sleep(backoff_seconds)
 
     return True, results, None
 
 
-def _execute_workflow_steps(workflow, context_data, user, simulate=False):
+def _execute_workflow_steps(workflow, context_data, user, simulate=False,
+                            execution=None, _steps_override=None,
+                            _prior_results=None, _prior_elapsed=0.0):
     """Execute a workflow's steps. Returns (success, result_data, error_message).
 
     Honours `workflow.timeout_seconds` (0 = unlimited), per-step retries with
     backoff, and a recursive `branch` step type. Pass `simulate=True` to run a
     dry-run that produces the same report shape without side effects.
+
+    Guarded with `workflow_execution_guard` — any Ticket write that happens
+    during a step won't re-trigger the same workflow via `post_save` (see
+    Frontline_agent/workflow_context.py + signals.py).
+
+    Pause handling: when a `wait` step raises `_WorkflowPauseSignal`, pause
+    state is saved to `execution` (if provided) and a Celery resume is
+    scheduled. Returns ``(True, result_data, None)`` with
+    ``result_data['paused'] = True`` — callers should treat that as "not
+    finished yet" and not stamp the execution as completed.
+
+    `_steps_override`, `_prior_results`, `_prior_elapsed` are for the resume
+    task to pass the remaining-work snapshot back in; external callers should
+    leave these defaulted.
     """
     import time as _t
-    steps = workflow.steps or []
+    from Frontline_agent.workflow_context import workflow_execution_guard
+    steps = _steps_override if _steps_override is not None else (workflow.steps or [])
     timeout = int(getattr(workflow, 'timeout_seconds', 0) or 0)
+    # If we've already burned time on earlier active segments, subtract from the budget.
+    effective_timeout = 0
+    if timeout:
+        effective_timeout = max(1, int(timeout - (_prior_elapsed or 0)))
     start = _t.monotonic()
-    ok, results, err = _execute_step_list(
-        steps, workflow, context_data, simulate, start, timeout,
-    )
-    return ok, {'steps_completed': sum(1 for r in results if r.get('done')),
-                'results': results, 'simulated': simulate,
-                'elapsed_seconds': round(_t.monotonic() - start, 3)}, err
+    prior_results = list(_prior_results or [])
+    try:
+        with workflow_execution_guard(workflow_id=workflow.id):
+            ok, results, err = _execute_step_list(
+                steps, workflow, context_data, simulate, start, effective_timeout,
+            )
+    except _WorkflowPauseSignal as pause:
+        # Combine results from before this segment + results accumulated inside
+        # the segment up to the pause point.
+        accumulated_results = prior_results + list(pause.partial_results or [])
+        elapsed_this_segment = _t.monotonic() - start
+        elapsed_active = round((_prior_elapsed or 0) + elapsed_this_segment, 3)
+        result_data = {
+            'paused': True,
+            'wait_seconds': pause.wait_seconds,
+            'pause_step_path': pause.step_path,
+            'steps_completed': sum(1 for r in accumulated_results if r.get('done')),
+            'results': accumulated_results,
+            'simulated': simulate,
+            'elapsed_active_seconds': elapsed_active,
+        }
+        if execution is not None and not simulate:
+            _persist_and_schedule_resume(
+                execution=execution,
+                wait_seconds=pause.wait_seconds,
+                remaining_steps=list(pause.remaining_steps or []),
+                results_so_far=accumulated_results,
+                elapsed_active_seconds=elapsed_active,
+                context_data=context_data,
+            )
+        return True, result_data, None
+    combined = prior_results + results
+    total_elapsed = round((_prior_elapsed or 0) + (_t.monotonic() - start), 3)
+    return ok, {'steps_completed': sum(1 for r in combined if r.get('done')),
+                'results': combined, 'simulated': simulate,
+                'elapsed_seconds': total_elapsed}, err
+
+
+def _persist_and_schedule_resume(*, execution, wait_seconds, remaining_steps,
+                                 results_so_far, elapsed_active_seconds,
+                                 context_data):
+    """Save pause snapshot to the execution row and schedule a Celery task to
+    resume at the ETA. Called only when `_execute_workflow_steps` has an
+    execution to write to — simulate runs and ad-hoc executions without a
+    row fall back to the old blocking path above by raising up to the caller."""
+    from Frontline_agent.tasks import resume_workflow_execution
+
+    resume_at = timezone.now() + timedelta(seconds=wait_seconds)
+    execution.status = 'paused'
+    execution.resume_at = resume_at
+    execution.pause_state = {
+        'remaining_steps': remaining_steps,
+        'results_so_far': results_so_far,
+        'elapsed_active_seconds': elapsed_active_seconds,
+        'context_data': context_data,
+    }
+    # Intermediate result snapshot so UI can show progress while paused.
+    execution.result_data = {
+        'paused': True,
+        'wait_seconds': wait_seconds,
+        'resume_at': resume_at.isoformat(),
+        'steps_completed': sum(1 for r in results_so_far if r.get('done')),
+        'results': results_so_far,
+        'elapsed_active_seconds': elapsed_active_seconds,
+    }
+    execution.save(update_fields=['status', 'resume_at', 'pause_state', 'result_data'])
+    # Probe the broker first with a short timeout. Celery's default connection
+    # retry loop is ~100s which would stall the request. A 1s probe lets us
+    # short-circuit to the inline fallback when the broker is genuinely down.
+    broker_ok = _celery_broker_ready(timeout_seconds=0.5)
+    if not broker_ok:
+        logger.warning("resume_workflow_execution: broker unreachable — running resume inline")
+
+    if broker_ok:
+        try:
+            # `retry=False` suppresses publish-level retries — message either
+            # lands in <100ms or we fall through to inline.
+            resume_workflow_execution.apply_async(
+                args=[execution.id], countdown=max(1, int(wait_seconds)),
+                retry=False,
+            )
+            return
+        except Exception:
+            logger.exception("resume_workflow_execution: Celery dispatch failed, running inline")
+
+    # Degraded fallback: run the resume synchronously. Does NOT honour
+    # wait_seconds — we resume immediately to avoid losing the execution.
+    try:
+        resume_workflow_execution(execution.id)
+    except Exception:
+        logger.exception("Inline resume_workflow_execution fallback also failed")
 
 
 @api_view(["GET"])
@@ -3583,7 +3869,20 @@ def execute_workflow(request, workflow_id):
         exec_obj = FrontlineWorkflowExecution.objects.create(
             workflow=w, workflow_name=w.name, workflow_description=w.description, executed_by=user, status='in_progress', context_data=context_data,
         )
-        success, result_data, err = _execute_workflow_steps(w, context_data, user)
+        success, result_data, err = _execute_workflow_steps(
+            w, context_data, user, execution=exec_obj,
+        )
+        # When the executor paused on a `wait` step, pause_state + status='paused'
+        # + the resume Celery task were already persisted/scheduled. Surface that
+        # to the caller so the client knows the execution is still in flight.
+        if result_data and result_data.get('paused'):
+            return Response({'status': 'accepted', 'data': {
+                'execution_id': exec_obj.id,
+                'status': 'paused',
+                'wait_seconds': result_data.get('wait_seconds'),
+                'resume_at': exec_obj.resume_at.isoformat() if exec_obj.resume_at else None,
+                'result_data': result_data,
+            }}, status=status.HTTP_202_ACCEPTED)
         exec_obj.status = 'completed' if success else 'failed'
         exec_obj.result_data = result_data
         exec_obj.error_message = err
@@ -3635,8 +3934,17 @@ def approve_workflow_execution(request, execution_id):
         if action == 'approve':
             exec_obj.status = 'in_progress'
             exec_obj.save()
-            
-            success, result_data, err = _execute_workflow_steps(exec_obj.workflow, exec_obj.context_data, user)
+
+            success, result_data, err = _execute_workflow_steps(
+                exec_obj.workflow, exec_obj.context_data, user, execution=exec_obj,
+            )
+            if result_data and result_data.get('paused'):
+                return Response({'status': 'accepted', 'data': {
+                    'status': 'paused',
+                    'wait_seconds': result_data.get('wait_seconds'),
+                    'resume_at': exec_obj.resume_at.isoformat() if exec_obj.resume_at else None,
+                    'result': result_data,
+                }}, status=status.HTTP_202_ACCEPTED)
             exec_obj.status = 'completed' if success else 'failed'
             exec_obj.result_data = result_data or {}
             exec_obj.error_message = err
@@ -4001,6 +4309,7 @@ def frontline_analytics_export(request):
         ticket_ids = list(qs.values_list('id', flat=True))
         notes_map = dict(
             TicketNote.objects.filter(ticket_id__in=ticket_ids)
+            .order_by()  # strip Meta.ordering so MSSQL doesn't reject the GROUP BY
             .values_list('ticket_id')
             .annotate(c=_Count('id'))
             .values_list('ticket_id', 'c')
@@ -4255,10 +4564,9 @@ def inbound_email_webhook(request, provider):
 def list_ticket_messages(request, ticket_id):
     """Return the full thread for a ticket (inbound + outbound, oldest-first)."""
     try:
-        ticket = _get_company_ticket_or_404(request, ticket_id)
-        if not ticket:
-            return Response({'status': 'error', 'message': 'Ticket not found'},
-                            status=status.HTTP_404_NOT_FOUND)
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
         qs = (TicketMessage.objects.filter(ticket=ticket)
               .prefetch_related('attachments')
               .order_by('created_at'))
@@ -4286,10 +4594,9 @@ def reply_to_ticket(request, ticket_id):
     from Frontline_agent.inbound_email import sanitize_html, build_subject_tag
 
     try:
-        ticket = _get_company_ticket_or_404(request, ticket_id)
-        if not ticket:
-            return Response({'status': 'error', 'message': 'Ticket not found'},
-                            status=status.HTTP_404_NOT_FOUND)
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
 
         data = request.data or {}
         body_text = (data.get('body_text') or '').strip()
@@ -4635,10 +4942,9 @@ def get_ticket_context(request, ticket_id):
     UI can render a sidebar in one request.
     """
     try:
-        ticket = _get_company_ticket_or_404(request, ticket_id)
-        if not ticket:
-            return Response({'status': 'error', 'message': 'Ticket not found'},
-                            status=status.HTTP_404_NOT_FOUND)
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
 
         if not ticket.contact_id:
             return Response({'status': 'success', 'data': {'contact': None}})
@@ -4895,10 +5201,9 @@ def accept_ticket_handoff(request, ticket_id):
     """Agent claims a pending hand-off. Assigns the ticket to them and moves
     the hand-off to `accepted`."""
     from Frontline_agent.handoff import accept_handoff
-    ticket = _get_company_ticket_or_404(request, ticket_id)
-    if not ticket:
-        return Response({'status': 'error', 'message': 'Ticket not found'},
-                        status=status.HTTP_404_NOT_FOUND)
+    ticket, err = _get_company_ticket_or_404(request, ticket_id)
+    if err:
+        return err
     if ticket.handoff_status != 'pending':
         return Response(
             {'status': 'error',
@@ -4929,10 +5234,9 @@ def suggest_ticket_reply(request, ticket_id):
     only — does not send anything.
     """
     try:
-        ticket = _get_company_ticket_or_404(request, ticket_id)
-        if not ticket:
-            return Response({'status': 'error', 'message': 'Ticket not found'},
-                            status=status.HTTP_404_NOT_FOUND)
+        ticket, err = _get_company_ticket_or_404(request, ticket_id)
+        if err:
+            return err
 
         company = request.user.company
 

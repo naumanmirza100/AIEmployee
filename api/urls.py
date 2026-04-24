@@ -536,3 +536,29 @@ urlpatterns = [
     # Company picker for admin forms
     re_path(r'^admin/companies-list/?$', admin_api_keys.list_companies_simple, name='admin_list_companies'),  # GET
 ]
+
+
+# -------------------------------------------------------------------------
+# API versioning (Phase 1 §1.6 — close "no API versioning" loophole)
+# -------------------------------------------------------------------------
+# Mirror every ^frontline/ route under ^v1/frontline/. Legacy /frontline/* stays
+# live so existing embed widgets / integrations keep working; new clients should
+# use /api/v1/frontline/*. Names get a `v1_` prefix so reverse() can pick a version.
+from django.urls import URLPattern as _URLPattern  # noqa: E402
+
+_v1_aliases = []
+for _pat in list(urlpatterns):
+    if not isinstance(_pat, _URLPattern):
+        continue
+    _name = getattr(_pat, 'name', '') or ''
+    if not _name.startswith('frontline_'):
+        continue
+    # `_regex` is the raw pattern string we passed to re_path. It's been stable
+    # through Django 3.x/4.x — if that ever changes we'd fall back to
+    # str(_pat.pattern) which yields the same thing.
+    _raw_regex = getattr(_pat.pattern, '_regex', '') or str(_pat.pattern)
+    if not _raw_regex.startswith('^frontline/'):
+        continue
+    _new_regex = '^v1/' + _raw_regex.lstrip('^')
+    _v1_aliases.append(re_path(_new_regex, _pat.callback, name='v1_' + _name))
+urlpatterns += _v1_aliases
