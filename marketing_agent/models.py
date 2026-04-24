@@ -92,7 +92,16 @@ class Campaign(models.Model):
     
     # Leads relationship - using custom through model to specify table name
     leads = models.ManyToManyField('Lead', blank=True, related_name='campaigns', through='CampaignLead')
-    
+
+    # Default sending account for all sequences in this campaign. Individual
+    # sequences may override via EmailSequence.email_account; when that is null
+    # the sequence inherits this value (see EmailSequence.get_sending_account).
+    email_account = models.ForeignKey(
+        'EmailAccount', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='campaigns',
+        help_text='Default email account to send from for sequences in this campaign',
+    )
+
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='marketing_campaigns')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -519,6 +528,19 @@ class EmailSequence(models.Model):
     def __str__(self):
         sequence_type = "Sub-Sequence" if self.is_sub_sequence else "Sequence"
         return f"{sequence_type}: {self.name} - {self.campaign.name}"
+
+    def get_sending_account(self):
+        """Resolve which EmailAccount to send from.
+
+        Priority: sequence.email_account (explicit override) -> campaign.email_account (default).
+        Returns None if neither is set; email_service.send_email then falls back
+        to the owner's default active account.
+        """
+        if self.email_account_id:
+            return self.email_account
+        if self.campaign_id and self.campaign.email_account_id:
+            return self.campaign.email_account
+        return None
 
 
 class EmailSequenceStep(models.Model):

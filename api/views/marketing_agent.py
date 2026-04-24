@@ -186,6 +186,8 @@ def list_campaigns(request):
                         'end_date': c.end_date.isoformat() if c.end_date else None,
                         'target_leads': c.target_leads,
                         'target_conversions': c.target_conversions,
+                        'email_account_id': c.email_account_id,
+                        'email_account_email': c.email_account.email if c.email_account_id else None,
                         'created_at': c.created_at.isoformat(),
                         'updated_at': c.updated_at.isoformat(),
                     }
@@ -412,6 +414,8 @@ def get_campaign(request, campaign_id):
             'industry': campaign.industry,
             'company_size': campaign.company_size,
             'language': campaign.language,
+            'email_account_id': campaign.email_account_id,
+            'email_account_email': campaign.email_account.email if campaign.email_account_id else None,
             'leads_count': leads_count,
             'sequences_count': sequences.count(),
             'created_at': campaign.created_at.isoformat(),
@@ -461,6 +465,17 @@ def create_campaign(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        email_account_id = data.get('email_account_id')
+        email_account_obj = None
+        if email_account_id:
+            try:
+                email_account_obj = EmailAccount.objects.get(id=email_account_id, owner=user)
+            except EmailAccount.DoesNotExist:
+                return Response(
+                    {'status': 'error', 'message': 'Email account not found or not owned by you.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         campaign = Campaign.objects.create(
             name=name,
             description=data.get('description', ''),
@@ -476,6 +491,7 @@ def create_campaign(request):
             industry=data.get('industry', ''),
             company_size=data.get('company_size', ''),
             language=data.get('language', ''),
+            email_account=email_account_obj,
             owner=user,
         )
         
@@ -543,6 +559,18 @@ def update_campaign(request, campaign_id):
                 campaign.end_date = datetime.strptime(str(data['end_date'])[:10], '%Y-%m-%d').date()
             except (ValueError, TypeError):
                 pass
+        if 'email_account_id' in data:
+            eid = data.get('email_account_id')
+            if eid in (None, '', 0, '0'):
+                campaign.email_account = None
+            else:
+                try:
+                    campaign.email_account = EmailAccount.objects.get(id=eid, owner=user)
+                except EmailAccount.DoesNotExist:
+                    return Response(
+                        {'status': 'error', 'message': 'Email account not found or not owned by you.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
         campaign.save()
         return Response({
             'status': 'success',
@@ -1610,7 +1638,13 @@ def list_sequences(request, campaign_id):
         return Response({
             'status': 'success',
             'data': {
-                'campaign': {'id': campaign.id, 'name': campaign.name, 'status': campaign.status},
+                'campaign': {
+                    'id': campaign.id,
+                    'name': campaign.name,
+                    'status': campaign.status,
+                    'email_account_id': campaign.email_account_id,
+                    'email_account_email': campaign.email_account.email if campaign.email_account_id else None,
+                },
                 'sequences': sequences_data,
                 'templates': templates_data,
                 'email_accounts': email_accounts_data,

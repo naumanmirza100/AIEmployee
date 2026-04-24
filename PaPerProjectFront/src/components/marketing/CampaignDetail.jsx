@@ -222,6 +222,7 @@ const CampaignDetail = () => {
   const [scheduleStart, setScheduleStart] = useState('');
   const [scheduleEnd, setScheduleEnd] = useState('');
   const [editForm, setEditForm] = useState({});
+  const [emailAccounts, setEmailAccounts] = useState([]);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState('');
   const [editingLead, setEditingLead] = useState(null);
@@ -369,7 +370,11 @@ const CampaignDetail = () => {
   const handleUpdateCampaign = async () => {
     setActionLoading('edit');
     try {
-      await marketingAgentService.updateCampaign(id, editForm);
+      const payload = {
+        ...editForm,
+        email_account_id: editForm.email_account_id ? Number(editForm.email_account_id) : null,
+      };
+      await marketingAgentService.updateCampaign(id, payload);
       toast({ title: 'Success', description: 'Campaign updated' });
       setEditOpen(false);
       fetchDetail();
@@ -462,7 +467,15 @@ const CampaignDetail = () => {
       language: campaign?.language || '',
       start_date: campaign?.start_date ? campaign.start_date.slice(0, 10) : '',
       end_date: campaign?.end_date ? campaign.end_date.slice(0, 10) : '',
+      email_account_id: campaign?.email_account_id ? String(campaign.email_account_id) : '',
     });
+    // Load email accounts for the picker. Failure here isn't fatal — the
+    // modal still opens; the dropdown will just show "No account".
+    marketingAgentService.listEmailAccounts().then((res) => {
+      if (res?.status === 'success' && Array.isArray(res.data)) {
+        setEmailAccounts(res.data);
+      }
+    }).catch(() => {});
     setEditOpen(true);
   };
 
@@ -1051,6 +1064,24 @@ const CampaignDetail = () => {
             <div>
               <Label>Company size</Label>
               <Input value={editForm.company_size || ''} onChange={(e) => setEditForm((f) => ({ ...f, company_size: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Send from (default email account)</Label>
+              <select
+                value={editForm.email_account_id || ''}
+                onChange={(e) => setEditForm((f) => ({ ...f, email_account_id: e.target.value }))}
+                className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="">No default (sequences must set one)</option>
+                {emailAccounts.map((a) => (
+                  <option key={a.id} value={String(a.id)}>
+                    {a.email}{a.is_default ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Sequences in this campaign will send from this account unless they override it.
+              </p>
             </div>
           </div>
           <DialogFooter>
