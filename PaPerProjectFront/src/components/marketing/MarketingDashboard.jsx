@@ -1230,9 +1230,6 @@ const MarketingDashboard = () => {
                     >
                       {selectedAccount.test_status === 'success' ? 'Success' : selectedAccount.test_status === 'failed' ? 'Failed' : 'Not tested'}
                     </Badge>
-                    {selectedAccount.test_error && (
-                      <p className="text-xs text-destructive mt-1 break-words">{selectedAccount.test_error}</p>
-                    )}
                   </div>
                   {/* IMAP / inbox sync — drives the Reply Draft Agent. */}
                   <div className="pt-3 border-t space-y-2">
