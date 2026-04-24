@@ -102,11 +102,15 @@ def retry_failed_emails_task(self):
         for email_history in failed_emails:
             try:
                 from marketing_agent.services.email_service import email_service
+                # EmailSendHistory has no email_account FK, so we resolve via
+                # the campaign's default. send_email also falls back to the
+                # owner's default active account when this is None.
+                retry_account = email_history.campaign.email_account if email_history.campaign else None
                 result = email_service.send_email(
                     template=email_history.email_template,
                     lead=email_history.lead,
                     campaign=email_history.campaign,
-                    email_account=email_history.email_account
+                    email_account=retry_account,
                 )
                 if result.get('success'):
                     retried_count += 1
