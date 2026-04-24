@@ -70,14 +70,12 @@ import { cn } from '@/lib/utils';
 
 const ACCOUNT_TYPES = [
   { value: 'gmail', label: 'Gmail', icon: Mail, color: 'text-red-500', bgColor: 'bg-red-500/10' },
-  { value: 'outlook', label: 'Outlook', icon: Mail, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
   { value: 'hostinger', label: 'Hostinger', icon: Server, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
   { value: 'smtp', label: 'Custom SMTP', icon: Settings, color: 'text-slate-500', bgColor: 'bg-slate-500/10' },
 ];
 
 const SMTP_DEFAULTS = {
   gmail: { host: 'smtp.gmail.com', port: 587, useTLS: true, useSSL: false },
-  outlook: { host: 'smtp-mail.outlook.com', port: 587, useTLS: true, useSSL: false },
   hostinger: { host: 'smtp.hostinger.com', port: 587, useTLS: true, useSSL: false },
   smtp: { host: '', port: 587, useTLS: true, useSSL: false },
 };

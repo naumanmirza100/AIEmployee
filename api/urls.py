@@ -504,6 +504,7 @@ urlpatterns = [
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/approve/?$', reply_draft_api.approve_draft, name='reply_draft_approve'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/reject/?$', reply_draft_api.reject_draft, name='reply_draft_reject'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/send/?$', reply_draft_api.send_draft, name='reply_draft_send'),
+    re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)

@@ -142,6 +142,18 @@ export const listSyncAccounts = async () => {
   }
 };
 
+// Create the Reply Draft Agent's dedicated inbox account. Isolated from
+// marketing — accounts created here never surface on the marketing agent
+// side because they carry the `is_reply_agent_account` flag.
+export const createReplyAccount = async (data) => {
+  try {
+    return await companyApi.post('/reply-draft/accounts/create', data);
+  } catch (error) {
+    console.error('Create reply account error:', error);
+    throw error;
+  }
+};
+
 // Fetch the full body for a single inbox item. The list endpoint serves
 // only a 200-char preview so the page loads fast; this fills in the full
 // content when the user clicks a row.

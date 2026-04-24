@@ -28,18 +28,19 @@ import {
   ChevronDown,
   CornerUpLeft,
   Quote,
-  Users,
-  TrendingUp,
   X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Plus, CheckCircle2 } from 'lucide-react';
 import {
   listPendingReplies,
   listDrafts,
-  listReplyDraftCampaigns,
-  listReplyDraftLeads,
   generateDraft,
   regenerateDraft,
   approveDraft,
@@ -47,6 +48,7 @@ import {
   sendDraft,
   getReplyItem,
   listSyncAccounts,
+  createReplyAccount,
 } from '@/services/replyDraftService';
 
 // Pure view filter for the inbox list — Celery pre-syncs the full 120-day
@@ -207,16 +209,11 @@ const ReplyDraftAgentPage = () => {
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
-  const [syncAccounts, setSyncAccounts] = useState([]);     // email accounts visible to this company (for the "synced from" card)
+  const [syncAccounts, setSyncAccounts] = useState([]);     // the attached Reply Draft Agent account, if any (0 or 1 items)
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
-  const [campaigns, setCampaigns] = useState([]);
-  const [campaignFilter, setCampaignFilter] = useState(''); // '' = all, 'none' = generic only, or campaign id
-  const [leads, setLeads] = useState([]);
-  const [leadsHasRepliedFilter, setLeadsHasRepliedFilter] = useState(''); // '' | 'yes' | 'no'
-  const [leadsCampaignFilter, setLeadsCampaignFilter] = useState('');     // separate from inbox campaign filter
-  const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'workspace' | 'leads'
 
   useEffect(() => {
     const companyUserStr = localStorage.getItem('company_user');
@@ -247,14 +244,14 @@ const ReplyDraftAgentPage = () => {
   const refreshInbox = useCallback(async () => {
     setInboxLoading(true);
     try {
-      const res = await listPendingReplies({ campaign: campaignFilter, days: String(syncDays) });
+      const res = await listPendingReplies({ days: String(syncDays) });
       setPendingReplies(res?.data || []);
     } catch (e) {
       toast({ title: 'Failed to load inbox', description: e.message, variant: 'destructive' });
     } finally {
       setInboxLoading(false);
     }
-  }, [toast, campaignFilter, syncDays]);
+  }, [toast, syncDays]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -264,16 +261,6 @@ const ReplyDraftAgentPage = () => {
       toast({ title: 'Failed to load drafts', description: e.message, variant: 'destructive' });
     }
   }, [toast]);
-
-  const refreshCampaigns = useCallback(async () => {
-    try {
-      const res = await listReplyDraftCampaigns();
-      setCampaigns(res?.data || []);
-    } catch (e) {
-      // Non-fatal — filter dropdown just shows no campaigns.
-      console.error('Failed to load campaigns', e);
-    }
-  }, []);
 
   const refreshSyncAccounts = useCallback(async () => {
     try {
@@ -285,34 +272,23 @@ const ReplyDraftAgentPage = () => {
     }
   }, []);
 
-  const refreshLeads = useCallback(async () => {
-    try {
-      const res = await listReplyDraftLeads({
-        hasReplied: leadsHasRepliedFilter,
-        campaign: leadsCampaignFilter,
-      });
-      setLeads(res?.data || []);
-    } catch (e) {
-      console.error('Failed to load leads', e);
-    }
-  }, [leadsHasRepliedFilter, leadsCampaignFilter]);
+  const openAddAccountModal = useCallback(() => {
+    setAccountModalOpen(true);
+  }, []);
 
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refreshInbox(), refreshDrafts(), refreshLeads()]);
+      await Promise.all([refreshInbox(), refreshDrafts()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refreshInbox, refreshDrafts, refreshLeads]);
+  }, [refreshInbox, refreshDrafts]);
 
   useEffect(() => {
     if (hasAccess) {
-      refreshCampaigns();
       refreshAll();
       refreshSyncAccounts();
-      // Hub cards show live counts → always fetch leads at least once on load.
-      refreshLeads();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAccess]);
@@ -337,12 +313,7 @@ const ReplyDraftAgentPage = () => {
   // Re-fetch the inbox whenever the user changes a filter.
   useEffect(() => {
     if (hasAccess) refreshInbox();
-  }, [hasAccess, campaignFilter, syncDays, refreshInbox]);
-
-  // Re-fetch leads whenever the leads-scoped filters change and we're viewing them.
-  useEffect(() => {
-    if (hasAccess && viewMode === 'leads') refreshLeads();
-  }, [hasAccess, viewMode, leadsHasRepliedFilter, leadsCampaignFilter, refreshLeads]);
+  }, [hasAccess, syncDays, refreshInbox]);
 
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
@@ -524,30 +495,12 @@ const ReplyDraftAgentPage = () => {
     );
   }, [sentDrafts, search]);
 
-  const filteredLeads = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return leads;
-    return leads.filter((l) =>
-      [l.full_name, l.email, l.company, l.job_title].some((v) => (v || '').toLowerCase().includes(q))
-    );
-  }, [leads, search]);
-
   const stats = useMemo(() => ({
     pending: pendingReplies.length,
     draftsPending: drafts.filter((d) => d.status === 'pending').length,
     sent: drafts.filter((d) => d.status === 'sent').length,
     failed: drafts.filter((d) => d.status === 'failed').length,
   }), [pendingReplies, drafts]);
-
-  const leadStats = useMemo(() => {
-    const total = leads.length;
-    const replied = leads.filter((l) => l.has_replied).length;
-    const notReplied = total - replied;
-    const sentSum = leads.reduce((acc, l) => acc + (l.emails_sent || 0), 0);
-    const repliesSum = leads.reduce((acc, l) => acc + (l.replies_count || 0), 0);
-    const avgReplyRate = sentSum > 0 ? Math.round((repliesSum / sentSum) * 100) : 0;
-    return { total, replied, notReplied, avgReplyRate };
-  }, [leads]);
 
   if (loading || checkingAccess || !modulesLoaded) {
     return (
@@ -616,40 +569,26 @@ const ReplyDraftAgentPage = () => {
         />
 
         <div className="container mx-auto px-4 sm:px-6 py-6 max-w-[1500px]">
-          {/* Header: title + (when inside a component) back button + Refresh */}
+          {/* Header: title + Refresh */}
           <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
             <div className="flex items-center gap-3 min-w-0">
-              {viewMode !== 'overview' && (
-                <button
-                  onClick={() => setViewMode('overview')}
-                  className="p-2 rounded-lg bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 transition"
-                  title="Back to overview"
-                  aria-label="Back to overview"
-                >
-                  <ChevronDown className="h-4 w-4 rotate-90" />
-                </button>
-              )}
               <div className="min-w-0">
-                <h1 className="text-lg font-bold text-white truncate">
-                  {viewMode === 'leads'
-                    ? 'Leads & Reply Analytics'
-                    : viewMode === 'workspace'
-                      ? 'Reply Draft Workspace'
-                      : 'Reply Draft Agent'}
-                </h1>
+                <h1 className="text-lg font-bold text-white truncate">Reply Draft Workspace</h1>
                 <p className="text-xs text-gray-400">
                   {refreshing
                     ? 'Syncing from your mailbox…'
-                    : viewMode === 'leads'
-                      ? 'Every lead across all company campaigns, with reply performance.'
-                      : viewMode === 'workspace'
-                        ? 'Click refresh to pull the latest from your inbox and drafts.'
-                        : 'AI-drafted replies to every incoming email — nothing is sent without your approval.'}
+                    : 'Click refresh to pull the latest from your inbox and drafts.'}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
               <span className="text-xs text-gray-400 hidden sm:inline">Auto-refreshes every 30s</span>
+
+              <AttachedAccountButton
+                syncAccounts={syncAccounts}
+                onAddNew={openAddAccountModal}
+              />
+
               <Button
                 onClick={refreshAll}
                 disabled={refreshing}
@@ -662,57 +601,21 @@ const ReplyDraftAgentPage = () => {
           </div>
 
           {/* Contextual Stats */}
-          {viewMode === 'leads' ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatCard icon={Users} label="Total Leads" value={leadStats.total} tint="from-indigo-500/20 to-violet-500/10" iconTint="text-indigo-300" />
-              <StatCard icon={CornerUpLeft} label="Replied" value={leadStats.replied} tint="from-emerald-500/20 to-teal-500/10" iconTint="text-emerald-300" />
-              <StatCard icon={Inbox} label="Not Replied" value={leadStats.notReplied} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300" />
-              <StatCard icon={TrendingUp} label="Avg Reply Rate" value={`${leadStats.avgReplyRate}%`} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
-              <StatCard icon={FileText} label="Drafts to Review" value={stats.draftsPending} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300" />
-              <StatCard icon={Send} label="Sent" value={stats.sent} tint="from-emerald-500/20 to-teal-500/10" iconTint="text-emerald-300" />
-              <StatCard icon={AlertCircle} label="Failed" value={stats.failed} tint="from-rose-500/20 to-red-500/10" iconTint="text-rose-300" />
-            </div>
-          )}
-
-          {/* Overview box: description + component-picker cards */}
-          {viewMode === 'overview' && (
-            <OverviewBox
-              inboxStats={stats}
-              leadStats={leadStats}
-              onSelectWorkspace={() => setViewMode('workspace')}
-              onSelectLeads={() => setViewMode('leads')}
-            />
-          )}
-
-          {viewMode === 'leads' && (
-            <LeadsDashboard
-              leads={filteredLeads}
-              totalLeads={leads.length}
-              campaigns={campaigns}
-              campaignFilter={leadsCampaignFilter}
-              setCampaignFilter={setLeadsCampaignFilter}
-              hasRepliedFilter={leadsHasRepliedFilter}
-              setHasRepliedFilter={setLeadsHasRepliedFilter}
-              search={search}
-              setSearch={setSearch}
-            />
-          )}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
+            <StatCard icon={FileText} label="Drafts to Review" value={stats.draftsPending} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300" />
+            <StatCard icon={Send} label="Sent" value={stats.sent} tint="from-emerald-500/20 to-teal-500/10" iconTint="text-emerald-300" />
+            <StatCard icon={AlertCircle} label="Failed" value={stats.failed} tint="from-rose-500/20 to-red-500/10" iconTint="text-rose-300" />
+          </div>
 
           {/* Sync Source card — tells the user exactly which mailbox feeds
               this inbox, or prompts them to configure one if it's empty. */}
-          {viewMode === 'workspace' && (
-            <SyncSourceCard
-              accounts={syncAccounts}
-              onConfigure={() => navigate('/marketing/dashboard')}
-            />
-          )}
+          <SyncSourceCard
+            accounts={syncAccounts}
+            onConfigure={() => setAccountModalOpen(true)}
+          />
 
           {/* Main Workspace */}
-          {viewMode === 'workspace' && (
           <div className="grid grid-cols-12 gap-4 items-stretch">
             {/* LEFT: List */}
             <div className="col-span-12 lg:col-span-4 xl:col-span-3">
@@ -791,34 +694,18 @@ const ReplyDraftAgentPage = () => {
                   </div>
 
                   {activeTab === 'inbox' && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={campaignFilter}
-                        onChange={(e) => setCampaignFilter(e.target.value)}
-                        title="Filter by campaign"
-                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
-                      >
-                        <option value="" className="bg-gray-900">All campaigns</option>
-                        <option value="none" className="bg-gray-900">No campaign (inbox)</option>
-                        {campaigns.map((c) => (
-                          <option key={c.id} value={String(c.id)} className="bg-gray-900">
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={syncDays}
-                        onChange={(e) => setSyncDays(Number(e.target.value))}
-                        title="Filter the inbox to a rolling time window. Mail is pre-synced in the background, so switching is instant."
-                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
-                      >
-                        {TIME_WINDOW_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value} className="bg-gray-900">
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <select
+                      value={syncDays}
+                      onChange={(e) => setSyncDays(Number(e.target.value))}
+                      title="Filter the inbox to a rolling time window. Mail is pre-synced in the background, so switching is instant."
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                    >
+                      {TIME_WINDOW_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value} className="bg-gray-900">
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
                   )}
 
                 </div>
@@ -839,13 +726,11 @@ const ReplyDraftAgentPage = () => {
                       {filteredInbox.length === 0 ? (
                         <EmptyState
                           icon={Inbox}
-                          title={search ? 'No matches' : (campaignFilter ? 'Nothing in this filter' : 'Inbox is clear')}
+                          title={search ? 'No matches' : 'Inbox is clear'}
                           subtitle={
                             search
                               ? 'Try a different search term.'
-                              : campaignFilter
-                                ? 'Try widening the campaign filter or time window.'
-                                : 'Replies and inbox mail will appear here.'
+                              : 'Replies and inbox mail will appear here.'
                           }
                         />
                       ) : (
@@ -1167,9 +1052,18 @@ const ReplyDraftAgentPage = () => {
               )}
             </div>
           </div>
-          )}
         </div>
       </div>
+
+      <AccountConnectModal
+        open={accountModalOpen}
+        onClose={() => setAccountModalOpen(false)}
+        onSaved={() => {
+          setAccountModalOpen(false);
+          refreshSyncAccounts();
+          refreshInbox();
+        }}
+      />
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
@@ -1405,6 +1299,8 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
   }
 
   // Steady-state happy path — sync is configured and settled. Small green chip.
+  // Keep this terse: the header's email-accounts dropdown already lists each
+  // account with its status, so repeating the list here was just noise.
   return (
     <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
       <div className="h-8 w-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
@@ -1412,9 +1308,9 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-xs text-emerald-200/90">
-          Syncing from {syncing.length} account{syncing.length === 1 ? '' : 's'}:{' '}
+          Inbox sync active ·{' '}
           <span className="text-white font-medium">
-            {syncing.map((a) => `${a.email} (${a.account_type || 'smtp'})`).join(', ')}
+            {syncing.length} account{syncing.length === 1 ? '' : 's'}
           </span>
         </div>
       </div>
@@ -1514,477 +1410,272 @@ const DraftItem = ({ draft, active, onClick }) => {
   );
 };
 
-const OverviewBox = ({ inboxStats, leadStats, onSelectWorkspace, onSelectLeads }) => {
-  const cards = [
-    {
-      title: 'Inbox & Drafts',
-      desc: 'Review incoming replies, generate AI drafts, and send them after approval. Nothing goes out without you.',
-      icon: Inbox,
-      onClick: onSelectWorkspace,
-      color: '#22d3ee',
-      bgColor: 'rgba(34,211,238,0.15)',
-      borderHover: 'rgba(34,211,238,0.4)',
-      metrics: [
-        { label: 'Pending', value: inboxStats.pending },
-        { label: 'Drafts', value: inboxStats.draftsPending },
-        { label: 'Sent', value: inboxStats.sent },
-      ],
-    },
-    {
-      title: 'Leads & Analytics',
-      desc: 'See every lead across your campaigns with their reply rates, interest level, and AI analysis.',
-      icon: Users,
-      onClick: onSelectLeads,
-      color: '#a78bfa',
-      bgColor: 'rgba(167,139,250,0.15)',
-      borderHover: 'rgba(167,139,250,0.4)',
-      metrics: [
-        { label: 'Leads', value: leadStats.total },
-        { label: 'Replied', value: leadStats.replied },
-        { label: 'Reply rate', value: `${leadStats.avgReplyRate}%` },
-      ],
-    },
-  ];
+// Attached-account status button for the Reply Draft dashboard header.
+// If no account is attached yet, renders an "Add email account" primary
+// button. Once attached, renders a non-interactive status chip showing the
+// connected email — we intentionally don't offer a change control, because
+// swapping the inbox source while drafts and history are tied to it would
+// cause confusing stale state.
+const AttachedAccountButton = ({ syncAccounts, onAddNew }) => {
+  const attached = Array.isArray(syncAccounts) && syncAccounts.length > 0 ? syncAccounts[0] : null;
+
+  if (!attached) {
+    return (
+      <Button
+        onClick={onAddNew}
+        className="bg-amber-500 hover:bg-amber-400 text-black font-semibold gap-2"
+        title="Connect an inbox to start pulling replies"
+      >
+        <Plus className="h-4 w-4" />
+        Add email account
+      </Button>
+    );
+  }
+
+  const ready = attached.will_sync;
+  const borderTint = ready ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10';
+  const textTint = ready ? 'text-emerald-200' : 'text-amber-200';
 
   return (
-    <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm p-5 sm:p-6 mb-6">
-      <div className="flex items-start gap-3 mb-5">
-        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/20">
-          <Reply className="h-5 w-5 text-white" />
-        </div>
-        <div className="min-w-0">
-          <h2 className="text-sm font-bold text-white">About the Reply Draft Agent</h2>
-          <p className="text-xs text-gray-400 leading-relaxed mt-1">
-            Every incoming email from your leads gets an AI-drafted reply you can review, edit, regenerate,
-            and approve. The agent never sends on its own. Pick a workspace below to get started.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {cards.map((card) => (
-          <button
-            key={card.title}
-            onClick={card.onClick}
-            className="group relative flex flex-col items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-5 text-left transition-all duration-300 hover:bg-white/[0.06] cursor-pointer w-full min-w-0"
-            onMouseEnter={(e) => e.currentTarget.style.borderColor = card.borderHover}
-            onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
-          >
-            <div className="rounded-lg p-2.5" style={{ backgroundColor: card.bgColor }}>
-              <card.icon className="h-5 w-5" style={{ color: card.color }} />
-            </div>
-            <div className="w-full">
-              <p className="font-semibold text-sm text-white">{card.title}</p>
-              <p className="text-xs text-white/40 mt-1 leading-relaxed">{card.desc}</p>
-            </div>
-            <div className="flex items-center gap-2 w-full mt-1">
-              {card.metrics.map((m) => (
-                <div
-                  key={m.label}
-                  className="flex-1 rounded-md bg-white/5 border border-white/10 px-2 py-1.5"
-                >
-                  <div className="text-[9px] text-gray-400 uppercase tracking-wider font-medium">{m.label}</div>
-                  <div className="text-sm font-bold text-white leading-tight">{m.value}</div>
-                </div>
-              ))}
-            </div>
-          </button>
-        ))}
-      </div>
+    <div
+      className={`h-9 max-w-[260px] rounded-md border px-3 flex items-center gap-2 ${borderTint} ${textTint}`}
+      title={ready ? 'Inbox sync active for this account' : 'Account connected but IMAP needs attention'}
+    >
+      {ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+      <span className="truncate text-xs font-medium">{attached.email}</span>
     </div>
   );
 };
 
-const LeadsDashboard = ({
-  leads,
-  totalLeads,
-  campaigns,
-  campaignFilter,
-  setCampaignFilter,
-  hasRepliedFilter,
-  setHasRepliedFilter,
-  search,
-  setSearch,
-}) => {
-  const [selectedLead, setSelectedLead] = useState(null);
+// Reply-Draft-specific "Add account" modal. Creates the single EmailAccount
+// attached to the Reply Draft Agent and fires an immediate Celery sync so the
+// inbox populates within ~30s. Completely independent of the Marketing Agent
+// email-accounts list.
+const ACCOUNT_TYPE_OPTIONS = [
+  { value: 'gmail',     label: 'Gmail',       smtp_host: 'smtp.gmail.com',     imap_host: 'imap.gmail.com'     },
+  { value: 'hostinger', label: 'Hostinger',   smtp_host: 'smtp.hostinger.com', imap_host: 'imap.hostinger.com' },
+  { value: 'smtp',      label: 'Custom SMTP', smtp_host: '',                   imap_host: ''                   },
+];
 
-  // Keep selected lead fresh when the `leads` array updates (e.g. after refresh).
+const defaultNewForm = () => ({
+  name: 'Reply Draft Inbox',
+  account_type: 'gmail',
+  email: '',
+  smtp_host: 'smtp.gmail.com',
+  smtp_port: 587,
+  smtp_username: '',
+  smtp_password: '',
+  use_tls: true,
+  use_ssl: false,
+  is_gmail_app_password: true,
+  imap_host: 'imap.gmail.com',
+  imap_port: 993,
+  imap_username: '',
+  imap_password: '',
+  imap_use_ssl: true,
+});
+
+const AccountConnectModal = ({ open, onClose, onSaved }) => {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(defaultNewForm());
+
   useEffect(() => {
-    if (!selectedLead) return;
-    const fresh = leads.find((l) => l.id === selectedLead.id);
-    if (fresh && fresh !== selectedLead) setSelectedLead(fresh);
-  }, [leads, selectedLead]);
+    if (open) setForm(defaultNewForm());
+  }, [open]);
 
-  // Close the drawer on Escape.
-  useEffect(() => {
-    if (!selectedLead) return;
-    const onKey = (e) => { if (e.key === 'Escape') setSelectedLead(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectedLead]);
+  const applyTypeDefaults = (typeValue) => {
+    const t = ACCOUNT_TYPE_OPTIONS.find((x) => x.value === typeValue);
+    if (!t) return;
+    setForm((p) => ({
+      ...p,
+      account_type: typeValue,
+      smtp_host: t.smtp_host,
+      imap_host: t.imap_host,
+      is_gmail_app_password: typeValue === 'gmail',
+    }));
+  };
 
-  const anyFilterActive = !!(campaignFilter || hasRepliedFilter || search);
-  const clearAll = () => {
-    setCampaignFilter('');
-    setHasRepliedFilter('');
-    setSearch('');
+  const handleSubmit = async () => {
+    if (!form.email.trim()) {
+      toast({ title: 'Missing email', description: 'Enter the email address.', variant: 'destructive' });
+      return;
+    }
+    if (!form.smtp_host.trim() || !form.smtp_password) {
+      toast({ title: 'Missing SMTP', description: 'SMTP host and password are required.', variant: 'destructive' });
+      return;
+    }
+    if (!form.imap_host.trim() || !form.imap_password) {
+      toast({ title: 'Missing IMAP', description: 'IMAP host and password are required (needed to pull replies).', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name.trim() || 'Reply Draft Inbox',
+        account_type: form.account_type,
+        email: form.email.trim(),
+        smtp_host: form.smtp_host.trim(),
+        smtp_port: Number(form.smtp_port) || 587,
+        smtp_username: (form.smtp_username || '').trim() || form.email.trim(),
+        smtp_password: form.smtp_password,
+        use_tls: form.use_tls,
+        use_ssl: form.use_ssl,
+        is_gmail_app_password: form.is_gmail_app_password,
+        imap_host: form.imap_host.trim(),
+        imap_port: Number(form.imap_port) || 993,
+        imap_username: (form.imap_username || '').trim() || form.email.trim(),
+        imap_password: form.imap_password,
+        imap_use_ssl: form.imap_use_ssl,
+      };
+      const res = await createReplyAccount(payload);
+      if (res?.status === 'success') {
+        toast({ title: 'Account connected', description: `${form.email} is syncing now — mail lands within ~30 seconds.` });
+        onSaved();
+      } else {
+        toast({ title: 'Create failed', description: res?.message || 'Could not add account.', variant: 'destructive' });
+      }
+    } catch (e) {
+      toast({ title: 'Create failed', description: e?.message || 'Could not add account.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="space-y-4">
-      {/* Filter bar */}
-      <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm p-4">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-          <div className="md:col-span-5 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, email, company…"
-              className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 focus:bg-white/10 transition"
-            />
-          </div>
-          <div className="md:col-span-4">
-            <select
-              value={campaignFilter}
-              onChange={(e) => setCampaignFilter(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:bg-white/10 transition"
-            >
-              <option value="" className="bg-gray-900">All campaigns</option>
-              {campaigns.map((c) => (
-                <option key={c.id} value={String(c.id)} className="bg-gray-900">
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="md:col-span-3">
-            <select
-              value={hasRepliedFilter}
-              onChange={(e) => setHasRepliedFilter(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:bg-white/10 transition"
-            >
-              <option value="" className="bg-gray-900">All leads</option>
-              <option value="yes" className="bg-gray-900">Replied</option>
-              <option value="no" className="bg-gray-900">Not replied</option>
-            </select>
-          </div>
-        </div>
-        <div className="flex items-center justify-between mt-3 text-xs">
-          <span className="text-gray-400">
-            Showing <span className="text-white font-semibold">{leads.length}</span>
-            {leads.length !== totalLeads && <> of <span className="text-gray-300">{totalLeads}</span></>} leads
-          </span>
-          {anyFilterActive && (
-            <button
-              onClick={clearAll}
-              className="text-gray-400 hover:text-white transition underline underline-offset-2"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-      </div>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Inbox className="h-5 w-5 text-primary" />
+            Connect an inbox
+          </DialogTitle>
+          <DialogDescription>
+            Add the email account the Reply Draft Agent will read replies from. Syncing starts automatically once you save.
+          </DialogDescription>
+        </DialogHeader>
 
-      {/* Table */}
-      {leads.length === 0 ? (
-        <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm">
-          <EmptyState
-            icon={Users}
-            title={anyFilterActive ? 'No leads match your filters' : 'No leads yet'}
-            subtitle={
-              anyFilterActive
-                ? 'Try clearing or widening your filters.'
-                : 'Leads from your campaigns will appear here with reply analytics.'
-            }
-          />
-        </div>
-      ) : (
-        <LeadsTable
-          leads={leads}
-          selectedId={selectedLead?.id}
-          onSelect={(l) => setSelectedLead(l)}
-        />
-      )}
-
-      {/* Side drawer */}
-      <LeadDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} />
-    </div>
-  );
-};
-
-const LeadsTable = ({ leads, selectedId, onSelect }) => (
-  <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm text-left">
-        <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wider text-gray-400 border-b border-white/10">
-          <tr>
-            <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold hidden md:table-cell">Company</th>
-            <th className="px-4 py-3 font-semibold hidden lg:table-cell">Campaigns</th>
-            <th className="px-3 py-3 font-semibold text-right">Sent</th>
-            <th className="px-3 py-3 font-semibold text-right">Replies</th>
-            <th className="px-3 py-3 font-semibold text-right">Rate</th>
-            <th className="px-4 py-3 font-semibold hidden sm:table-cell">Interest</th>
-            <th className="px-4 py-3 font-semibold hidden md:table-cell">Last reply</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/5">
-          {leads.map((l) => (
-            <LeadRow
-              key={l.id}
-              lead={l}
-              active={selectedId === l.id}
-              onClick={() => onSelect(l)}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-);
-
-const LeadRow = ({ lead, active, onClick }) => {
-  const interest = INTEREST_STYLES[lead.latest_interest_level] || null;
-  const replyRate = lead.emails_sent > 0
-    ? Math.round((lead.replies_count / lead.emails_sent) * 100)
-    : null;
-  const primaryCampaign = (lead.campaigns || [])[0];
-  const extraCampaigns = Math.max(0, (lead.campaigns || []).length - 1);
-
-  return (
-    <tr
-      onClick={onClick}
-      className={`cursor-pointer transition-colors ${
-        active ? 'bg-indigo-500/10' : 'hover:bg-white/5'
-      }`}
-    >
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Avatar name={lead.full_name} email={lead.email} size="sm" />
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-white truncate max-w-[220px]">
-              {lead.full_name || lead.email || 'Unknown'}
+        <div className="py-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Account name</Label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. Reply inbox"
+                className="mt-1 h-9"
+              />
             </div>
-            <div className="text-xs text-gray-400 truncate max-w-[220px]">{lead.email}</div>
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-3 hidden md:table-cell">
-        <div className="text-xs text-gray-200 truncate max-w-[200px]">
-          {lead.company || <span className="text-gray-500">—</span>}
-        </div>
-        {lead.job_title && (
-          <div className="text-[11px] text-gray-500 truncate max-w-[200px]">{lead.job_title}</div>
-        )}
-      </td>
-      <td className="px-4 py-3 hidden lg:table-cell">
-        {primaryCampaign ? (
-          <div className="flex items-center gap-1.5">
-            <span
-              title={primaryCampaign.name}
-              className="inline-flex items-center gap-1 text-[11px] text-indigo-200 px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/25 truncate max-w-[180px]"
-            >
-              <Zap className="h-2.5 w-2.5" />
-              {primaryCampaign.name}
-            </span>
-            {extraCampaigns > 0 && (
-              <span className="text-[10px] text-gray-500">+{extraCampaigns}</span>
-            )}
-          </div>
-        ) : (
-          <span className="text-gray-500 text-xs">—</span>
-        )}
-      </td>
-      <td className="px-3 py-3 text-right text-sm text-gray-200 tabular-nums">{lead.emails_sent}</td>
-      <td className="px-3 py-3 text-right text-sm text-gray-200 tabular-nums">{lead.replies_count}</td>
-      <td className={`px-3 py-3 text-right text-sm font-semibold tabular-nums ${
-        replyRate === null ? 'text-gray-500' : replyRate >= 50 ? 'text-emerald-300' : 'text-gray-200'
-      }`}>
-        {replyRate !== null ? `${replyRate}%` : '—'}
-      </td>
-      <td className="px-4 py-3 hidden sm:table-cell">
-        {interest ? (
-          <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${interest.className}`}>
-            {interest.label}
-          </span>
-        ) : (
-          <span className="text-gray-500 text-xs">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 hidden md:table-cell text-xs text-gray-400 whitespace-nowrap">
-        {lead.last_reply_at ? formatRelative(lead.last_reply_at) : '—'}
-      </td>
-    </tr>
-  );
-};
-
-const LeadDrawer = ({ lead, onClose }) => {
-  const open = !!lead;
-  const interest = lead ? (INTEREST_STYLES[lead.latest_interest_level] || null) : null;
-  const replyRate = lead && lead.emails_sent > 0
-    ? Math.round((lead.replies_count / lead.emails_sent) * 100)
-    : null;
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity ${
-          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-      />
-
-      {/* Drawer */}
-      <aside
-        role="dialog"
-        aria-hidden={!open}
-        className={`fixed top-0 right-0 bottom-0 z-50 w-full sm:w-[440px] max-w-full bg-gradient-to-b from-[#0a0a1a] to-[#020308] border-l border-white/10 shadow-2xl overflow-y-auto custom-scrollbar transition-transform duration-200 ease-out ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
-        {lead && (
-          <div className="flex flex-col h-full">
-            {/* Header */}
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-4 bg-gradient-to-b from-[#0a0a1a] to-transparent border-b border-white/10 backdrop-blur-sm">
-              <div className="flex items-center gap-2 text-xs text-gray-400 uppercase tracking-wider font-semibold">
-                <Users className="h-4 w-4 text-indigo-300" />
-                Lead Details
-              </div>
-              <button
-                onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
-                aria-label="Close"
+            <div>
+              <Label className="text-xs">Provider</Label>
+              <select
+                value={form.account_type}
+                onChange={(e) => applyTypeDefaults(e.target.value)}
+                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="px-5 py-5 space-y-5">
-              {/* Identity */}
-              <div className="flex items-start gap-3">
-                <Avatar name={lead.full_name} email={lead.email} size="lg" />
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-lg font-bold text-white truncate">
-                    {lead.full_name || lead.email || 'Unknown'}
-                  </h2>
-                  <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-400">
-                    <AtSign className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{lead.email}</span>
-                  </div>
-                  {(lead.company || lead.job_title) && (
-                    <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-400">
-                      <Building2 className="h-3 w-3 shrink-0" />
-                      <span className="truncate">
-                        {lead.company || '—'}
-                        {lead.job_title && <span className="text-gray-500"> · {lead.job_title}</span>}
-                      </span>
-                    </div>
-                  )}
-                  {interest && (
-                    <div className="mt-2">
-                      <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${interest.className}`}>
-                        {interest.label}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Analytics */}
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                  Reply Analytics
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <MetricPill icon={Send} label="Sent" value={lead.emails_sent} />
-                  <MetricPill icon={CornerUpLeft} label="Replies" value={lead.replies_count} />
-                  <MetricPill
-                    icon={TrendingUp}
-                    label="Reply rate"
-                    value={replyRate !== null ? `${replyRate}%` : '—'}
-                    highlight={replyRate !== null && replyRate >= 50}
-                  />
-                </div>
-              </div>
-
-              {/* Last reply */}
-              {lead.last_reply_at && (
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                    Last Reply
-                  </div>
-                  <div className="rounded-lg bg-white/5 border border-white/10 px-3 py-2 flex items-center gap-2 text-xs text-gray-300">
-                    <Clock className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                    <span className="font-medium text-white">{formatRelative(lead.last_reply_at)}</span>
-                    <span className="text-gray-500">· {formatDateTime(lead.last_reply_at)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Campaigns */}
-              {(lead.campaigns || []).length > 0 && (
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                    Campaigns ({lead.campaigns.length})
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {lead.campaigns.map((c) => (
-                      <span
-                        key={c.id}
-                        className="inline-flex items-center gap-1.5 text-xs text-indigo-200 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/25"
-                      >
-                        <Zap className="h-3 w-3" />
-                        {c.name}
-                        <span className="text-[9px] uppercase tracking-wider text-indigo-300/60 font-semibold">{c.status}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Latest AI analysis */}
-              {lead.latest_analysis ? (
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                    Latest AI Analysis
-                  </div>
-                  <div className="rounded-lg bg-indigo-500/5 border border-indigo-500/20 p-3 flex gap-2.5">
-                    <Sparkles className="h-4 w-4 text-indigo-300 shrink-0 mt-0.5" />
-                    <p className="text-xs text-gray-300 leading-relaxed italic">
-                      {lead.latest_analysis}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-gray-500 italic">
-                  No AI analysis yet — generate a draft on one of this lead's replies to populate it.
-                </div>
-              )}
+                {ACCOUNT_TYPE_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
             </div>
           </div>
-        )}
-      </aside>
-    </>
+
+          <div>
+            <Label className="text-xs">Email address</Label>
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+              placeholder="you@example.com"
+              className="mt-1 h-9"
+            />
+          </div>
+
+          <div className="pt-2 border-t">
+            <div className="text-xs font-semibold text-muted-foreground mb-2">SMTP (for sending)</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Host</Label>
+                <Input
+                  value={form.smtp_host}
+                  onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
+                  className="mt-1 h-9"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Port</Label>
+                <Input
+                  type="number"
+                  value={form.smtp_port}
+                  onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                  className="mt-1 h-9"
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <Label className="text-xs">Password</Label>
+              <Input
+                type="password"
+                value={form.smtp_password}
+                onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
+                placeholder="••••••••"
+                className="mt-1 h-9"
+              />
+            </div>
+          </div>
+
+          <div className="pt-2 border-t">
+            <div className="text-xs font-semibold text-muted-foreground mb-2">IMAP (for receiving replies)</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Host</Label>
+                <Input
+                  value={form.imap_host}
+                  onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
+                  className="mt-1 h-9"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Port</Label>
+                <Input
+                  type="number"
+                  value={form.imap_port}
+                  onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
+                  className="mt-1 h-9"
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <Label className="text-xs">Password</Label>
+              <Input
+                type="password"
+                value={form.imap_password}
+                onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
+                placeholder="••••••••"
+                className="mt-1 h-9"
+              />
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <Switch
+                id="imap-ssl"
+                checked={form.imap_use_ssl}
+                onCheckedChange={(checked) => setForm((p) => ({ ...p, imap_use_ssl: checked }))}
+              />
+              <Label htmlFor="imap-ssl" className="text-xs cursor-pointer">Use SSL</Label>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Save &amp; start sync
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
-
-const MetricPill = ({ icon: Icon, label, value, highlight }) => (
-  <div className={`rounded-lg border px-2.5 py-2 flex flex-col gap-0.5 ${
-    highlight
-      ? 'bg-emerald-500/10 border-emerald-500/30'
-      : 'bg-white/5 border-white/10'
-  }`}>
-    <div className="flex items-center gap-1 text-[10px] text-gray-400 font-medium uppercase tracking-wider">
-      <Icon className="h-3 w-3" />
-      {label}
-    </div>
-    <div className={`text-sm font-bold ${highlight ? 'text-emerald-200' : 'text-white'}`}>
-      {value}
-    </div>
-  </div>
-);
 
 export default ReplyDraftAgentPage;
