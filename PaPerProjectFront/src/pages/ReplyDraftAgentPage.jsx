@@ -37,7 +37,21 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Plus, CheckCircle2 } from 'lucide-react';
+import { Plus, CheckCircle2, Settings as SettingsIcon, BarChart3 } from 'lucide-react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Tooltip,
+  Filler,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+// Safe to call more than once — Chart.js dedupes registrations, so the fact
+// that CampaignDetail also registers these won't cause problems.
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 import {
   listPendingReplies,
   listDrafts,
@@ -49,6 +63,8 @@ import {
   getReplyItem,
   listSyncAccounts,
   createReplyAccount,
+  deleteReplyAccount,
+  getReplyAnalytics,
 } from '@/services/replyDraftService';
 
 // Pure view filter for the inbox list — Celery pre-syncs the full 120-day
@@ -211,6 +227,8 @@ const ReplyDraftAgentPage = () => {
   const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
   const [syncAccounts, setSyncAccounts] = useState([]);     // the attached Reply Draft Agent account, if any (0 or 1 items)
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [accountModalMode, setAccountModalMode] = useState('add'); // 'add' | 'edit'
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
@@ -273,6 +291,12 @@ const ReplyDraftAgentPage = () => {
   }, []);
 
   const openAddAccountModal = useCallback(() => {
+    setAccountModalMode('add');
+    setAccountModalOpen(true);
+  }, []);
+
+  const openEditAccountModal = useCallback(() => {
+    setAccountModalMode('edit');
     setAccountModalOpen(true);
   }, []);
 
@@ -588,6 +612,18 @@ const ReplyDraftAgentPage = () => {
                 syncAccounts={syncAccounts}
                 onAddNew={openAddAccountModal}
               />
+
+              {syncAccounts.length > 0 && (
+                <Button
+                  variant="outline"
+                  className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white gap-2"
+                  onClick={() => setSettingsOpen(true)}
+                  title="Inbox analytics & account settings"
+                >
+                  <SettingsIcon className="h-4 w-4" />
+                  <span className="hidden sm:inline text-xs font-medium">Settings</span>
+                </Button>
+              )}
 
               <Button
                 onClick={refreshAll}
@@ -1057,9 +1093,26 @@ const ReplyDraftAgentPage = () => {
 
       <AccountConnectModal
         open={accountModalOpen}
+        mode={accountModalMode}
+        existingAccount={syncAccounts[0] || null}
         onClose={() => setAccountModalOpen(false)}
         onSaved={() => {
           setAccountModalOpen(false);
+          refreshSyncAccounts();
+          refreshInbox();
+        }}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        account={syncAccounts[0] || null}
+        onClose={() => setSettingsOpen(false)}
+        onEdit={() => {
+          setSettingsOpen(false);
+          openEditAccountModal();
+        }}
+        onDeleted={() => {
+          setSettingsOpen(false);
           refreshSyncAccounts();
           refreshInbox();
         }}
@@ -1475,14 +1528,41 @@ const defaultNewForm = () => ({
   imap_use_ssl: true,
 });
 
-const AccountConnectModal = ({ open, onClose, onSaved }) => {
+const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAccount = null }) => {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(defaultNewForm());
 
+  const isEdit = mode === 'edit' && existingAccount;
+
   useEffect(() => {
-    if (open) setForm(defaultNewForm());
-  }, [open]);
+    if (!open) return;
+    if (isEdit) {
+      // Prefill from the server's account record. Passwords are never echoed
+      // back from the list endpoint, so leave them blank — the backend treats
+      // empty passwords as "keep existing" on re-attach.
+      setForm({
+        ...defaultNewForm(),
+        name: existingAccount.name || 'Reply Draft Inbox',
+        account_type: existingAccount.account_type || 'smtp',
+        email: existingAccount.email || '',
+        smtp_host: existingAccount.smtp_host || '',
+        smtp_port: existingAccount.smtp_port || 587,
+        smtp_username: existingAccount.smtp_username || existingAccount.email || '',
+        smtp_password: '',
+        use_tls: existingAccount.use_tls ?? true,
+        use_ssl: existingAccount.use_ssl ?? false,
+        is_gmail_app_password: existingAccount.is_gmail_app_password ?? (existingAccount.account_type === 'gmail'),
+        imap_host: existingAccount.imap_host || '',
+        imap_port: existingAccount.imap_port || 993,
+        imap_username: existingAccount.imap_username || existingAccount.email || '',
+        imap_password: '',
+        imap_use_ssl: existingAccount.imap_use_ssl ?? true,
+      });
+    } else {
+      setForm(defaultNewForm());
+    }
+  }, [open, isEdit, existingAccount]);
 
   const applyTypeDefaults = (typeValue) => {
     const t = ACCOUNT_TYPE_OPTIONS.find((x) => x.value === typeValue);
@@ -1501,13 +1581,25 @@ const AccountConnectModal = ({ open, onClose, onSaved }) => {
       toast({ title: 'Missing email', description: 'Enter the email address.', variant: 'destructive' });
       return;
     }
-    if (!form.smtp_host.trim() || !form.smtp_password) {
-      toast({ title: 'Missing SMTP', description: 'SMTP host and password are required.', variant: 'destructive' });
+    if (!form.smtp_host.trim()) {
+      toast({ title: 'Missing SMTP host', description: 'SMTP host is required.', variant: 'destructive' });
       return;
     }
-    if (!form.imap_host.trim() || !form.imap_password) {
-      toast({ title: 'Missing IMAP', description: 'IMAP host and password are required (needed to pull replies).', variant: 'destructive' });
+    if (!form.imap_host.trim()) {
+      toast({ title: 'Missing IMAP host', description: 'IMAP host is required.', variant: 'destructive' });
       return;
+    }
+    // On create, passwords are required; on edit they're optional (empty ==
+    // keep the stored password).
+    if (!isEdit) {
+      if (!form.smtp_password) {
+        toast({ title: 'Missing SMTP password', description: 'SMTP password is required.', variant: 'destructive' });
+        return;
+      }
+      if (!form.imap_password) {
+        toast({ title: 'Missing IMAP password', description: 'IMAP password is required (needed to pull replies).', variant: 'destructive' });
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -1518,25 +1610,31 @@ const AccountConnectModal = ({ open, onClose, onSaved }) => {
         smtp_host: form.smtp_host.trim(),
         smtp_port: Number(form.smtp_port) || 587,
         smtp_username: (form.smtp_username || '').trim() || form.email.trim(),
-        smtp_password: form.smtp_password,
         use_tls: form.use_tls,
         use_ssl: form.use_ssl,
         is_gmail_app_password: form.is_gmail_app_password,
         imap_host: form.imap_host.trim(),
         imap_port: Number(form.imap_port) || 993,
         imap_username: (form.imap_username || '').trim() || form.email.trim(),
-        imap_password: form.imap_password,
         imap_use_ssl: form.imap_use_ssl,
       };
+      // Only include password fields when the user actually typed something,
+      // so an edit that leaves them blank preserves what's stored.
+      if (form.smtp_password) payload.smtp_password = form.smtp_password;
+      if (form.imap_password) payload.imap_password = form.imap_password;
+
       const res = await createReplyAccount(payload);
       if (res?.status === 'success') {
-        toast({ title: 'Account connected', description: `${form.email} is syncing now — mail lands within ~30 seconds.` });
+        toast({
+          title: isEdit ? 'Account updated' : 'Account connected',
+          description: `${form.email} is syncing now — mail lands within ~30 seconds.`,
+        });
         onSaved();
       } else {
-        toast({ title: 'Create failed', description: res?.message || 'Could not add account.', variant: 'destructive' });
+        toast({ title: isEdit ? 'Save failed' : 'Create failed', description: res?.message || 'Could not save account.', variant: 'destructive' });
       }
     } catch (e) {
-      toast({ title: 'Create failed', description: e?.message || 'Could not add account.', variant: 'destructive' });
+      toast({ title: isEdit ? 'Save failed' : 'Create failed', description: e?.message || 'Could not save account.', variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -1548,10 +1646,12 @@ const AccountConnectModal = ({ open, onClose, onSaved }) => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Inbox className="h-5 w-5 text-primary" />
-            Connect an inbox
+            {isEdit ? 'Edit inbox account' : 'Connect an inbox'}
           </DialogTitle>
           <DialogDescription>
-            Add the email account the Reply Draft Agent will read replies from. Syncing starts automatically once you save.
+            {isEdit
+              ? 'Update the connection settings. Leave password fields blank to keep what\'s stored.'
+              : 'Add the email account the Reply Draft Agent will read replies from. Syncing starts automatically once you save.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1670,8 +1770,224 @@ const AccountConnectModal = ({ open, onClose, onSaved }) => {
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={saving}>
             {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-            Save &amp; start sync
+            {isEdit ? 'Save changes' : 'Save & start sync'}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// Settings dialog surfaced from the header gear button once an account is
+// attached. Shows account info with edit/disconnect actions and a single
+// window-selectable bar chart of inbox volume (30/60/90/120 days).
+const ANALYTICS_WINDOWS = [30, 60, 90, 120];
+
+const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
+  const { toast } = useToast();
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [windowDays, setWindowDays] = useState(30);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setConfirmDelete(false);
+    setWindowDays(30);
+  }, [open]);
+
+  // Refetch whenever the modal opens OR the user switches the window.
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    getReplyAnalytics({ days: windowDays })
+      .then((res) => setAnalytics(res?.status === 'success' ? res.data : null))
+      .catch(() => setAnalytics(null))
+      .finally(() => setLoading(false));
+  }, [open, windowDays]);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await deleteReplyAccount();
+      if (res?.status === 'success') {
+        toast({ title: 'Account disconnected', description: res?.data?.message || 'Inbox cleared.' });
+        onDeleted();
+      } else {
+        toast({ title: 'Delete failed', description: res?.message || 'Could not disconnect the account.', variant: 'destructive' });
+      }
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e?.message || 'Could not disconnect the account.', variant: 'destructive' });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const buckets = analytics?.buckets || [];
+  const granularity = analytics?.granularity || 'day';  // 'day' | 'week'
+
+  // Line chart config — daily buckets for 30d, weekly buckets above that.
+  // Fewer buckets on longer windows means point dots + tooltip labels can
+  // stay visible without overwhelming the chart.
+  const chartData = {
+    labels: buckets.map((b) => b.date),
+    datasets: [
+      {
+        label: 'Emails received',
+        data: buckets.map((b) => b.count || 0),
+        borderColor: '#22d3ee',
+        backgroundColor: 'rgba(34, 211, 238, 0.15)',
+        fill: true,
+        tension: 0.35,
+        pointRadius: granularity === 'week' ? 3 : 2.5,
+        pointHoverRadius: 5,
+        borderWidth: 2,
+      },
+    ],
+  };
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          title: (items) => {
+            const raw = items[0]?.label || '';
+            return granularity === 'week' ? `Week of ${raw}` : raw;
+          },
+          label: (ctx) => ` ${ctx.parsed.y} email${ctx.parsed.y === 1 ? '' : 's'}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: {
+          autoSkip: true,
+          maxTicksLimit: granularity === 'week' ? Math.min(buckets.length, 10) : 8,
+          color: 'rgba(120,120,120,0.8)',
+          font: { size: 10 },
+          callback: function (value) {
+            const label = this.getLabelForValue(value);
+            return typeof label === 'string' ? label.slice(5) : label;
+          },
+        },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          precision: 0,
+          color: 'rgba(120,120,120,0.8)',
+          font: { size: 10 },
+        },
+        grid: { color: 'rgba(120,120,120,0.12)' },
+      },
+    },
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <SettingsIcon className="h-5 w-5 text-primary" />
+            Inbox settings &amp; analytics
+          </DialogTitle>
+          <DialogDescription>
+            Stats are scoped to the attached Reply Draft Agent account only.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="py-4 space-y-5">
+          {/* Account info + actions */}
+          <section className="rounded-lg border p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <div className="text-xs text-muted-foreground">Connected account</div>
+                <div className="text-sm font-semibold truncate">{account?.email || '—'}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {account?.account_type || 'smtp'} · IMAP: {account?.imap_host || '—'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={onEdit} disabled={deleting}>
+                  <Edit3 className="h-3.5 w-3.5 mr-2" />
+                  Edit
+                </Button>
+                {!confirmDelete ? (
+                  <Button variant="destructive" size="sm" onClick={() => setConfirmDelete(true)} disabled={deleting}>
+                    <Trash2 className="h-3.5 w-3.5 mr-2" />
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleting}>
+                    {deleting ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 mr-2" />}
+                    Really disconnect?
+                  </Button>
+                )}
+              </div>
+            </div>
+            {confirmDelete && (
+              <div className="rounded-md border border-rose-200 bg-rose-500/5 p-3 text-xs text-rose-700 dark:text-rose-400 dark:border-rose-800">
+                Disconnecting deletes this account <strong>and all its synced inbox mail + drafts</strong>. This cannot be undone.{' '}
+                <button type="button" onClick={() => setConfirmDelete(false)} className="underline">
+                  Cancel
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* Inbox volume chart */}
+          <section className="rounded-lg border p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <BarChart3 className="h-4 w-4 text-primary" />
+                Emails received
+              </div>
+              <div className="flex gap-1 p-0.5 rounded-md bg-muted text-xs">
+                {ANALYTICS_WINDOWS.map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => setWindowDays(w)}
+                    className={`px-2.5 py-1 rounded transition-colors ${
+                      windowDays === w ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {w}d
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : buckets.length === 0 ? (
+              <div className="text-xs text-muted-foreground py-6 text-center">No data.</div>
+            ) : (
+              <>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{analytics?.total ?? 0}</span>{' '}
+                  email{(analytics?.total ?? 0) === 1 ? '' : 's'} in the last {windowDays} days
+                  {granularity === 'week' && (
+                    <span className="ml-1 opacity-75">· grouped by week</span>
+                  )}
+                </div>
+                <div className="h-48">
+                  <Line data={chartData} options={chartOptions} />
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

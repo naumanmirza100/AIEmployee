@@ -6,7 +6,7 @@ Resolves the CompanyUser to a Django User (same bridge marketing uses) because
 the underlying models (Lead, Reply, EmailAccount) are keyed on User.
 """
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -427,7 +427,19 @@ def list_sync_accounts(request):
             'enable_imap_sync': a.enable_imap_sync,
             'imap_ready': imap_ready,   # has all three credential fields
             'will_sync': will_sync,
+            # SMTP connection fields. The password itself is never returned —
+            # the edit form treats a blank password as "keep what's stored".
+            'smtp_host': a.smtp_host or '',
+            'smtp_port': a.smtp_port,
+            'smtp_username': a.smtp_username or '',
+            'use_tls': a.use_tls,
+            'use_ssl': a.use_ssl,
+            'is_gmail_app_password': a.is_gmail_app_password,
+            # IMAP connection fields (same password policy as SMTP above).
             'imap_host': a.imap_host or '',
+            'imap_port': a.imap_port,
+            'imap_username': a.imap_username or '',
+            'imap_use_ssl': a.imap_use_ssl,
             'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
             'test_status': getattr(a, 'test_status', 'not_tested') or 'not_tested',
             # --- First-sync UX signals ---
@@ -853,3 +865,118 @@ def create_reply_account(request):
             {'status': 'error', 'message': str(e), 'error': 'failed'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_reply_account(request):
+    """Detach and delete the Reply Draft Agent's EmailAccount.
+
+    Cascades InboxEmail + ReplyDraft rows tied to this account (per the FK
+    on_delete behavior in the models). The UI gates this behind a confirm
+    dialog — there's no separate soft-detach mode because leaving orphaned
+    InboxEmail rows around after the user clicks "Delete" is more confusing
+    than cleaning them up.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    try:
+        user_ids = _company_bridge_user_ids(request.user)
+        account = _get_reply_account(user_ids)
+        if account is None:
+            return Response(
+                {'status': 'error', 'message': 'No Reply Draft account attached.', 'error': 'not_attached'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        account_email = account.email
+        account.delete()
+        return Response({
+            'status': 'success',
+            'data': {'message': f'{account_email} disconnected and inbox cleared.'},
+        })
+    except Exception as e:
+        logger.exception('delete_reply_account failed')
+        return Response(
+            {'status': 'error', 'message': str(e), 'error': 'failed'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reply_analytics(request):
+    """Time-series of inbox mail for the attached Reply Draft Agent account.
+
+    Query params:
+      - days: 30 | 60 | 90 | 120 (default 30). Anything out-of-range is clamped.
+
+    Buckets are daily for the 30-day window and weekly for 60/90/120-day
+    windows — aggregating longer spans into weeks keeps the line chart from
+    looking like a flat line with one spike when mail volume is sparse.
+    Scoped to the attached EmailAccount — nothing bleeds in from marketing.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    # Clamp the window to supported values so a bad query string can't cause
+    # a 10,000-bucket payload.
+    ALLOWED_WINDOWS = (30, 60, 90, 120)
+    try:
+        days = int(request.GET.get('days') or 30)
+    except (TypeError, ValueError):
+        days = 30
+    if days not in ALLOWED_WINDOWS:
+        days = min(ALLOWED_WINDOWS, key=lambda w: abs(w - days))
+
+    # 30-day view stays daily (30 points is fine to read). Anything longer
+    # rolls up to 7-day buckets — 60d → 9 points, 90d → 13, 120d → 18.
+    granularity = 'day' if days <= 30 else 'week'
+    bucket_span_days = 1 if granularity == 'day' else 7
+    bucket_count = days if granularity == 'day' else -(-days // 7)  # ceil div
+
+    user_ids = _company_bridge_user_ids(request.user)
+    account = _get_reply_account(user_ids)
+
+    today = timezone.now().date()
+    buckets = []
+    inbox_qs = None
+    if account is not None:
+        inbox_qs = InboxEmail.objects.filter(owner_id__in=user_ids, email_account_id=account.id)
+
+    # Walk oldest → newest so the frontend can render the series in order.
+    for i in range(bucket_count - 1, -1, -1):
+        end_day = today - timedelta(days=i * bucket_span_days)
+        start_day = end_day - timedelta(days=bucket_span_days - 1)
+        start_dt = datetime.combine(start_day, datetime.min.time())
+        if timezone.is_naive(start_dt):
+            start_dt = timezone.make_aware(start_dt)
+        end_dt = datetime.combine(end_day, datetime.min.time()) + timedelta(days=1)
+        if timezone.is_naive(end_dt):
+            end_dt = timezone.make_aware(end_dt)
+
+        if inbox_qs is not None:
+            count = inbox_qs.filter(received_at__gte=start_dt, received_at__lt=end_dt).count()
+        else:
+            count = 0
+
+        # `date` anchors the bucket at its START — that's the conventional
+        # label for weekly charts ("week of 2026-04-19").
+        buckets.append({'date': start_day.isoformat(), 'count': count})
+
+    total = sum(b['count'] for b in buckets)
+    return Response({
+        'status': 'success',
+        'data': {
+            'account_email': account.email if account else None,
+            'days': days,
+            'granularity': granularity,
+            'total': total,
+            'buckets': buckets,
+        },
+    })
+
+

@@ -154,6 +154,32 @@ export const createReplyAccount = async (data) => {
   }
 };
 
+// Disconnect (delete) the Reply Draft Agent's attached EmailAccount. This
+// cascades the account's InboxEmail + ReplyDraft rows, so the UI should
+// gate this behind an explicit confirm.
+export const deleteReplyAccount = async () => {
+  try {
+    return await companyApi.delete('/reply-draft/accounts/delete');
+  } catch (error) {
+    console.error('Delete reply account error:', error);
+    throw error;
+  }
+};
+
+// Daily-bucketed inbox volume for the attached account. Pass days to pick
+// the window (30 / 60 / 90 / 120); the backend clamps anything unexpected.
+// companyApi.get's second arg is the query object directly (NOT { params })
+// — wrapping it broke this endpoint and made every window return the same
+// default 30-day payload.
+export const getReplyAnalytics = async ({ days = 30 } = {}) => {
+  try {
+    return await companyApi.get('/reply-draft/analytics', { days });
+  } catch (error) {
+    console.error('Reply analytics error:', error);
+    throw error;
+  }
+};
+
 // Fetch the full body for a single inbox item. The list endpoint serves
 // only a 200-char preview so the page loads fast; this fills in the full
 // content when the user clicks a row.
