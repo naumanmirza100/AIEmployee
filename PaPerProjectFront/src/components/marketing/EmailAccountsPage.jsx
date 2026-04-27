@@ -257,6 +257,24 @@ const EmailAccountsPage = () => {
       toast({ title: 'Validation', description: 'SMTP password is required for new account.', variant: 'destructive' });
       return;
     }
+    // IMAP sync requires a full set of IMAP credentials — otherwise the
+    // backend sync_inbox task silently skips the account with zero UI feedback.
+    if (form.enable_imap_sync) {
+      const missing = [];
+      if (!form.imap_host?.trim())     missing.push('IMAP host');
+      if (!form.imap_username?.trim()) missing.push('IMAP username');
+      // On create, imap_password must be provided. On edit, it's optional if
+      // one was stored previously — the backend preserves the existing value.
+      if (!editingId && !form.imap_password) missing.push('IMAP password');
+      if (missing.length) {
+        toast({
+          title: 'IMAP fields required',
+          description: `Please fill in: ${missing.join(', ')}. Or turn off "Enable IMAP sync" if you don't want to sync this account.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
     setActionLoading(true);
     try {
       const payload = {
@@ -946,12 +964,13 @@ const EmailAccountsPage = () => {
                       >
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label>IMAP Host</Label>
+                            <Label>IMAP Host <span className="text-red-500">*</span></Label>
                             <Input
                               placeholder="imap.gmail.com"
                               value={form.imap_host}
                               onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
-                              className="h-10"
+                              className={`h-10 ${!form.imap_host?.trim() ? 'border-red-500/40' : ''}`}
+                              required
                             />
                           </div>
                           <div className="space-y-2">
@@ -968,25 +987,33 @@ const EmailAccountsPage = () => {
 
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label>IMAP Username</Label>
+                            <Label>IMAP Username <span className="text-red-500">*</span></Label>
                             <Input
                               placeholder="Usually same as email"
                               value={form.imap_username}
                               onChange={(e) => setForm((p) => ({ ...p, imap_username: e.target.value }))}
-                              className="h-10"
+                              className={`h-10 ${!form.imap_username?.trim() ? 'border-red-500/40' : ''}`}
+                              required
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label>IMAP Password</Label>
+                            <Label>
+                              IMAP Password {!editingId && <span className="text-red-500">*</span>}
+                              {editingId && <span className="text-xs text-muted-foreground"> (leave blank to keep existing)</span>}
+                            </Label>
                             <Input
                               type="password"
                               placeholder="••••••••"
                               value={form.imap_password}
                               onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
-                              className="h-10"
+                              className={`h-10 ${!editingId && !form.imap_password ? 'border-red-500/40' : ''}`}
+                              required={!editingId}
                             />
                           </div>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          These fields are required when IMAP sync is enabled — without them the inbox won't sync.
+                        </p>
 
                         <div className="flex items-center gap-2">
                           <Switch

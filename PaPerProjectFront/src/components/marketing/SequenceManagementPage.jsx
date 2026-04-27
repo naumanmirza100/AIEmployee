@@ -722,7 +722,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                             </Badge>
                           </div>
                           <p className="text-sm text-muted-foreground mt-1">
-                            {seq.email_account ? `From: ${seq.email_account}` : 'No email account'}
+                            {seq.email_account
+                              ? `From: ${seq.email_account}`
+                              : campaign?.email_account_email
+                                ? `From: ${campaign.email_account_email} (campaign default)`
+                                : 'No email account'}
                           </p>
                           {/* <div className="flex gap-4 mt-2 text-sm">
                         <span>Sent: {seq.total_sent}</span>
@@ -1087,7 +1091,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                     <SelectValue placeholder="Select account" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">No account</SelectItem>
+                    <SelectItem value="__none__">
+                      {campaign?.email_account_email
+                        ? `Use campaign default (${campaign.email_account_email})`
+                        : 'No account'}
+                    </SelectItem>
                     {email_accounts.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         {a.email} {a.is_default ? '(default)' : ''}
@@ -1229,7 +1237,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                     <SelectValue placeholder="Select account" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">No account</SelectItem>
+                    <SelectItem value="__none__">
+                      {campaign?.email_account_email
+                        ? `Use campaign default (${campaign.email_account_email})`
+                        : 'No account'}
+                    </SelectItem>
                     {email_accounts.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>{a.email}</SelectItem>
                     ))}
