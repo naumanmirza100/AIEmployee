@@ -58,3 +58,17 @@ except Exception as e:
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')
+
+
+# With --pool=threads each task runs in its own thread, so Django's
+# request-lifecycle hooks that normally close DB connections never fire.
+# Without this, idle connections accumulate per-thread until SQL Server
+# starts rejecting them. close_old_connections() also drops connections
+# in an unusable state so the next task gets a fresh one.
+from celery.signals import task_postrun  # noqa: E402
+
+
+@task_postrun.connect
+def _close_db_connections(sender=None, task_id=None, task=None, **kwargs):
+    from django.db import close_old_connections
+    close_old_connections()

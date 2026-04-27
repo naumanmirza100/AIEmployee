@@ -135,18 +135,33 @@ class Command(BaseCommand):
 
     def sync_account_inbox(self, account, dry_run=False, since_days=None):
         """
-        Sync inbox for a single email account.
+        Sync mail for a single email account — INBOX (incoming) and Sent
+        (outgoing) folders both land in the InboxEmail table, distinguished
+        by the `direction` field ('in' / 'out').
 
-        Campaign replies (matched by In-Reply-To / References / Subject) go into
-        the Reply table via the existing path. Every other incoming message is
-        stored as an InboxEmail row so the Reply Draft Agent can surface the
-        full mailbox for the last N days.
+        Campaign reply detection runs only for INBOX. Sent mail is stored
+        as InboxEmail with direction='out' and is independent of campaign
+        replies / EmailSendHistory by design.
         """
         if since_days is None or since_days < 1:
             since_days = self.DEFAULT_SINCE_DAYS
-        replies_found = 0
-        replies_processed = 0
-        inbox_stored = 0
+
+        # Re-verify the account still exists in DB. The instance we were
+        # handed may be stale if a concurrent sync task / user-deletion
+        # removed it between handle()'s queryset and this call. Without
+        # this check every InboxEmail INSERT in the loop fails with a
+        # FK violation and we waste minutes retrying.
+        fresh_account = EmailAccount.objects.filter(pk=account.pk).first()
+        if fresh_account is None:
+            self.stdout.write(self.style.WARNING(
+                f'  [SKIP] Account {account.id} ({account.email}) no longer exists in DB — skipping sync.'
+            ))
+            return 0, 0, 0
+        account = fresh_account
+
+        total_replies_found = 0
+        total_replies_processed = 0
+        total_inbox_stored = 0
 
         try:
             # Connect to IMAP server
@@ -159,114 +174,47 @@ class Command(BaseCommand):
 
             mail.login(account.imap_username, account.imap_password)
             self.stdout.write(f'  Connected to IMAP server: {account.imap_host}:{account.imap_port}')
-            mail.select('INBOX')
 
-            # Last N days of mail (both UNSEEN and SEEN). We rely on our own
-            # Message-ID dedupe so reading mail in another client doesn't
-            # cause the draft agent to miss messages.
-            since_date = (timezone.now() - timedelta(days=since_days)).strftime('%d-%b-%Y')
-            status, messages = mail.search(None, f'(SINCE {since_date})')
+            # Preload existing Message-IDs ONCE for the whole account, shared
+            # across INBOX + Sent. The unique (email_account, message_id)
+            # constraint means a self-CC (same Message-ID in both folders)
+            # is stored exactly once — first folder processed wins the
+            # direction, and we process INBOX first.
+            known_message_ids = set(
+                InboxEmail.objects
+                .filter(email_account=account)
+                .values_list('message_id', flat=True)
+            )
+            self.stdout.write(f'  [INFO] {len(known_message_ids)} message(s) already cached for this account')
 
-            if status != 'OK':
-                self.stdout.write(self.style.WARNING(f'   Failed to search inbox'))
-                mail.logout()
-                return replies_found, replies_processed, inbox_stored
+            # 1) INBOX — incoming mail + campaign reply detection
+            in_replies_found, in_replies_processed, in_inbox_stored = self._process_folder(
+                mail, account, 'INBOX', 'in', dry_run, since_days, known_message_ids,
+            )
+            total_replies_found += in_replies_found
+            total_replies_processed += in_replies_processed
+            total_inbox_stored += in_inbox_stored
 
-            # Reverse so we process newest messages first. IMAP SEARCH returns
-            # UIDs oldest-to-newest; if we fetched in that order, the Reply Draft
-            # UI's default "Last 30 days" view stays empty for 30-60s while only
-            # old messages land, then suddenly fills. Newest-first makes each
-            # view window populate progressively in the order users actually care
-            # about — you see today's mail first, week-old next, etc.
-            email_ids = list(reversed(messages[0].split()))
+            # 2) Sent folder — outgoing mail, no reply detection
+            sent_folder = self._find_sent_folder(mail)
+            if sent_folder:
+                self.stdout.write(f'  Sent folder detected: {sent_folder!r}')
+                _, _, out_inbox_stored = self._process_folder(
+                    mail, account, sent_folder, 'out', dry_run, since_days, known_message_ids,
+                )
+                total_inbox_stored += out_inbox_stored
+            else:
+                self.stdout.write('  [INFO] Sent folder not found via common names; skipping sent sync')
 
-            if not email_ids:
-                self.stdout.write(f'  [INFO] No emails in the last {since_days} day(s)')
-                mail.logout()
-                return replies_found, replies_processed, inbox_stored
-
-            self.stdout.write(f'   Found {len(email_ids)} email(s) in the last {since_days} day(s) (processing newest first)')
-
-            emails_checked = 0
-            emails_skipped_known = 0
-            # Log progress every N messages so long-running syncs (hundreds
-            # of emails on a first-time pull) are observable from celery_worker.log.
-            progress_every = 25
-            total_to_process = len(email_ids)
-
-            for idx, email_id in enumerate(email_ids, start=1):
-                try:
-                    # Stage 1: peek at headers only, bail out if we've already stored this Message-ID.
-                    status, hdr_data = mail.fetch(email_id, '(BODY.PEEK[HEADER])')
-                    if status != 'OK' or not hdr_data or not hdr_data[0]:
-                        continue
-                    hdr_msg = email.message_from_bytes(hdr_data[0][1])
-                    msg_id_raw = (hdr_msg.get('Message-ID') or hdr_msg.get('Message-Id') or '').strip().strip('<>')
-                    if msg_id_raw and InboxEmail.objects.filter(
-                        email_account=account, message_id=msg_id_raw[:500]
-                    ).exists():
-                        emails_skipped_known += 1
-                        continue
-
-                    # Stage 2: full fetch for anything new.
-                    status, msg_data = mail.fetch(email_id, '(RFC822)')
-                    if status != 'OK':
-                        continue
-
-                    email_body = msg_data[0][1]
-                    msg = email.message_from_bytes(email_body)
-
-                    sender_email = self.get_email_address(msg.get('From', ''))
-                    if not sender_email:
-                        continue
-
-                    emails_checked += 1
-
-                    # Step 1: try to match as a campaign reply first.
-                    is_reply, sent_email = self.detect_reply(msg, account)
-
-                    if is_reply and sent_email:
-                        replies_found += 1
-                        self.stdout.write(f'\n  [REPLY] Campaign reply detected!')
-                        self.stdout.write(f'     From: {sender_email}')
-                        self.stdout.write(f'     Subject: {self.decode_header(msg.get("Subject", ""))}')
-                        self.stdout.write(f'     Original Email: {sent_email.subject} (ID: {sent_email.id})')
-
-                        if not dry_run:
-                            if self.process_reply(msg, sent_email, account):
-                                replies_processed += 1
-                                self.stdout.write(f'     [OK] Reply processed successfully')
-                            else:
-                                self.stdout.write(f'     [ERROR] Failed to process reply')
-                        else:
-                            self.stdout.write(f'     [SKIP] Skipped (dry run)')
-                        continue
-
-                    # Step 2: generic inbox mail — store every message so the
-                    # Reply Draft UI surfaces the full mailbox (last N days).
-                    if dry_run:
-                        continue
-
-                    if self.store_inbox_email(msg, account, sender_email):
-                        inbox_stored += 1
-
-                except Exception as e:
-                    self.stdout.write(self.style.ERROR(f'  [ERROR] Error processing email {email_id.decode()}: {str(e)}'))
-                    logger.error(f'Error processing email {email_id.decode()}: {str(e)}', exc_info=True)
-                    continue
-
-                # Progress heartbeat — so long syncs are visible in celery_worker.log.
-                if idx % progress_every == 0 or idx == total_to_process:
-                    self.stdout.write(
-                        f'  [PROGRESS] {idx}/{total_to_process}  checked={emails_checked}  '
-                        f'skipped={emails_skipped_known}  stored={inbox_stored}  replies={replies_found}'
-                    )
-
+            try:
+                mail.close()
+            except Exception:
+                pass
             mail.logout()
             self.stdout.write(f'\n  [OK] Finished processing account: {account.email}')
             self.stdout.write(
-                f'     Checked: {emails_checked} · Skipped (already known): {emails_skipped_known} · '
-                f'Campaign replies: {replies_found} · Inbox stored: {inbox_stored}'
+                f'     Campaign replies: {total_replies_found} '
+                f'(processed {total_replies_processed}) · Inbox stored: {total_inbox_stored}'
             )
 
         except imaplib.IMAP4.error as e:
@@ -276,20 +224,251 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'  [ERROR] Error: {str(e)}'))
             logger.error(f'Error syncing account {account.id}: {str(e)}', exc_info=True)
 
+        return total_replies_found, total_replies_processed, total_inbox_stored
+
+    def _find_sent_folder(self, mail):
+        """Locate the IMAP Sent-mail folder by probing common names.
+
+        IMAP doesn't have a universal name for Sent — Gmail uses
+        '[Gmail]/Sent Mail', Outlook/Exchange uses 'Sent Items', generic
+        IMAP servers use 'Sent', etc. RFC 6154's \\Sent special-use flag
+        has uneven server support, so we just SELECT each candidate
+        readonly until one opens. Returns the folder name as it should
+        be passed to mail.select() later.
+        """
+        candidates = [
+            '[Gmail]/Sent Mail',     # Gmail (English UI)
+            'Sent',                   # Generic IMAP / Hostinger / cPanel
+            'Sent Items',             # Outlook / Exchange / Office 365
+            'Sent Messages',          # Apple Mail / iCloud
+            'INBOX.Sent',             # Some Courier IMAP servers
+            'Sent Mail',              # Older format
+        ]
+        for name in candidates:
+            try:
+                # Quote names with spaces / brackets — IMAP requires it.
+                status, _ = mail.select(f'"{name}"', readonly=True)
+                if status == 'OK':
+                    return name
+            except Exception:
+                continue
+        return None
+
+    def _process_folder(self, mail, account, folder_label, direction, dry_run, since_days, known_message_ids):
+        """Pull mail from one IMAP folder and store as InboxEmail rows.
+
+        direction='in'  → INBOX flow. Each message runs through detect_reply;
+                          campaign matches go to the Reply table, the rest
+                          land as InboxEmail rows with direction='in'.
+        direction='out' → Sent flow. No reply detection — sent mail can't
+                          be a "reply to a campaign we sent" in the inbound
+                          sense. from_email becomes the account's own
+                          address; to_email is parsed from the To: header.
+
+        known_message_ids is shared with the caller and updated in-place so
+        cross-folder dedupe spans the whole account.
+        """
+        # IMAP folder names with spaces or brackets must be quoted.
+        select_arg = f'"{folder_label}"' if folder_label != 'INBOX' else 'INBOX'
+        status, _ = mail.select(select_arg)
+        if status != 'OK':
+            self.stdout.write(self.style.WARNING(f'   Failed to select folder {folder_label!r}; skipping'))
+            return 0, 0, 0
+
+        since_date = (timezone.now() - timedelta(days=since_days)).strftime('%d-%b-%Y')
+        status, messages = mail.search(None, f'(SINCE {since_date})')
+        if status != 'OK':
+            self.stdout.write(self.style.WARNING(f'   Failed to search folder {folder_label!r}'))
+            return 0, 0, 0
+
+        # Newest first so the UI's recent-window view fills progressively.
+        email_ids = list(reversed(messages[0].split()))
+        if not email_ids:
+            self.stdout.write(f'  [INFO] No emails in folder {folder_label!r} for the last {since_days} day(s)')
+            return 0, 0, 0
+
+        self.stdout.write(
+            f'   [{folder_label}] Found {len(email_ids)} email(s) in the last {since_days} day(s) '
+            f'(direction={direction!r}, processing newest first)'
+        )
+
+        replies_found = 0
+        replies_processed = 0
+        inbox_stored = 0
+        emails_checked = 0
+        emails_skipped_known = 0
+
+        # Buffer InboxEmail rows and flush via bulk_create.
+        pending_inbox_rows = []
+        BULK_FLUSH_SIZE = 50
+
+        # IMAP fetch batching — one round-trip handles many messages.
+        HEADER_BATCH_SIZE = 100
+        RFC_BATCH_SIZE = 20
+
+        own_address = (account.email or '').lower()
+        total_to_process = len(email_ids)
+
+        for chunk_start in range(0, total_to_process, HEADER_BATCH_SIZE):
+            chunk = email_ids[chunk_start:chunk_start + HEADER_BATCH_SIZE]
+
+            # Stage 1: batched header peek (just MESSAGE-ID for dedupe).
+            headers_by_eid = {}
+            try:
+                seq = b','.join(chunk)
+                status, hdr_data = mail.fetch(seq, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])')
+                if status == 'OK':
+                    headers_by_eid = self._parse_imap_fetch(hdr_data)
+            except Exception as e:
+                logger.error(f'[{folder_label}] Batched header fetch failed at chunk {chunk_start}: {e}', exc_info=True)
+
+            # Stage 2: split chunk into known (skip) and unknown (need RFC822).
+            unknown_in_chunk = []
+            for eid in chunk:
+                hdr_bytes = headers_by_eid.get(eid)
+                if hdr_bytes:
+                    try:
+                        hdr_msg = email.message_from_bytes(hdr_bytes)
+                        mid = (hdr_msg.get('Message-ID') or hdr_msg.get('Message-Id') or '').strip().strip('<>')
+                        if mid and mid[:500] in known_message_ids:
+                            emails_skipped_known += 1
+                            continue
+                    except Exception:
+                        pass
+                unknown_in_chunk.append(eid)
+
+            # Stage 3: batched RFC822 for unknowns.
+            for sub_start in range(0, len(unknown_in_chunk), RFC_BATCH_SIZE):
+                sub_chunk = unknown_in_chunk[sub_start:sub_start + RFC_BATCH_SIZE]
+                if not sub_chunk:
+                    continue
+
+                msgs_by_eid = {}
+                try:
+                    seq2 = b','.join(sub_chunk)
+                    status, msg_data = mail.fetch(seq2, '(RFC822)')
+                    if status == 'OK':
+                        msgs_by_eid = self._parse_imap_fetch(msg_data)
+                except Exception as e:
+                    logger.error(f'[{folder_label}] Batched RFC822 fetch failed: {e}', exc_info=True)
+                    continue
+
+                for eid in sub_chunk:
+                    try:
+                        msg_bytes = msgs_by_eid.get(eid)
+                        if not msg_bytes:
+                            continue
+                        msg = email.message_from_bytes(msg_bytes)
+
+                        # Direction-aware addressing. For incoming mail the
+                        # From: header carries the sender; for outgoing mail
+                        # the From: is us and the To: header has the recipient.
+                        if direction == 'in':
+                            from_addr = self.get_email_address(msg.get('From', ''))
+                            to_addr = own_address
+                        else:
+                            from_addr = own_address
+                            to_addr = self.get_email_address(msg.get('To', '')) or ''
+
+                        if not from_addr:
+                            continue
+
+                        emails_checked += 1
+
+                        # Campaign reply detection only on incoming mail.
+                        if direction == 'in':
+                            is_reply, sent_email = self.detect_reply(msg, account)
+                            if is_reply and sent_email:
+                                replies_found += 1
+                                self.stdout.write(f'\n  [REPLY] Campaign reply detected!')
+                                self.stdout.write(f'     From: {from_addr}')
+                                self.stdout.write(f'     Subject: {self.decode_header(msg.get("Subject", ""))}')
+                                self.stdout.write(f'     Original Email: {sent_email.subject} (ID: {sent_email.id})')
+                                if not dry_run:
+                                    if pending_inbox_rows:
+                                        inbox_stored += self._flush_inbox_rows(pending_inbox_rows)
+                                    if self.process_reply(msg, sent_email, account):
+                                        replies_processed += 1
+                                        self.stdout.write(f'     [OK] Reply processed successfully')
+                                    else:
+                                        self.stdout.write(f'     [ERROR] Failed to process reply')
+                                else:
+                                    self.stdout.write(f'     [SKIP] Skipped (dry run)')
+                                continue
+
+                        if dry_run:
+                            continue
+
+                        row = self._build_inbox_email(
+                            msg, account, from_addr,
+                            to_email=to_addr,
+                            direction=direction,
+                        )
+                        if row and row.message_id not in known_message_ids:
+                            pending_inbox_rows.append(row)
+                            known_message_ids.add(row.message_id)
+                            if len(pending_inbox_rows) >= BULK_FLUSH_SIZE:
+                                inbox_stored += self._flush_inbox_rows(pending_inbox_rows)
+                    except Exception as e:
+                        self.stdout.write(self.style.ERROR(f'  [ERROR] [{folder_label}] Error processing email {eid.decode()}: {str(e)}'))
+                        logger.error(f'[{folder_label}] Error processing email {eid.decode()}: {str(e)}', exc_info=True)
+                        continue
+
+            # Progress heartbeat per chunk
+            processed_so_far = min(chunk_start + HEADER_BATCH_SIZE, total_to_process)
+            self.stdout.write(
+                f'  [PROGRESS {folder_label}] {processed_so_far}/{total_to_process}  '
+                f'checked={emails_checked}  skipped={emails_skipped_known}  '
+                f'stored={inbox_stored + len(pending_inbox_rows)}  replies={replies_found}'
+            )
+
+        # Final flush for this folder
+        if pending_inbox_rows:
+            inbox_stored += self._flush_inbox_rows(pending_inbox_rows)
+
         return replies_found, replies_processed, inbox_stored
 
-    def store_inbox_email(self, msg, account, sender_email):
-        """Persist a generic (non-campaign) inbox email. Idempotent on (account, Message-ID)."""
+    @staticmethod
+    def _parse_imap_fetch(fetch_data):
+        """Parse imaplib's multi-message FETCH response into {seq_id_bytes: payload_bytes}.
+
+        imaplib returns a list that mixes tuples (where the body literal is)
+        with stand-alone bytes (the closing parens). For each message we get:
+            (b'42 (RFC822 {12345}', b'<actual message bytes>'),
+            b')',
+        We pull the leading sequence number out of the descriptor so the
+        caller can look up payloads by the same id it sent in the request,
+        regardless of the order the server returned them.
+        """
+        result = {}
+        for entry in fetch_data:
+            if not isinstance(entry, tuple) or len(entry) < 2:
+                continue
+            descriptor, payload = entry[0], entry[1]
+            if not isinstance(descriptor, (bytes, bytearray)) or not isinstance(payload, (bytes, bytearray)):
+                continue
+            m = re.match(rb'\s*(\d+)\s', descriptor)
+            if m:
+                result[m.group(1)] = bytes(payload)
+        return result
+
+    def _build_inbox_email(self, msg, account, from_email, *, to_email=None, direction='in'):
+        """Construct (but do not save) an InboxEmail instance from a parsed message.
+
+        from_email is the sender (always — for direction='out' the caller
+        passes the account's own address). to_email defaults to the
+        account's own address (the typical case for direction='in') and
+        is parsed from the To: header by the caller for direction='out'.
+        direction is stored verbatim and lets the list endpoint split
+        Inbox vs Sent views.
+        """
         message_id = (msg.get('Message-ID') or msg.get('Message-Id') or '').strip().strip('<>')
         if not message_id:
             # Synthesize a stable-ish id for messages without a Message-ID header
             # so dedupe still works across syncs.
             date_hint = msg.get('Date', '') or ''
             subj_hint = (msg.get('Subject', '') or '')[:60]
-            message_id = f'synthetic-{hash((sender_email, date_hint, subj_hint)) & 0xffffffff:x}'
-
-        if InboxEmail.objects.filter(email_account=account, message_id=message_id).exists():
-            return False
+            message_id = f'synthetic-{hash((from_email, date_hint, subj_hint)) & 0xffffffff:x}'
 
         received_at = timezone.now()
         date_str = msg.get('Date')
@@ -314,22 +493,92 @@ class Command(BaseCommand):
         in_reply_to = (msg.get('In-Reply-To', '') or '').strip()[:500]
         references = (msg.get('References', '') or '').strip()
 
+        # Default to_email = the account address (correct for incoming mail).
+        if to_email is None:
+            to_email = (account.email or '')
+
+        return InboxEmail(
+            owner=account.owner,
+            email_account=account,
+            message_id=message_id[:500],
+            in_reply_to=in_reply_to,
+            references=references,
+            from_email=from_email,
+            from_name=from_name[:255],
+            subject=subject,
+            body=body,
+            received_at=received_at,
+            to_email=(to_email or '')[:254],
+            direction=direction,
+        )
+
+    def _flush_inbox_rows(self, pending_rows):
+        """Bulk-insert buffered InboxEmail rows. Returns the count flushed.
+
+        SQL Server's mssql backend has had a few foot-guns here historically
+        (no ignore_conflicts, ARITHABORT/OUTPUT clause oddities, DataError on
+        4000-char-plus subjects, etc.) so we catch *any* exception from
+        bulk_create — not just IntegrityError — and fall back to per-row
+        save() so the rest of the batch still lands. The log lines below
+        surface the real failure if anything still slips through.
+        pending_rows is always cleared so the buffer can't poison the next
+        batch.
+
+        FK-violation special case: if the email_account row was deleted while
+        sync was running, every insert in this batch (and every batch after)
+        will fail the same way. Detecting that and re-raising lets the outer
+        loop abort instead of burning minutes retrying 2000+ doomed rows.
+        """
+        if not pending_rows:
+            return 0
         try:
-            InboxEmail.objects.create(
-                owner=account.owner,
-                email_account=account,
-                message_id=message_id[:500],
-                in_reply_to=in_reply_to,
-                references=references,
-                from_email=sender_email,
-                from_name=from_name[:255],
-                subject=subject,
-                body=body,
-                received_at=received_at,
+            InboxEmail.objects.bulk_create(pending_rows, batch_size=50)
+            flushed = len(pending_rows)
+        except Exception as e:
+            err_text = str(e)
+            if 'FOREIGN KEY constraint' in err_text and 'emailaccount' in err_text.lower():
+                # The account row vanished mid-sync. Per-row retries are pointless —
+                # they'll all hit the same FK miss. Clear the buffer and bail.
+                logger.error(
+                    'sync_inbox: email_account FK violation — account was deleted '
+                    'mid-sync, aborting this account. (%s)', err_text[:300]
+                )
+                pending_rows.clear()
+                raise
+            logger.warning(
+                'sync_inbox bulk_create failed (%s: %s); falling back to per-row save for %d rows',
+                type(e).__name__, e, len(pending_rows)
             )
+            flushed = 0
+            for row in pending_rows:
+                try:
+                    row.save()
+                    flushed += 1
+                except Exception as inner_e:
+                    logger.warning(
+                        'sync_inbox per-row save failed for message_id=%r: %s: %s',
+                        (row.message_id or '')[:60], type(inner_e).__name__, inner_e
+                    )
+        finally:
+            pending_rows.clear()
+        return flushed
+
+    def store_inbox_email(self, msg, account, sender_email):
+        """Persist a single incoming inbox email. Idempotent on (account, Message-ID).
+
+        Retained for callers outside the batched sync loop. Always writes
+        as direction='in' — Sent-folder mail goes through the batched
+        _process_folder path, not this one.
+        """
+        row = self._build_inbox_email(msg, account, sender_email, direction='in')
+        if row is None:
+            return False
+        if InboxEmail.objects.filter(email_account=account, message_id=row.message_id).exists():
+            return False
+        try:
+            row.save()
             return True
         except IntegrityError:
-            # Raced with a concurrent sync — treat as already stored.
             return False
 
     def detect_reply(self, msg, account):

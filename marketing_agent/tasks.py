@@ -36,7 +36,7 @@ def send_sequence_emails_task(self):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=300)
-def sync_inbox_task(self, account_id=None):
+def sync_inbox_task(self, account_id=None, since_days=None):
     """
     Celery task to sync inbox and detect email replies.
     Handles: Reply detection, AI analysis, sub-sequence assignment.
@@ -46,12 +46,21 @@ def sync_inbox_task(self, account_id=None):
     specific account_id for instant single-account sync — so a newly
     configured mailbox starts populating within ~30s instead of waiting
     up to 5 minutes for the next beat tick.
+
+    `since_days` is passed through to the management command so callers
+    can request a smaller window than the default. The on-connect path
+    uses this to fire a fast 30-day sync first and queue the deeper
+    120-day backfill on a delay.
     """
     try:
+        kwargs = {}
         if account_id:
-            call_command('sync_inbox', account_id=account_id)
+            kwargs['account_id'] = account_id
+        if since_days:
+            kwargs['since_days'] = since_days
+        call_command('sync_inbox', **kwargs)
+        if account_id:
             return {'status': 'success', 'message': f'Inbox synced for account {account_id}'}
-        call_command('sync_inbox')
         return {'status': 'success', 'message': 'Inbox synced'}
     except Exception as e:
         print(f'Error in inbox sync task: {str(e)}')

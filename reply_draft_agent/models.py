@@ -46,6 +46,14 @@ class InboxEmail(models.Model):
     interest_level = models.CharField(max_length=20, choices=INTEREST_LEVEL_CHOICES, default='not_analyzed')
     analysis = models.TextField(blank=True)
 
+    # Recipient + direction. Mirrors columns added by migration
+    # 0003_inboxemail_direction_to_email — kept in the model so inserts
+    # don't violate the NOT NULL constraint on those columns.
+    to_email = models.EmailField(blank=True, default='',
+                                 help_text='Mailbox the message was delivered to (the EmailAccount address)')
+    direction = models.CharField(max_length=4, default='in',
+                                 help_text="'in' for received mail, 'out' for sent")
+
     synced_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

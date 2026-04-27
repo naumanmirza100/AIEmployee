@@ -13,7 +13,6 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 from django.contrib.auth.models import User
 from django.db.models import Count, Max, Prefetch, Q
-from django.db.models.functions import Substr
 from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
@@ -110,15 +109,23 @@ def _serialize_reply(r, *, include_body=False):
 
 
 def _serialize_inbox_email(m, *, include_body=False):
-    """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics."""
+    """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics.
+
+    `to_email` and `direction` are exposed so the frontend Sent tab can
+    render "To: <recipient>" instead of the from-address. `replied_at`
+    is reused as the row's timestamp regardless of direction; the field
+    name is historical (originally only inbound replies were listed).
+    """
     preview = getattr(m, '_list_preview', None)
     if preview is None:
         preview = (m.body or '')[:200]
     out = {
         'id': m.id,
         'source': 'inbox',
+        'direction': m.direction,
         'from_email': m.from_email,
         'from_name': m.from_name,
+        'to_email': m.to_email,
         'from_company': '',
         'from_job_title': '',
         'subject': m.subject or '(no subject)',
@@ -276,13 +283,16 @@ def dashboard(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_pending_replies(request):
-    """Inbox view: every mail that landed in the company's Reply Draft Agent
-    account in the window. Isolated from marketing — if the company hasn't
-    attached a Reply Draft Agent account yet, the inbox is empty by design.
+    """Inbox / Sent view: every mail in the company's Reply Draft Agent
+    account in the window, scoped by direction. Isolated from marketing —
+    if the company hasn't attached a Reply Draft Agent account yet, the
+    list is empty by design.
 
     Query params:
       - days: 1 / 7 / 30 / 60 / 90 / 120 / 'all' (default: all stored rows;
               the underlying storage window is set per-account via Sync depth)
+      - direction: 'in' (Inbox tab — default, backwards-compat)
+                   'out' (Sent tab — populated by the IMAP Sent-folder sync)
     """
     gate = _enforce_module(request.user)
     if gate is not None:
@@ -290,6 +300,11 @@ def list_pending_replies(request):
 
     user_ids = _company_bridge_user_ids(request.user)
     days_cutoff = _parse_days_filter(request.GET.get('days'))
+    # 'in' default keeps existing inbox callers unchanged. The Sent tab
+    # passes direction=out explicitly.
+    direction = request.GET.get('direction', 'in')
+    if direction not in ('in', 'out'):
+        direction = 'in'
 
     reply_account = _get_reply_account(user_ids)
     if reply_account is None:
@@ -309,19 +324,19 @@ def list_pending_replies(request):
 
     items = []
 
-    # The body / reply_content columns can be 10-100KB each on MSSQL. Pulling
-    # them for the list view tanked /pending-replies to 30s for 350 rows.
-    # We defer them + pre-compute a 200-char preview via SQL SUBSTRING instead;
-    # the full body is loaded lazily by the detail endpoints when a row is clicked.
-    preview_len = 200
+    # The body column can be 10-100KB each on MSSQL. We previously deferred it
+    # and computed the preview via SQL SUBSTRING — but on SQL Server's UTF-16 LE
+    # nvarchar storage that can split a surrogate pair (emoji, non-BMP char) at
+    # position 200 and produce bytes pyodbc can't decode → 500. Falling back to
+    # Python-side slicing in the serializer: still bounded (only the most recent
+    # 2000 rows) and Python's str slicing is surrogate-safe.
+    preview_len = 200  # noqa: F841  (used by serializer fallback path)
 
     inbox_qs = (
         InboxEmail.objects
-        .filter(owner_id__in=user_ids, email_account_id=reply_account.id)
+        .filter(owner_id__in=user_ids, email_account_id=reply_account.id, direction=direction)
         .exclude(id__in=drafted_inbox_ids)
         .select_related('email_account')
-        .defer('body')
-        .annotate(_list_preview=Substr('body', 1, preview_len))
     )
     if days_cutoff is not None:
         inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
@@ -794,6 +809,22 @@ def create_reply_account(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Verify IMAP credentials BEFORE we save the account so the user
+        # sees the auth error immediately. Without this the account gets
+        # created, the background sync fails, and the UI just spins.
+        from api.views.marketing_agent import verify_imap_credentials
+        ok, err = verify_imap_credentials(
+            imap_host, imap_port,
+            bool(data.get('imap_use_ssl', True)),
+            imap_username, imap_password,
+        )
+        if not ok:
+            return Response({
+                'status': 'error',
+                'message': f'IMAP login failed: {err}',
+                'error': 'imap_auth_failed',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Duplicate check — create_unique is per (owner, email). If the user is
         # re-attaching an existing account by the same email, just promote it
         # instead of erroring out.
@@ -841,7 +872,10 @@ def create_reply_account(request):
                 is_reply_agent_account=True,
             )
 
-        # Fire the targeted Celery sync so the inbox populates right away.
+        # Single 120-day sync — batched IMAP fetches in sync_inbox bring
+        # this in around 30s, so the prior 30-day-fast / 120-day-delayed
+        # split is no longer worth its complexity. The 5-min periodic beat
+        # is the fallback if this enqueue fails.
         sync_queued = False
         try:
             from marketing_agent.tasks import sync_inbox_task
