@@ -1871,6 +1871,13 @@ class AgentTokenQuota(models.Model):
     # names kept stable for code compatibility; db_column maps to the actual column.
     included_tokens = models.BigIntegerField(default=DEFAULT_FREE_TOKENS, db_column='platform_included_tokens')
     used_tokens = models.BigIntegerField(default=0, db_column='platform_used_tokens')
+    # Sibling managed-key counters. These columns exist in the DB as NOT NULL,
+    # so without these fields every INSERT on this table fails with
+    # "Cannot insert NULL into column 'managed_included_tokens'". Kept separate
+    # from platform_* since they track a different key source; default to 0
+    # until a managed key is purchased.
+    managed_included_tokens = models.BigIntegerField(default=0)
+    managed_used_tokens = models.BigIntegerField(default=0)
     byok_tokens_info = models.BigIntegerField(
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',

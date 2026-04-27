@@ -1754,6 +1754,9 @@ const FrontlineDashboard = () => {
 
   // Document processing result (summarize / extract)
   const [docResultDialog, setDocResultDialog] = useState({ open: false, type: null, title: '', content: null, loading: false });
+  // Per-doc inline summary cache + expand toggle for the redesigned card grid.
+  // Shape: { [docId]: { summary, loading, expanded, error } }
+  const [docSummaries, setDocSummaries] = useState({});
 
   // Tickets list (filter + pagination)
   const [ticketsList, setTicketsList] = useState([]);
@@ -1872,10 +1875,15 @@ const FrontlineDashboard = () => {
         'knowledge_base'
       );
 
-      if (response.status === 'success') {
+      // Backend returns 'accepted' (202) when processing was enqueued asynchronously,
+      // or 'success' when processed inline. Treat either as a successful upload.
+      if (response.status === 'success' || response.status === 'accepted') {
+        const mode = response?.data?.dispatch_mode;
         toast({
           title: 'Success!',
-          description: 'Document uploaded and processed successfully',
+          description: mode === 'inline'
+            ? 'Document uploaded and indexed.'
+            : 'Document uploaded — processing in the background.',
         });
         setShowUploadDialog(false);
         setUploadFile(null);
@@ -1937,6 +1945,28 @@ const FrontlineDashboard = () => {
       setDocResultDialog((prev) => ({ ...prev, content, loading: false }));
     } catch (error) {
       setDocResultDialog((prev) => ({ ...prev, content: `Error: ${error.message || 'Extraction failed'}`, loading: false }));
+    }
+  };
+
+  /** Inline summary toggle for the Documents card grid.
+   *  First click on a card fetches the summary (short — 3 sentences) and expands.
+   *  Subsequent clicks just flip expanded without re-fetching. */
+  const toggleDocSummary = async (doc) => {
+    const cur = docSummaries[doc.id];
+    if (cur?.summary) {
+      setDocSummaries((m) => ({ ...m, [doc.id]: { ...cur, expanded: !cur.expanded } }));
+      return;
+    }
+    setDocSummaries((m) => ({ ...m, [doc.id]: { summary: null, loading: true, expanded: true, error: null } }));
+    try {
+      const response = await frontlineAgentService.summarizeDocument(doc.id, { max_sentences: 3 });
+      const summary = response?.data?.summary ?? response?.summary ?? '';
+      setDocSummaries((m) => ({ ...m, [doc.id]: { summary, loading: false, expanded: true, error: null } }));
+    } catch (error) {
+      setDocSummaries((m) => ({
+        ...m,
+        [doc.id]: { summary: null, loading: false, expanded: true, error: error.message || 'Failed to summarize' },
+      }));
     }
   };
 
@@ -2599,36 +2629,129 @@ const FrontlineDashboard = () => {
             </CardHeader>
             <CardContent>
               {documents.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  No documents uploaded yet. Upload your first document to get started.
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="h-14 w-14 rounded-2xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
+                    <FileText className="h-7 w-7 text-violet-400" />
+                  </div>
+                  <div className="font-medium mb-1">No documents yet</div>
+                  <div className="text-sm text-muted-foreground max-w-sm">
+                    Upload a document to give the knowledge agent something to answer from.
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {documents.map((doc) => (
-                    <div key={doc.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded">
-                      <div className="flex items-center space-x-3 min-w-0">
-                        <FileText className="h-5 w-5 shrink-0" />
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">{doc.title}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {doc.file_format.toUpperCase()} • {doc.document_type}
-                            {doc.is_indexed && ' • Indexed'}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {documents.map((doc) => {
+                    const fmt = (doc.file_format || 'other').toLowerCase();
+                    const fmtColor = {
+                      pdf: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
+                      docx: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
+                      doc: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
+                      txt: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                      md: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
+                      html: 'bg-amber-500/15 text-amber-400 border-amber-400/30',
+                    }[fmt] || 'bg-violet-500/15 text-violet-400 border-violet-400/30';
+                    const sizeKB = doc.file_size ? Math.max(1, Math.round(doc.file_size / 1024)) : null;
+                    const sizeDisplay = sizeKB && sizeKB >= 1024
+                      ? `${(sizeKB / 1024).toFixed(1)} MB`
+                      : (sizeKB ? `${sizeKB} KB` : null);
+                    const summaryState = docSummaries[doc.id];
+                    const procStatus = doc.processing_status || (doc.is_indexed ? 'ready' : 'pending');
+                    const procLabel = {
+                      ready: 'Indexed',
+                      processing: 'Processing',
+                      pending: 'Queued',
+                      failed: 'Failed',
+                    }[procStatus] || procStatus;
+                    const procColor = {
+                      ready: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
+                      processing: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
+                      pending: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                      failed: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
+                    }[procStatus] || 'bg-slate-500/15 text-slate-300 border-slate-400/30';
+
+                    return (
+                      <div
+                        key={doc.id}
+                        className="group flex flex-col rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.04] to-white/[0.01] hover:border-violet-400/40 hover:shadow-[0_0_0_1px_rgba(139,92,246,0.15),0_8px_32px_-8px_rgba(139,92,246,0.25)] transition-all duration-200 overflow-hidden"
+                      >
+                        {/* Header row: format badge + title + status */}
+                        <div className="p-4 pb-3">
+                          <div className="flex items-start gap-3">
+                            <div className={`shrink-0 h-10 w-10 rounded-lg border flex items-center justify-center ${fmtColor}`}>
+                              <FileText className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium truncate text-sm" title={doc.title}>{doc.title}</div>
+                              <div className="mt-0.5 text-xs text-muted-foreground truncate">
+                                {fmt.toUpperCase()}
+                                {doc.document_type ? ` • ${doc.document_type.replace(/_/g, ' ')}` : ''}
+                                {sizeDisplay ? ` • ${sizeDisplay}` : ''}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${procColor}`}>
+                              {procLabel}
+                            </Badge>
+                            {doc.created_at && (
+                              <span className="text-[10px] text-muted-foreground">
+                                {new Date(doc.created_at).toLocaleDateString()}
+                              </span>
+                            )}
                           </div>
                         </div>
+
+                        {/* Expandable summary area */}
+                        <div className="px-4 pb-3 flex-1">
+                          {summaryState?.expanded ? (
+                            <div className="rounded-md bg-black/20 border border-white/[0.06] p-3 text-xs text-white/80 space-y-2">
+                              {summaryState.loading ? (
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  <span>Generating summary...</span>
+                                </div>
+                              ) : summaryState.error ? (
+                                <div className="text-rose-400">{summaryState.error}</div>
+                              ) : (
+                                <div className="whitespace-pre-wrap break-words leading-relaxed">
+                                  {summaryState.summary || 'No summary available.'}
+                                </div>
+                              )}
+                              <button
+                                onClick={() => toggleDocSummary(doc)}
+                                disabled={summaryState.loading}
+                                className="text-violet-400 hover:text-violet-300 text-[11px] font-medium flex items-center gap-0.5"
+                              >
+                                Show less <ChevronUp className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => toggleDocSummary(doc)}
+                              className="text-violet-400 hover:text-violet-300 text-xs font-medium flex items-center gap-0.5"
+                            >
+                              Show summary <ChevronDown className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Action bar */}
+                        <div className="border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
+                          <div className="flex items-center">
+                            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => handleSummarizeDocument(doc)} title="Full summary">
+                              <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => handleExtractDocument(doc)} title="Extract structured data">
+                              <ListChecks className="h-3.5 w-3.5 mr-1" /> Extract
+                            </Button>
+                          </div>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-rose-400" onClick={() => handleDeleteDocument(doc.id)} title="Delete">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
-                        <Button variant="ghost" size="sm" onClick={() => handleSummarizeDocument(doc)} title="Summarize">
-                          <FileSearch className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleExtractDocument(doc)} title="Extract data">
-                          <ListChecks className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDeleteDocument(doc.id)} title="Delete">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

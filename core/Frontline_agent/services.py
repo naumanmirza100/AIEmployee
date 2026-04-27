@@ -184,30 +184,21 @@ class KnowledgeService:
             all_chunks = DocumentChunk.objects.filter(document_id__in=doc_ids).select_related('document')
 
             # 1. Semantic Search
+            # Prefers a FAISS inner-product index (O(log N)); falls back to the
+            # legacy per-chunk JSON scan (O(N)) when faiss isn't installed or
+            # the company has no built index yet.
             semantic_results = []
             if self.embedding_service.is_available():
                 try:
                     logger.info("Generating query embedding for hybrid search")
                     query_embedding = self.embedding_service.generate_embedding(query)
                     if query_embedding:
-                        chunks_with_embeddings = all_chunks.exclude(embedding__isnull=True).exclude(embedding='')
-                        for chunk in chunks_with_embeddings:
-                            try:
-                                chunk_emb = json.loads(chunk.embedding) if isinstance(chunk.embedding, str) else chunk.embedding
-                                similarity = self.embedding_service.cosine_similarity(query_embedding, chunk_emb)
-                                semantic_results.append({
-                                    'chunk_id': chunk.id,
-                                    'document_id': chunk.document_id,
-                                    'score': similarity,
-                                    'content': chunk.chunk_text,
-                                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
-                                    'file_format': chunk.document.file_format,
-                                    'document_type': chunk.document.document_type
-                                })
-                            except Exception as e:
-                                pass
-                        semantic_results.sort(key=lambda x: x['score'], reverse=True)
-                        semantic_results = semantic_results[:50] # Top 50 semantic
+                        semantic_results = self._semantic_search(
+                            query_embedding=query_embedding,
+                            company_id=company_id,
+                            allowed_doc_ids=doc_ids,
+                            all_chunks=all_chunks,
+                        )
                 except Exception as e:
                     logger.warning(f"Semantic search failed: {e}")
             
@@ -226,25 +217,31 @@ class KnowledgeService:
                 })
                 
             # 3. Reciprocal Rank Fusion (RRF)
-            # RRF Score = sum(1 / (k + rank))
+            # RRF Score = sum(1 / (k + rank)) — good for ordering, but the magnitude
+            # is tiny (top hit ≈ 0.016) and MUST NOT be compared against the
+            # cosine-space confidence threshold. We preserve the true semantic
+            # score alongside the RRF score so `get_answer` can gate on the real one.
             k = 60
             chunk_scores = {}
             chunk_data = {}
-            
+            semantic_score_by_chunk = {}
+
             for rank, res in enumerate(semantic_results):
                 cid = res['chunk_id']
                 chunk_scores[cid] = chunk_scores.get(cid, 0) + (1.0 / (k + rank + 1))
                 chunk_data[cid] = res
-                
+                # `res['score']` is cosine similarity from _semantic_search.
+                semantic_score_by_chunk[cid] = float(res.get('score') or 0.0)
+
             for rank, res in enumerate(keyword_results):
                 cid = res['chunk_id']
                 chunk_scores[cid] = chunk_scores.get(cid, 0) + (1.0 / (k + rank + 1))
                 if cid not in chunk_data:
                     chunk_data[cid] = res
-                    
+
             # 4. Sort and return top chunks
             sorted_chunks = sorted(chunk_scores.items(), key=lambda x: x[1], reverse=True)[:max_results*2]
-            
+
             results = []
             for cid, score in sorted_chunks:
                 data = chunk_data[cid]
@@ -255,7 +252,12 @@ class KnowledgeService:
                     'content': data['content'],
                     'file_format': data['file_format'],
                     'document_type': data['document_type'],
+                    # RRF score — used for ordering inside this function only.
                     'similarity_score': round(score, 3),
+                    # True cosine similarity (None when only keyword-matched).
+                    # This is what `get_answer` compares against the confidence threshold.
+                    'semantic_score': (round(semantic_score_by_chunk[cid], 3)
+                                       if cid in semantic_score_by_chunk else None),
                     'search_method': 'hybrid'
                 })
                 
@@ -282,6 +284,65 @@ class KnowledgeService:
         except Exception as e:
             logger.error(f"Document search failed: {e}", exc_info=True)
             return []
+
+    def _semantic_search(self, *, query_embedding, company_id,
+                         allowed_doc_ids, all_chunks):
+        """Run the semantic half of hybrid search. Uses FAISS when available,
+        else the legacy JSON-scan path. Returns a list of chunk dicts shaped
+        for RRF (chunk_id, document_id, score, content, title, ...)."""
+        import json as _json
+        from Frontline_agent import vector_store as _vs
+
+        # ---- FAISS path ---------------------------------------------------
+        if _vs.FAISS_AVAILABLE:
+            store = _vs.get_store(company_id)
+            if store is not None:
+                # Candidate set = chunks whose parent document survived our filters.
+                candidate_chunk_ids = set(all_chunks.values_list('id', flat=True))
+                hits = store.search(query_embedding, k=50,
+                                    candidate_chunk_ids=candidate_chunk_ids)
+                if hits:
+                    hit_ids = [cid for cid, _ in hits]
+                    # Single DB fetch for metadata on the small top-k set.
+                    chunk_map = {c.id: c for c in all_chunks.filter(id__in=hit_ids)}
+                    out = []
+                    for cid, score in hits:
+                        c = chunk_map.get(cid)
+                        if c is None:
+                            continue
+                        out.append({
+                            'chunk_id': c.id,
+                            'document_id': c.document_id,
+                            'score': float(score),
+                            'content': c.chunk_text,
+                            'title': f"{c.document.title} (Chunk {c.chunk_index})",
+                            'file_format': c.document.file_format,
+                            'document_type': c.document.document_type,
+                        })
+                    return out
+
+        # ---- Legacy JSON-scan fallback -----------------------------------
+        # Used when faiss isn't installed, the tenant has no built index yet,
+        # or the FAISS call returned no hits (e.g. dim mismatch mid-rebuild).
+        semantic_results = []
+        chunks_with_embeddings = all_chunks.exclude(embedding__isnull=True).exclude(embedding='')
+        for chunk in chunks_with_embeddings:
+            try:
+                chunk_emb = _json.loads(chunk.embedding) if isinstance(chunk.embedding, str) else chunk.embedding
+                similarity = self.embedding_service.cosine_similarity(query_embedding, chunk_emb)
+                semantic_results.append({
+                    'chunk_id': chunk.id,
+                    'document_id': chunk.document_id,
+                    'score': similarity,
+                    'content': chunk.chunk_text,
+                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                    'file_format': chunk.document.file_format,
+                    'document_type': chunk.document.document_type,
+                })
+            except Exception:
+                pass
+        semantic_results.sort(key=lambda x: x['score'], reverse=True)
+        return semantic_results[:50]
 
     def _llm_rerank(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
         """
@@ -411,12 +472,20 @@ Chunks:
 
         best_match = search_results['results'][0]
         best_type = best_match.get('type', 'unknown')
-        best_score = best_match.get('similarity_score')
-        best_score_f = float(best_score) if best_score is not None else 0.0
+        # Confidence is gated on the TRUE cosine similarity from semantic search
+        # (`semantic_score`), NOT the RRF score (`similarity_score`), which is an
+        # ordering-only quantity in the ~0.01–0.05 range and would fail every
+        # 0.3 threshold. A None here means the match came from keyword search
+        # only — we treat that as "low but not zero" and still answer, rather
+        # than escalating a perfectly good keyword hit.
+        sem_raw = best_match.get('semantic_score')
+        best_score_f = float(sem_raw) if sem_raw is not None else None
 
         # Confidence enforcement: for document matches, reject below threshold.
         # FAQ / policy / manual entries are curated — trust them regardless of score.
-        if best_type == 'document' and best_score_f < threshold:
+        if (best_type == 'document'
+                and best_score_f is not None
+                and best_score_f < threshold):
             logger.info(
                 "Top document match below confidence threshold (%.3f < %.3f) — escalating",
                 best_score_f, threshold,
@@ -454,18 +523,28 @@ Chunks:
             ]
             answer = "\n\n".join(content_parts) or ''
 
+            # Surface the cosine score when we have one (helpful for the UI);
+            # fall back to the RRF score otherwise so the citation isn't score-less.
+            def _display_score(row):
+                s = row.get('semantic_score')
+                if s is not None:
+                    return round(float(s), 3)
+                s = row.get('similarity_score')
+                return round(float(s), 3) if s is not None else None
+
             citations = [{
                 'type': 'document',
                 'source': r.get('source', 'Uploaded Document'),
                 'title': r.get('title') or 'Uploaded Document',
                 'document_id': r.get('document_id') or r.get('id'),
                 'chunk_id': r.get('chunk_id'),
-                'score': round(float(r['similarity_score']), 3) if r.get('similarity_score') is not None else None,
+                'score': _display_score(r),
                 'snippet': (r.get('content') or '')[:200],
             } for r in doc_chunks]
             logger.info(
-                "Using %d document chunks as context (top score: %.3f)",
-                len(doc_chunks), best_score_f,
+                "Using %d document chunks as context (top score: %s)",
+                len(doc_chunks),
+                f"{best_score_f:.3f}" if best_score_f is not None else "keyword-only",
             )
         else:
             # Policy / manual / other curated sources
@@ -492,12 +571,20 @@ Chunks:
         if primary.get('title'):
             source_display += f" – {primary['title']}"
 
+        # confidence label: 'high' well above threshold, 'medium' otherwise.
+        # keyword-only matches (best_score_f is None) → 'medium' (we have something).
+        if best_score_f is not None and best_score_f >= max(threshold + 0.2, 0.5):
+            _confidence_label = 'high'
+        else:
+            _confidence_label = 'medium'
         return {
             'success': True,
             'answer': answer,
             'has_verified_info': True,
-            'confidence': 'high' if best_score_f >= max(threshold + 0.2, 0.5) else 'medium',
-            'best_score': round(best_score_f, 3) if best_type == 'document' else None,
+            'confidence': _confidence_label,
+            'best_score': (round(best_score_f, 3)
+                           if best_type == 'document' and best_score_f is not None
+                           else None),
             'threshold': round(threshold, 3),
             'source': source_display,
             'type': best_type,

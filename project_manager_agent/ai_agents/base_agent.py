@@ -121,19 +121,40 @@ class BaseAgent:
     def _resolve_company_client(self):
         """If the agent has a company_id + agent_key_name set, route through
         the key/quota resolver. Returns (client, ctx) or (None, None) to fall
-        back to the default Groq env-key client. Raises on hard-block so the
-        view layer can surface a 402/403."""
+        back to the default Groq env-key client.
+
+        Exceptions:
+          - QuotaExhausted: propagates — hard cap is intentional.
+          - NoKeyAvailable / Company.DoesNotExist / misc: we fall back to the
+            env-level client rather than hard-failing the whole LLM call. That
+            preserves the tenant-key infrastructure for tenants that DO set up
+            keys, without breaking agents on a fresh deployment that hasn't
+            provisioned a PlatformAPIKey row yet.
+        """
         company_id = getattr(self, 'company_id', None)
         agent_key_name = getattr(self, 'agent_key_name', None)
         if not company_id or not agent_key_name:
             return None, None
         try:
             from core.models import Company
-            from core.api_key_service import resolve_for_call
+            from core.api_key_service import (
+                resolve_for_call, QuotaExhausted, NoKeyAvailable, InvalidAgent,
+            )
             company = Company.objects.get(pk=company_id)
             ctx = resolve_for_call(company, agent_key_name)
-        except Exception:
-            raise  # QuotaExhausted / NoKeyAvailable / Company.DoesNotExist — let the view handle
+        except QuotaExhausted:
+            # Hard cap — surface to the view so it can return 402/403.
+            raise
+        except NoKeyAvailable:
+            logger.info(
+                "No per-company key configured for agent=%s company=%s; "
+                "falling back to env-level client.",
+                agent_key_name, company_id,
+            )
+            return None, None
+        except Exception as e:
+            logger.warning("Per-company key resolution failed (%s); using env fallback", e)
+            return None, None
         try:
             if ctx.provider == 'groq':
                 from groq import Groq
