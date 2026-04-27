@@ -19,6 +19,7 @@ from api.permissions import IsCompanyUserOnly
 from operations_agent.models import (
     OperationsDocument, OperationsDocumentChunk, OperationsDocumentSummary,
     OperationsChat, OperationsChatMessage, OperationsGeneratedDocument,
+    OperationsNotification,
 )
 
 logger = logging.getLogger(__name__)
@@ -1529,6 +1530,181 @@ def operations_analytics(request):
 
     except Exception as e:
         logger.error(f'operations_analytics error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+# ──────────────────────────────────────────────
+# Operations Notifications Endpoints
+# ──────────────────────────────────────────────
+
+def _serialize_notification(n):
+    return {
+        'id': n.id,
+        'notification_type': n.notification_type,
+        'severity': n.severity,
+        'title': n.title,
+        'message': n.message,
+        'data': n.data or {},
+        'is_read': n.is_read,
+        'created_at': n.created_at.isoformat(),
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_notifications(request):
+    """List operations notifications for the company (paginated, filterable)."""
+    try:
+        company = request.user.company
+        qs = OperationsNotification.objects.filter(company=company).order_by('-created_at')
+
+        notif_type = request.query_params.get('type')
+        severity = request.query_params.get('severity')
+        is_read = request.query_params.get('is_read')
+
+        if notif_type:
+            qs = qs.filter(notification_type=notif_type)
+        if severity:
+            qs = qs.filter(severity=severity)
+        if is_read is not None and is_read != '':
+            qs = qs.filter(is_read=is_read.lower() in ('true', '1'))
+
+        total = qs.count()
+        unread_count = OperationsNotification.objects.filter(
+            company=company, is_read=False,
+        ).count()
+
+        page = max(1, int(request.query_params.get('page', 1)))
+        page_size = min(max(1, int(request.query_params.get('page_size', 50))), 200)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = qs[start:end]
+
+        return Response({
+            'status': 'success',
+            'notifications': [_serialize_notification(n) for n in items],
+            'total': total,
+            'unread_count': unread_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+        })
+
+    except Exception as e:
+        logger.error(f'list_notifications error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def unread_notifications_count(request):
+    """Return just the unread count (for tab badge polling)."""
+    try:
+        count = OperationsNotification.objects.filter(
+            company=request.user.company, is_read=False,
+        ).count()
+        return Response({'status': 'success', 'unread_count': count})
+    except Exception as e:
+        logger.error(f'unread_notifications_count error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def mark_notification_read(request, notification_id):
+    """Mark a single notification as read."""
+    try:
+        company = request.user.company
+        n = OperationsNotification.objects.filter(
+            company=company, pk=notification_id,
+        ).first()
+        if not n:
+            return Response(
+                {'status': 'error', 'message': 'Notification not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not n.is_read:
+            n.is_read = True
+            n.save(update_fields=['is_read'])
+        return Response({'status': 'success', 'notification': _serialize_notification(n)})
+    except Exception as e:
+        logger.error(f'mark_notification_read error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def mark_all_notifications_read(request):
+    """Mark every notification as read for this company."""
+    try:
+        updated = OperationsNotification.objects.filter(
+            company=request.user.company, is_read=False,
+        ).update(is_read=True)
+        return Response({'status': 'success', 'updated': updated})
+    except Exception as e:
+        logger.error(f'mark_all_notifications_read error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_notification(request, notification_id):
+    """Delete a single notification."""
+    try:
+        company = request.user.company
+        n = OperationsNotification.objects.filter(
+            company=company, pk=notification_id,
+        ).first()
+        if not n:
+            return Response(
+                {'status': 'error', 'message': 'Notification not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        n.delete()
+        return Response({'status': 'success', 'message': 'Notification deleted'})
+    except Exception as e:
+        logger.error(f'delete_notification error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def clear_all_notifications(request):
+    """Delete all notifications for the company (optional read-only filter)."""
+    try:
+        read_only = (request.query_params.get('read_only') or '').lower() in ('true', '1')
+        qs = OperationsNotification.objects.filter(company=request.user.company)
+        if read_only:
+            qs = qs.filter(is_read=True)
+        deleted, _ = qs.delete()
+        return Response({'status': 'success', 'deleted': deleted})
+    except Exception as e:
+        logger.error(f'clear_all_notifications error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,

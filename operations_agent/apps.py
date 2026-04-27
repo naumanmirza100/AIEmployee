@@ -8,6 +8,12 @@ class OperationsAgentConfig(AppConfig):
 
     def ready(self):
         """Register operations agents when app is ready"""
+        # Connect signal handlers that auto-generate notifications
+        try:
+            from . import signals  # noqa: F401
+        except ImportError:
+            pass
+
         from project_manager_agent.ai_agents.agents_registry import AgentRegistry
 
         try:
