@@ -324,29 +324,33 @@ def list_pending_replies(request):
 
     items = []
 
-    # The body column can be 10-100KB each on MSSQL. We previously deferred it
-    # and computed the preview via SQL SUBSTRING — but on SQL Server's UTF-16 LE
-    # nvarchar storage that can split a surrogate pair (emoji, non-BMP char) at
-    # position 200 and produce bytes pyodbc can't decode → 500. Falling back to
-    # Python-side slicing in the serializer: still bounded (only the most recent
-    # 2000 rows) and Python's str slicing is surrogate-safe.
-    preview_len = 200  # noqa: F841  (used by serializer fallback path)
-
+    # Defer the body column entirely. Per-row body is 10-100KB on MSSQL, so
+    # fetching it for hundreds of rows just to compute a 200-char preview
+    # was the dominant cost of this endpoint (multi-second responses for the
+    # Sent tab in particular). The list view shows from/subject/date/badge —
+    # body is loaded lazily via getReplyItem when the user clicks a row.
+    # `_list_preview` is set to '' so the serializer's fallback never touches
+    # `m.body` (which would trigger an N+1 query under defer).
     inbox_qs = (
         InboxEmail.objects
         .filter(owner_id__in=user_ids, email_account_id=reply_account.id, direction=direction)
         .exclude(id__in=drafted_inbox_ids)
         .select_related('email_account')
+        .defer('body')
     )
     if days_cutoff is not None:
         inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
-    for m in inbox_qs.order_by('-received_at')[:2000]:
+    # Cap at 500 — the previous 2000 was a worst-case safety net but with
+    # body deferred + paged list, the user only ever scrolls through the
+    # most recent few hundred. A smaller cap also keeps the JSON payload
+    # tight enough to render instantly on dropdown changes.
+    LIST_LIMIT = 500
+    for m in inbox_qs.order_by('-received_at')[:LIST_LIMIT]:
+        m._list_preview = ''
         items.append((m.received_at, _serialize_inbox_email(m)))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
-    # Cap at 2000 so a broken client can't pull the entire mailbox; in
-    # practice a 120-day window on a typical business inbox stays well below this.
-    payload = [entry for _, entry in items[:2000]]
+    payload = [entry for _, entry in items]
 
     return Response({
         'status': 'success',

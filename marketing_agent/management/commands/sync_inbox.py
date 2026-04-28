@@ -15,8 +15,10 @@ Usage:
 
 import imaplib
 import email
+from contextlib import contextmanager
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import IntegrityError
@@ -27,7 +29,68 @@ import logging
 import re
 from datetime import timedelta
 
+try:
+    import redis as _redis
+except ImportError:
+    _redis = None
+
 logger = logging.getLogger(__name__)
+
+
+# Per-account lock: stops two sync_inbox runs from racing on the same
+# EmailAccount. Without it, beat ticks every 5 min could overlap with
+# a previous run that's still working through 200+ messages, causing
+# `(email_account, message_id)` unique-constraint violations and noisy
+# IntegrityError fallbacks.
+_LOCK_TTL_SECONDS = 30 * 60  # 30 min — longer than any realistic single-account sync
+_LOCK_KEY_PREFIX = 'sync_inbox_lock:account:'
+
+
+def _get_redis_client():
+    """Return a redis client built from CELERY_BROKER_URL, or None.
+
+    We piggy-back on the celery broker connection rather than adding a
+    new dependency. Returns None when redis isn't available (sqlite
+    broker fallback) — callers degrade to no-locking.
+    """
+    if _redis is None:
+        return None
+    url = getattr(settings, 'CELERY_BROKER_URL', '') or ''
+    if not url.startswith('redis://') and not url.startswith('rediss://'):
+        return None
+    try:
+        return _redis.Redis.from_url(url, socket_connect_timeout=2, socket_timeout=2)
+    except Exception:
+        return None
+
+
+@contextmanager
+def _account_sync_lock(account_id):
+    """Acquire an exclusive lock for syncing a single account.
+
+    Yields True if acquired (proceed), False if another worker holds it
+    (caller should skip). Auto-releases on exit; TTL prevents a crashed
+    worker from locking the account forever.
+    """
+    client = _get_redis_client()
+    if client is None:
+        # No Redis → fall back to no-lock behavior. Single-worker setups
+        # still work; multi-worker setups lose the protection but won't
+        # be worse than before this change.
+        yield True
+        return
+
+    key = f'{_LOCK_KEY_PREFIX}{account_id}'
+    acquired = False
+    try:
+        acquired = bool(client.set(key, '1', nx=True, ex=_LOCK_TTL_SECONDS))
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                client.delete(key)
+            except Exception:
+                pass
 
 
 class Command(BaseCommand):
@@ -115,16 +178,27 @@ class Command(BaseCommand):
             # DEFAULT_SINCE_DAYS. `--since-days` still works as a one-shot override.
             account_since_days = cli_since_days or self.DEFAULT_SINCE_DAYS
             self.stdout.write(f'  IMAP window for this account: last {account_since_days} day(s)')
-            try:
-                replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
-                    account, dry_run, since_days=account_since_days,
-                )
-                total_replies_found += replies_found
-                total_replies_processed += replies_processed
-                total_inbox_stored += inbox_stored
-            except Exception as e:
-                self.stdout.write(self.style.ERROR(f'  [ERROR] Error syncing {account.email}: {str(e)}'))
-                logger.error(f'Error syncing account {account.id} ({account.email}): {str(e)}', exc_info=True)
+            with _account_sync_lock(account.id) as got_lock:
+                if not got_lock:
+                    self.stdout.write(self.style.WARNING(
+                        f'  [SKIP] Another sync is already running for account {account.id} ({account.email}); '
+                        'skipping this tick to avoid duplicate-key races.'
+                    ))
+                    logger.info(
+                        'sync_inbox: skipping account %s (%s) — lock held by another worker',
+                        account.id, account.email,
+                    )
+                    continue
+                try:
+                    replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
+                        account, dry_run, since_days=account_since_days,
+                    )
+                    total_replies_found += replies_found
+                    total_replies_processed += replies_processed
+                    total_inbox_stored += inbox_stored
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(f'  [ERROR] Error syncing {account.email}: {str(e)}'))
+                    logger.error(f'Error syncing account {account.id} ({account.email}): {str(e)}', exc_info=True)
 
         self.stdout.write(f'\n{"="*60}')
         self.stdout.write(self.style.SUCCESS(f'\n[OK] Sync Complete'))
@@ -159,6 +233,12 @@ class Command(BaseCommand):
             return 0, 0, 0
         account = fresh_account
 
+        # Strict separation: only the dedicated reply-agent account writes
+        # to the InboxEmail table. Marketing-campaign accounts still need
+        # IMAP for campaign reply detection (writes to Reply, not InboxEmail)
+        # but their generic mail must not pollute the reply-draft inbox.
+        is_reply_agent = bool(getattr(account, 'is_reply_agent_account', False))
+
         total_replies_found = 0
         total_replies_processed = 0
         total_inbox_stored = 0
@@ -186,25 +266,39 @@ class Command(BaseCommand):
                 .values_list('message_id', flat=True)
             )
             self.stdout.write(f'  [INFO] {len(known_message_ids)} message(s) already cached for this account')
+            if not is_reply_agent:
+                self.stdout.write(
+                    '  [INFO] Marketing-only account: campaign reply detection runs '
+                    'on INBOX, but no InboxEmail rows are written and Sent is skipped.'
+                )
 
             # 1) INBOX — incoming mail + campaign reply detection
             in_replies_found, in_replies_processed, in_inbox_stored = self._process_folder(
                 mail, account, 'INBOX', 'in', dry_run, since_days, known_message_ids,
+                store_inbox_rows=is_reply_agent,
             )
             total_replies_found += in_replies_found
             total_replies_processed += in_replies_processed
             total_inbox_stored += in_inbox_stored
 
-            # 2) Sent folder — outgoing mail, no reply detection
-            sent_folder = self._find_sent_folder(mail)
-            if sent_folder:
-                self.stdout.write(f'  Sent folder detected: {sent_folder!r}')
-                _, _, out_inbox_stored = self._process_folder(
-                    mail, account, sent_folder, 'out', dry_run, since_days, known_message_ids,
-                )
-                total_inbox_stored += out_inbox_stored
+            # 2) Sent folder — only synced for the reply-agent account.
+            # Marketing accounts have no use for Sent storage (campaigns
+            # already track outgoing mail via EmailSendHistory) and must
+            # stay out of the InboxEmail table per the reply/marketing
+            # separation rule.
+            if is_reply_agent:
+                sent_folder = self._find_sent_folder(mail)
+                if sent_folder:
+                    self.stdout.write(f'  Sent folder detected: {sent_folder!r}')
+                    _, _, out_inbox_stored = self._process_folder(
+                        mail, account, sent_folder, 'out', dry_run, since_days, known_message_ids,
+                        store_inbox_rows=True,
+                    )
+                    total_inbox_stored += out_inbox_stored
+                else:
+                    self.stdout.write('  [INFO] Sent folder not found via common names; skipping sent sync')
             else:
-                self.stdout.write('  [INFO] Sent folder not found via common names; skipping sent sync')
+                self.stdout.write('  [INFO] Skipping Sent sync (marketing account)')
 
             try:
                 mail.close()
@@ -254,7 +348,7 @@ class Command(BaseCommand):
                 continue
         return None
 
-    def _process_folder(self, mail, account, folder_label, direction, dry_run, since_days, known_message_ids):
+    def _process_folder(self, mail, account, folder_label, direction, dry_run, since_days, known_message_ids, store_inbox_rows=True):
         """Pull mail from one IMAP folder and store as InboxEmail rows.
 
         direction='in'  → INBOX flow. Each message runs through detect_reply;
@@ -264,6 +358,11 @@ class Command(BaseCommand):
                           be a "reply to a campaign we sent" in the inbound
                           sense. from_email becomes the account's own
                           address; to_email is parsed from the To: header.
+
+        store_inbox_rows=False is used for marketing-only accounts: we still
+        run campaign reply detection on INBOX (writes to Reply), but no
+        InboxEmail row is built — the reply-draft inbox stays exclusive to
+        the dedicated reply-agent account.
 
         known_message_ids is shared with the caller and updated in-place so
         cross-folder dedupe spans the whole account.
@@ -397,6 +496,13 @@ class Command(BaseCommand):
                                 continue
 
                         if dry_run:
+                            continue
+
+                        # Marketing-only accounts run reply detection above
+                        # but never write to InboxEmail — that table is
+                        # exclusive to the reply-draft agent's dedicated
+                        # account.
+                        if not store_inbox_rows:
                             continue
 
                         row = self._build_inbox_email(

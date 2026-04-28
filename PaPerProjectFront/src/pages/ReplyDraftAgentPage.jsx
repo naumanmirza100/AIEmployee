@@ -215,6 +215,10 @@ const ReplyDraftAgentPage = () => {
   const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
   const [pendingReplies, setPendingReplies] = useState([]);
+  // Synced Sent-folder mail (InboxEmail rows where direction='out'), shown
+  // in the Sent tab. Kept separate from pendingReplies so the inbox list
+  // doesn't get polluted with outgoing mail.
+  const [sentEmails, setSentEmails] = useState([]);
   const [drafts, setDrafts] = useState([]);
   const [selectedReply, setSelectedReply] = useState(null);
   const [selectedDraft, setSelectedDraft] = useState(null);
@@ -225,6 +229,7 @@ const ReplyDraftAgentPage = () => {
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
+  const [sentLoading, setSentLoading] = useState(false);    // mirrors inboxLoading but for the Sent tab's days-window refetch
   const [syncAccounts, setSyncAccounts] = useState([]);     // the attached Reply Draft Agent account, if any (0 or 1 items)
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountModalMode, setAccountModalMode] = useState('add'); // 'add' | 'edit'
@@ -262,7 +267,7 @@ const ReplyDraftAgentPage = () => {
   const refreshInbox = useCallback(async () => {
     setInboxLoading(true);
     try {
-      const res = await listPendingReplies({ days: String(syncDays) });
+      const res = await listPendingReplies({ days: String(syncDays), direction: 'in' });
       setPendingReplies(res?.data || []);
     } catch (e) {
       toast({ title: 'Failed to load inbox', description: e.message, variant: 'destructive' });
@@ -270,6 +275,19 @@ const ReplyDraftAgentPage = () => {
       setInboxLoading(false);
     }
   }, [toast, syncDays]);
+
+  const refreshSent = useCallback(async () => {
+    setSentLoading(true);
+    try {
+      const res = await listPendingReplies({ days: String(syncDays), direction: 'out' });
+      setSentEmails(res?.data || []);
+    } catch (e) {
+      // Non-fatal — Sent tab will just show its empty state.
+      console.error('Failed to load sent emails', e);
+    } finally {
+      setSentLoading(false);
+    }
+  }, [syncDays]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -303,11 +321,11 @@ const ReplyDraftAgentPage = () => {
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refreshInbox(), refreshDrafts()]);
+      await Promise.all([refreshInbox(), refreshSent(), refreshDrafts()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refreshInbox, refreshDrafts]);
+  }, [refreshInbox, refreshSent, refreshDrafts]);
 
   useEffect(() => {
     if (hasAccess) {
@@ -326,18 +344,23 @@ const ReplyDraftAgentPage = () => {
     if (!hasAccess) return;
     const interval = setInterval(() => {
       refreshInbox();
+      refreshSent();
       refreshDrafts();
       // Keep sync-accounts fresh so the "Syncing your inbox…" banner
       // hides as soon as InboxEmail rows land from the Celery sync.
       refreshSyncAccounts();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [hasAccess, refreshInbox, refreshDrafts, refreshSyncAccounts]);
+  }, [hasAccess, refreshInbox, refreshSent, refreshDrafts, refreshSyncAccounts]);
 
-  // Re-fetch the inbox whenever the user changes a filter.
+  // Re-fetch inbox + sent whenever the user changes the time-window filter
+  // — both lists honour the same `days` slice.
   useEffect(() => {
-    if (hasAccess) refreshInbox();
-  }, [hasAccess, syncDays, refreshInbox]);
+    if (hasAccess) {
+      refreshInbox();
+      refreshSent();
+    }
+  }, [hasAccess, syncDays, refreshInbox, refreshSent]);
 
   const handleLogout = () => {
     localStorage.removeItem('company_auth_token');
@@ -519,12 +542,27 @@ const ReplyDraftAgentPage = () => {
     );
   }, [sentDrafts, search]);
 
+  // Sent tab now lists every message synced from the mailbox's Sent
+  // folder, not just drafts the user pushed through this tool. Search
+  // matches recipient + subject (sender is always us, so it's omitted).
+  const filteredSentEmails = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sentEmails;
+    return sentEmails.filter((m) =>
+      [m.to_email, m.subject].some((v) => (v || '').toLowerCase().includes(q))
+    );
+  }, [sentEmails, search]);
+
   const stats = useMemo(() => ({
     pending: pendingReplies.length,
     draftsPending: drafts.filter((d) => d.status === 'pending').length,
-    sent: drafts.filter((d) => d.status === 'sent').length,
+    // Sent stat now mirrors the Sent tab — total synced Sent-folder mail
+    // for the active time window. Sent drafts (status='sent') are folded
+    // into Failed if they errored, otherwise they're already in this list
+    // because the agent dispatches via the same mailbox.
+    sent: sentEmails.length,
     failed: drafts.filter((d) => d.status === 'failed').length,
-  }), [pendingReplies, drafts]);
+  }), [pendingReplies, sentEmails, drafts]);
 
   if (loading || checkingAccess || !modulesLoaded) {
     return (
@@ -561,8 +599,13 @@ const ReplyDraftAgentPage = () => {
     );
   }
 
+  // Sent-folder rows store our own address in from_*, so flip to the
+  // recipient (to_email) when showing an outgoing message — otherwise
+  // the header would just say "to: me".
   const selectedContact = selectedReply
-    ? { name: selectedReply.from_name, email: selectedReply.from_email, company: selectedReply.from_company, jobTitle: selectedReply.from_job_title }
+    ? (selectedReply.direction === 'out'
+        ? { name: selectedReply.to_email, email: selectedReply.to_email, company: '', jobTitle: '' }
+        : { name: selectedReply.from_name, email: selectedReply.from_email, company: selectedReply.from_company, jobTitle: selectedReply.from_job_title })
     : selectedDraft
       ? { name: selectedDraft.to_name, email: selectedDraft.to_email, company: selectedDraft.to_company }
       : null;
@@ -701,9 +744,9 @@ const ReplyDraftAgentPage = () => {
                     >
                       <Check className="h-4 w-4" />
                       Sent
-                      {sentDrafts.length > 0 && (
+                      {sentEmails.length > 0 && (
                         <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
-                          {sentDrafts.length}
+                          {sentEmails.length}
                         </span>
                       )}
                     </button>
@@ -723,17 +766,17 @@ const ReplyDraftAgentPage = () => {
                           ? 'Search replies…'
                           : activeTab === 'drafts'
                             ? 'Search unsent drafts…'
-                            : 'Search sent replies…'
+                            : 'Search sent emails…'
                       }
                       className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     />
                   </div>
 
-                  {activeTab === 'inbox' && (
+                  {(activeTab === 'inbox' || activeTab === 'sent') && (
                     <select
                       value={syncDays}
                       onChange={(e) => setSyncDays(Number(e.target.value))}
-                      title="Filter the inbox to a rolling time window. Mail is pre-synced in the background, so switching is instant."
+                      title="Filter to a rolling time window. Mail is pre-synced in the background, so switching is instant."
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     >
                       {TIME_WINDOW_OPTIONS.map((o) => (
@@ -746,12 +789,12 @@ const ReplyDraftAgentPage = () => {
 
                 </div>
 
-                {/* Loading strip — subtle indeterminate bar while the inbox refetches.
-                    Triggered by dropdown changes + the 30s poll; sits above the list so
-                    it doesn't push rows around. */}
-                {inboxLoading && activeTab === 'inbox' && (
+                {/* Loading strip — subtle indeterminate bar while the inbox or
+                    sent list refetches. Triggered by dropdown changes + the
+                    30s poll; sits above the list so rows don't shift. */}
+                {((inboxLoading && activeTab === 'inbox') || (sentLoading && activeTab === 'sent')) && (
                   <div className="relative h-0.5 overflow-hidden bg-white/5">
-                    <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-cyan-400/70 to-transparent animate-[inbox-loading_1.2s_ease-in-out_infinite]" />
+                    <div className={`absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent ${activeTab === 'sent' ? 'via-emerald-400/70' : 'via-cyan-400/70'} to-transparent animate-[inbox-loading_1.2s_ease-in-out_infinite]`} />
                   </div>
                 )}
 
@@ -803,19 +846,19 @@ const ReplyDraftAgentPage = () => {
                   )}
                   {activeTab === 'sent' && (
                     <>
-                      {filteredSentDrafts.length === 0 ? (
+                      {filteredSentEmails.length === 0 ? (
                         <EmptyState
                           icon={Send}
-                          title={search ? 'No matches' : 'No sent replies yet'}
-                          subtitle={search ? 'Try a different search term.' : 'Approved drafts that were sent will appear here.'}
+                          title={search ? 'No matches' : 'No sent emails yet'}
+                          subtitle={search ? 'Try a different search term.' : 'Mail synced from your Sent folder will appear here.'}
                         />
                       ) : (
-                        filteredSentDrafts.map((d) => (
-                          <DraftItem
-                            key={d.id}
-                            draft={d}
-                            active={selectedDraft?.id === d.id}
-                            onClick={() => handleSelectDraft(d)}
+                        filteredSentEmails.map((m) => (
+                          <InboxItem
+                            key={m.id}
+                            reply={m}
+                            active={selectedReply?.id === m.id}
+                            onClick={() => handleSelectReply(m)}
                           />
                         ))
                       )}
@@ -909,7 +952,11 @@ const ReplyDraftAgentPage = () => {
               )}
 
               {/* Composer / Draft Editor */}
-              {(selectedReply || selectedDraft) && (
+              {/* Compose panel — hidden for selected Sent-tab rows. They're
+                  outgoing mail we already sent, so the "generate a reply"
+                  flow doesn't apply; the right pane shows the message body
+                  in the section above and stops there. */}
+              {(selectedReply || selectedDraft) && selectedReply?.direction !== 'out' && (
                 <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-3">
@@ -1390,6 +1437,14 @@ const StatCard = ({ icon: Icon, label, value, tint, iconTint }) => (
 
 const InboxItem = ({ reply, active, onClick }) => {
   const style = INTEREST_STYLES[reply.interest_level] || INTEREST_STYLES.not_analyzed;
+  // Outgoing rows live in the Sent tab. Show the recipient instead of
+  // ourselves — `from_email` for sent mail is the account's own address
+  // and would render every row identically otherwise.
+  const isOutgoing = reply.direction === 'out';
+  const personName = isOutgoing
+    ? (reply.to_email || 'Unknown recipient')
+    : (reply.from_name || reply.from_email || 'Unknown');
+  const personEmail = isOutgoing ? reply.to_email : reply.from_email;
   return (
     <button
       onClick={onClick}
@@ -1397,11 +1452,11 @@ const InboxItem = ({ reply, active, onClick }) => {
         active ? 'bg-gradient-to-r from-cyan-500/10 to-transparent border-l-2 border-l-cyan-400' : 'hover:bg-white/5 border-l-2 border-l-transparent'
       }`}
     >
-      <Avatar name={reply.from_name} email={reply.from_email} size="md" />
+      <Avatar name={personName} email={personEmail} size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2 mb-0.5">
           <span className={`text-sm font-semibold truncate ${active ? 'text-white' : 'text-gray-100'}`}>
-            {reply.from_name || reply.from_email || 'Unknown'}
+            {isOutgoing ? `To: ${personName}` : personName}
           </span>
           <span className="text-[10px] text-gray-500 shrink-0">{formatRelative(reply.replied_at)}</span>
         </div>
@@ -1411,17 +1466,19 @@ const InboxItem = ({ reply, active, onClick }) => {
         <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
           {reply.preview || 'No preview available'}
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
-            {style.label}
-          </span>
-          {reply.campaign && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
-              <Zap className="h-2.5 w-2.5" />
-              {reply.campaign}
+        {!isOutgoing && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
+              {style.label}
             </span>
-          )}
-        </div>
+            {reply.campaign && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
+                <Zap className="h-2.5 w-2.5" />
+                {reply.campaign}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </button>
   );

@@ -12,7 +12,7 @@ export const getReplyDraftDashboard = async () => {
   }
 };
 
-export const listPendingReplies = async ({ campaign = '', days = '' } = {}) => {
+export const listPendingReplies = async ({ campaign = '', days = '', direction = '' } = {}) => {
   try {
     const params = new URLSearchParams();
     if (campaign !== '' && campaign !== null && campaign !== undefined) {
@@ -20,6 +20,12 @@ export const listPendingReplies = async ({ campaign = '', days = '' } = {}) => {
     }
     if (days !== '' && days !== null && days !== undefined) {
       params.set('days', String(days));
+    }
+    // direction='out' switches the same endpoint to return synced Sent
+    // folder mail (InboxEmail rows where direction='out'). Default 'in'
+    // server-side keeps existing inbox callers unchanged.
+    if (direction === 'in' || direction === 'out') {
+      params.set('direction', direction);
     }
     const qs = params.toString();
     const path = qs ? `/reply-draft/pending-replies?${qs}` : '/reply-draft/pending-replies';

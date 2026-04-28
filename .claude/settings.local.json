@@ -58,7 +58,12 @@
       "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('marketing_agent/management/commands/sync_inbox.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('core/apps.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('core/management/commands/runserver_with_celery.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('project_manager_ai/celery.py', encoding='utf-8'\\).read\\(\\)\\); print\\('all syntax ok'\\)\")",
       "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('api/views/marketing_agent.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/views/reply_draft_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")",
       "Bash(tasklist)",
-      "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('marketing_agent/management/commands/sync_inbox.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/views/reply_draft_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax ok'\\)\")"
+      "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('marketing_agent/management/commands/sync_inbox.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/views/reply_draft_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
+      "Bash(venv/Scripts/python.exe *)",
+      "Bash(break)",
+      "Bash(grep -vE \"EMAIL CONFIG|CELERY|SMTP|Backend|Host:|Port:|From:|Broker|Result Backend|Timezone|Using Redis|Scheduled Tasks|Sequence|Inbox sync|Retry|Auto-|Monitor|Sync performance|====|^$\")",
+      "Bash(grep -vE \"EMAIL CONFIG|CELERY CONFIG|Backend:|Host:|Port:|From:|Broker|Result Backend|Timezone|Using Redis|Scheduled Tasks|Sequence|Inbox sync|Retry|Auto-|Monitor|Sync performance|====|^$\")",
+      "Bash(timeout 90 npx --no-install vite build)"
     ]
   }
 }
