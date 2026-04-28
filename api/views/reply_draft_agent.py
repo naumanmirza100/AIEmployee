@@ -981,9 +981,17 @@ def reply_analytics(request):
 
     today = timezone.now().date()
     buckets = []
-    inbox_qs = None
+    in_qs = None
+    out_qs = None
     if account is not None:
-        inbox_qs = InboxEmail.objects.filter(owner_id__in=user_ids, email_account_id=account.id)
+        # Split incoming vs outgoing up front so each bucket's two .count()
+        # calls don't re-evaluate the direction filter.
+        in_qs = InboxEmail.objects.filter(
+            owner_id__in=user_ids, email_account_id=account.id, direction='in',
+        )
+        out_qs = InboxEmail.objects.filter(
+            owner_id__in=user_ids, email_account_id=account.id, direction='out',
+        )
 
     # Walk oldest → newest so the frontend can render the series in order.
     for i in range(bucket_count - 1, -1, -1):
@@ -996,23 +1004,35 @@ def reply_analytics(request):
         if timezone.is_naive(end_dt):
             end_dt = timezone.make_aware(end_dt)
 
-        if inbox_qs is not None:
-            count = inbox_qs.filter(received_at__gte=start_dt, received_at__lt=end_dt).count()
+        if in_qs is not None:
+            received = in_qs.filter(received_at__gte=start_dt, received_at__lt=end_dt).count()
+            sent = out_qs.filter(received_at__gte=start_dt, received_at__lt=end_dt).count()
         else:
-            count = 0
+            received = 0
+            sent = 0
 
         # `date` anchors the bucket at its START — that's the conventional
         # label for weekly charts ("week of 2026-04-19").
-        buckets.append({'date': start_day.isoformat(), 'count': count})
+        # `count` is kept for backwards compatibility with anything still
+        # reading the combined total; new callers should prefer received/sent.
+        buckets.append({
+            'date': start_day.isoformat(),
+            'received': received,
+            'sent': sent,
+            'count': received + sent,
+        })
 
-    total = sum(b['count'] for b in buckets)
+    received_total = sum(b['received'] for b in buckets)
+    sent_total = sum(b['sent'] for b in buckets)
     return Response({
         'status': 'success',
         'data': {
             'account_email': account.email if account else None,
             'days': days,
             'granularity': granularity,
-            'total': total,
+            'total': received_total + sent_total,
+            'received_total': received_total,
+            'sent_total': sent_total,
             'buckets': buckets,
         },
     })

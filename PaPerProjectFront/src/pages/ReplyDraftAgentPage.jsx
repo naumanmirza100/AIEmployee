@@ -1884,17 +1884,29 @@ const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
   const buckets = analytics?.buckets || [];
   const granularity = analytics?.granularity || 'day';  // 'day' | 'week'
 
-  // Line chart config — daily buckets for 30d, weekly buckets above that.
-  // Fewer buckets on longer windows means point dots + tooltip labels can
-  // stay visible without overwhelming the chart.
+  // Two-line chart: incoming (cyan) vs sent (emerald). Daily buckets for
+  // 30d, weekly buckets above that. Each bucket carries `received` and
+  // `sent` keys from the analytics endpoint; older payloads with only
+  // `count` fall back to the combined value on the received line.
   const chartData = {
     labels: buckets.map((b) => b.date),
     datasets: [
       {
-        label: 'Emails received',
-        data: buckets.map((b) => b.count || 0),
+        label: 'Received',
+        data: buckets.map((b) => (b.received != null ? b.received : (b.count || 0))),
         borderColor: '#22d3ee',
         backgroundColor: 'rgba(34, 211, 238, 0.15)',
+        fill: true,
+        tension: 0.35,
+        pointRadius: granularity === 'week' ? 3 : 2.5,
+        pointHoverRadius: 5,
+        borderWidth: 2,
+      },
+      {
+        label: 'Sent',
+        data: buckets.map((b) => b.sent || 0),
+        borderColor: '#34d399',
+        backgroundColor: 'rgba(52, 211, 153, 0.12)',
         fill: true,
         tension: 0.35,
         pointRadius: granularity === 'week' ? 3 : 2.5,
@@ -1908,14 +1920,26 @@ const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
     maintainAspectRatio: false,
     interaction: { intersect: false, mode: 'index' },
     plugins: {
-      legend: { display: false },
+      legend: {
+        display: true,
+        position: 'top',
+        align: 'end',
+        labels: {
+          color: 'rgba(200,200,200,0.85)',
+          font: { size: 11 },
+          boxWidth: 10,
+          boxHeight: 10,
+          usePointStyle: true,
+          pointStyle: 'circle',
+        },
+      },
       tooltip: {
         callbacks: {
           title: (items) => {
             const raw = items[0]?.label || '';
             return granularity === 'week' ? `Week of ${raw}` : raw;
           },
-          label: (ctx) => ` ${ctx.parsed.y} email${ctx.parsed.y === 1 ? '' : 's'}`,
+          label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y} email${ctx.parsed.y === 1 ? '' : 's'}`,
         },
       },
     },
@@ -2002,7 +2026,7 @@ const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <BarChart3 className="h-4 w-4 text-primary" />
-                Emails received
+                Email activity
               </div>
               <div className="flex gap-1 p-0.5 rounded-md bg-muted text-xs">
                 {ANALYTICS_WINDOWS.map((w) => (
@@ -2029,8 +2053,10 @@ const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
             ) : (
               <>
                 <div className="text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">{analytics?.total ?? 0}</span>{' '}
-                  email{(analytics?.total ?? 0) === 1 ? '' : 's'} in the last {windowDays} days
+                  <span className="font-semibold text-cyan-300">{analytics?.received_total ?? 0}</span>
+                  {' '}received ·{' '}
+                  <span className="font-semibold text-emerald-300">{analytics?.sent_total ?? 0}</span>
+                  {' '}sent in the last {windowDays} days
                   {granularity === 'week' && (
                     <span className="ml-1 opacity-75">· grouped by week</span>
                   )}

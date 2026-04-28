@@ -63,7 +63,9 @@
       "Bash(break)",
       "Bash(grep -vE \"EMAIL CONFIG|CELERY|SMTP|Backend|Host:|Port:|From:|Broker|Result Backend|Timezone|Using Redis|Scheduled Tasks|Sequence|Inbox sync|Retry|Auto-|Monitor|Sync performance|====|^$\")",
       "Bash(grep -vE \"EMAIL CONFIG|CELERY CONFIG|Backend:|Host:|Port:|From:|Broker|Result Backend|Timezone|Using Redis|Scheduled Tasks|Sequence|Inbox sync|Retry|Auto-|Monitor|Sync performance|====|^$\")",
-      "Bash(timeout 90 npx --no-install vite build)"
+      "Bash(timeout 90 npx --no-install vite build)",
+      "Bash(timeout 120 npx --no-install vite build)",
+      "Bash(npx --no-install vite build)"
     ]
   }
 }
