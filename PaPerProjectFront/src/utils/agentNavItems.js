@@ -6,6 +6,7 @@ import {
   Headphones,
   FileSearch,
   Reply,
+  Target,
 } from 'lucide-react';
 
 /**
@@ -19,6 +20,7 @@ const ALL_AGENTS = [
   { key: 'frontline_agent',       label: 'Frontline Agent',       icon: Headphones,   section: 'frontline',        path: '/frontline/dashboard' },
   { key: 'operations_agent',      label: 'Operations Agent',      icon: FileSearch,   section: 'operations',       path: '/operations/dashboard' },
   { key: 'reply_draft_agent',     label: 'Reply Draft Agent',     icon: Reply,        section: 'reply-draft',      path: '/reply-draft/dashboard' },
+  { key: 'ai_sdr_agent',          label: 'AI SDR Agent',          icon: Target,       section: 'ai-sdr',           path: '/ai-sdr/dashboard' },
 ];
 
 /**

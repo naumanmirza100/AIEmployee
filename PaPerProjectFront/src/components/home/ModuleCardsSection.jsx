@@ -7,7 +7,8 @@ import {
   FolderKanban,
   Headphones,
   FileSearch,
-  Reply
+  Reply,
+  Target,
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -121,6 +122,26 @@ const ModuleCardsSection = () => {
         'Knowledge base Q&A with source citations',
         'Automated report & memo generation',
         'Proactive anomaly & threshold alerts'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'AI SDR Agent',
+      moduleName: 'ai_sdr_agent',
+      description: 'Automated sales development rep with AI lead scoring, multi-step outreach sequences, meeting scheduling, and pipeline analytics.',
+      icon: Target,
+      iconColor: 'text-rose-500',
+      gradientFrom: '#f43f5e',
+      gradientTo: '#a855f7',
+      price: 199,
+      pricePeriod: 'month',
+      features: [
+        'AI lead scoring (Hot / Warm / Cold)',
+        'Multi-step outreach sequences',
+        'Personalized AI email drafting',
+        'Meeting scheduling & AI prep notes',
+        'Pipeline funnel analytics',
+        'CRM-ready lead management',
       ],
       highlight: false,
     },

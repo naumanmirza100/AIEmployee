@@ -7,6 +7,12 @@
 # Celery logs
 logs/
 
+# Celery Beat schedule files
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+celerybeat.pid
+
 # Python cache
 __pycache__/
 *.pyc
