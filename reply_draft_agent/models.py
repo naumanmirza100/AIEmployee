@@ -37,7 +37,15 @@ class InboxEmail(models.Model):
     from_email = models.EmailField(db_index=True)
     from_name = models.CharField(max_length=255, blank=True)
     subject = models.CharField(max_length=500, blank=True)
-    body = models.TextField(blank=True)
+    body = models.TextField(blank=True, default='',
+                            help_text='Plain-text body. Used for AI analysis and search; preferred over HTML when both are present in the source.')
+    # Nullable + empty default so any caller path (including older-stamp
+    # workers that haven't picked up the new field, and the campaign-reply
+    # branch that constructs InboxEmail in different shapes) can insert
+    # without violating a NOT NULL constraint. Frontend treats NULL the
+    # same as empty string.
+    body_html = models.TextField(blank=True, null=True, default='',
+                                 help_text='Original HTML body if the source carried one. Rendered in the UI for fidelity (links, images, layout); plain `body` is used as fallback when this is empty.')
 
     received_at = models.DateTimeField(db_index=True, default=timezone.now,
                                        help_text='Date header from the message, or sync time as fallback')

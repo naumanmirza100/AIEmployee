@@ -41,27 +41,49 @@ def sync_inbox_task(self, account_id=None, since_days=None):
     Celery task to sync inbox and detect email replies.
     Handles: Reply detection, AI analysis, sub-sequence assignment.
 
-    Scheduled: Every 5-10 minutes via Celery Beat (syncs ALL accounts).
-    Also dispatched on-demand from create/update_email_account with a
-    specific account_id for instant single-account sync — so a newly
-    configured mailbox starts populating within ~30s instead of waiting
-    up to 5 minutes for the next beat tick.
+    Two modes:
+      - account_id=None  → fan-out. The beat scheduler fires this every
+        5 min; it enumerates every IMAP-enabled account and queues one
+        per-account task on the same queue. Workers then sync accounts
+        truly in parallel (bounded by --concurrency), so adding a 10th
+        company doesn't make every other company's inbox 10× slower.
+      - account_id=<id>  → single account. Used by the on-create dispatch
+        and by the fan-out branch above. Acquires the per-account Redis
+        lock inside sync_inbox; if another worker is already syncing the
+        same account it logs and skips instead of racing.
 
     `since_days` is passed through to the management command so callers
     can request a smaller window than the default. The on-connect path
     uses this to fire a fast 30-day sync first and queue the deeper
     120-day backfill on a delay.
     """
+    # Fan-out branch — runs on the periodic beat tick.
+    if account_id is None:
+        from marketing_agent.models import EmailAccount
+        active_ids = list(
+            EmailAccount.objects
+            .filter(enable_imap_sync=True, is_active=True)
+            .values_list('id', flat=True)
+        )
+        for aid in active_ids:
+            # `apply_async` queues each account as its own task. The worker
+            # pool drains them in parallel; a slow account doesn't block
+            # the fast ones the way the old sequential loop did.
+            sync_inbox_task.apply_async(
+                kwargs={'account_id': aid, 'since_days': since_days},
+                expires=600,
+            )
+        return {'status': 'success', 'message': f'Fan-out: queued {len(active_ids)} account(s)'}
+
+    # Single-account branch. The per-account lock lives inside the
+    # management command (sync_inbox.py), so an overlapping fan-out tick
+    # can't double-sync the same mailbox.
     try:
-        kwargs = {}
-        if account_id:
-            kwargs['account_id'] = account_id
+        kwargs = {'account_id': account_id}
         if since_days:
             kwargs['since_days'] = since_days
         call_command('sync_inbox', **kwargs)
-        if account_id:
-            return {'status': 'success', 'message': f'Inbox synced for account {account_id}'}
-        return {'status': 'success', 'message': 'Inbox synced'}
+        return {'status': 'success', 'message': f'Inbox synced for account {account_id}'}
     except Exception as e:
         print(f'Error in inbox sync task: {str(e)}')
         raise self.retry(exc=e)

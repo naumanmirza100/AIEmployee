@@ -138,6 +138,10 @@ def _serialize_inbox_email(m, *, include_body=False):
     }
     if include_body:
         out['body'] = m.body or ''
+        # `body_html` is only useful at detail-view time — the list view
+        # would otherwise pull tens of MB of markup. Frontend renders this
+        # in a sandboxed iframe and falls back to `body` when empty.
+        out['body_html'] = getattr(m, 'body_html', '') or ''
     return out
 
 
@@ -336,7 +340,7 @@ def list_pending_replies(request):
         .filter(owner_id__in=user_ids, email_account_id=reply_account.id, direction=direction)
         .exclude(id__in=drafted_inbox_ids)
         .select_related('email_account')
-        .defer('body')
+        .defer('body', 'body_html')
     )
     if days_cutoff is not None:
         inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
@@ -375,10 +379,11 @@ def get_inbox_email(request, email_id):
     reply_account = _get_reply_account(user_ids)
     if reply_account is None:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    # Detail serializer doesn't read any EmailAccount fields, so no
+    # select_related — that join was an unused 200ms tax on every click.
     m = (
         InboxEmail.objects
         .filter(id=email_id, owner_id__in=user_ids, email_account_id=reply_account.id)
-        .select_related('email_account')
         .first()
     )
     if m is None:

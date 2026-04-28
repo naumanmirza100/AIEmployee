@@ -610,9 +610,14 @@ const ReplyDraftAgentPage = () => {
       ? { name: selectedDraft.to_name, email: selectedDraft.to_email, company: selectedDraft.to_company }
       : null;
 
-  const originalEmail = selectedReply || (selectedDraft
-    ? { subject: selectedDraft.original_subject, body: selectedDraft.original_body, replied_at: selectedDraft.created_at }
-    : null);
+  // `body_html` is forwarded so EmailBody can render the original markup
+  // for synced messages. ReplyDraft thread context only has plain
+  // `original_body` — drafts don't store the source HTML.
+  const originalEmail = selectedReply
+    ? { ...selectedReply }
+    : (selectedDraft
+        ? { subject: selectedDraft.original_subject, body: selectedDraft.original_body, body_html: '', replied_at: selectedDraft.created_at }
+        : null);
 
   const isReadOnly = selectedDraft?.status === 'sent' || selectedDraft?.status === 'rejected';
 
@@ -937,7 +942,7 @@ const ReplyDraftAgentPage = () => {
                   </div>
 
                   <div className="p-5">
-                    <EmailBody body={originalEmail.body} isIncomingReply={!!selectedReply} />
+                    <EmailBody body={originalEmail.body} bodyHtml={originalEmail.body_html} isIncomingReply={!!selectedReply} />
                     {selectedReply?.analysis && (
                       <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
                         <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
@@ -1179,12 +1184,68 @@ const ReplyDraftAgentPage = () => {
   );
 };
 
-const EmailBody = ({ body, isIncomingReply }) => {
+// Render an HTML email body in a sandboxed iframe. The iframe blocks
+// scripts and same-origin access, but still renders styled markup,
+// images, links and tables — exactly what the user sees in Gmail. Auto-
+// resizes to the content height so there's no inner scrollbar inside
+// the message card.
+const HtmlBody = ({ html }) => {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const iframe = ref.current;
+    if (!iframe) return;
+    const resize = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        const next = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0);
+        if (next > 0) iframe.style.height = `${next + 8}px`;
+      } catch {
+        // Cross-origin sandbox can throw — just leave whatever default height we set.
+      }
+    };
+    resize();
+    const t = setTimeout(resize, 200);
+    return () => clearTimeout(t);
+  }, [html]);
+
+  // Force light background + dark text inside the iframe so transactional
+  // mail (often white-on-light) doesn't render unreadable on our dark
+  // dashboard. Links open in a new tab via `<base target="_blank">`.
+  const wrapped = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
+    html,body{margin:0;padding:0;background:#fff;color:#111;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.5;}
+    img{max-width:100%;height:auto;}
+    a{color:#0a66c2;}
+    body{padding:14px;}
+  </style></head><body>${html || ''}</body></html>`;
+
+  return (
+    <iframe
+      ref={ref}
+      title="Email body"
+      sandbox="allow-popups allow-popups-to-escape-sandbox"
+      srcDoc={wrapped}
+      style={{ width: '100%', minHeight: '120px', border: 0, background: '#fff', borderRadius: '8px' }}
+      onLoad={() => {
+        const iframe = ref.current;
+        if (!iframe) return;
+        try {
+          const doc = iframe.contentDocument;
+          if (doc) {
+            iframe.style.height = `${(doc.documentElement.scrollHeight || 200) + 8}px`;
+          }
+        } catch {}
+      }}
+    />
+  );
+};
+
+const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
   const [showQuoted, setShowQuoted] = useState(false);
   // `body === undefined` means the list endpoint returned just a preview and
   // the detail fetch is still in flight. Show a gentle loading state instead
   // of "No content" to avoid misleading the user.
-  if (body === undefined) {
+  if (body === undefined && bodyHtml === undefined) {
     return (
       <div className="flex items-center gap-2 text-sm text-gray-500 italic">
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1192,6 +1253,23 @@ const EmailBody = ({ body, isIncomingReply }) => {
       </div>
     );
   }
+
+  // HTML path — when the source had a text/html part, render it for
+  // visual fidelity. Quote-folding only applies to plain text (parseReplyBody
+  // is regex-based and would mangle markup), so HTML mail is shown whole.
+  if (bodyHtml && bodyHtml.trim()) {
+    const replyLabel = isIncomingReply ? "Their reply" : "Message";
+    return (
+      <div>
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+          <CornerUpLeft className="h-3 w-3" />
+          {replyLabel}
+        </div>
+        <HtmlBody html={bodyHtml} />
+      </div>
+    );
+  }
+
   if (!body || !body.trim()) {
     return <div className="text-sm text-gray-500 italic">No content.</div>;
   }
