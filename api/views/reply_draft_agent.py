@@ -112,6 +112,92 @@ def _serialize_reply(r, *, include_body=False):
 _CID_REF_RE = re.compile(r'''(["'])\s*cid:\s*([^"'>\s]+)\s*\1''', re.IGNORECASE)
 
 
+# MIME types that are technical bounce/DSN metadata and shouldn't appear
+# as user-facing attachments. Bounce emails ("Delivery Status Notification
+# (Failure)") wrap the failed message + headers as separate parts; users
+# don't want to see those as files to download.
+_BOUNCE_MIME_TYPES = frozenset({
+    'text/rfc822-headers',
+    'message/delivery-status',
+    'message/disposition-notification',
+    'message/feedback-report',
+    'message/global-delivery-status',
+    'message/global-headers',
+})
+
+# Filename patterns that we generate ourselves when a part has no proper
+# filename (see sync_inbox.get_email_attachments). These are always
+# bounce/system metadata and should be hidden from the user.
+_BOUNCE_FILENAME_HINTS = (
+    'attachment.text_rfc822-headers',
+    'attachment.message_delivery-status',
+    'attachment.message_disposition-notification',
+)
+
+# Subject + sender hints that mark a message as a bounce / DSN. When this
+# matches, we get more aggressive about hiding attachments — bounce
+# notifiers commonly include a tiny status icon (icon.png ~1-2 KB) that's
+# pure visual chrome the email client should absorb, not show as a file
+# to download.
+_BOUNCE_SUBJECT_HINTS = (
+    'delivery status notification',
+    'undeliverable',
+    'undelivered mail',
+    'mail delivery failed',
+    'mail delivery failure',
+    'returned mail',
+    'failure notice',
+    'message not delivered',
+    'delivery failure',
+)
+_BOUNCE_FROM_HINTS = (
+    'mailer-daemon',
+    'postmaster',
+    'mail-daemon',
+    'mail delivery subsystem',
+)
+# Status icons embedded in bounce mail are tiny — anything legitimately
+# attached by a human is bigger than this. Threshold is intentionally
+# conservative; raise if real attachments start getting hidden.
+_BOUNCE_ICON_MAX_BYTES = 8 * 1024  # 8 KB
+
+
+def _is_bounce_email(email):
+    """Heuristic: is this InboxEmail a delivery failure / bounce notification?"""
+    subj = (email.subject or '').lower()
+    if any(h in subj for h in _BOUNCE_SUBJECT_HINTS):
+        return True
+    sender = (email.from_email or '').lower()
+    from_name = (email.from_name or '').lower()
+    if any(h in sender for h in _BOUNCE_FROM_HINTS):
+        return True
+    if any(h in from_name for h in _BOUNCE_FROM_HINTS):
+        return True
+    return False
+
+
+def _is_bounce_metadata(att, *, is_bounce_email=False):
+    """True if this attachment is bounce/DSN metadata, not a user file.
+
+    `is_bounce_email` widens the filter: when the parent message is a
+    bounce notification, small image attachments (status icons like
+    icon.png at ~1-2 KB) are also hidden. Outside bounce mail those
+    same images could be real user attachments, so the size heuristic
+    only kicks in here.
+    """
+    ct = (att.content_type or '').lower().strip()
+    if ct in _BOUNCE_MIME_TYPES:
+        return True
+    fn = (att.filename or '').lower().strip()
+    if any(fn.startswith(h) for h in _BOUNCE_FILENAME_HINTS):
+        return True
+    if is_bounce_email:
+        # Tiny images on a bounce mail = postmaster status icon.
+        if ct.startswith('image/') and (att.size_bytes or 0) <= _BOUNCE_ICON_MAX_BYTES:
+            return True
+    return False
+
+
 def _rewrite_cid_refs(html, attachments):
     """Replace ``src="cid:abc@host"`` with the inline attachment's download URL.
 
@@ -211,9 +297,17 @@ def _serialize_inbox_email(m, *, include_body=False):
 
         out['body_html'] = body_html
 
+        is_bounce = _is_bounce_email(m)
         attachments = []
         for att in all_attachments:
             if att.is_inline:
+                continue
+            # Hide bounce/DSN technical parts — rfc822-headers, delivery-
+            # status, tiny status icons. MIME plumbing the email client
+            # should absorb, not show as user-facing files. Without this,
+            # every bounce mail produced 2-3 useless "attachments" at the
+            # bottom (icon.png + delivery-status + rfc822-headers).
+            if _is_bounce_metadata(att, is_bounce_email=is_bounce):
                 continue
             attachments.append({
                 'id': att.id,
@@ -544,18 +638,24 @@ def list_inbox_attachments(request, email_id):
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
     # Permission: scope by reply-agent account so a different tenant's
-    # attachments can't be enumerated by ID-guessing.
+    # attachments can't be enumerated by ID-guessing. Pulls subject /
+    # from_email too so the bounce-detection heuristic can see them.
     email = InboxEmail.objects.filter(
         id=email_id, owner_id__in=user_ids, email_account_id=reply_account.id,
-    ).only('id').first()
+    ).only('id', 'subject', 'from_email', 'from_name').first()
     if email is None:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    is_bounce = _is_bounce_email(email)
     payload = []
     for att in InboxAttachment.objects.filter(inbox_email_id=email.id).only(
         'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at'
     ):
         if att.is_inline:
+            continue
+        # Same bounce-DSN filter the detail serializer uses — kept in sync
+        # so the standalone "Files" view doesn't surface plumbing.
+        if _is_bounce_metadata(att, is_bounce_email=is_bounce):
             continue
         payload.append({
             'id': att.id,
