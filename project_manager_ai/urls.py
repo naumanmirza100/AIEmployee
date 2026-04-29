@@ -56,9 +56,10 @@ urlpatterns = [
     # Marketing Agent
     path('marketing/', include('marketing_agent.urls')),
 
-    # Reply Draft Agent
-    path('reply-draft/', include('reply_draft_agent.urls')),
-    
+    # Note: the legacy `reply-draft/` mount (Django session-auth views) was
+    # removed; the only consumer is the SPA, which talks to the DRF surface
+    # at `/api/reply-draft/...` (see api/urls.py).
+
     # Simple token tracking (root level - /token?t=TOKEN for opens, /token?t=TOKEN&url=... for clicks)
     path('token/', views_email_tracking.simple_track_open, name='root_simple_track_open'),
     path('token/<str:tracking_token>/', views_email_tracking.simple_track_click, name='root_simple_track_click'),

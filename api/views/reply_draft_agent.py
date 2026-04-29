@@ -6,6 +6,7 @@ Resolves the CompanyUser to a Django User (same bridge marketing uses) because
 the underlying models (Lead, Reply, EmailAccount) are keyed on User.
 """
 import logging
+import re
 from datetime import datetime, timedelta
 
 from rest_framework import status
@@ -108,6 +109,57 @@ def _serialize_reply(r, *, include_body=False):
     return out
 
 
+_CID_REF_RE = re.compile(r'''(["'])\s*cid:\s*([^"'>\s]+)\s*\1''', re.IGNORECASE)
+
+
+def _rewrite_cid_refs(html, attachments):
+    """Replace ``src="cid:abc@host"`` with the inline attachment's download URL.
+
+    `attachments` is the queryset/list of the email's InboxAttachment rows
+    (inline + non-inline); we match by ``content_id`` (with surrounding
+    angle brackets stripped, since those are part of the wire format but
+    not what HTML attributes use). Returns the rewritten HTML; pass-through
+    on no matches so the cost is a single regex scan when there's nothing
+    to rewrite.
+    """
+    if not html or '<' not in html:
+        return html
+    cid_map = {}
+    for att in attachments:
+        cid = (att.content_id or '').strip()
+        if not cid:
+            continue
+        # Strip angle brackets ("<image001@…>" → "image001@…") — that's
+        # the form they appear as inside HTML's src="cid:…" references.
+        cid = cid.lstrip('<').rstrip('>')
+        cid_map[cid.lower()] = att.id
+
+    if not cid_map:
+        return html
+
+    # We don't know the email_id at this depth, so the caller passes it via
+    # the closure. Build a cheap per-call replacer.
+    def _make_replacer(email_id):
+        def _replace(match):
+            quote = match.group(1)
+            cid = match.group(2).strip().lower()
+            att_id = cid_map.get(cid)
+            if not att_id:
+                return match.group(0)
+            return f'{quote}/api/reply-draft/inbox/{email_id}/attachments/{att_id}/download{quote}'
+        return _replace
+
+    # Email_id is bound on the wrapper below — _rewrite_cid_refs itself is
+    # called with `attachments` already attached to a single email, so we
+    # piggy-back on the FK on the first row. Falling back to the original
+    # html when the list is empty keeps this safe under empty-attachment
+    # paths.
+    first = next(iter(attachments), None)
+    if first is None:
+        return html
+    return _CID_REF_RE.sub(_make_replacer(first.inbox_email_id), html)
+
+
 def _serialize_inbox_email(m, *, include_body=False):
     """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics.
 
@@ -135,34 +187,41 @@ def _serialize_inbox_email(m, *, include_body=False):
         'campaign_id': None,
         'campaign': '',
         'analysis': m.analysis or '',
+        'thread_key': getattr(m, 'thread_key', '') or '',
     }
     if include_body:
         out['body'] = m.body or ''
-        # `body_html` is only useful at detail-view time — the list view
-        # would otherwise pull tens of MB of markup. Frontend renders this
-        # in a sandboxed iframe and falls back to `body` when empty.
-        out['body_html'] = getattr(m, 'body_html', '') or ''
-        # Surface non-inline attachments so the detail panel can render
-        # a downloadable list. Inline parts (cid: images embedded in the
-        # HTML body) stay server-side until the iframe-rewrite story
-        # lands; listing them here would clutter the UI with the same
-        # files the email already shows.
-        attachments = []
+        body_html = getattr(m, 'body_html', '') or ''
+
+        # Pull attachments once — used both for the downloadable list and
+        # for cid: rewrite below. Inline parts are filtered out of the user-
+        # visible list but kept available to the rewriter so embedded images
+        # actually load.
+        all_attachments = []
         try:
-            for att in m.attachments.all():
-                if att.is_inline:
-                    continue
-                attachments.append({
-                    'id': att.id,
-                    'filename': att.filename,
-                    'content_type': att.content_type,
-                    'size_bytes': att.size_bytes,
-                    'download_url': f'/api/reply-draft/inbox/{m.id}/attachments/{att.id}/download',
-                })
+            all_attachments = list(m.attachments.all())
         except Exception:
-            # Old rows synced before the attachment feature simply have no
-            # related rows — surface as empty list.
-            pass
+            all_attachments = []
+
+        # Rewrite cid: refs inside body_html so inline images served from
+        # our attachment endpoint actually render. Falls through cleanly
+        # on emails without inline parts.
+        if body_html and all_attachments:
+            body_html = _rewrite_cid_refs(body_html, all_attachments)
+
+        out['body_html'] = body_html
+
+        attachments = []
+        for att in all_attachments:
+            if att.is_inline:
+                continue
+            attachments.append({
+                'id': att.id,
+                'filename': att.filename,
+                'content_type': att.content_type,
+                'size_bytes': att.size_bytes,
+                'download_url': f'/api/reply-draft/inbox/{m.id}/attachments/{att.id}/download',
+            })
         out['attachments'] = attachments
     return out
 
@@ -265,16 +324,41 @@ def dashboard(request):
 
     user_ids = _company_bridge_user_ids(request.user)
     try:
+        reply_account = _get_reply_account(user_ids)
+        # Scope ReplyDraft counts to the attached reply-agent account so old
+        # drafts created against marketing accounts (before isolation) and
+        # drafts that no longer match the currently-attached mailbox don't
+        # inflate the "pending" / "approved" cards. Null email_account is
+        # kept so legacy drafts without a FK still appear; matching list_drafts.
         drafts_qs = ReplyDraft.objects.filter(owner_id__in=user_ids)
+        if reply_account is not None:
+            drafts_qs = drafts_qs.filter(
+                Q(email_account_id=reply_account.id) | Q(email_account__isnull=True)
+            )
+        else:
+            # No mailbox attached → only legacy drafts can count, otherwise
+            # the dashboard would show stale marketing-side numbers.
+            drafts_qs = drafts_qs.filter(email_account__isnull=True)
+
         # "Live" drafts only — rejected ones don't block the original from being pending again.
         live_drafts_qs = drafts_qs.exclude(status='rejected')
+
+        # Pending inbox count is similarly scoped to the attached account —
+        # without this, inbox rows from a previously-attached mailbox would
+        # bleed into the pending tally.
+        if reply_account is not None:
+            inbox_pool = InboxEmail.objects.filter(
+                owner_id__in=user_ids, email_account_id=reply_account.id, direction='in',
+            )
+        else:
+            inbox_pool = InboxEmail.objects.none()
+
         pending_reply_count = Reply.objects.filter(lead__owner_id__in=user_ids).exclude(
             id__in=live_drafts_qs.filter(original_email_id__isnull=False).values_list('original_email_id', flat=True)
         ).count()
 
         pending_inbox_count = (
-            InboxEmail.objects
-            .filter(owner_id__in=user_ids)
+            inbox_pool
             .exclude(id__in=live_drafts_qs.filter(inbox_email_id__isnull=False).values_list('inbox_email_id', flat=True))
             .count()
         )
@@ -371,9 +455,37 @@ def list_pending_replies(request):
     # most recent few hundred. A smaller cap also keeps the JSON payload
     # tight enough to render instantly on dropdown changes.
     LIST_LIMIT = 500
-    for m in inbox_qs.order_by('-received_at')[:LIST_LIMIT]:
+    visible_rows = list(inbox_qs.order_by('-received_at')[:LIST_LIMIT])
+
+    # Per-thread message count across BOTH directions of the same account
+    # — so a thread that has 1 inbox message + 3 sent replies shows as a
+    # 4-message thread in both tabs. Single query, no N+1.
+    thread_counts = {}
+    thread_keys = {m.thread_key for m in visible_rows if m.thread_key}
+    if thread_keys:
+        from django.db.models import Count as _Count
+        # `.order_by()` (empty) clears the model's Meta.ordering = ['-received_at']
+        # default. Without this, SQL Server rejects the query because
+        # received_at ends up in ORDER BY without being in GROUP BY
+        # ("Column ... is invalid in the ORDER BY clause"). On Postgres
+        # the default ordering is silently absorbed; MSSQL is strict.
+        for row in (
+            InboxEmail.objects
+            .filter(email_account_id=reply_account.id, thread_key__in=thread_keys)
+            .order_by()
+            .values('thread_key')
+            .annotate(c=_Count('id'))
+        ):
+            thread_counts[row['thread_key']] = row['c']
+
+    for m in visible_rows:
         m._list_preview = ''
-        items.append((m.received_at, _serialize_inbox_email(m)))
+        serialized = _serialize_inbox_email(m)
+        # Surface thread depth so the UI can show "5 messages" badges.
+        # Default 1 covers the (common) case where a message has no
+        # thread_key yet (synced before backfill).
+        serialized['thread_count'] = thread_counts.get(m.thread_key, 1) if m.thread_key else 1
+        items.append((m.received_at, serialized))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
     payload = [entry for _, entry in items]
@@ -798,6 +910,7 @@ def generate_draft(request):
         inbox_email_id=inbox_email_id,
         user_context=payload.get('user_context', ''),
         tone=payload.get('tone', 'professional'),
+        length=payload.get('length'),
         email_account_id=payload.get('email_account_id'),
     )
     if not result.get('success'):
@@ -821,6 +934,7 @@ def regenerate_draft(request, draft_id):
         draft_id=draft_id,
         new_instructions=payload.get('new_instructions', ''),
         tone=payload.get('tone'),
+        length=payload.get('length'),
     )
     if not result.get('success'):
         return Response({'status': 'error', 'message': result.get('error')},

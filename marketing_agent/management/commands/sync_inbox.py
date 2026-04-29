@@ -608,6 +608,14 @@ class Command(BaseCommand):
         if to_email is None:
             to_email = (account.email or '')
 
+        thread_key = InboxEmail.compute_thread_key(
+            references=references,
+            in_reply_to=in_reply_to,
+            subject=subject,
+            from_email=from_email,
+            to_email=to_email,
+        )
+
         return InboxEmail(
             owner=account.owner,
             email_account=account,
@@ -622,6 +630,7 @@ class Command(BaseCommand):
             received_at=received_at,
             to_email=(to_email or '')[:254],
             direction=direction,
+            thread_key=thread_key,
         )
 
     def _flush_inbox_rows(self, pending_rows):

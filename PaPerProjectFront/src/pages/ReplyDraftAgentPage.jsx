@@ -19,7 +19,7 @@ import {
   Sparkles,
   Search,
   FileText,
-  Clock,
+  Clock, 
   Building2,
   AtSign,
   AlertCircle,
@@ -85,6 +85,15 @@ const TONES = [
   { value: 'apologetic',   label: 'Apologetic' },
   { value: 'confident',    label: 'Confident' },
   { value: 'empathetic',   label: 'Empathetic' },
+];
+
+// Length presets — must mirror the backend LENGTH_GUIDANCE map in
+// reply_draft_agent/agents/reply_draft_agent.py. Replaces the previous
+// hard "<150 word" cap baked into the system prompt.
+const LENGTHS = [
+  { value: 'short',  label: 'Short (60-100 words)' },
+  { value: 'medium', label: 'Medium (120-200 words)' },
+  { value: 'long',   label: 'Long (250-400 words)' },
 ];
 
 const INTEREST_STYLES = {
@@ -223,6 +232,7 @@ const ReplyDraftAgentPage = () => {
   const [selectedReply, setSelectedReply] = useState(null);
   const [selectedDraft, setSelectedDraft] = useState(null);
   const [tone, setTone] = useState('professional');
+  const [length, setLength] = useState('medium');
   const [userContext, setUserContext] = useState('');
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
@@ -416,6 +426,7 @@ const ReplyDraftAgentPage = () => {
         inboxEmailId: isInbox ? selectedReply.id : null,
         userContext,
         tone,
+        length,
       });
       const d = res?.data;
       if (d?.draft_id) {
@@ -452,6 +463,7 @@ const ReplyDraftAgentPage = () => {
       const res = await regenerateDraft(selectedDraft.id, {
         newInstructions: userContext,
         tone,
+        length,
       });
       const d = res?.data;
       if (d?.draft_id) {
@@ -1005,9 +1017,9 @@ const ReplyDraftAgentPage = () => {
                   </div>
 
                   <div className="p-5 space-y-4">
-                    {/* Tone + Instructions */}
+                    {/* Tone + Length + Instructions */}
                     {!isReadOnly && (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Tone</label>
                           <select
@@ -1017,6 +1029,17 @@ const ReplyDraftAgentPage = () => {
                             disabled={busy}
                           >
                             {TONES.map((t) => (<option key={t.value} value={t.value} className="bg-gray-900">{t.label}</option>))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-300 mb-1.5 block">Length</label>
+                          <select
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                            value={length}
+                            onChange={(e) => setLength(e.target.value)}
+                            disabled={busy}
+                          >
+                            {LENGTHS.map((l) => (<option key={l.value} value={l.value} className="bg-gray-900">{l.label}</option>))}
                           </select>
                         </div>
                         <div className="md:col-span-2">
@@ -1187,16 +1210,56 @@ const ReplyDraftAgentPage = () => {
   );
 };
 
-// Render an HTML email body in a sandboxed iframe. The iframe blocks
-// scripts and same-origin access, but still renders styled markup,
-// images, links and tables — exactly what the user sees in Gmail. Auto-
-// resizes to the content height so there's no inner scrollbar inside
-// the message card.
+// Heuristic: does this HTML carry its own visual styling (bg color,
+// inline styles, tables) that would break if rendered in dark theme?
+// Plain reply HTML — `<p>...</p><br/><p>...</p>` — has none of these,
+// so we can render it inline in the dark card. Only transactional /
+// templated mail goes into the (light) iframe. The check is stupid-
+// simple on purpose: we err on the side of using the iframe, so the
+// risk is "we rendered a plain reply in a white box once" — an aesthetic
+// regression, not a correctness one.
+const _RICH_HTML_HINTS = /<(?:table|style|font|center|img\b)|background(?:-color)?\s*:|color\s*:\s*(?!inherit)/i;
+const isPlainHtmlReply = (html) => {
+  if (!html) return true;
+  return !_RICH_HTML_HINTS.test(html);
+};
+
+// Lightweight inline renderer for plain HTML replies. Strips scripts /
+// dangerous attrs, then drops into a dark-theme div. Used instead of
+// the iframe path for handwritten replies so they don't appear in a
+// white box on the dark dashboard.
+const sanitizeReplyHtml = (html) => {
+  if (!html) return '';
+  let s = String(html);
+  // Remove script / style / iframe / object / embed wholesale.
+  s = s.replace(/<\s*\/?(?:script|style|iframe|object|embed|link|meta)[^>]*>/gi, '');
+  // Strip on*=… event handlers (case-insensitive, handles single/double/none quoted).
+  s = s.replace(/\son[a-z]+\s*=\s*"(?:[^"]*)"/gi, '');
+  s = s.replace(/\son[a-z]+\s*=\s*'(?:[^']*)'/gi, '');
+  s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
+  // Strip javascript: URIs in href/src.
+  s = s.replace(/(href|src)\s*=\s*"(?:\s*javascript:[^"]*)"/gi, '$1="#"');
+  s = s.replace(/(href|src)\s*=\s*'(?:\s*javascript:[^']*)'/gi, "$1='#'");
+  return s;
+};
+
+// Render an HTML email body. Two paths:
+//   • plain replies → inline div in the dark theme (no white box)
+//   • rich / transactional mail → sandboxed iframe with light bg
+// The light iframe is wrapped in a dark "document card" so the
+// transition from dashboard → email looks intentional (paper preview)
+// instead of like a CSS bug.
 const HtmlBody = ({ html }) => {
   const ref = React.useRef(null);
+  const inline = isPlainHtmlReply(html);
+
+  // Always declare hooks before any return — the iframe-resize effect
+  // is a no-op on the inline path because `inline` short-circuits both
+  // the listener and the cleanup.
   React.useEffect(() => {
+    if (inline) return undefined;
     const iframe = ref.current;
-    if (!iframe) return;
+    if (!iframe) return undefined;
     const resize = () => {
       try {
         const doc = iframe.contentDocument;
@@ -1210,36 +1273,59 @@ const HtmlBody = ({ html }) => {
     resize();
     const t = setTimeout(resize, 200);
     return () => clearTimeout(t);
-  }, [html]);
+  }, [html, inline]);
 
-  // Force light background + dark text inside the iframe so transactional
-  // mail (often white-on-light) doesn't render unreadable on our dark
-  // dashboard. Links open in a new tab via `<base target="_blank">`.
+  // Plain-reply path: render directly in the dark theme.
+  if (inline) {
+    return (
+      <div
+        className="text-sm text-gray-100 leading-relaxed [&_a]:text-cyan-300 [&_a]:underline [&_p]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_blockquote]:text-gray-400 [&_pre]:bg-white/5 [&_pre]:p-2 [&_pre]:rounded"
+        dangerouslySetInnerHTML={{ __html: sanitizeReplyHtml(html) }}
+      />
+    );
+  }
+
+  // Transparent iframe background so the dark "document frame" wrapper
+  // shows through. Transactional mail almost always paints its own
+  // background (white card, brand banner, etc.) inside its template,
+  // so the email still looks like the sender intended — but the harsh
+  // white halo around it is gone. Default text color is light so plain
+  // mail without its own styling stays readable on dark.
   const wrapped = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
-    html,body{margin:0;padding:0;background:#fff;color:#111;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.5;}
+    html,body{margin:0;padding:0;background:transparent;color:#e4e4e7;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.5;}
     img{max-width:100%;height:auto;}
-    a{color:#0a66c2;}
+    a{color:#7dd3fc;}
     body{padding:14px;}
   </style></head><body>${html || ''}</body></html>`;
 
+  // Dark "document frame" — the iframe is transparent, so this gradient
+  // is what the user sees around the email's own template.
   return (
-    <iframe
-      ref={ref}
-      title="Email body"
-      sandbox="allow-popups allow-popups-to-escape-sandbox"
-      srcDoc={wrapped}
-      style={{ width: '100%', minHeight: '120px', border: 0, background: '#fff', borderRadius: '8px' }}
-      onLoad={() => {
-        const iframe = ref.current;
-        if (!iframe) return;
-        try {
-          const doc = iframe.contentDocument;
-          if (doc) {
-            iframe.style.height = `${(doc.documentElement.scrollHeight || 200) + 8}px`;
-          }
-        } catch {}
-      }}
-    />
+    <div className="rounded-xl bg-gradient-to-b from-zinc-900/60 to-zinc-950/40 border border-white/10 p-2 shadow-inner">
+      <div className="flex items-center gap-2 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+        <span className="inline-block w-2 h-2 rounded-full bg-rose-400/70"></span>
+        <span className="inline-block w-2 h-2 rounded-full bg-amber-400/70"></span>
+        <span className="inline-block w-2 h-2 rounded-full bg-emerald-400/70"></span>
+        <span className="ml-2">Original message</span>
+      </div>
+      <iframe
+        ref={ref}
+        title="Email body"
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        srcDoc={wrapped}
+        style={{ width: '100%', minHeight: '120px', border: 0, background: 'transparent', borderRadius: '10px', display: 'block' }}
+        onLoad={() => {
+          const iframe = ref.current;
+          if (!iframe) return;
+          try {
+            const doc = iframe.contentDocument;
+            if (doc) {
+              iframe.style.height = `${(doc.documentElement.scrollHeight || 200) + 8}px`;
+            }
+          } catch {}
+        }}
+      />
+    </div>
   );
 };
 
@@ -1639,19 +1725,31 @@ const InboxItem = ({ reply, active, onClick }) => {
         <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
           {reply.preview || 'No preview available'}
         </div>
-        {!isOutgoing && (
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {!isOutgoing && (
             <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
               {style.label}
             </span>
-            {reply.campaign && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
-                <Zap className="h-2.5 w-2.5" />
-                {reply.campaign}
-              </span>
-            )}
-          </div>
-        )}
+          )}
+          {/* Thread depth badge — only shows when the row is part of a
+              multi-message conversation. Helps the user spot ongoing
+              threads in the list without expanding them. */}
+          {reply.thread_count > 1 && (
+            <span
+              title={`${reply.thread_count} messages in this thread`}
+              className="inline-flex items-center gap-1 text-[10px] font-medium text-fuchsia-200 px-2 py-0.5 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20"
+            >
+              <Quote className="h-2.5 w-2.5" />
+              {reply.thread_count}
+            </span>
+          )}
+          {!isOutgoing && reply.campaign && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
+              <Zap className="h-2.5 w-2.5" />
+              {reply.campaign}
+            </span>
+          )}
+        </div>
       </div>
     </button>
   );
