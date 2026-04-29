@@ -9,6 +9,7 @@ import {
   FileSearch,
   Reply,
   Target,
+  UserCog
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -162,6 +163,26 @@ const ModuleCardsSection = () => {
         'Inline edit before approving',
         'Proper email threading (In-Reply-To)',
         'Full version history of regenerations'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'HR Support Agent',
+      moduleName: 'hr_agent',
+      description: 'Employee-facing HR assistant — answers policy questions, runs onboarding/offboarding workflows, processes HR documents, and books HR meetings.',
+      icon: UserCog,
+      iconColor: 'text-purple-500',
+      gradientFrom: gradientColors['purple-500'],
+      gradientTo: gradientColors['blue-500'],
+      price: 129,
+      pricePeriod: 'month',
+      features: [
+        'Knowledge Q&A from your handbook & policies',
+        'Confidentiality-aware retrieval (IC vs manager vs HR)',
+        'Onboarding & offboarding SOP automation',
+        'HR document processing (offer letters, contracts, payslips)',
+        'Birthday, anniversary & probation reminders',
+        'Typed HR meetings (1:1, performance review, exit, grievance)'
       ],
       highlight: false,
     }

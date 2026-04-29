@@ -59,8 +59,12 @@ class CoreConfig(AppConfig):
         beat_log = open(os.path.join(logs_dir, 'celery_beat.log'), 'a')
 
         try:
+            # threads pool with concurrency=4 lets the on-connect inbox sync
+            # run alongside the periodic 5-min beat instead of waiting in
+            # queue. Was --pool=solo previously, which serialized everything
+            # behind whatever long-running task happened to be active.
             _celery_worker_proc = subprocess.Popen(
-                [sys.executable, '-m', 'celery', '-A', 'project_manager_ai', 'worker', '-l', 'info', '--pool=solo'],
+                [sys.executable, '-m', 'celery', '-A', 'project_manager_ai', 'worker', '-l', 'info', '--pool=threads', '--concurrency=4'],
                 stdout=worker_log,
                 stderr=worker_log,
                 creationflags=creation_flags,
