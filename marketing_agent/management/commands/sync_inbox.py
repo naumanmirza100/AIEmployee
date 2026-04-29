@@ -511,7 +511,12 @@ class Command(BaseCommand):
                             direction=direction,
                         )
                         if row and row.message_id not in known_message_ids:
-                            pending_inbox_rows.append(row)
+                            # Extract attachments now while we have the parsed
+                            # message bytes in hand. They're persisted in
+                            # _flush_inbox_rows once the parent InboxEmail
+                            # row has a PK.
+                            attachments = self.get_email_attachments(msg)
+                            pending_inbox_rows.append((row, attachments))
                             known_message_ids.add(row.message_id)
                             if len(pending_inbox_rows) >= BULK_FLUSH_SIZE:
                                 inbox_stored += self._flush_inbox_rows(pending_inbox_rows)
@@ -622,6 +627,11 @@ class Command(BaseCommand):
     def _flush_inbox_rows(self, pending_rows):
         """Bulk-insert buffered InboxEmail rows. Returns the count flushed.
 
+        ``pending_rows`` is a list of ``(InboxEmail, attachments_list)``
+        tuples — see _process_folder. Attachments are persisted via
+        ``_persist_attachments_for_batch`` after the parent rows land, so
+        that an InboxAttachment FK never points at a non-existent email.
+
         SQL Server's mssql backend has had a few foot-guns here historically
         (no ignore_conflicts, ARITHABORT/OUTPUT clause oddities, DataError on
         4000-char-plus subjects, etc.) so we catch *any* exception from
@@ -638,9 +648,23 @@ class Command(BaseCommand):
         """
         if not pending_rows:
             return 0
+        # Split out the InboxEmail objects from their attachment payloads.
+        # Tolerate the historical shape (plain list of InboxEmail) so a
+        # caller that hasn't updated still works; just yields no attachments.
+        rows = []
+        attachments_by_msg_id = {}
+        for entry in pending_rows:
+            if isinstance(entry, tuple):
+                row, atts = entry
+                rows.append(row)
+                if atts and row.message_id:
+                    attachments_by_msg_id[row.message_id] = atts
+            else:
+                rows.append(entry)
+
         try:
-            InboxEmail.objects.bulk_create(pending_rows, batch_size=50)
-            flushed = len(pending_rows)
+            InboxEmail.objects.bulk_create(rows, batch_size=50)
+            flushed = len(rows)
         except Exception as e:
             err_text = str(e)
             if 'FOREIGN KEY constraint' in err_text and 'emailaccount' in err_text.lower():
@@ -654,10 +678,10 @@ class Command(BaseCommand):
                 raise
             logger.warning(
                 'sync_inbox bulk_create failed (%s: %s); falling back to per-row save for %d rows',
-                type(e).__name__, e, len(pending_rows)
+                type(e).__name__, e, len(rows)
             )
             flushed = 0
-            for row in pending_rows:
+            for row in rows:
                 try:
                     row.save()
                     flushed += 1
@@ -666,9 +690,62 @@ class Command(BaseCommand):
                         'sync_inbox per-row save failed for message_id=%r: %s: %s',
                         (row.message_id or '')[:60], type(inner_e).__name__, inner_e
                     )
-        finally:
-            pending_rows.clear()
+
+        # Persist attachments after parent rows are committed.
+        if attachments_by_msg_id and rows:
+            try:
+                self._persist_attachments_for_batch(rows[0].email_account_id, attachments_by_msg_id)
+            except Exception as att_e:
+                logger.warning('sync_inbox attachment persist failed (non-fatal): %s', att_e)
+
+        pending_rows.clear()
         return flushed
+
+    def _persist_attachments_for_batch(self, email_account_id, attachments_by_msg_id):
+        """Save InboxAttachment rows + write files via default_storage.
+
+        Looks up the just-inserted InboxEmail rows by ``message_id`` (the
+        same dedupe key) so we have authoritative IDs even on the bulk_create
+        path where Django doesn't always populate ``pk`` back into the in-memory
+        instances on MSSQL. Errors per-attachment are logged and swallowed so
+        a single bad file doesn't sink the whole batch.
+        """
+        from django.core.files.base import ContentFile
+        from reply_draft_agent.models import InboxAttachment
+
+        if not attachments_by_msg_id:
+            return
+        # Bulk-look-up: one query maps message_id → inbox_email_id
+        id_map = dict(
+            InboxEmail.objects
+            .filter(email_account_id=email_account_id, message_id__in=list(attachments_by_msg_id.keys()))
+            .values_list('message_id', 'id')
+        )
+        for mid, atts in attachments_by_msg_id.items():
+            inbox_id = id_map.get(mid)
+            if not inbox_id:
+                continue
+            for att in atts:
+                try:
+                    obj = InboxAttachment(
+                        inbox_email_id=inbox_id,
+                        filename=att['filename'],
+                        content_type=att.get('content_type', ''),
+                        size_bytes=att.get('size_bytes', 0),
+                        sha256=att.get('sha256', ''),
+                        content_id=att.get('content_id', ''),
+                        is_inline=att.get('is_inline', False),
+                    )
+                    # FileField needs the file written via .save() on the field
+                    # so default_storage chooses the path (and the upload_to
+                    # callable can read obj.sha256 / obj.inbox_email_id).
+                    obj.file.save(att['filename'], ContentFile(att['data']), save=False)
+                    obj.save()
+                except Exception as e:
+                    logger.warning(
+                        'sync_inbox: failed to persist attachment %r on email %s: %s',
+                        att.get('filename', ''), inbox_id, e,
+                    )
 
     def store_inbox_email(self, msg, account, sender_email):
         """Persist a single incoming inbox email. Idempotent on (account, Message-ID).
@@ -888,6 +965,70 @@ class Command(BaseCommand):
                 result += part
 
         return result.strip()
+
+    def get_email_attachments(self, msg):
+        """Walk a message and return ``[{...}, ...]`` for each attachment part.
+
+        Each entry is a dict with the raw bytes + headers we need to persist
+        an InboxAttachment row + write the file via ``default_storage``.
+        Inline parts (the ones referenced by ``cid:`` in body_html) are
+        included with ``is_inline=True`` so the UI can later swap cid:
+        URLs for download links rather than dropping them.
+        """
+        import hashlib
+
+        results = []
+        if not msg.is_multipart():
+            return results
+
+        for part in msg.walk():
+            content_type = part.get_content_type() or ''
+            disposition = (part.get('Content-Disposition') or '').lower()
+            content_id_raw = (part.get('Content-ID') or '').strip()
+            content_id = content_id_raw.strip('<>') if content_id_raw else ''
+
+            # Two ways something is "an attachment" worth keeping:
+            #  - explicit Content-Disposition: attachment / inline; filename=...
+            #  - has a Content-ID (referenced by body_html as cid:...)
+            is_attachment_disposition = 'attachment' in disposition
+            is_inline_disposition = 'inline' in disposition
+            has_filename = part.get_filename() is not None
+
+            # Skip multipart container parts (multipart/mixed, multipart/related)
+            # and the actual body text/html parts (those are handled elsewhere).
+            if part.is_multipart():
+                continue
+            if content_type in ('text/plain', 'text/html') and not (is_attachment_disposition or has_filename):
+                continue
+
+            try:
+                payload = part.get_payload(decode=True)
+            except Exception:
+                payload = None
+            if not payload:
+                continue
+
+            filename = part.get_filename() or (
+                f'inline-{content_id[:24]}' if content_id else f'attachment.{content_type.replace("/", "_") or "bin"}'
+            )
+            try:
+                # Some servers MIME-encode the filename header; decode if so.
+                filename = self.decode_header(filename) or filename
+            except Exception:
+                pass
+
+            sha = hashlib.sha256(payload).hexdigest()
+            results.append({
+                'filename': filename[:255],
+                'content_type': content_type[:120],
+                'size_bytes': len(payload),
+                'data': payload,
+                'sha256': sha,
+                'content_id': content_id[:255],
+                'is_inline': bool(is_inline_disposition or content_id) and not is_attachment_disposition,
+            })
+
+        return results
 
     def get_email_body(self, msg):
         """Extract email body — both plain text and HTML when present.

@@ -943,6 +943,9 @@ const ReplyDraftAgentPage = () => {
 
                   <div className="p-5">
                     <EmailBody body={originalEmail.body} bodyHtml={originalEmail.body_html} isIncomingReply={!!selectedReply} />
+                    {Array.isArray(originalEmail.attachments) && originalEmail.attachments.length > 0 && (
+                      <AttachmentList attachments={originalEmail.attachments} />
+                    )}
                     {selectedReply?.analysis && (
                       <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
                         <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
@@ -1237,6 +1240,98 @@ const HtmlBody = ({ html }) => {
         } catch {}
       }}
     />
+  );
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+const fileIconChar = (filename, contentType) => {
+  // Tiny single-glyph badge — keeps the row compact and avoids dragging in
+  // an icon library entry per file type.
+  const ct = (contentType || '').toLowerCase();
+  const ext = ((filename || '').split('.').pop() || '').toLowerCase();
+  if (ct.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return '🖼';
+  if (ct.includes('pdf') || ext === 'pdf') return '📄';
+  if (ct.includes('zip') || ['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜';
+  if (ct.includes('word') || ['doc', 'docx'].includes(ext)) return '📝';
+  if (ct.includes('sheet') || ['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
+  if (ct.includes('presentation') || ['ppt', 'pptx'].includes(ext)) return '📽';
+  if (ct.startsWith('audio/')) return '🎵';
+  if (ct.startsWith('video/')) return '🎬';
+  return '📎';
+};
+
+const AttachmentList = ({ attachments }) => {
+  const handleDownload = async (att) => {
+    // Token-authenticated download: fetch with the auth header, turn the
+    // response into a Blob, then synthesise an <a download> click. Direct
+    // <a href> links wouldn't carry the company-user token and would 401.
+    try {
+      const token = localStorage.getItem('company_auth_token') || '';
+      const apiBase = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      const url = `${apiBase}${att.download_url}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: token ? { Authorization: `Token ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = att.filename || 'attachment';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Tiny delay so the click triggers before the URL is revoked. 200ms
+      // is enough for any browser to start the save.
+      setTimeout(() => URL.revokeObjectURL(objUrl), 200);
+    } catch (e) {
+      console.error('Attachment download failed', e);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-white/10">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300 mb-2">
+        <span>📎</span>
+        Attachments · {attachments.length}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {attachments.map((att) => (
+          <button
+            key={att.id}
+            type="button"
+            onClick={() => handleDownload(att)}
+            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-emerald-500/30 transition text-left group"
+          >
+            <span className="text-xl shrink-0" aria-hidden="true">
+              {fileIconChar(att.filename, att.content_type)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-gray-100 truncate group-hover:text-white">
+                {att.filename || 'attachment'}
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">
+                {formatFileSize(att.size_bytes)}
+                {att.content_type && (
+                  <span className="ml-1 opacity-60">· {att.content_type}</span>
+                )}
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300 opacity-0 group-hover:opacity-100 transition shrink-0">
+              Download
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 };
 

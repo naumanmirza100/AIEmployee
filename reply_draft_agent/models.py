@@ -1,3 +1,5 @@
+import re
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -77,6 +79,68 @@ class InboxEmail(models.Model):
 
     def __str__(self):
         return f"InboxEmail from {self.from_email} at {self.received_at:%Y-%m-%d %H:%M}"
+
+
+def _inbox_attachment_upload_path(instance, original_filename):
+    """Where Django stores the file under ``default_storage``.
+
+    Path layout: ``inbox_attachments/<account_id>/<email_id>/<sha8>-<filename>``.
+    Bucketing by account + email keeps directories small enough for fast
+    listing on local disk and yields stable S3 prefixes when the storage
+    backend is later swapped to S3 (just flip ``DEFAULT_FILE_STORAGE``;
+    this code stays unchanged).
+    """
+    # `instance.sha256` is set before .save(); fall back to '' if a caller
+    # forgot, in which case Django will append its own uniquifier on collision.
+    sha_prefix = (instance.sha256 or '')[:8]
+    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', original_filename)[:120] or 'attachment.bin'
+    return (
+        f'inbox_attachments/'
+        f'{instance.inbox_email.email_account_id}/'
+        f'{instance.inbox_email_id}/'
+        f'{sha_prefix}-{safe_name}'
+    )
+
+
+class InboxAttachment(models.Model):
+    """File attachment on an InboxEmail.
+
+    Uses Django's ``FileField`` against ``default_storage``, so the file
+    lives wherever ``DEFAULT_FILE_STORAGE`` points: on local disk today
+    (``MEDIA_ROOT``), on S3 the day someone flips one settings line. DB
+    row holds only metadata so SQL Server isn't loaded down with blobs.
+    """
+
+    inbox_email = models.ForeignKey(
+        InboxEmail, on_delete=models.CASCADE, related_name='attachments',
+        help_text='Email this attachment was extracted from. CASCADE keeps the table consistent '
+                  'when emails are pruned; the actual file is removed by the post_delete signal '
+                  'wired up in apps.py.',
+    )
+    filename = models.CharField(max_length=255, help_text='Original filename from the message part.')
+    content_type = models.CharField(max_length=120, blank=True, default='')
+    size_bytes = models.BigIntegerField(default=0)
+    file = models.FileField(upload_to=_inbox_attachment_upload_path, max_length=1000,
+                            help_text='Stored via default_storage (local FS now, S3 later).')
+    sha256 = models.CharField(max_length=64, blank=True, default='', db_index=True,
+                              help_text='Content hash. Lets us dedupe identical files across emails.')
+    # Inline-image content-id (e.g. "<image001@01D8...@laskon.com>") so the
+    # frontend can later swap `cid:` references in body_html for download URLs.
+    content_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
+    is_inline = models.BooleanField(default=False,
+                                    help_text='True for cid: parts referenced inside body_html (e.g. inline images).')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_replydraftagent_inboxattachment'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['inbox_email', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"InboxAttachment {self.filename} ({self.size_bytes}B) on email #{self.inbox_email_id}"
 
 
 class ReplyDraft(models.Model):

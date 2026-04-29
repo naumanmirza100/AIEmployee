@@ -20,7 +20,7 @@ from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
 from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
-from reply_draft_agent.models import ReplyDraft, InboxEmail
+from reply_draft_agent.models import ReplyDraft, InboxEmail, InboxAttachment
 from reply_draft_agent.permissions import company_has_module
 
 logger = logging.getLogger(__name__)
@@ -142,6 +142,28 @@ def _serialize_inbox_email(m, *, include_body=False):
         # would otherwise pull tens of MB of markup. Frontend renders this
         # in a sandboxed iframe and falls back to `body` when empty.
         out['body_html'] = getattr(m, 'body_html', '') or ''
+        # Surface non-inline attachments so the detail panel can render
+        # a downloadable list. Inline parts (cid: images embedded in the
+        # HTML body) stay server-side until the iframe-rewrite story
+        # lands; listing them here would clutter the UI with the same
+        # files the email already shows.
+        attachments = []
+        try:
+            for att in m.attachments.all():
+                if att.is_inline:
+                    continue
+                attachments.append({
+                    'id': att.id,
+                    'filename': att.filename,
+                    'content_type': att.content_type,
+                    'size_bytes': att.size_bytes,
+                    'download_url': f'/api/reply-draft/inbox/{m.id}/attachments/{att.id}/download',
+                })
+        except Exception:
+            # Old rows synced before the attachment feature simply have no
+            # related rows — surface as empty list.
+            pass
+        out['attachments'] = attachments
     return out
 
 
@@ -389,6 +411,106 @@ def get_inbox_email(request, email_id):
     if m is None:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
     return Response({'status': 'success', 'data': _serialize_inbox_email(m, include_body=True)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_inbox_attachments(request, email_id):
+    """Return attachment metadata for a single InboxEmail.
+
+    The detail endpoint already inlines this list, so this is mostly here
+    for a future "Files" tab / standalone refresh; the current frontend
+    reads attachments directly off the email payload.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Permission: scope by reply-agent account so a different tenant's
+    # attachments can't be enumerated by ID-guessing.
+    email = InboxEmail.objects.filter(
+        id=email_id, owner_id__in=user_ids, email_account_id=reply_account.id,
+    ).only('id').first()
+    if email is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    payload = []
+    for att in InboxAttachment.objects.filter(inbox_email_id=email.id).only(
+        'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at'
+    ):
+        if att.is_inline:
+            continue
+        payload.append({
+            'id': att.id,
+            'filename': att.filename,
+            'content_type': att.content_type,
+            'size_bytes': att.size_bytes,
+            'created_at': att.created_at.isoformat() if att.created_at else None,
+            'download_url': f'/api/reply-draft/inbox/{email.id}/attachments/{att.id}/download',
+        })
+    return Response({'status': 'success', 'data': payload})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def download_inbox_attachment(request, email_id, attachment_id):
+    """Stream the file bytes for a single attachment.
+
+    Same tenant scoping as the detail endpoint — the email_id in the URL
+    must belong to the caller's reply-agent account, and the attachment
+    must belong to that email. Returns 404 (not 403) on mismatch so we
+    don't leak existence.
+    """
+    from django.http import FileResponse, Http404
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    user_ids = _company_bridge_user_ids(request.user)
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    att = (
+        InboxAttachment.objects
+        .filter(
+            id=attachment_id,
+            inbox_email_id=email_id,
+            inbox_email__owner_id__in=user_ids,
+            inbox_email__email_account_id=reply_account.id,
+        )
+        .first()
+    )
+    if att is None or not att.file:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        # FileField.open() respects whatever default_storage points at —
+        # local disk today, S3 later — so this download endpoint stays
+        # untouched when the storage backend changes.
+        fh = att.file.open('rb')
+        resp = FileResponse(
+            fh,
+            content_type=att.content_type or 'application/octet-stream',
+            as_attachment=True,
+            filename=att.filename or 'attachment',
+        )
+        # Long cache: file content is immutable (sha256 in path). Browser
+        # can re-show the same file without another DB / storage round-trip.
+        resp['Cache-Control'] = 'private, max-age=3600'
+        return resp
+    except (FileNotFoundError, Http404):
+        return Response({'status': 'error', 'message': 'File missing on storage'},
+                        status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.exception('download_inbox_attachment failed')
+        return Response({'status': 'error', 'message': str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
