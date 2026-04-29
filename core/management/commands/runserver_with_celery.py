@@ -55,7 +55,9 @@ class Command(BaseCommand):
 
         # Start Celery worker in background
         self.stdout.write('Starting Celery worker in background...')
-        worker_cmd = [sys.executable, '-m', 'celery', '-A', 'project_manager_ai', 'worker', '-l', 'info']
+        # threads pool with concurrency=4 — see core/apps.py for rationale
+        # (lets on-connect inbox sync run alongside the periodic beat).
+        worker_cmd = [sys.executable, '-m', 'celery', '-A', 'project_manager_ai', 'worker', '-l', 'info', '--pool=threads', '--concurrency=4']
         try:
             worker_proc = subprocess.Popen(
                 worker_cmd,

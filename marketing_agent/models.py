@@ -679,30 +679,43 @@ class EmailAccount(models.Model):
     # Status
     is_active = models.BooleanField(default=True, help_text='Is this account active and ready to use?')
     is_default = models.BooleanField(default=False, help_text='Use this as default account for sending')
-    
+
+    # Reply Draft Agent isolation flag. When True, this account is the inbox
+    # source for the Reply Draft Agent and is intentionally hidden from the
+    # marketing-campaign account list. Exactly one EmailAccount per owner
+    # should have this set — the save() override enforces that.
+    is_reply_agent_account = models.BooleanField(
+        default=False,
+        help_text='Designates this account as the Reply Draft Agent inbox source (one per owner).',
+    )
+
     # Test/Verification
     last_tested_at = models.DateTimeField(null=True, blank=True, help_text='Last time account was tested')
     test_status = models.CharField(max_length=20, choices=[('success', 'Success'), ('failed', 'Failed'), ('not_tested', 'Not Tested')], default='not_tested')
     test_error = models.TextField(blank=True, help_text='Error message from last test')
-    
+
     # Relationship
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_accounts')
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'ppp_marketingagent_emailaccount'
         ordering = ['-is_default', '-is_active', '-created_at']
         unique_together = [('email', 'owner')]
-    
+
     def __str__(self):
         return f"{self.name} ({self.email})"
-    
+
     def save(self, *args, **kwargs):
         # Ensure only one default account per user
         if self.is_default:
             EmailAccount.objects.filter(owner=self.owner, is_default=True).exclude(pk=self.pk).update(is_default=False)
+        # Ensure only one reply-agent account per user — promoting a new one
+        # demotes any previously flagged account.
+        if self.is_reply_agent_account:
+            EmailAccount.objects.filter(owner=self.owner, is_reply_agent_account=True).exclude(pk=self.pk).update(is_reply_agent_account=False)
         super().save(*args, **kwargs)
 
 

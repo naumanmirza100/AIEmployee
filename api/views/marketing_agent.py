@@ -14,6 +14,7 @@ from django.db.models import Q, Count, Sum, Avg
 from django.contrib.auth.models import User
 from django.http import HttpResponse
 from datetime import timedelta, datetime
+import imaplib
 import inspect
 import json
 import logging
@@ -37,6 +38,51 @@ logger = logging.getLogger(__name__)
 
 # User-friendly message when LLM/API rate limit (429) is hit — do not expose raw provider errors
 RATE_LIMIT_MESSAGE = "The service is busy. Please try again in a moment."
+
+
+def verify_imap_credentials(host, port, use_ssl, username, password):
+    """Quick IMAP login probe. Returns (ok: bool, error_message: str).
+
+    Called by account-create / account-update endpoints so wrong
+    credentials surface synchronously to the UI as a 400 instead of
+    failing later in the background sync (where the user just sees an
+    indefinite "Syncing..." spinner). 10s timeout keeps the request
+    from hanging on dead hosts.
+    """
+    if not host or not username or not password:
+        return False, 'IMAP host, username, and password are required.'
+    try:
+        port = int(port) if port else (993 if use_ssl else 143)
+        if use_ssl:
+            mail = imaplib.IMAP4_SSL(host, port, timeout=10)
+        else:
+            mail = imaplib.IMAP4(host, port, timeout=10)
+            if port == 143:
+                mail.starttls()
+        try:
+            mail.login(username, password)
+        finally:
+            try:
+                mail.logout()
+            except Exception:
+                pass
+        return True, ''
+    except imaplib.IMAP4.error as e:
+        msg = e.args[0] if e.args else str(e)
+        if isinstance(msg, (bytes, bytearray)):
+            msg = msg.decode('utf-8', errors='replace')
+        msg = msg.strip()
+        if ('authentication' in msg.lower() or 'invalid credentials' in msg.lower()) \
+                and 'gmail' in (host or '').lower():
+            msg += (' — Gmail requires an App Password (not your regular password). '
+                    'Generate one at myaccount.google.com → Security → App passwords.')
+        return False, msg
+    except (TimeoutError, socket.timeout):
+        return False, f'Connection to {host}:{port} timed out. Check the host/port and that the server is reachable.'
+    except (OSError, socket.gaierror) as e:
+        return False, f'Could not reach IMAP server {host}: {e}'
+    except Exception as e:
+        return False, f'Unexpected IMAP error: {type(e).__name__}: {e}'
 
 
 def _normalize_error_message(e):
@@ -2625,6 +2671,22 @@ def create_email_account(request):
                     'fields': missing,
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+            # Verify IMAP credentials BEFORE saving the account so the user
+            # sees the auth error immediately instead of an indefinite
+            # syncing spinner while the background task fails.
+            imap_port_for_check = int(data.get('imap_port')) if data.get('imap_port') else None
+            ok, err = verify_imap_credentials(
+                imap_host, imap_port_for_check,
+                bool(data.get('imap_use_ssl', True)),
+                imap_username, imap_password,
+            )
+            if not ok:
+                return Response({
+                    'status': 'error',
+                    'message': f'IMAP login failed: {err}',
+                    'error': 'imap_auth_failed',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         account = EmailAccount.objects.create(
             owner=user,
             name=name,
@@ -2647,9 +2709,10 @@ def create_email_account(request):
             is_default=data.get('is_default', False),
         )
 
-        # Fire a targeted Celery sync immediately so a newly configured mailbox
-        # starts populating within ~30s instead of waiting up to 5 minutes for
-        # the next beat tick. Safe to swallow — the periodic job is a fallback.
+        # Single 120-day sync — batched IMAP fetches in sync_inbox now make
+        # this complete in ~30s, so the previous 30-day-fast / 120-day-delayed
+        # split (which existed only to mask a 3-minute slow path) is no longer
+        # needed. Best-effort enqueue; the 5-min periodic beat is a fallback.
         sync_queued = False
         if account.enable_imap_sync and account.imap_host and account.imap_username and account.imap_password:
             try:
@@ -2777,6 +2840,23 @@ def update_email_account(request, account_id):
             or bool(new_enable_imap_sync) != bool(account.enable_imap_sync)
         )
 
+        # Re-verify IMAP credentials only when something actually changed
+        # AND the user wants sync on. Skipping the probe when nothing
+        # touched keeps the update endpoint snappy on cosmetic edits.
+        if new_enable_imap_sync and imap_touched:
+            new_imap_port = int(data.get('imap_port')) if data.get('imap_port') else account.imap_port
+            ok, err = verify_imap_credentials(
+                new_imap_host, new_imap_port,
+                bool(data.get('imap_use_ssl', account.imap_use_ssl)),
+                new_imap_username, new_imap_password,
+            )
+            if not ok:
+                return Response({
+                    'status': 'error',
+                    'message': f'IMAP login failed: {err}',
+                    'error': 'imap_auth_failed',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         account.imap_host = new_imap_host
         account.imap_port = int(data.get('imap_port')) if data.get('imap_port') else account.imap_port
         account.imap_use_ssl = data.get('imap_use_ssl', account.imap_use_ssl)
@@ -2787,9 +2867,8 @@ def update_email_account(request, account_id):
         account.is_default = data.get('is_default', account.is_default)
         account.save()
 
-        # Fire an immediate targeted sync if IMAP was just turned on, credentials
-        # changed, or the sync toggle flipped. Keeps inbox fresh without waiting
-        # for the 5-min beat tick.
+        # IMAP just enabled / credentials changed: single 120-day sync,
+        # same as create. ~30s end-to-end with batched IMAP fetches.
         sync_queued = False
         if imap_touched and account.enable_imap_sync and account.imap_host and account.imap_username and account.imap_password:
             try:

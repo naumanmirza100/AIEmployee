@@ -37,7 +37,15 @@ class InboxEmail(models.Model):
     from_email = models.EmailField(db_index=True)
     from_name = models.CharField(max_length=255, blank=True)
     subject = models.CharField(max_length=500, blank=True)
-    body = models.TextField(blank=True)
+    body = models.TextField(blank=True, default='',
+                            help_text='Plain-text body. Used for AI analysis and search; preferred over HTML when both are present in the source.')
+    # Nullable + empty default so any caller path (including older-stamp
+    # workers that haven't picked up the new field, and the campaign-reply
+    # branch that constructs InboxEmail in different shapes) can insert
+    # without violating a NOT NULL constraint. Frontend treats NULL the
+    # same as empty string.
+    body_html = models.TextField(blank=True, null=True, default='',
+                                 help_text='Original HTML body if the source carried one. Rendered in the UI for fidelity (links, images, layout); plain `body` is used as fallback when this is empty.')
 
     received_at = models.DateTimeField(db_index=True, default=timezone.now,
                                        help_text='Date header from the message, or sync time as fallback')
@@ -45,6 +53,14 @@ class InboxEmail(models.Model):
     # AI analysis (populated lazily when a draft is generated)
     interest_level = models.CharField(max_length=20, choices=INTEREST_LEVEL_CHOICES, default='not_analyzed')
     analysis = models.TextField(blank=True)
+
+    # Recipient + direction. Mirrors columns added by migration
+    # 0003_inboxemail_direction_to_email — kept in the model so inserts
+    # don't violate the NOT NULL constraint on those columns.
+    to_email = models.EmailField(blank=True, default='',
+                                 help_text='Mailbox the message was delivered to (the EmailAccount address)')
+    direction = models.CharField(max_length=4, default='in',
+                                 help_text="'in' for received mail, 'out' for sent")
 
     synced_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
