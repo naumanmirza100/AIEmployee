@@ -51,6 +51,8 @@ import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
+import HRAgentPage from '@/pages/HRAgentPage';
+import HRDashboard from '@/components/hr/HRDashboard';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
@@ -150,6 +152,12 @@ import { useTranslation } from 'react-i18next';
             {/* Frontline Agent routes without header/footer */}
             <Route path="/frontline/dashboard" element={<FrontlineAgentPage />}>
               <Route index element={<FrontlineDashboard />} />
+            </Route>
+
+            {/* HR Support Agent routes */}
+            <Route path="/hr" element={<Navigate to="/hr/dashboard" replace />} />
+            <Route path="/hr/dashboard" element={<HRAgentPage />}>
+              <Route index element={<HRDashboard />} />
             </Route>
 
             {/* Operations Agent routes without header/footer */}
