@@ -559,6 +559,7 @@ class CompanyUser(models.Model):
         ('marketing_agent', 'Marketing Agent'),
         ('operations_agent', 'Operations Agent'),
         ('reply_draft_agent', 'Reply Draft Agent'),
+        ('hr_agent', 'HR Support Agent'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
@@ -617,8 +618,9 @@ class CompanyModulePurchase(models.Model):
         ('frontline_agent', 'Frontline Agent'),
         ('operations_agent', 'Operations Agent'),
         ('reply_draft_agent', 'Reply Draft Agent'),
+        ('hr_agent', 'HR Support Agent'),
     ]
-    
+
     STATUS_CHOICES = [
         ('active', 'Active'),
         ('cancelled', 'Cancelled'),
@@ -1776,6 +1778,7 @@ AGENT_CHOICES = [
     ('frontline_agent', 'Frontline Agent'),
     ('operations_agent', 'Operations Agent'),
     ('reply_draft_agent', 'Reply Draft Agent'),
+    ('hr_agent', 'HR Support Agent'),
 ]
 
 PROVIDER_CHOICES = [
@@ -2038,4 +2041,5 @@ AGENT_DEFAULT_PROVIDER = {
     'project_manager_agent': 'groq',
     'frontline_agent': 'openai',
     'operations_agent': 'groq',
+    'hr_agent': 'groq',
 }
