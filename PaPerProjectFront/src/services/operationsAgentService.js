@@ -335,6 +335,71 @@ export const deleteGeneratedDocument = async (docId) => {
   }
 };
 
+// ──────────────────────────────────────────────
+// Notifications
+// ──────────────────────────────────────────────
+
+/** List notifications for the current company */
+export const listNotifications = async (params = {}) => {
+  try {
+    return await companyApi.get('/operations/notifications', params);
+  } catch (error) {
+    console.error('List notifications error:', error);
+    throw error;
+  }
+};
+
+/** Unread count only (lightweight, polled for the tab badge) */
+export const getUnreadNotificationsCount = async () => {
+  try {
+    return await companyApi.get('/operations/notifications/unread-count');
+  } catch (error) {
+    console.error('Unread count error:', error);
+    throw error;
+  }
+};
+
+/** Mark a single notification as read */
+export const markNotificationRead = async (notificationId) => {
+  try {
+    return await companyApi.post(`/operations/notifications/${notificationId}/read`, {});
+  } catch (error) {
+    console.error('Mark notification read error:', error);
+    throw error;
+  }
+};
+
+/** Mark all notifications as read */
+export const markAllNotificationsRead = async () => {
+  try {
+    return await companyApi.post('/operations/notifications/mark-all-read', {});
+  } catch (error) {
+    console.error('Mark all notifications read error:', error);
+    throw error;
+  }
+};
+
+/** Delete one notification */
+export const deleteNotification = async (notificationId) => {
+  try {
+    return await companyApi.delete(`/operations/notifications/${notificationId}/delete`);
+  } catch (error) {
+    console.error('Delete notification error:', error);
+    throw error;
+  }
+};
+
+/** Clear notifications (optionally only read ones) */
+export const clearAllNotifications = async ({ readOnly = false } = {}) => {
+  try {
+    const qs = readOnly ? '?read_only=true' : '';
+    return await companyApi.delete(`/operations/notifications/clear${qs}`);
+  } catch (error) {
+    console.error('Clear notifications error:', error);
+    throw error;
+  }
+};
+
 /**
  * Aggregated analytics for the operations module.
  * @param {string} range  '7d' | '30d' | '90d' | 'all'
@@ -413,6 +478,13 @@ export default {
   deleteGeneratedDocument,
   regenerateDocument,
   getOperationsAnalytics,
+  // Notifications
+  listNotifications,
+  getUnreadNotificationsCount,
+  markNotificationRead,
+  markAllNotificationsRead,
+  deleteNotification,
+  clearAllNotifications,
   getGeneratedDocumentPdfUrl,
   fetchGeneratedDocumentPdf,
 };

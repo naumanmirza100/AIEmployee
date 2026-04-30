@@ -303,6 +303,11 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Gzip-compress JSON / HTML responses. Reply Draft Agent's email
+    # detail payloads ship 100-300KB of `body_html` per click; gzip
+    # cuts that to ~20-40KB and makes "Loading message…" near-instant.
+    # Sits before CommonMiddleware (per Django docs) and after security.
+    'django.middleware.gzip.GZipMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
      'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -358,7 +363,15 @@ DATABASES = {
             'connection_timeout': 60,
             'login_timeout': 60,
         },
-        'CONN_MAX_AGE': 0,
+        # Persistent connections — reuse the same TCP connection for 60s
+        # of idle time across requests instead of dialing a fresh MSSQL
+        # session for every API call. The TCP handshake + login round-trip
+        # is the dominant cost on a remote SQL Server (often 200-500ms);
+        # reusing connections collapses that to ~0 for warm requests.
+        # Health check before reuse so a stale/dropped connection doesn't
+        # surface as a confusing 500 to the user.
+        'CONN_MAX_AGE': 60,
+        'CONN_HEALTH_CHECKS': True,
         'TIME_ZONE': 'UTC',
     }
 }

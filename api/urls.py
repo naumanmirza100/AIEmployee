@@ -494,12 +494,28 @@ urlpatterns = [
     # Reply Draft Agent endpoints
     re_path(r'^reply-draft/dashboard/?$', reply_draft_api.dashboard, name='reply_draft_dashboard'),
     re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/?$', reply_draft_api.get_inbox_email, name='reply_draft_get_inbox_email'),
+    re_path(r'^reply-draft/reply/(?P<reply_id>\d+)/?$', reply_draft_api.get_reply, name='reply_draft_get_reply'),
+    re_path(r'^reply-draft/campaigns/?$', reply_draft_api.list_campaigns, name='reply_draft_list_campaigns'),
+    re_path(r'^reply-draft/sync-accounts/?$', reply_draft_api.list_sync_accounts, name='reply_draft_list_sync_accounts'),
+    re_path(r'^reply-draft/leads/?$', reply_draft_api.list_leads, name='reply_draft_list_leads'),
     re_path(r'^reply-draft/drafts/?$', reply_draft_api.list_drafts, name='reply_draft_list_drafts'),
     re_path(r'^reply-draft/drafts/generate/?$', reply_draft_api.generate_draft, name='reply_draft_generate'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/regenerate/?$', reply_draft_api.regenerate_draft, name='reply_draft_regenerate'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/approve/?$', reply_draft_api.approve_draft, name='reply_draft_approve'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/reject/?$', reply_draft_api.reject_draft, name='reply_draft_reject'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/send/?$', reply_draft_api.send_draft, name='reply_draft_send'),
+    re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
+    re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
+    re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
+
+    # Operations Notifications
+    re_path(r'^operations/notifications/?$', operations_agent.list_notifications, name='operations_notifications_list'),  # GET
+    re_path(r'^operations/notifications/unread-count/?$', operations_agent.unread_notifications_count, name='operations_notifications_unread_count'),  # GET
+    re_path(r'^operations/notifications/mark-all-read/?$', operations_agent.mark_all_notifications_read, name='operations_notifications_mark_all_read'),  # POST
+    re_path(r'^operations/notifications/clear/?$', operations_agent.clear_all_notifications, name='operations_notifications_clear'),  # DELETE
+    re_path(r'^operations/notifications/(?P<notification_id>\d+)/read/?$', operations_agent.mark_notification_read, name='operations_notifications_mark_read'),  # POST
+    re_path(r'^operations/notifications/(?P<notification_id>\d+)/delete/?$', operations_agent.delete_notification, name='operations_notifications_delete'),  # DELETE
 
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)

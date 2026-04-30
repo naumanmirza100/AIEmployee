@@ -92,7 +92,16 @@ class Campaign(models.Model):
     
     # Leads relationship - using custom through model to specify table name
     leads = models.ManyToManyField('Lead', blank=True, related_name='campaigns', through='CampaignLead')
-    
+
+    # Default sending account for all sequences in this campaign. Individual
+    # sequences may override via EmailSequence.email_account; when that is null
+    # the sequence inherits this value (see EmailSequence.get_sending_account).
+    email_account = models.ForeignKey(
+        'EmailAccount', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='campaigns',
+        help_text='Default email account to send from for sequences in this campaign',
+    )
+
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='marketing_campaigns')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -520,6 +529,19 @@ class EmailSequence(models.Model):
         sequence_type = "Sub-Sequence" if self.is_sub_sequence else "Sequence"
         return f"{sequence_type}: {self.name} - {self.campaign.name}"
 
+    def get_sending_account(self):
+        """Resolve which EmailAccount to send from.
+
+        Priority: sequence.email_account (explicit override) -> campaign.email_account (default).
+        Returns None if neither is set; email_service.send_email then falls back
+        to the owner's default active account.
+        """
+        if self.email_account_id:
+            return self.email_account
+        if self.campaign_id and self.campaign.email_account_id:
+            return self.campaign.email_account
+        return None
+
 
 class EmailSequenceStep(models.Model):
     """Individual step in an email sequence"""
@@ -649,34 +671,51 @@ class EmailAccount(models.Model):
     imap_username = models.CharField(max_length=255, blank=True, help_text='IMAP username (usually same as email)')
     imap_password = models.CharField(max_length=500, blank=True, help_text='IMAP password')
     enable_imap_sync = models.BooleanField(default=False, help_text='Enable automatic IMAP sync for reply detection')
-    
+    imap_sync_days = models.PositiveIntegerField(
+        default=30,
+        help_text='How many days of mail to pull on each IMAP sync. Used by the Reply Draft Agent inbox view.',
+    )
+
     # Status
     is_active = models.BooleanField(default=True, help_text='Is this account active and ready to use?')
     is_default = models.BooleanField(default=False, help_text='Use this as default account for sending')
-    
+
+    # Reply Draft Agent isolation flag. When True, this account is the inbox
+    # source for the Reply Draft Agent and is intentionally hidden from the
+    # marketing-campaign account list. Exactly one EmailAccount per owner
+    # should have this set — the save() override enforces that.
+    is_reply_agent_account = models.BooleanField(
+        default=False,
+        help_text='Designates this account as the Reply Draft Agent inbox source (one per owner).',
+    )
+
     # Test/Verification
     last_tested_at = models.DateTimeField(null=True, blank=True, help_text='Last time account was tested')
     test_status = models.CharField(max_length=20, choices=[('success', 'Success'), ('failed', 'Failed'), ('not_tested', 'Not Tested')], default='not_tested')
     test_error = models.TextField(blank=True, help_text='Error message from last test')
-    
+
     # Relationship
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_accounts')
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'ppp_marketingagent_emailaccount'
         ordering = ['-is_default', '-is_active', '-created_at']
         unique_together = [('email', 'owner')]
-    
+
     def __str__(self):
         return f"{self.name} ({self.email})"
-    
+
     def save(self, *args, **kwargs):
         # Ensure only one default account per user
         if self.is_default:
             EmailAccount.objects.filter(owner=self.owner, is_default=True).exclude(pk=self.pk).update(is_default=False)
+        # Ensure only one reply-agent account per user — promoting a new one
+        # demotes any previously flagged account.
+        if self.is_reply_agent_account:
+            EmailAccount.objects.filter(owner=self.owner, is_reply_agent_account=True).exclude(pk=self.pk).update(is_reply_agent_account=False)
         super().save(*args, **kwargs)
 
 

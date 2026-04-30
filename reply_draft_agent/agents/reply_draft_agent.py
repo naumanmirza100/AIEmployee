@@ -14,7 +14,7 @@ from django.utils import timezone
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 from marketing_agent.models import Reply, EmailAccount, EmailSendHistory
 from marketing_agent.services.email_service import email_service
-from ..models import ReplyDraft
+from ..models import ReplyDraft, InboxEmail
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,29 @@ class ReplyDraftAgent(MarketingBaseAgent):
         '{"subject": "...", "body": "...", "reasoning": "..."}'
     )
 
+    INBOX_SYSTEM_PROMPT = (
+        "You are an email assistant helping a human draft a reply to an incoming "
+        "email that arrived in their inbox. No prior CRM analysis is available, so "
+        "you must analyze the message yourself before drafting the reply.\n\n"
+        "Step 1 — analyze: read the sender name/email and the message content. "
+        "Decide the sender's intent and classify their interest level as one of: "
+        "positive, negative, neutral, requested_info, objection, unsubscribe.\n"
+        "Step 2 — draft the reply with these rules:\n"
+        "1. Match the formality of the sender.\n"
+        "2. Stay grounded in what the sender actually wrote and the user's instructions. "
+        "Do not invent product details, pricing, or commitments.\n"
+        "3. Respect the interest level you just classified:\n"
+        "   - positive: momentum-building, propose a clear next step.\n"
+        "   - requested_info: directly address what they asked for.\n"
+        "   - objection: acknowledge the concern first, then respond.\n"
+        "   - negative / unsubscribe: brief, respectful, offer an easy opt-out.\n"
+        "   - neutral: warm, re-engage with a soft question.\n"
+        "4. Keep under 150 words unless the user asks for more.\n"
+        "5. End with a clear question or a specific next step.\n\n"
+        "Output strict JSON only, with exactly these keys: "
+        '{"interest_level": "...", "analysis": "...", "subject": "...", "body": "...", "reasoning": "..."}'
+    )
+
     def __init__(self, user=None, company_id=None, **kwargs):
         super().__init__(**kwargs)
         self.user = user
@@ -60,17 +83,45 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return self.send_approved(**kwargs)
         return {'success': False, 'error': f'Unknown action: {action}'}
 
-    def generate_draft(self, original_email_id, user_context='', tone='professional',
+    def generate_draft(self, original_email_id=None, inbox_email_id=None,
+                       user_context='', tone='professional',
                        email_account_id=None, parent_draft_id=None):
         """Generate a new draft reply for an incoming email.
 
+        Exactly one of `original_email_id` (campaign Reply) or
+        `inbox_email_id` (generic InboxEmail) must be provided.
+
         Args:
-            original_email_id: Reply.id of the incoming message.
+            original_email_id: Reply.id of a campaign reply.
+            inbox_email_id: InboxEmail.id of a generic inbox message.
             user_context: free-text instructions ("keep it short", "mention demo link").
             tone: one of ReplyDraft.TONE_CHOICES.
             email_account_id: override which account to send from.
             parent_draft_id: link to the prior draft when regenerating.
         """
+        if not original_email_id and not inbox_email_id:
+            return {'success': False, 'error': 'original_email_id or inbox_email_id is required'}
+        if original_email_id and inbox_email_id:
+            return {'success': False, 'error': 'Provide only one of original_email_id / inbox_email_id'}
+
+        if original_email_id:
+            return self._generate_from_reply(
+                original_email_id=original_email_id,
+                user_context=user_context,
+                tone=tone,
+                email_account_id=email_account_id,
+                parent_draft_id=parent_draft_id,
+            )
+        return self._generate_from_inbox(
+            inbox_email_id=inbox_email_id,
+            user_context=user_context,
+            tone=tone,
+            email_account_id=email_account_id,
+            parent_draft_id=parent_draft_id,
+        )
+
+    def _generate_from_reply(self, original_email_id, user_context, tone,
+                             email_account_id, parent_draft_id):
         try:
             reply = Reply.objects.select_related('lead', 'campaign').get(id=original_email_id)
         except Reply.DoesNotExist:
@@ -113,6 +164,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
 
         self.log_action('generated_draft', {
             'draft_id': draft.id,
+            'source': 'reply',
             'reply_id': reply.id,
             'tone': tone,
             'regen_count': draft.regeneration_count,
@@ -120,13 +172,92 @@ class ReplyDraftAgent(MarketingBaseAgent):
         return {
             'success': True,
             'draft_id': draft.id,
+            'source': 'reply',
             'subject': draft.draft_subject,
             'body': draft.draft_body,
             'reasoning': draft.ai_notes,
         }
 
+    def _generate_from_inbox(self, inbox_email_id, user_context, tone,
+                             email_account_id, parent_draft_id):
+        try:
+            msg = InboxEmail.objects.select_related('email_account').get(id=inbox_email_id)
+        except InboxEmail.DoesNotExist:
+            return {'success': False, 'error': f'Inbox email {inbox_email_id} not found'}
+
+        if self.user is not None and msg.owner_id != self.user.id:
+            return {'success': False, 'error': 'Not authorized for this email'}
+
+        account = self._resolve_email_account(email_account_id, None) or msg.email_account
+
+        user_prompt = self._build_inbox_prompt(msg, user_context, tone)
+        raw = self._call_llm(
+            prompt=user_prompt,
+            system_prompt=self.INBOX_SYSTEM_PROMPT,
+            temperature=0.5,
+            max_tokens=900,
+        )
+
+        subject, body, reasoning, interest_level, analysis = self._parse_inbox_llm_output(
+            raw, fallback_subject=msg.subject
+        )
+        if not body:
+            return {'success': False, 'error': 'AI failed to produce a draft. Try regenerating.'}
+
+        # Persist analysis back onto the InboxEmail so the UI can display it.
+        update_fields = []
+        if interest_level and interest_level != msg.interest_level:
+            msg.interest_level = interest_level
+            update_fields.append('interest_level')
+        if analysis and analysis != msg.analysis:
+            msg.analysis = analysis
+            update_fields.append('analysis')
+        if update_fields:
+            update_fields.append('updated_at')
+            msg.save(update_fields=update_fields)
+
+        parent = None
+        if parent_draft_id:
+            parent = ReplyDraft.objects.filter(id=parent_draft_id, owner=self.user).first()
+
+        draft = ReplyDraft.objects.create(
+            owner=self.user,
+            inbox_email=msg,
+            lead=None,
+            email_account=account,
+            draft_subject=subject,
+            draft_body=body,
+            tone=tone,
+            ai_notes=reasoning,
+            generation_prompt=user_context,
+            parent_draft=parent,
+            regeneration_count=(parent.regeneration_count + 1) if parent else 0,
+        )
+
+        self.log_action('generated_draft', {
+            'draft_id': draft.id,
+            'source': 'inbox',
+            'inbox_email_id': msg.id,
+            'tone': tone,
+            'regen_count': draft.regeneration_count,
+        })
+        return {
+            'success': True,
+            'draft_id': draft.id,
+            'source': 'inbox',
+            'subject': draft.draft_subject,
+            'body': draft.draft_body,
+            'reasoning': draft.ai_notes,
+            'interest_level': msg.interest_level,
+            'analysis': msg.analysis,
+        }
+
     def regenerate_draft(self, draft_id, new_instructions='', tone=None):
-        """Produce a fresh draft based on an existing one, with new instructions."""
+        """Produce a fresh draft based on an existing one, with new instructions.
+
+        The parent draft is marked 'rejected' once a new child is created, so
+        the drafts list and pending counts only reflect the latest iteration.
+        """
         try:
             existing = ReplyDraft.objects.get(id=draft_id, owner=self.user)
         except ReplyDraft.DoesNotExist:
@@ -135,13 +266,21 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return {'success': False, 'error': 'Cannot regenerate a draft that was already sent'}
 
         combined_context = (existing.generation_prompt + '\n' + new_instructions).strip()
-        return self.generate_draft(
+        result = self.generate_draft(
             original_email_id=existing.original_email_id,
+            inbox_email_id=existing.inbox_email_id,
             user_context=combined_context,
             tone=tone or existing.tone,
             email_account_id=existing.email_account_id,
             parent_draft_id=existing.id,
         )
+
+        # If the new draft was created successfully, supersede the parent.
+        if result.get('success') and result.get('draft_id') and existing.status != 'rejected':
+            existing.status = 'rejected'
+            existing.save(update_fields=['status', 'updated_at'])
+
+        return result
 
     def approve_draft(self, draft_id, edited_subject=None, edited_body=None):
         """User approves a draft, optionally with inline edits. Send happens separately."""
@@ -167,19 +306,22 @@ class ReplyDraftAgent(MarketingBaseAgent):
         """Send an approved draft through the shared email service."""
         try:
             draft = ReplyDraft.objects.select_related(
-                'lead', 'email_account', 'original_email', 'original_email__triggering_email'
+                'lead', 'email_account', 'original_email', 'original_email__triggering_email',
+                'inbox_email',
             ).get(id=draft_id, owner=self.user)
         except ReplyDraft.DoesNotExist:
             return {'success': False, 'error': 'Draft not found'}
         if draft.status not in ('approved', 'pending'):
             return {'success': False, 'error': f'Draft is in state "{draft.status}", cannot send'}
-        if not draft.lead or not draft.lead.email:
+
+        recipient_email = draft.get_recipient_email()
+        if not recipient_email:
             return {'success': False, 'error': 'Draft has no recipient email'}
 
-        in_reply_to = self._original_message_id(draft.original_email)
+        in_reply_to = self._resolve_in_reply_to(draft)
 
         result = email_service.send_raw_email(
-            to_email=draft.lead.email,
+            to_email=recipient_email,
             subject=self._ensure_re_prefix(draft.get_final_subject()),
             body=draft.get_final_body(),
             email_account=draft.email_account,
@@ -195,7 +337,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             if sh_id:
                 sent_history = EmailSendHistory.objects.filter(id=sh_id).first()
             draft.mark_sent(sent_history)
-            self.log_action('sent_draft', {'draft_id': draft.id, 'to': draft.lead.email})
+            self.log_action('sent_draft', {'draft_id': draft.id, 'to': recipient_email})
         else:
             draft.mark_failed(result.get('error', 'unknown error'))
             self.log_action('send_failed', {'draft_id': draft.id, 'error': result.get('error')})
@@ -226,28 +368,66 @@ class ReplyDraftAgent(MarketingBaseAgent):
             "Draft the reply now, returning the JSON object described in the system prompt."
         )
 
+    def _build_inbox_prompt(self, msg, user_context, tone):
+        sender_name = (msg.from_name or '').strip() or msg.from_email
+        return (
+            f"Desired tone: {tone}\n"
+            f"Sender: {sender_name} <{msg.from_email}>\n"
+            f"Received: {msg.received_at.isoformat() if msg.received_at else 'unknown'}\n\n"
+            f"INCOMING SUBJECT: {msg.subject or '(no subject)'}\n"
+            f"INCOMING BODY:\n{msg.body or '(empty body)'}\n\n"
+            f"User instructions: {user_context or '(none)'}\n\n"
+            "First classify the sender's interest_level, write a short analysis, "
+            "then draft the reply. Return the JSON object described in the system prompt."
+        )
+
+    _VALID_INTEREST_LEVELS = {
+        'positive', 'negative', 'neutral', 'requested_info',
+        'objection', 'unsubscribe', 'not_analyzed',
+    }
+
     def _parse_llm_output(self, raw, fallback_subject=''):
         """Extract subject/body/reasoning from the LLM JSON output, tolerant of minor drift."""
-        if not raw:
-            return '', '', ''
-        text = raw.strip()
-        # Try direct JSON first
-        try:
-            data = json.loads(text)
-        except (ValueError, TypeError):
-            # Extract the first {...} block
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if not match:
-                return self._re_prefix(fallback_subject), text, ''
-            try:
-                data = json.loads(match.group(0))
-            except (ValueError, TypeError):
-                return self._re_prefix(fallback_subject), text, ''
+        data = self._loose_json(raw)
+        if data is None:
+            return self._re_prefix(fallback_subject), (raw or '').strip(), ''
 
         subject = (data.get('subject') or fallback_subject or '').strip()
         body = (data.get('body') or '').strip()
         reasoning = (data.get('reasoning') or '').strip()
         return self._re_prefix(subject), body, reasoning
+
+    def _parse_inbox_llm_output(self, raw, fallback_subject=''):
+        """Parse the extended inbox JSON shape: interest_level + analysis + subject + body + reasoning."""
+        data = self._loose_json(raw)
+        if data is None:
+            return self._re_prefix(fallback_subject), (raw or '').strip(), '', '', ''
+
+        subject = (data.get('subject') or fallback_subject or '').strip()
+        body = (data.get('body') or '').strip()
+        reasoning = (data.get('reasoning') or '').strip()
+        interest_level = (data.get('interest_level') or '').strip().lower()
+        if interest_level not in self._VALID_INTEREST_LEVELS:
+            interest_level = 'not_analyzed'
+        analysis = (data.get('analysis') or '').strip()
+        return self._re_prefix(subject), body, reasoning, interest_level, analysis
+
+    @staticmethod
+    def _loose_json(raw):
+        """Parse JSON directly, falling back to the first {...} block."""
+        if not raw:
+            return None
+        text = raw.strip()
+        try:
+            return json.loads(text)
+        except (ValueError, TypeError):
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if not match:
+                return None
+            try:
+                return json.loads(match.group(0))
+            except (ValueError, TypeError):
+                return None
 
     @staticmethod
     def _re_prefix(subject):
@@ -268,11 +448,12 @@ class ReplyDraftAgent(MarketingBaseAgent):
         return qs.order_by('-is_default', '-created_at').first()
 
     @staticmethod
-    def _original_message_id(reply):
-        """Find the RFC Message-ID of the email we're replying to, for threading."""
-        if not reply:
-            return None
-        triggering = getattr(reply, 'triggering_email', None)
-        if triggering and getattr(triggering, 'message_id', None):
-            return triggering.message_id
+    def _resolve_in_reply_to(draft):
+        """RFC Message-ID to use in the outbound In-Reply-To header for threading."""
+        if draft.original_email_id and draft.original_email:
+            triggering = getattr(draft.original_email, 'triggering_email', None)
+            if triggering and getattr(triggering, 'message_id', None):
+                return triggering.message_id
+        if draft.inbox_email_id and draft.inbox_email:
+            return draft.inbox_email.message_id or None
         return None

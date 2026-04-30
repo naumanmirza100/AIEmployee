@@ -36,17 +36,54 @@ def send_sequence_emails_task(self):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=300)
-def sync_inbox_task(self):
+def sync_inbox_task(self, account_id=None, since_days=None):
     """
     Celery task to sync inbox and detect email replies.
     Handles: Reply detection, AI analysis, sub-sequence assignment.
-    
-    Scheduled: Every 5-10 minutes via Celery Beat
-    Replaces: Windows Task Scheduler running 'sync_inbox'
+
+    Two modes:
+      - account_id=None  → fan-out. The beat scheduler fires this every
+        5 min; it enumerates every IMAP-enabled account and queues one
+        per-account task on the same queue. Workers then sync accounts
+        truly in parallel (bounded by --concurrency), so adding a 10th
+        company doesn't make every other company's inbox 10× slower.
+      - account_id=<id>  → single account. Used by the on-create dispatch
+        and by the fan-out branch above. Acquires the per-account Redis
+        lock inside sync_inbox; if another worker is already syncing the
+        same account it logs and skips instead of racing.
+
+    `since_days` is passed through to the management command so callers
+    can request a smaller window than the default. The on-connect path
+    uses this to fire a fast 30-day sync first and queue the deeper
+    120-day backfill on a delay.
     """
+    # Fan-out branch — runs on the periodic beat tick.
+    if account_id is None:
+        from marketing_agent.models import EmailAccount
+        active_ids = list(
+            EmailAccount.objects
+            .filter(enable_imap_sync=True, is_active=True)
+            .values_list('id', flat=True)
+        )
+        for aid in active_ids:
+            # `apply_async` queues each account as its own task. The worker
+            # pool drains them in parallel; a slow account doesn't block
+            # the fast ones the way the old sequential loop did.
+            sync_inbox_task.apply_async(
+                kwargs={'account_id': aid, 'since_days': since_days},
+                expires=600,
+            )
+        return {'status': 'success', 'message': f'Fan-out: queued {len(active_ids)} account(s)'}
+
+    # Single-account branch. The per-account lock lives inside the
+    # management command (sync_inbox.py), so an overlapping fan-out tick
+    # can't double-sync the same mailbox.
     try:
-        call_command('sync_inbox')
-        return {'status': 'success', 'message': 'Inbox synced'}
+        kwargs = {'account_id': account_id}
+        if since_days:
+            kwargs['since_days'] = since_days
+        call_command('sync_inbox', **kwargs)
+        return {'status': 'success', 'message': f'Inbox synced for account {account_id}'}
     except Exception as e:
         print(f'Error in inbox sync task: {str(e)}')
         raise self.retry(exc=e)
@@ -96,11 +133,15 @@ def retry_failed_emails_task(self):
         for email_history in failed_emails:
             try:
                 from marketing_agent.services.email_service import email_service
+                # EmailSendHistory has no email_account FK, so we resolve via
+                # the campaign's default. send_email also falls back to the
+                # owner's default active account when this is None.
+                retry_account = email_history.campaign.email_account if email_history.campaign else None
                 result = email_service.send_email(
                     template=email_history.email_template,
                     lead=email_history.lead,
                     campaign=email_history.campaign,
-                    email_account=email_history.email_account
+                    email_account=retry_account,
                 )
                 if result.get('success'):
                     retried_count += 1

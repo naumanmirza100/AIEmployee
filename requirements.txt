@@ -21,7 +21,7 @@ numpy==1.26.4 --prefer-binary
 pdfplumber==0.10.3
 python-docx==0.8.11
 python-pptx==0.6.21
-reportlab==4.0.0
+reportlab>=4.0.4,<5
 xhtml2pdf==0.2.17
 Pillow>=10.0.0 --prefer-binary
 markdown==3.5.0
@@ -36,7 +36,6 @@ celery==5.3.4
 redis==5.0.1
 django-celery-beat==2.5.0
 spacy>=3.7.0,<3.8.0
-
 
 # Stripe payments
 stripe==8.0.0

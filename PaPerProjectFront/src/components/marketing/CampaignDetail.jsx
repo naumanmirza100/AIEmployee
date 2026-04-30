@@ -222,6 +222,9 @@ const CampaignDetail = () => {
   const [scheduleStart, setScheduleStart] = useState('');
   const [scheduleEnd, setScheduleEnd] = useState('');
   const [editForm, setEditForm] = useState({});
+  const [emailAccounts, setEmailAccounts] = useState([]);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountDraftId, setAccountDraftId] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState('');
   const [editingLead, setEditingLead] = useState(null);
@@ -375,6 +378,32 @@ const CampaignDetail = () => {
       fetchDetail();
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Update failed', variant: 'destructive' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openAccountModal = () => {
+    setAccountDraftId(campaign?.email_account_id ? String(campaign.email_account_id) : '');
+    marketingAgentService.listEmailAccounts().then((res) => {
+      if (res?.status === 'success' && Array.isArray(res.data)) {
+        setEmailAccounts(res.data);
+      }
+    }).catch(() => {});
+    setAccountOpen(true);
+  };
+
+  const handleSaveAccount = async () => {
+    setActionLoading('account');
+    try {
+      await marketingAgentService.updateCampaign(id, {
+        email_account_id: accountDraftId ? Number(accountDraftId) : null,
+      });
+      toast({ title: 'Success', description: 'Sending account updated' });
+      setAccountOpen(false);
+      fetchDetail();
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Failed to update sending account', variant: 'destructive' });
     } finally {
       setActionLoading(null);
     }
@@ -565,6 +594,16 @@ const CampaignDetail = () => {
               Stop
             </Button>
           )}
+          <Button
+            size="sm"
+            variant={campaign.email_account_email ? 'outline' : 'default'}
+            onClick={openAccountModal}
+            disabled={!!actionLoading}
+            title={campaign.email_account_email ? `Sending from ${campaign.email_account_email}` : 'No sending account set'}
+          >
+            <Mail className="mr-2 h-4 w-4" />
+            {campaign.email_account_email ? `From: ${campaign.email_account_email}` : 'Set sending account'}
+          </Button>
           <Button size="sm" variant="outline" onClick={openEdit} disabled={!!actionLoading}>
             <Pencil className="mr-2 h-4 w-4" />
             Edit
@@ -1057,6 +1096,80 @@ const CampaignDetail = () => {
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button onClick={handleUpdateCampaign} disabled={actionLoading === 'edit'}>
               {actionLoading === 'edit' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sending account modal */}
+      <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-primary" />
+              Sending account
+            </DialogTitle>
+            <DialogDescription>
+              Pick the email account this campaign's sequences should send from. Individual sequences can still override this.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <Label>Default email account</Label>
+            {emailAccounts.length === 0 ? (
+              <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                No email accounts yet.{' '}
+                <Link to="/marketing/email-accounts" className="underline text-primary">
+                  Add one first
+                </Link>
+                .
+              </div>
+            ) : (
+              <select
+                value={accountDraftId || ''}
+                onChange={(e) => setAccountDraftId(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="">No default (sequences must set one)</option>
+                {emailAccounts.map((a) => (
+                  <option key={a.id} value={String(a.id)}>
+                    {a.email}{a.is_default ? ' — default' : ''}{a.is_active ? '' : ' (inactive)'}
+                  </option>
+                ))}
+              </select>
+            )}
+            {(() => {
+              const selected = emailAccounts.find((a) => String(a.id) === String(accountDraftId));
+              if (!selected) return null;
+              const canReceiveReplies = selected.enable_imap_sync && selected.imap_ready;
+              if (canReceiveReplies) {
+                return (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-500/5 p-3 text-xs text-emerald-700 dark:text-emerald-400 dark:border-emerald-800">
+                    Replies to this account will be synced and attributed to this campaign automatically.
+                  </div>
+                );
+              }
+              return (
+                <div className="rounded-md border border-amber-200 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400 dark:border-amber-800">
+                  <strong>Heads up:</strong>{' '}
+                  {selected.enable_imap_sync
+                    ? 'IMAP sync is on but the host / username / password aren\'t all filled in'
+                    : 'Inbox sync (IMAP) is not enabled on this account'}
+                  {' '}— outbound emails will still send, but replies won\'t be pulled in automatically.{' '}
+                  <Link to="/marketing/email-accounts" className="underline font-medium">
+                    Fix in Email Accounts
+                  </Link>.
+                </div>
+              );
+            })()}
+            <p className="text-xs text-muted-foreground">
+              Changing this does not affect sequences that already have their own account selected.
+            </p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setAccountOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveAccount} disabled={actionLoading === 'account' || emailAccounts.length === 0}>
+              {actionLoading === 'account' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>
