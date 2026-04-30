@@ -132,7 +132,7 @@ function generateHTMLDocumentation() {
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container" >
         <header>
             <h1>Pay Per Project</h1>
             <p style="font-size: 1.3em; margin-top: 10px;">Complete Project Documentation</p>

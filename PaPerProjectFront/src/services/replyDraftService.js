@@ -77,6 +77,7 @@ export const generateDraft = async ({
   inboxEmailId = null,
   userContext = '',
   tone = 'professional',
+  length = null,
   emailAccountId = null,
 } = {}) => {
   try {
@@ -85,6 +86,7 @@ export const generateDraft = async ({
       tone,
       email_account_id: emailAccountId,
     };
+    if (length) payload.length = length;
     if (originalEmailId) payload.original_email_id = originalEmailId;
     if (inboxEmailId) payload.inbox_email_id = inboxEmailId;
     return await companyApi.post('/reply-draft/drafts/generate', payload);
@@ -94,12 +96,14 @@ export const generateDraft = async ({
   }
 };
 
-export const regenerateDraft = async (draftId, { newInstructions = '', tone = null } = {}) => {
+export const regenerateDraft = async (draftId, { newInstructions = '', tone = null, length = null } = {}) => {
   try {
-    return await companyApi.post(`/reply-draft/drafts/${draftId}/regenerate`, {
+    const payload = {
       new_instructions: newInstructions,
       tone,
-    });
+    };
+    if (length) payload.length = length;
+    return await companyApi.post(`/reply-draft/drafts/${draftId}/regenerate`, payload);
   } catch (error) {
     console.error('Regenerate draft error:', error);
     throw error;

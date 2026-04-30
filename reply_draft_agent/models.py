@@ -1,3 +1,5 @@
+import re
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -62,6 +64,14 @@ class InboxEmail(models.Model):
     direction = models.CharField(max_length=4, default='in',
                                  help_text="'in' for received mail, 'out' for sent")
 
+    # Conversation grouping key. Derived from the RFC References chain
+    # (root message-id) when present; falls back to a normalized
+    # subject + canonical participant pair so plain "Re:" exchanges that
+    # don't carry References still group. Populated at sync time —
+    # nullable + indexed so existing rows stay valid until backfill.
+    thread_key = models.CharField(max_length=120, blank=True, default='', db_index=True,
+                                  help_text='Stable key shared by every message in the same conversation.')
+
     synced_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -73,10 +83,114 @@ class InboxEmail(models.Model):
             models.Index(fields=['owner', '-received_at']),
             models.Index(fields=['email_account', '-received_at']),
             models.Index(fields=['from_email']),
+            models.Index(fields=['email_account', 'thread_key']),
         ]
 
     def __str__(self):
         return f"InboxEmail from {self.from_email} at {self.received_at:%Y-%m-%d %H:%M}"
+
+    @staticmethod
+    def compute_thread_key(*, references, in_reply_to, subject, from_email, to_email, max_len=120):
+        """Derive a stable per-thread key from RFC headers + subject.
+
+        Preference order:
+          1. Root message-id from the References chain (most reliable —
+             every reply in a thread keeps the same first References entry).
+          2. The In-Reply-To header (one-step-back parent).
+          3. Hash of normalized subject + sorted participant pair (works
+             when the sender's client doesn't set References, as some
+             webmail clients still don't).
+
+        The result is truncated to `max_len` chars so it fits the column.
+        """
+        import hashlib
+
+        refs = (references or '').strip()
+        if refs:
+            # References can be space- or newline-separated; the first
+            # token is the root of the thread.
+            first = refs.split()[0].strip().lstrip('<').rstrip('>')
+            if first:
+                return ('root:' + first)[:max_len]
+
+        irt = (in_reply_to or '').strip().lstrip('<').rstrip('>')
+        if irt:
+            return ('irt:' + irt)[:max_len]
+
+        # Subject-based fallback. Strip the standard reply prefixes and
+        # collapse whitespace so "Re: Re: Foo" and "Foo" land together.
+        subj = (subject or '').strip()
+        subj = re.sub(r'^(?:\s*(?:re|fwd?|aw)\s*:\s*)+', '', subj, flags=re.IGNORECASE)
+        subj = re.sub(r'\s+', ' ', subj).strip().lower()
+
+        # Canonical participant pair: sort the two addresses so an exchange
+        # in either direction shares the same key.
+        pair = sorted(filter(None, [(from_email or '').strip().lower(), (to_email or '').strip().lower()]))
+        seed = (subj + '|' + '|'.join(pair)).encode('utf-8', 'ignore')
+        digest = hashlib.sha1(seed).hexdigest()[:24]
+        return ('subj:' + digest)[:max_len]
+
+
+def _inbox_attachment_upload_path(instance, original_filename):
+    """Where Django stores the file under ``default_storage``.
+
+    Path layout: ``inbox_attachments/<account_id>/<email_id>/<sha8>-<filename>``.
+    Bucketing by account + email keeps directories small enough for fast
+    listing on local disk and yields stable S3 prefixes when the storage
+    backend is later swapped to S3 (just flip ``DEFAULT_FILE_STORAGE``;
+    this code stays unchanged).
+    """
+    # `instance.sha256` is set before .save(); fall back to '' if a caller
+    # forgot, in which case Django will append its own uniquifier on collision.
+    sha_prefix = (instance.sha256 or '')[:8]
+    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', original_filename)[:120] or 'attachment.bin'
+    return (
+        f'inbox_attachments/'
+        f'{instance.inbox_email.email_account_id}/'
+        f'{instance.inbox_email_id}/'
+        f'{sha_prefix}-{safe_name}'
+    )
+
+
+class InboxAttachment(models.Model):
+    """File attachment on an InboxEmail.
+
+    Uses Django's ``FileField`` against ``default_storage``, so the file
+    lives wherever ``DEFAULT_FILE_STORAGE`` points: on local disk today
+    (``MEDIA_ROOT``), on S3 the day someone flips one settings line. DB
+    row holds only metadata so SQL Server isn't loaded down with blobs.
+    """
+
+    inbox_email = models.ForeignKey(
+        InboxEmail, on_delete=models.CASCADE, related_name='attachments',
+        help_text='Email this attachment was extracted from. CASCADE keeps the table consistent '
+                  'when emails are pruned; the actual file is removed by the post_delete signal '
+                  'wired up in apps.py.',
+    )
+    filename = models.CharField(max_length=255, help_text='Original filename from the message part.')
+    content_type = models.CharField(max_length=120, blank=True, default='')
+    size_bytes = models.BigIntegerField(default=0)
+    file = models.FileField(upload_to=_inbox_attachment_upload_path, max_length=1000,
+                            help_text='Stored via default_storage (local FS now, S3 later).')
+    sha256 = models.CharField(max_length=64, blank=True, default='', db_index=True,
+                              help_text='Content hash. Lets us dedupe identical files across emails.')
+    # Inline-image content-id (e.g. "<image001@01D8...@laskon.com>") so the
+    # frontend can later swap `cid:` references in body_html for download URLs.
+    content_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
+    is_inline = models.BooleanField(default=False,
+                                    help_text='True for cid: parts referenced inside body_html (e.g. inline images).')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_replydraftagent_inboxattachment'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['inbox_email', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"InboxAttachment {self.filename} ({self.size_bytes}B) on email #{self.inbox_email_id}"
 
 
 class ReplyDraft(models.Model):
