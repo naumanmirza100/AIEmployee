@@ -11,12 +11,16 @@ auth + throttle pattern as Frontline:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.response import Response
+from django.conf import settings
+from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Count, Q
@@ -37,8 +41,45 @@ from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
 )
 from core.HR_agent.hr_agent import HRAgent
+# Re-use Frontline's hardened helpers — file validation + broker probe.
+from Frontline_agent.document_processor import DocumentProcessor
 
 logger = logging.getLogger(__name__)
+
+
+def _hr_celery_broker_ready(timeout_seconds: float = 0.5) -> bool:
+    """TCP probe of the Celery broker — fast-fails when Redis is down so
+    upload doesn't stall in Kombu's ~100s connect-retry loop. Same shape as
+    `api.views.frontline_agent._celery_broker_ready`."""
+    import socket
+    from urllib.parse import urlparse
+    from celery import current_app
+    try:
+        url = current_app.conf.broker_url or ''
+        parsed = urlparse(url)
+        host = parsed.hostname or 'localhost'
+        default_port = 6379 if (parsed.scheme or '').startswith('redis') else 5672
+        port = parsed.port or default_port
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True
+    except Exception:
+        return False
+
+
+def _hr_get_or_create_user_for_company_user(company_user):
+    """Get or create a Django User for a CompanyUser. Mirrors the Frontline
+    helper — needed because the `uploaded_by` FK on HRDocument points at
+    `auth.User`, not `core.CompanyUser`."""
+    try:
+        return User.objects.get(email=company_user.email)
+    except User.DoesNotExist:
+        username = f"company_user_{company_user.id}_{company_user.email}"
+        return User.objects.create_user(
+            username=username, email=company_user.email, password=None,
+            first_name=(company_user.full_name.split()[0] if company_user.full_name else ''),
+            last_name=(' '.join(company_user.full_name.split()[1:])
+                       if company_user.full_name and len(company_user.full_name.split()) > 1 else ''),
+        )
 
 
 # ============================================================================
@@ -232,16 +273,155 @@ def list_hr_documents(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRUploadThrottle])
 def upload_hr_document(request):
-    """Stub: accepts the upload metadata and creates an `HRDocument` row in
-    `processing_status='pending'`. The Celery worker (to be implemented) will
-    parse + chunk + embed. Mirrors Frontline's upload contract."""
-    return Response({
-        'status': 'accepted',
-        'data': {
-            'message': 'HR document upload is scaffolded. Implement file persistence + '
-                       'process_hr_document Celery task before going live.',
-        },
-    }, status=status.HTTP_202_ACCEPTED)
+    """Upload an HR document. Validates content (magic bytes), saves to disk
+    under MEDIA_ROOT/hr_documents/<company>/, creates the `HRDocument` row,
+    then dispatches `process_hr_document` to Celery for parse + chunk + embed.
+
+    Body (multipart/form-data):
+        file               required
+        title              optional (defaults to filename)
+        description        optional
+        document_type      one of HRDocument.DOCUMENT_TYPE_CHOICES (default 'policy')
+        confidentiality    one of public|employee|manager|hr_only (default 'employee')
+        employee_id        optional — FK to a personal-doc owner
+        retention_days     optional override; otherwise defaults from
+                           `RETENTION_DEFAULTS_DAYS` per document_type
+    """
+    try:
+        company_user = request.user
+        company = company_user.company
+        user = _hr_get_or_create_user_for_company_user(company_user)
+
+        if 'file' not in request.FILES:
+            return Response({'status': 'error', 'message': 'No file provided'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        uploaded = request.FILES['file']
+        if uploaded.size > 50 * 1024 * 1024:
+            return Response({'status': 'error', 'message': 'File size exceeds 50MB limit'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        title = (request.POST.get('title') or uploaded.name).strip() or uploaded.name
+        description = (request.POST.get('description') or '').strip()
+        document_type = (request.POST.get('document_type') or 'policy').strip()
+        confidentiality = (request.POST.get('confidentiality') or 'employee').strip().lower()
+        if confidentiality not in ('public', 'employee', 'manager', 'hr_only'):
+            confidentiality = 'employee'
+
+        # Optional personal-doc link
+        employee = None
+        if request.POST.get('employee_id'):
+            employee = Employee.objects.filter(pk=request.POST['employee_id'], company=company).first()
+            if not employee:
+                return Response({'status': 'error', 'message': 'employee_id not found for this company'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate + read once
+        safe_filename = DocumentProcessor.sanitize_filename(uploaded.name)
+        file_bytes = uploaded.read()
+        ok, _detected_fmt, content_err = DocumentProcessor.validate_content(file_bytes, safe_filename)
+        if not ok:
+            return Response(
+                {'status': 'error', 'message': content_err or 'File content validation failed'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        # Dedupe within the company — same content twice is almost always a mistake
+        existing = HRDocument.objects.filter(company=company, file_hash=file_hash).first()
+        if existing:
+            return Response({
+                'status': 'error',
+                'message': 'A document with this content already exists',
+                'document_id': existing.id,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Persist file under MEDIA_ROOT/hr_documents/<company>/
+        upload_dir = Path(settings.MEDIA_ROOT) / 'hr_documents' / str(company.id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        storage_filename = f"{file_hash[:16]}_{safe_filename}"
+        file_path = upload_dir / storage_filename
+        with open(file_path, 'wb') as f:
+            f.write(file_bytes)
+
+        file_format = DocumentProcessor.get_file_format(safe_filename)
+
+        # Retention default by document_type — caller can override
+        from hr_agent.tasks import RETENTION_DEFAULTS_DAYS
+        retention_days = request.POST.get('retention_days')
+        if retention_days:
+            try:
+                retention_days = max(1, min(36500, int(retention_days)))
+            except ValueError:
+                retention_days = RETENTION_DEFAULTS_DAYS.get(document_type)
+        else:
+            retention_days = RETENTION_DEFAULTS_DAYS.get(document_type)
+
+        document = HRDocument.objects.create(
+            company=company,
+            title=title[:200],
+            description=description,
+            document_type=document_type,
+            confidentiality=confidentiality,
+            employee=employee,
+            uploaded_by=user,
+            file_path=str(file_path.relative_to(settings.MEDIA_ROOT)),
+            file_size=uploaded.size,
+            mime_type=uploaded.content_type or '',
+            file_format=file_format,
+            file_hash=file_hash,
+            processing_status='pending',
+            retention_days=retention_days,
+        )
+
+        # Dispatch processing — broker probe → fall back to inline if Redis is down,
+        # so the request doesn't stall in Celery's ~100s connection retry loop.
+        from hr_agent.tasks import process_hr_document
+        dispatch_mode = 'async'
+        if _hr_celery_broker_ready(timeout_seconds=0.5):
+            try:
+                process_hr_document.apply_async(args=[document.id], retry=False)
+            except Exception:
+                logger.exception("process_hr_document: Celery dispatch failed, running inline")
+                dispatch_mode = 'inline'
+        else:
+            logger.warning("process_hr_document: Celery broker unreachable — running inline")
+            dispatch_mode = 'inline'
+
+        if dispatch_mode == 'inline':
+            try:
+                process_hr_document.apply(args=[document.id])
+            except Exception:
+                logger.exception("Inline process_hr_document fallback failed for HR doc %s",
+                                 document.id)
+            document.refresh_from_db()
+
+        return Response({
+            'status': 'accepted',
+            'data': {
+                'document_id': document.id,
+                'title': document.title,
+                'file_format': document.file_format,
+                'document_type': document.document_type,
+                'confidentiality': document.confidentiality,
+                'employee_id': document.employee_id,
+                'retention_days': document.retention_days,
+                'processing_status': document.processing_status,
+                'dispatch_mode': dispatch_mode,
+                'message': (
+                    'Upload processed inline (Celery broker was unreachable).'
+                    if dispatch_mode == 'inline'
+                    else 'Upload accepted. Processing in the background.'
+                ),
+            },
+        }, status=status.HTTP_202_ACCEPTED)
+    except Exception:
+        logger.exception("upload_hr_document failed")
+        return Response(
+            {'status': 'error', 'message': 'Failed to upload document'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(['POST'])
@@ -352,15 +532,56 @@ def create_hr_workflow(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def execute_hr_workflow(request, workflow_id):
-    """Stub. Once the executor is ported (mirroring `_execute_step_list` from
-    Frontline), this endpoint will run the workflow, persist an
-    `HRWorkflowExecution` row, and return its status (or 202 + paused if a
-    `wait` step is hit)."""
-    return Response({
-        'status': 'accepted',
-        'data': {'message': 'Executor not yet implemented for hr_agent. '
-                            'Port the Frontline `_execute_step_list` engine here.'},
-    }, status=status.HTTP_202_ACCEPTED)
+    """Run an HR workflow with the supplied context. Returns 202 + the paused
+    snapshot when a `wait` step is hit (the resume task takes over); 200 on
+    immediate completion; 500 on executor error."""
+    try:
+        company = request.user.company
+        user = _hr_get_or_create_user_for_company_user(request.user)
+        w = HRWorkflow.objects.filter(company=company, id=workflow_id, is_active=True).first()
+        if not w:
+            return Response({'status': 'error', 'message': 'Workflow not found or inactive'},
+                            status=status.HTTP_404_NOT_FOUND)
+        data = request.data or {}
+        context_data = dict(data.get('context') or {})
+        # Always seed company_id so HR step handlers can scope inserts (e.g. schedule_meeting).
+        context_data.setdefault('company_id', company.id)
+
+        exec_obj = HRWorkflowExecution.objects.create(
+            workflow=w, workflow_name=w.name, executed_by=user,
+            employee_id=context_data.get('employee_id') or None,
+            status='in_progress', context_data=context_data,
+        )
+
+        from hr_agent.workflow_engine import execute_workflow as _exec
+        success, result_data, err = _exec(w, context_data, user, simulate=bool(data.get('simulate')),
+                                          execution=exec_obj)
+
+        if result_data and result_data.get('paused'):
+            return Response({
+                'status': 'accepted',
+                'data': {
+                    'execution_id': exec_obj.id,
+                    'status': 'paused',
+                    'wait_seconds': result_data.get('wait_seconds'),
+                    'resume_at': exec_obj.resume_at.isoformat() if exec_obj.resume_at else None,
+                    'result_data': result_data,
+                },
+            }, status=status.HTTP_202_ACCEPTED)
+
+        exec_obj.status = 'completed' if success else 'failed'
+        exec_obj.result_data = result_data or {}
+        exec_obj.error_message = err
+        exec_obj.completed_at = timezone.now()
+        exec_obj.save()
+        return Response({'status': 'success',
+                         'data': {'execution_id': exec_obj.id,
+                                  'status': exec_obj.status,
+                                  'result_data': result_data}})
+    except Exception:
+        logger.exception("execute_hr_workflow failed")
+        return Response({'status': 'error', 'message': 'Failed to execute workflow'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ============================================================================
