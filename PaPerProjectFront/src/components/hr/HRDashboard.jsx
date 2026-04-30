@@ -20,6 +20,17 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   Loader2,
   LayoutDashboard,
   MessageSquare,
@@ -30,6 +41,7 @@ import {
   Sparkles,
   Send,
   Plus,
+  Upload,
 } from 'lucide-react';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import hrAgentService from '@/services/hrAgentService';
@@ -55,6 +67,14 @@ const HRDashboard = () => {
   // Documents
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  // Upload dialog state
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadDescription, setUploadDescription] = useState('');
+  const [uploadDocType, setUploadDocType] = useState('policy');
+  const [uploadConfidentiality, setUploadConfidentiality] = useState('employee');
+  const [uploading, setUploading] = useState(false);
 
   // Workflows
   const [workflows, setWorkflows] = useState([]);
@@ -135,6 +155,37 @@ const HRDashboard = () => {
   }, [activeTab]);
 
   // ---------- Handlers ----------
+  const handleUpload = async () => {
+    if (!uploadFile) {
+      toast({ title: 'Pick a file first', variant: 'destructive' });
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await hrAgentService.uploadHRDocument(uploadFile, uploadTitle, uploadDescription, {
+        document_type: uploadDocType,
+        confidentiality: uploadConfidentiality,
+      });
+      const status = res?.data?.processing_status;
+      const mode = res?.data?.dispatch_mode;
+      toast({
+        title: 'Document uploaded',
+        description: mode === 'inline'
+          ? `Processed inline. Status: ${status}.`
+          : 'Processing in the background — refresh to see status.',
+      });
+      setUploadOpen(false);
+      setUploadFile(null);
+      setUploadTitle('');
+      setUploadDescription('');
+      loadDocuments();
+    } catch (e) {
+      toast({ title: 'Upload failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleAsk = async () => {
     const q = question.trim();
     if (!q) return;
@@ -290,15 +341,20 @@ const HRDashboard = () => {
         <TabsContent value="documents" className="mt-6">
           <ErrorBoundary>
             <Card>
-              <CardHeader>
-                <CardTitle>HR Documents</CardTitle>
-                <CardDescription>Handbook, policies, contracts, payroll. Confidentiality-gated.</CardDescription>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>HR Documents</CardTitle>
+                  <CardDescription>Handbook, policies, contracts, payroll. Confidentiality-gated.</CardDescription>
+                </div>
+                <Button onClick={() => setUploadOpen(true)}><Upload className="h-4 w-4 mr-1" /> Upload</Button>
               </CardHeader>
               <CardContent>
                 {docsLoading ? (
                   <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
                 ) : documents.length === 0 ? (
-                  <div className="text-center py-10 text-muted-foreground">No documents uploaded yet. Upload via <code>POST /api/hr/documents/upload/</code> (Celery worker pending).</div>
+                  <div className="text-center py-10 text-muted-foreground">
+                    No documents uploaded yet. Click <strong>Upload</strong> to add your first one.
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {documents.map((d) => (
@@ -308,6 +364,11 @@ const HRDashboard = () => {
                         <div className="mt-2 flex flex-wrap gap-1">
                           <Badge variant="secondary" className="text-[10px]">{d.confidentiality}</Badge>
                           <Badge variant="outline" className="text-[10px]">{d.processing_status}</Badge>
+                          {d.chunks_total > 0 && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {d.chunks_processed}/{d.chunks_total} chunks
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -315,6 +376,89 @@ const HRDashboard = () => {
                 )}
               </CardContent>
             </Card>
+
+            {/* Upload dialog */}
+            <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Upload HR Document</DialogTitle>
+                  <DialogDescription>
+                    Pick a file, set its type and confidentiality. The agent indexes it for Knowledge Q&A.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="hr-upload-file">File</Label>
+                    <Input
+                      id="hr-upload-file"
+                      type="file"
+                      accept=".pdf,.docx,.doc,.txt,.md,.html,.htm"
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="hr-upload-title">Title</Label>
+                    <Input
+                      id="hr-upload-title"
+                      placeholder="Defaults to filename"
+                      value={uploadTitle}
+                      onChange={(e) => setUploadTitle(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="hr-upload-desc">Description</Label>
+                    <Textarea
+                      id="hr-upload-desc"
+                      rows={2}
+                      value={uploadDescription}
+                      onChange={(e) => setUploadDescription(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Type</Label>
+                      <Select value={uploadDocType} onValueChange={setUploadDocType}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="handbook">Employee Handbook</SelectItem>
+                          <SelectItem value="policy">Policy</SelectItem>
+                          <SelectItem value="procedure">Procedure / SOP</SelectItem>
+                          <SelectItem value="offer_letter">Offer Letter</SelectItem>
+                          <SelectItem value="contract">Contract</SelectItem>
+                          <SelectItem value="payslip">Payslip</SelectItem>
+                          <SelectItem value="payroll">Payroll / Comp</SelectItem>
+                          <SelectItem value="performance_review">Performance Review</SelectItem>
+                          <SelectItem value="leave_form">Leave Form</SelectItem>
+                          <SelectItem value="training">Training</SelectItem>
+                          <SelectItem value="benefits">Benefits</SelectItem>
+                          <SelectItem value="compliance">Compliance</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Confidentiality</Label>
+                      <Select value={uploadConfidentiality} onValueChange={setUploadConfidentiality}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="public">Public</SelectItem>
+                          <SelectItem value="employee">All Employees</SelectItem>
+                          <SelectItem value="manager">Managers + HR</SelectItem>
+                          <SelectItem value="hr_only">HR Only</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setUploadOpen(false)} disabled={uploading}>Cancel</Button>
+                  <Button onClick={handleUpload} disabled={uploading || !uploadFile}>
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+                    Upload
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </ErrorBoundary>
         </TabsContent>
 

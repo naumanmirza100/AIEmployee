@@ -811,6 +811,27 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 604800.0,  # Every 7 days
         'options': {'expires': 1209600}
     },
+
+    # ----- HR Support Agent -----
+    # Process pending HRScheduledNotification rows: send + retry/DLQ.
+    'hr-process-scheduled-notifications': {
+        'task': 'hr_agent.tasks.process_hr_scheduled_notifications',
+        'schedule': 60.0,
+        'options': {'expires': 90},
+    },
+    # Daily walk of time-based HR events (probation, birthdays, anniversaries,
+    # document expirations) — fans out into HRScheduledNotification rows.
+    'hr-walk-time-based-events': {
+        'task': 'hr_agent.tasks.walk_hr_time_based_events',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800},
+    },
+    # 24h + 15min HR meeting reminders.
+    'hr-send-meeting-reminders': {
+        'task': 'hr_agent.tasks.send_hr_meeting_reminders',
+        'schedule': 300.0,
+        'options': {'expires': 600},
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
