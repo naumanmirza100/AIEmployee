@@ -58,6 +58,35 @@ export const askHRKnowledge = async (question) => {
 };
 
 // ---------- Documents ----------
+/** Upload an HR document (multipart). `options` may carry document_type,
+ *  confidentiality, employee_id, retention_days. */
+export const uploadHRDocument = async (file, title, description, options = {}) => {
+  try {
+    const { API_BASE_URL } = await import('@/config/apiConfig');
+    const token = localStorage.getItem('company_auth_token');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('title', title || file.name);
+    fd.append('description', description || '');
+    if (options.document_type) fd.append('document_type', options.document_type);
+    if (options.confidentiality) fd.append('confidentiality', options.confidentiality);
+    if (options.employee_id != null) fd.append('employee_id', String(options.employee_id));
+    if (options.retention_days != null) fd.append('retention_days', String(options.retention_days));
+    const res = await fetch(`${API_BASE_URL}/hr/documents/upload/`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Token ${token}` } : {},
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok && res.status !== 202) throw new Error(data.message || `HTTP ${res.status}`);
+    if (data.status === 'error') throw new Error(data.message || 'Upload failed');
+    return data;
+  } catch (error) {
+    console.error('Upload HR document error:', error);
+    throw error;
+  }
+};
+
 export const listHRDocuments = async (params = {}) => {
   try {
     const q = new URLSearchParams();
@@ -201,6 +230,7 @@ export default {
   listHREmployees,
   createHREmployee,
   askHRKnowledge,
+  uploadHRDocument,
   listHRDocuments,
   summarizeHRDocument,
   extractHRDocument,

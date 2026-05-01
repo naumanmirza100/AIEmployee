@@ -19,7 +19,7 @@ import {
   Sparkles,
   Search,
   FileText,
-  Clock,
+  Clock, 
   Building2,
   AtSign,
   AlertCircle,
@@ -85,6 +85,15 @@ const TONES = [
   { value: 'apologetic',   label: 'Apologetic' },
   { value: 'confident',    label: 'Confident' },
   { value: 'empathetic',   label: 'Empathetic' },
+];
+
+// Length presets — must mirror the backend LENGTH_GUIDANCE map in
+// reply_draft_agent/agents/reply_draft_agent.py. Replaces the previous
+// hard "<150 word" cap baked into the system prompt.
+const LENGTHS = [
+  { value: 'short',  label: 'Short (60-100 words)' },
+  { value: 'medium', label: 'Medium (120-200 words)' },
+  { value: 'long',   label: 'Long (250-400 words)' },
 ];
 
 const INTEREST_STYLES = {
@@ -223,6 +232,7 @@ const ReplyDraftAgentPage = () => {
   const [selectedReply, setSelectedReply] = useState(null);
   const [selectedDraft, setSelectedDraft] = useState(null);
   const [tone, setTone] = useState('professional');
+  const [length, setLength] = useState('medium');
   const [userContext, setUserContext] = useState('');
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
@@ -237,6 +247,11 @@ const ReplyDraftAgentPage = () => {
   const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
+  // Reply composer is hidden by default for inbox rows — the user has to
+  // click the "Reply" button to reveal the AI-draft generator. Drafts on
+  // the other hand land straight in the composer (the user came to review
+  // it). Reset to false on every new selection.
+  const [composerOpen, setComposerOpen] = useState(false);
 
   useEffect(() => {
     const companyUserStr = localStorage.getItem('company_user');
@@ -375,6 +390,7 @@ const ReplyDraftAgentPage = () => {
     setEditedSubject('');
     setEditedBody('');
     setUserContext('');
+    setComposerOpen(false);
   };
 
   const handleSelectReply = async (r) => {
@@ -386,6 +402,7 @@ const ReplyDraftAgentPage = () => {
     setEditedBody('');
     setEditedSubject('');
     setUserContext('');
+    setComposerOpen(false);
     if (!r || r.body !== undefined) return;
     try {
       const res = await getReplyItem(r.source, r.id);
@@ -404,6 +421,8 @@ const ReplyDraftAgentPage = () => {
     setEditedSubject(d.subject || '');
     setEditedBody(d.body || '');
     setTone(d.tone || 'professional');
+    // Drafts always land in the composer — the user came to review/edit.
+    setComposerOpen(true);
   };
 
   const handleGenerate = async () => {
@@ -416,6 +435,7 @@ const ReplyDraftAgentPage = () => {
         inboxEmailId: isInbox ? selectedReply.id : null,
         userContext,
         tone,
+        length,
       });
       const d = res?.data;
       if (d?.draft_id) {
@@ -452,6 +472,7 @@ const ReplyDraftAgentPage = () => {
       const res = await regenerateDraft(selectedDraft.id, {
         newInstructions: userContext,
         tone,
+        length,
       });
       const d = res?.data;
       if (d?.draft_id) {
@@ -890,9 +911,15 @@ const ReplyDraftAgentPage = () => {
                 </div>
               )}
 
-              {/* Original Email Viewer */}
+              {/* Original Email Viewer — always stretched to match the
+                  left list panel's exact height (calc(100vh-220px)).
+                  Using `h-` (not `min-h-`) so the card forces the full
+                  height even when the email body is short. When the
+                  composer opens it appears *below* this card and the
+                  right pane scrolls, so the viewer keeps its full
+                  height instead of shrinking. */}
               {(selectedReply || selectedDraft) && originalEmail && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)] lg:flex-shrink-0">
                   <div className="p-5 border-b border-white/10">
                     <div className="flex items-start justify-between gap-4 mb-4">
                       <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -941,8 +968,11 @@ const ReplyDraftAgentPage = () => {
                     </h2>
                   </div>
 
-                  <div className="p-5">
+                  <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
                     <EmailBody body={originalEmail.body} bodyHtml={originalEmail.body_html} isIncomingReply={!!selectedReply} />
+                    {Array.isArray(originalEmail.attachments) && originalEmail.attachments.length > 0 && (
+                      <AttachmentList attachments={originalEmail.attachments} />
+                    )}
                     {selectedReply?.analysis && (
                       <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
                         <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
@@ -953,6 +983,23 @@ const ReplyDraftAgentPage = () => {
                       </div>
                     )}
                   </div>
+
+                  {/* Reply CTA — sticks to the bottom of the viewer card
+                      and reveals the AI-draft composer below on click.
+                      Hidden for sent (direction='out') rows since
+                      replying to your own outgoing mail isn't a flow,
+                      and hidden once the composer is already open. */}
+                  {selectedReply && !selectedDraft && selectedReply.direction !== 'out' && !composerOpen && (
+                    <div className="border-t border-white/10 px-5 py-3 flex justify-end">
+                      <Button
+                        onClick={() => setComposerOpen(true)}
+                        className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white"
+                      >
+                        <CornerUpLeft className="h-4 w-4 mr-2" />
+                        Reply
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -960,8 +1007,12 @@ const ReplyDraftAgentPage = () => {
               {/* Compose panel — hidden for selected Sent-tab rows. They're
                   outgoing mail we already sent, so the "generate a reply"
                   flow doesn't apply; the right pane shows the message body
-                  in the section above and stops there. */}
-              {(selectedReply || selectedDraft) && selectedReply?.direction !== 'out' && (
+                  in the section above and stops there.
+                  Also gated behind `composerOpen`: inbox rows start with
+                  the panel collapsed and only show it once the user
+                  clicks the Reply button on the email viewer above.
+                  Drafts open it automatically (see handleSelectDraft). */}
+              {(selectedReply || selectedDraft) && selectedReply?.direction !== 'out' && composerOpen && (
                 <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-3">
@@ -985,26 +1036,38 @@ const ReplyDraftAgentPage = () => {
                         </p>
                       </div>
                     </div>
-                    {selectedDraft && (
-                      <div className="flex items-center gap-2">
-                        {STATUS_STYLES[selectedDraft.status] && (
-                          <Badge variant="outline" className={`${STATUS_STYLES[selectedDraft.status].className} border`}>
-                            {STATUS_STYLES[selectedDraft.status].label}
-                          </Badge>
-                        )}
-                        {selectedDraft.regeneration_count > 0 && (
-                          <Badge variant="outline" className="bg-white/5 text-gray-300 border-white/10">
-                            Regen ×{selectedDraft.regeneration_count}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {selectedDraft && STATUS_STYLES[selectedDraft.status] && (
+                        <Badge variant="outline" className={`${STATUS_STYLES[selectedDraft.status].className} border`}>
+                          {STATUS_STYLES[selectedDraft.status].label}
+                        </Badge>
+                      )}
+                      {selectedDraft && selectedDraft.regeneration_count > 0 && (
+                        <Badge variant="outline" className="bg-white/5 text-gray-300 border-white/10">
+                          Regen ×{selectedDraft.regeneration_count}
+                        </Badge>
+                      )}
+                      {/* Hide / collapse the composer. Only meaningful for
+                          inbox rows — drafts come from the Drafts tab
+                          specifically to be edited, so don't let the
+                          user accidentally collapse them. */}
+                      {selectedReply && !selectedDraft && (
+                        <button
+                          type="button"
+                          onClick={() => setComposerOpen(false)}
+                          title="Hide reply composer"
+                          className="h-8 w-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="p-5 space-y-4">
-                    {/* Tone + Instructions */}
+                    {/* Tone + Length + Instructions */}
                     {!isReadOnly && (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Tone</label>
                           <select
@@ -1014,6 +1077,17 @@ const ReplyDraftAgentPage = () => {
                             disabled={busy}
                           >
                             {TONES.map((t) => (<option key={t.value} value={t.value} className="bg-gray-900">{t.label}</option>))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-300 mb-1.5 block">Length</label>
+                          <select
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
+                            value={length}
+                            onChange={(e) => setLength(e.target.value)}
+                            disabled={busy}
+                          >
+                            {LENGTHS.map((l) => (<option key={l.value} value={l.value} className="bg-gray-900">{l.label}</option>))}
                           </select>
                         </div>
                         <div className="md:col-span-2">
@@ -1184,48 +1258,143 @@ const ReplyDraftAgentPage = () => {
   );
 };
 
-// Render an HTML email body in a sandboxed iframe. The iframe blocks
-// scripts and same-origin access, but still renders styled markup,
-// images, links and tables — exactly what the user sees in Gmail. Auto-
-// resizes to the content height so there's no inner scrollbar inside
-// the message card.
+// Render an HTML email body. Single path: sandboxed iframe with the
+// `#er` wrapper + flattenBackgrounds() machinery below, which already
+// converts each email to dark-theme on render. Earlier we had a second
+// "plain reply" path that rendered HTML inline in the dark theme —
+// looked good for handwritten replies but stripped <style> blocks from
+// transactional/GPT marketing emails, which dropped their footers and
+// made superficially-similar emails render differently. Going through
+// one path keeps the rendering consistent across every email type.
 const HtmlBody = ({ html }) => {
   const ref = React.useRef(null);
+
+  // Resize aggressively: initial pass + ResizeObserver on the body +
+  // <img> load listeners. Without the observer we'd ship the iframe at
+  // its initial measured height and any late-loading image (almost
+  // every transactional mail) would push content past it, leaving an
+  // ugly internal scrollbar. We instead grow the iframe to match
+  // content so the *outer* panel handles the scrolling.
   React.useEffect(() => {
     const iframe = ref.current;
-    if (!iframe) return;
+    if (!iframe) return undefined;
     const resize = () => {
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
-        const next = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0);
+        const next = Math.max(
+          doc.documentElement.scrollHeight,
+          doc.documentElement.offsetHeight,
+          doc.body?.scrollHeight || 0,
+          doc.body?.offsetHeight || 0,
+        );
         if (next > 0) iframe.style.height = `${next + 8}px`;
       } catch {
         // Cross-origin sandbox can throw — just leave whatever default height we set.
       }
     };
+    // Force-strip every element's background by walking the DOM. This
+    // is the only way to beat inline `style="background:#000 !important"`
+    // (which CSS overrides, even with !important + ID specificity,
+    // can't reach because inline !important sits at the top of the
+    // cascade for the author origin). We also yank legacy `bgcolor` /
+    // `background` HTML attributes and remove email-internal <style>
+    // tags so they can't repaint after we strip.
+    const flattenBackgrounds = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        const root = doc.getElementById('er') || doc.body;
+        if (!root) return;
+        // Drop any <style> inside the email body — its rules would
+        // otherwise repaint backgrounds (especially on hover/media
+        // queries we can't predict). Our wrapper <style> in <head>
+        // stays untouched.
+        root.querySelectorAll('style').forEach((s) => s.remove());
+        const all = [root, ...root.querySelectorAll('*')];
+        all.forEach((el) => {
+          el.style.setProperty('background-color', 'transparent', 'important');
+          el.style.setProperty('background-image', 'none', 'important');
+          el.style.setProperty('background', 'transparent', 'important');
+          if (el.hasAttribute && el.hasAttribute('bgcolor')) el.removeAttribute('bgcolor');
+          if (el.hasAttribute && el.hasAttribute('background')) el.removeAttribute('background');
+        });
+      } catch {
+        // sandboxed cross-origin or torn-down doc: nothing we can do
+      }
+    };
+    flattenBackgrounds();
     resize();
-    const t = setTimeout(resize, 200);
-    return () => clearTimeout(t);
+    let ro;
+    let mo;
+    let imgs = [];
+    try {
+      const doc = iframe.contentDocument;
+      if (doc && typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(resize);
+        if (doc.documentElement) ro.observe(doc.documentElement);
+        if (doc.body) ro.observe(doc.body);
+      }
+      // Watch for late-injected nodes (web pixels, lazy-loaded blocks)
+      // and re-flatten so they can't sneak a black bg back in.
+      if (doc && typeof MutationObserver !== 'undefined' && doc.body) {
+        mo = new MutationObserver(() => { flattenBackgrounds(); resize(); });
+        mo.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'bgcolor', 'background'] });
+      }
+      if (doc) {
+        imgs = Array.from(doc.images || []);
+        imgs.forEach((img) => {
+          if (!img.complete) img.addEventListener('load', resize, { once: true });
+        });
+      }
+    } catch {
+      // sandboxed cross-origin: rely on the timed retries below
+    }
+    // Timed retries for the cases the observer can't see (e.g. fonts
+    // settling, web-pixel beacons that don't fire load events).
+    const t1 = setTimeout(() => { flattenBackgrounds(); resize(); }, 150);
+    const t2 = setTimeout(() => { flattenBackgrounds(); resize(); }, 600);
+    const t3 = setTimeout(() => { flattenBackgrounds(); resize(); }, 1500);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      if (ro) ro.disconnect();
+      if (mo) mo.disconnect();
+      imgs.forEach((img) => img.removeEventListener('load', resize));
+    };
   }, [html]);
 
-  // Force light background + dark text inside the iframe so transactional
-  // mail (often white-on-light) doesn't render unreadable on our dark
-  // dashboard. Links open in a new tab via `<base target="_blank">`.
+  // Force dark mode on every email by aggressively overriding their
+  // styles, and keep the iframe fully transparent so the parent
+  // panel's bg-black/40 over the page gradient shows through — that's
+  // what makes the email viewer feel like part of the dashboard
+  // instead of a separate "darker black" island.
+  // The email body is wrapped in <div id="er"> so our overrides can
+  // use `#er, #er *` and reach specificity (1,0,1). Without the ID
+  // any email-internal `<style>` rule with a class or element
+  // selector (e.g. `body{background:#000}` or `.wrapper{...}`) would
+  // beat our universal selector — !important doesn't override
+  // specificity, only same-specificity ties.
   const wrapped = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
-    html,body{margin:0;padding:0;background:#fff;color:#111;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.5;}
-    img{max-width:100%;height:auto;}
-    a{color:#0a66c2;}
-    body{padding:14px;}
-  </style></head><body>${html || ''}</body></html>`;
+    html,body{margin:0;padding:0;background:transparent !important;color:#e4e4e7 !important;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.5;color-scheme:dark;scrollbar-width:none !important;-ms-overflow-style:none !important;}
+    html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:none !important;width:0 !important;height:0 !important;}
+    body{padding:0;}
+    #er,#er *,#er *::before,#er *::after{background-color:transparent !important;background-image:none !important;color:#e4e4e7 !important;box-shadow:none !important;}
+    #er [bgcolor]{background-color:transparent !important;}
+    #er a,#er a *{color:#7dd3fc !important;text-decoration:underline;}
+    #er img{max-width:100%;height:auto;background-color:transparent !important;}
+    #er hr{border-color:rgba(255,255,255,0.15) !important;}
+    #er blockquote{border-left:2px solid rgba(255,255,255,0.2) !important;padding-left:10px;color:#a1a1aa !important;}
+  </style></head><body><div id="er">${html || ''}</div></body></html>`;
 
+  // No wrapper chrome — render the iframe directly so the email reads
+  // as part of the dashboard, not a "document" sitting on a tray.
   return (
     <iframe
       ref={ref}
       title="Email body"
-      sandbox="allow-popups allow-popups-to-escape-sandbox"
+      sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
       srcDoc={wrapped}
-      style={{ width: '100%', minHeight: '120px', border: 0, background: '#fff', borderRadius: '8px' }}
+      style={{ width: '100%', minHeight: '380px', border: 0, background: 'transparent', display: 'block', colorScheme: 'dark' }}
       onLoad={() => {
         const iframe = ref.current;
         if (!iframe) return;
@@ -1237,6 +1406,98 @@ const HtmlBody = ({ html }) => {
         } catch {}
       }}
     />
+  );
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+const fileIconChar = (filename, contentType) => {
+  // Tiny single-glyph badge — keeps the row compact and avoids dragging in
+  // an icon library entry per file type.
+  const ct = (contentType || '').toLowerCase();
+  const ext = ((filename || '').split('.').pop() || '').toLowerCase();
+  if (ct.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return '🖼';
+  if (ct.includes('pdf') || ext === 'pdf') return '📄';
+  if (ct.includes('zip') || ['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜';
+  if (ct.includes('word') || ['doc', 'docx'].includes(ext)) return '📝';
+  if (ct.includes('sheet') || ['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
+  if (ct.includes('presentation') || ['ppt', 'pptx'].includes(ext)) return '📽';
+  if (ct.startsWith('audio/')) return '🎵';
+  if (ct.startsWith('video/')) return '🎬';
+  return '📎';
+};
+
+const AttachmentList = ({ attachments }) => {
+  const handleDownload = async (att) => {
+    // Token-authenticated download: fetch with the auth header, turn the
+    // response into a Blob, then synthesise an <a download> click. Direct
+    // <a href> links wouldn't carry the company-user token and would 401.
+    try {
+      const token = localStorage.getItem('company_auth_token') || '';
+      const apiBase = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      const url = `${apiBase}${att.download_url}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: token ? { Authorization: `Token ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = att.filename || 'attachment';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Tiny delay so the click triggers before the URL is revoked. 200ms
+      // is enough for any browser to start the save.
+      setTimeout(() => URL.revokeObjectURL(objUrl), 200);
+    } catch (e) {
+      console.error('Attachment download failed', e);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-white/10">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300 mb-2">
+        <span>📎</span>
+        Attachments · {attachments.length}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {attachments.map((att) => (
+          <button
+            key={att.id}
+            type="button"
+            onClick={() => handleDownload(att)}
+            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-emerald-500/30 transition text-left group"
+          >
+            <span className="text-xl shrink-0" aria-hidden="true">
+              {fileIconChar(att.filename, att.content_type)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-gray-100 truncate group-hover:text-white">
+                {att.filename || 'attachment'}
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">
+                {formatFileSize(att.size_bytes)}
+                {att.content_type && (
+                  <span className="ml-1 opacity-60">· {att.content_type}</span>
+                )}
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300 opacity-0 group-hover:opacity-100 transition shrink-0">
+              Download
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -1261,7 +1522,7 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
     const replyLabel = isIncomingReply ? "Their reply" : "Message";
     return (
       <div>
-        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
           {replyLabel}
         </div>
@@ -1280,7 +1541,7 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
   if (!quoted) {
     return (
       <div>
-        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
           {replyLabel}
         </div>
@@ -1541,22 +1802,36 @@ const InboxItem = ({ reply, active, onClick }) => {
         <div className="text-xs text-gray-300 truncate font-medium mb-1">
           {reply.subject || '(no subject)'}
         </div>
-        <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
-          {reply.preview || 'No preview available'}
-        </div>
-        {!isOutgoing && (
-          <div className="flex items-center gap-1.5 flex-wrap">
+        {reply.preview ? (
+          <div className="text-xs text-gray-500 line-clamp-2 leading-snug mb-1.5">
+            {reply.preview}
+          </div>
+        ) : null}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {!isOutgoing && (
             <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${style.className}`}>
               {style.label}
             </span>
-            {reply.campaign && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
-                <Zap className="h-2.5 w-2.5" />
-                {reply.campaign}
-              </span>
-            )}
-          </div>
-        )}
+          )}
+          {/* Thread depth badge — only shows when the row is part of a
+              multi-message conversation. Helps the user spot ongoing
+              threads in the list without expanding them. */}
+          {reply.thread_count > 1 && (
+            <span
+              title={`${reply.thread_count} messages in this thread`}
+              className="inline-flex items-center gap-1 text-[10px] font-medium text-fuchsia-200 px-2 py-0.5 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20"
+            >
+              <Quote className="h-2.5 w-2.5" />
+              {reply.thread_count}
+            </span>
+          )}
+          {!isOutgoing && reply.campaign && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 truncate max-w-[120px]">
+              <Zap className="h-2.5 w-2.5" />
+              {reply.campaign}
+            </span>
+          )}
+        </div>
       </div>
     </button>
   );
