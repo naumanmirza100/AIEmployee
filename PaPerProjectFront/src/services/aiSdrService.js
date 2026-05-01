@@ -1,5 +1,8 @@
 import { companyApi } from './companyAuthService';
 
+// --------------------------------------------------------------------------
+// Dashboard
+// --------------------------------------------------------------------------
 export const getSdrDashboard = async () => {
   try {
     return await companyApi.get('/sdr/dashboard/');
@@ -9,13 +12,36 @@ export const getSdrDashboard = async () => {
   }
 };
 
-// Leads
-export const listLeads = async ({ search = '', status = '', scoring = '' } = {}) => {
+// --------------------------------------------------------------------------
+// ICP Profile
+// --------------------------------------------------------------------------
+export const getIcpProfile = async () => {
+  try {
+    return await companyApi.get('/sdr/icp/');
+  } catch (error) {
+    console.error('Get ICP error:', error);
+    throw error;
+  }
+};
+
+export const saveIcpProfile = async (data) => {
+  try {
+    return await companyApi.post('/sdr/icp/', data);
+  } catch (error) {
+    console.error('Save ICP error:', error);
+    throw error;
+  }
+};
+
+// --------------------------------------------------------------------------
+// Leads — CRUD
+// --------------------------------------------------------------------------
+export const listLeads = async ({ search = '', temperature = '', status = '' } = {}) => {
   try {
     const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    if (status) params.set('status', status);
-    if (scoring) params.set('scoring', scoring);
+    if (search)      params.set('search', search);
+    if (temperature) params.set('temperature', temperature);
+    if (status)      params.set('status', status);
     const qs = params.toString();
     return await companyApi.get(qs ? `/sdr/leads/?${qs}` : '/sdr/leads/');
   } catch (error) {
@@ -60,20 +86,62 @@ export const deleteLead = async (id) => {
   }
 };
 
-export const scoreLead = async (id) => {
+// --------------------------------------------------------------------------
+// Qualification
+// --------------------------------------------------------------------------
+export const qualifyLead = async (id) => {
   try {
-    return await companyApi.post(`/sdr/leads/${id}/score/`);
+    return await companyApi.post(`/sdr/leads/${id}/qualify/`);
   } catch (error) {
-    console.error('Score lead error:', error);
+    console.error('Qualify lead error:', error);
     throw error;
   }
 };
 
-export const bulkScoreLeads = async () => {
+export const qualifyAllLeads = async () => {
   try {
-    return await companyApi.post('/sdr/leads/bulk-score/');
+    return await companyApi.post('/sdr/leads/qualify-all/');
   } catch (error) {
-    console.error('Bulk score leads error:', error);
+    console.error('Qualify all leads error:', error);
+    throw error;
+  }
+};
+
+// --------------------------------------------------------------------------
+// Research (Apollo.io or AI generation)
+// --------------------------------------------------------------------------
+export const researchLeads = async ({ count = 20 } = {}) => {
+  try {
+    return await companyApi.post('/sdr/leads/research/', { count });
+  } catch (error) {
+    console.error('Research leads error:', error);
+    throw error;
+  }
+};
+
+// --------------------------------------------------------------------------
+// CSV Import — uses raw fetch to send multipart/form-data
+// --------------------------------------------------------------------------
+export const importLeadsFromCSV = async (file) => {
+  try {
+    const token = localStorage.getItem('company_auth_token');
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const resp = await fetch(`${baseUrl}/sdr/leads/import/`, {
+      method: 'POST',
+      headers: { Authorization: `Token ${token}` },
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ message: 'Import failed' }));
+      throw new Error(err.message || 'CSV import failed');
+    }
+    return resp.json();
+  } catch (error) {
+    console.error('CSV import error:', error);
     throw error;
   }
 };

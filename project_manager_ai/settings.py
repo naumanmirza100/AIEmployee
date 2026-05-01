@@ -297,6 +297,7 @@ INSTALLED_APPS = [
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
     'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app
+    'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
     'whitenoise.runserver_nostatic',
 ]
 
