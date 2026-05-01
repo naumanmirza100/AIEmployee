@@ -356,12 +356,19 @@ class EmailService:
         campaign: Optional[Campaign] = None,
         lead: Optional[Lead] = None,
         html_body: Optional[str] = None,
+        attachments: Optional[list] = None,
     ) -> Dict:
         """Send a one-off email with subject/body directly (no template rendering).
 
         Used by the reply-draft agent where the body is already composed.
         If in_reply_to is provided, sets RFC 5322 threading headers so the
         message lands in the recipient's existing thread.
+
+        ``attachments`` is an optional list of ``(filename, content_bytes, content_type)``
+        tuples appended to the outbound message via Django's
+        ``EmailMultiAlternatives.attach``. Bytes are read by the caller (e.g.
+        the reply-draft agent reads them from default_storage) so this method
+        stays storage-backend agnostic.
         """
         if not to_email:
             return {'success': False, 'error': 'to_email is required'}
@@ -426,6 +433,20 @@ class EmailService:
 
             if html_body:
                 email.attach_alternative(html_body, 'text/html')
+
+            # Attach uploaded files. We pass the raw bytes through to Django's
+            # EmailMultiAlternatives — it MIME-encodes them and adds the
+            # Content-Disposition header so they show up as downloadable
+            # attachments at the recipient's end.
+            if attachments:
+                for att in attachments:
+                    try:
+                        fname, content, ctype = att
+                    except (TypeError, ValueError):
+                        continue
+                    if not content:
+                        continue
+                    email.attach(fname or 'attachment', content, ctype or 'application/octet-stream')
 
             email.send()
 
