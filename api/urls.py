@@ -565,6 +565,11 @@ urlpatterns = [
 
     # Knowledge Q&A
     re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
+    # Persisted HR Q&A chats — sidebar history (mirrors PM agent's chat shape)
+    re_path(r'^hr/ai/knowledge-qa/chats/?$', hr_agent.list_hr_knowledge_chats, name='hr_list_knowledge_chats'),  # GET
+    re_path(r'^hr/ai/knowledge-qa/chats/create/?$', hr_agent.create_hr_knowledge_chat, name='hr_create_knowledge_chat'),  # POST
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_knowledge_chat, name='hr_update_knowledge_chat'),  # PATCH
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_knowledge_chat, name='hr_delete_knowledge_chat'),  # DELETE
 
     # Documents
     re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET

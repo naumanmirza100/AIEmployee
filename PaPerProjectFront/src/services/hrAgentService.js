@@ -47,12 +47,61 @@ export const createHREmployee = async (payload) => {
 };
 
 // ---------- Knowledge Q&A ----------
-export const askHRKnowledge = async (question) => {
+/**
+ * Ask the HR knowledge agent. `chatHistory` is an optional list of
+ * `{role: 'user'|'assistant', content}` for multi-turn coherence.
+ */
+export const askHRKnowledge = async (question, chatHistory = []) => {
   try {
-    const response = await companyApi.post('/hr/knowledge-qa', { question });
+    const payload = { question };
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      payload.chat_history = chatHistory;
+    }
+    const response = await companyApi.post('/hr/knowledge-qa', payload);
     return response;
   } catch (error) {
     console.error('HR knowledge QA error:', error);
+    throw error;
+  }
+};
+
+// ---------- Persisted HR Q&A chats ----------
+export const listHRKnowledgeChats = async () => {
+  try {
+    const response = await companyApi.get('/hr/ai/knowledge-qa/chats');
+    return response;
+  } catch (error) {
+    console.error('List HR knowledge chats error:', error);
+    throw error;
+  }
+};
+
+export const createHRKnowledgeChat = async (payload = {}) => {
+  try {
+    const response = await companyApi.post('/hr/ai/knowledge-qa/chats/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create HR knowledge chat error:', error);
+    throw error;
+  }
+};
+
+export const updateHRKnowledgeChat = async (chatId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/ai/knowledge-qa/chats/${chatId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR knowledge chat error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRKnowledgeChat = async (chatId) => {
+  try {
+    const response = await companyApi.delete(`/hr/ai/knowledge-qa/chats/${chatId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR knowledge chat error:', error);
     throw error;
   }
 };
@@ -230,6 +279,10 @@ export default {
   listHREmployees,
   createHREmployee,
   askHRKnowledge,
+  listHRKnowledgeChats,
+  createHRKnowledgeChat,
+  updateHRKnowledgeChat,
+  deleteHRKnowledgeChat,
   uploadHRDocument,
   listHRDocuments,
   summarizeHRDocument,

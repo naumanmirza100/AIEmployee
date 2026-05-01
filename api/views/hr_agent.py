@@ -135,9 +135,21 @@ def _serialize_employee(e: Employee) -> dict:
 @throttle_classes([HRCRUDThrottle])
 def list_employees(request):
     """List employees in the caller's company. Supports ?q=substring,
-    ?department=, ?status=, ?limit/?offset (defaults 50/0)."""
+    ?department=, ?status=, ?limit/?offset (defaults 50/0).
+
+    Backfills any CompanyUser without a backing Employee before listing —
+    employees in HR are the company users of the same tenant. The
+    CompanyUser→Employee sync signal handles new/updated rows; this catches
+    pre-existing CompanyUsers from before the sync was wired.
+    """
     try:
         company = request.user.company
+        # Backfill — idempotent + cheap.
+        from hr_agent.signals import backfill_employees_for_company
+        try:
+            backfill_employees_for_company(company.id)
+        except Exception:
+            logger.exception("list_employees: backfill failed for company %s", company.id)
         qs = Employee.objects.filter(company=company)
         q = (request.GET.get('q') or '').strip()
         if q:
@@ -206,7 +218,12 @@ def create_employee(request):
 def hr_knowledge_qa(request):
     """Ask the HR knowledge agent. Personalises the answer to the asking
     employee when the CompanyUser is linked to one (the HRAgent stitches in
-    leave balance / manager / department from `Employee`)."""
+    leave balance / manager / department from `Employee`).
+
+    Optional body fields:
+      ``chat_history``: list of ``{role: 'user'|'assistant', content: str}``
+        — last few turns for multi-turn coherence.
+    """
     try:
         company_user = request.user
         company = company_user.company
@@ -216,9 +233,27 @@ def hr_knowledge_qa(request):
                             status=status.HTTP_400_BAD_REQUEST)
         asker_employee = (Employee.objects.filter(company=company, company_user=company_user).first()
                           or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+
+        # Multi-turn — prepend the last few turns to the question so the
+        # retriever has something to ground on for follow-ups like "what about
+        # for managers?". Cap length so prompts don't balloon.
+        history = request.data.get('chat_history') or []
+        contextualized = question
+        if isinstance(history, list) and history:
+            recent = []
+            for turn in history[-6:]:
+                if not isinstance(turn, dict):
+                    continue
+                role = (turn.get('role') or '').lower()
+                content = (turn.get('content') or '')[:1500]
+                if role in ('user', 'assistant') and content:
+                    recent.append(f"{role.capitalize()}: {content}")
+            if recent:
+                contextualized = "Previous conversation:\n" + "\n".join(recent) + "\n\nCurrent question: " + question
+
         agent = HRAgent(company_id=company.id)
         result = agent.answer_question(
-            question,
+            contextualized,
             asker_role=_resolve_asker_role(company_user),
             asker_employee=asker_employee,
         )
@@ -226,6 +261,131 @@ def hr_knowledge_qa(request):
     except Exception:
         logger.exception("hr_knowledge_qa failed")
         return Response({'status': 'error', 'message': 'Failed to answer question'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# HR Knowledge Q&A — chat persistence (mirrors PM agent's chat shape)
+# ============================================================================
+
+def _normalize_chat(chat: HRKnowledgeChat) -> dict:
+    """Compact wire shape; messages oldest-first."""
+    msgs = []
+    for m in chat.messages.order_by('created_at'):
+        item = {'role': m.role, 'content': m.content}
+        if m.response_data:
+            item['responseData'] = m.response_data
+        msgs.append(item)
+    return {
+        'id': str(chat.id),
+        'title': chat.title or 'HR chat',
+        'messages': msgs,
+        'updatedAt': chat.updated_at.isoformat() if chat.updated_at else None,
+        'timestamp': chat.updated_at.isoformat() if chat.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_knowledge_chats(request):
+    """List the caller's HR Q&A chats (most recent first, capped at 50)."""
+    try:
+        chats = (HRKnowledgeChat.objects.filter(company_user=request.user)
+                 .order_by('-updated_at')[:50])
+        return Response({'status': 'success',
+                         'data': [_normalize_chat(c) for c in chats]})
+    except Exception:
+        logger.exception("list_hr_knowledge_chats failed")
+        return Response({'status': 'error', 'message': 'Failed to list chats'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_hr_knowledge_chat(request):
+    """Create a new chat with optional initial messages."""
+    try:
+        d = request.data or {}
+        title = (d.get('title') or 'HR chat')[:255]
+        chat = HRKnowledgeChat.objects.create(company_user=request.user, title=title)
+        for m in (d.get('messages') or []):
+            if not isinstance(m, dict):
+                continue
+            role = (m.get('role') or '').lower()
+            if role not in ('user', 'assistant'):
+                continue
+            HRKnowledgeChatMessage.objects.create(
+                chat=chat, role=role,
+                content=str(m.get('content') or '')[:50000],
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _normalize_chat(chat)},
+                        status=status.HTTP_201_CREATED)
+    except Exception:
+        logger.exception("create_hr_knowledge_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to create chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_hr_knowledge_chat(request, chat_id):
+    """Replace title and/or message list. Caller sends the full message
+    array (PM agent's pattern) so we don't have to merge deltas — simple,
+    deterministic, idempotent."""
+    try:
+        chat = HRKnowledgeChat.objects.filter(pk=chat_id, company_user=request.user).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        if 'title' in d:
+            chat.title = (d['title'] or 'HR chat')[:255]
+        chat.save()
+        if 'messages' in d:
+            HRKnowledgeChatMessage.objects.filter(chat=chat).delete()
+            for m in d.get('messages') or []:
+                if not isinstance(m, dict):
+                    continue
+                role = (m.get('role') or '').lower()
+                if role not in ('user', 'assistant'):
+                    continue
+                HRKnowledgeChatMessage.objects.create(
+                    chat=chat, role=role,
+                    content=str(m.get('content') or '')[:50000],
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _normalize_chat(chat)})
+    except Exception:
+        logger.exception("update_hr_knowledge_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to update chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_hr_knowledge_chat(request, chat_id):
+    try:
+        deleted, _ = HRKnowledgeChat.objects.filter(
+            pk=chat_id, company_user=request.user,
+        ).delete()
+        if not deleted:
+            return Response({'status': 'error', 'message': 'Chat not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': {'deleted': True}})
+    except Exception:
+        logger.exception("delete_hr_knowledge_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to delete chat'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

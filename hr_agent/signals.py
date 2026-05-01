@@ -1,13 +1,19 @@
-"""HR Support Agent — post_save signal triggers for HR workflows.
+"""HR Support Agent — post_save signal triggers.
 
-When an Employee row is created (a new hire) or a LeaveRequest is submitted
-or transitions through approve/reject, we evaluate every active
-`HRWorkflow` whose `trigger_conditions.on` matches the event. The matching
-workflows run via `hr_agent.workflow_engine.execute_workflow` with a
-context payload populated from the row.
+Two responsibilities:
 
-Re-entrancy: the workflow engine's `update_employee` step writes back to
-the same Employee row; without a guard we'd loop. Reuses Frontline's
+1. **CompanyUser ↔ Employee sync.** Every CompanyUser in a company IS an
+   employee. A `post_save` receiver auto-creates an `Employee` row linked by
+   `company_user` OneToOneField when a new CompanyUser is created (or its
+   email/name changes). Manual `Employee.objects.create(...)` still works
+   for contractors / candidates without dashboard logins.
+
+2. **HR workflow triggers.** When an Employee or LeaveRequest is saved we
+   evaluate every active `HRWorkflow` whose `trigger_conditions.on` matches
+   the event. Workflows run via `hr_agent.workflow_engine.execute_workflow`.
+
+Re-entrancy: the workflow engine's `update_employee` step writes back to the
+same Employee row; without a guard we'd loop. Reuses Frontline's
 `workflow_execution_guard` ContextVar — same module, same shape.
 """
 import logging
@@ -16,10 +22,87 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+from core.models import CompanyUser
 from hr_agent.models import Employee, LeaveRequest
 
 
 logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------
+# CompanyUser → Employee auto-sync
+# --------------------------------------------------------------------------
+
+def _ensure_employee_for_company_user(company_user: CompanyUser) -> Employee:
+    """Create-or-update the Employee row backing a CompanyUser. Idempotent."""
+    if not company_user or not company_user.company_id:
+        return None
+    emp = Employee.objects.filter(company_user=company_user).first()
+    if emp:
+        # Light sync — keep email + name in step with the CompanyUser.
+        dirty = []
+        if emp.work_email != (company_user.email or '').lower():
+            emp.work_email = (company_user.email or '').lower()
+            dirty.append('work_email')
+        if not emp.full_name and company_user.full_name:
+            emp.full_name = company_user.full_name[:255]
+            dirty.append('full_name')
+        if dirty:
+            dirty.append('updated_at')
+            emp.save(update_fields=list(set(dirty)))
+        return emp
+    # Try not to create a duplicate when an Employee with the same email
+    # already exists for this company (e.g. contractor row added manually).
+    existing_by_email = Employee.objects.filter(
+        company_id=company_user.company_id,
+        work_email__iexact=(company_user.email or ''),
+        company_user__isnull=True,
+    ).first()
+    if existing_by_email:
+        existing_by_email.company_user = company_user
+        if not existing_by_email.full_name and company_user.full_name:
+            existing_by_email.full_name = company_user.full_name[:255]
+        existing_by_email.save(update_fields=['company_user', 'full_name', 'updated_at'])
+        return existing_by_email
+    return Employee.objects.create(
+        company=company_user.company,
+        company_user=company_user,
+        full_name=(company_user.full_name or company_user.email)[:255],
+        work_email=(company_user.email or '').lower(),
+        employment_status='active',
+    )
+
+
+@receiver(post_save, sender=CompanyUser)
+def companyuser_post_save(sender, instance: CompanyUser, created, **kwargs):
+    """Auto-create / sync the Employee row backing this CompanyUser.
+
+    Failures are logged but never break the original save — Employee sync is
+    a side effect, not a precondition for the CompanyUser write.
+    """
+    try:
+        _ensure_employee_for_company_user(instance)
+    except Exception:
+        logger.exception("Failed to sync Employee for CompanyUser %s", instance.id)
+
+
+def backfill_employees_for_company(company_id: int) -> int:
+    """One-shot helper used by `list_employees` to make sure every active
+    CompanyUser in a tenant has a backing Employee row before we list them.
+
+    Returns the number of newly-created Employee rows.
+    """
+    created = 0
+    for cu in CompanyUser.objects.filter(company_id=company_id, is_active=True):
+        emp = Employee.objects.filter(company_user=cu).first()
+        if emp:
+            continue
+        try:
+            _ensure_employee_for_company_user(cu)
+            created += 1
+        except Exception:
+            logger.exception("backfill: failed for CompanyUser %s", cu.id)
+    return created
 
 
 def _system_user():
