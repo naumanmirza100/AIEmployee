@@ -34,6 +34,7 @@ from api.views import recruitment_agent
 from api.views import marketing_agent
 from api.views import reply_draft_agent as reply_draft_api
 from api.views import frontline_agent
+from api.views import hr_agent
 from api.views import module_purchase
 from api.views import company_api_keys
 from api.views import admin_api_keys
@@ -505,6 +506,9 @@ urlpatterns = [
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/approve/?$', reply_draft_api.approve_draft, name='reply_draft_approve'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/reject/?$', reply_draft_api.reject_draft, name='reply_draft_reject'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/send/?$', reply_draft_api.send_draft, name='reply_draft_send'),
+    re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
+    re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
+    re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
 
     # Operations Notifications
     re_path(r'^operations/notifications/?$', operations_agent.list_notifications, name='operations_notifications_list'),  # GET
@@ -559,6 +563,43 @@ urlpatterns = [
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/qualify/?$', sdr_api.qualify_lead, name='sdr_qualify_lead'),  # POST
+    # ---------------------------------------------------------------------
+    # HR Support Agent
+    # ---------------------------------------------------------------------
+    # Dashboard
+    re_path(r'^hr/dashboard/?$', hr_agent.hr_dashboard, name='hr_dashboard'),  # GET
+
+    # Employees
+    re_path(r'^hr/employees/?$', hr_agent.list_employees, name='hr_list_employees'),  # GET
+    re_path(r'^hr/employees/create/?$', hr_agent.create_employee, name='hr_create_employee'),  # POST
+
+    # Knowledge Q&A
+    re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
+
+    # Documents
+    re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
+    re_path(r'^hr/documents/upload/?$', hr_agent.upload_hr_document, name='hr_upload_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/summarize/?$', hr_agent.summarize_hr_document, name='hr_summarize_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/extract/?$', hr_agent.extract_hr_document, name='hr_extract_document'),  # POST
+
+    # Workflows / SOPs
+    re_path(r'^hr/workflows/?$', hr_agent.list_hr_workflows, name='hr_list_workflows'),  # GET
+    re_path(r'^hr/workflows/create/?$', hr_agent.create_hr_workflow, name='hr_create_workflow'),  # POST
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/execute/?$', hr_agent.execute_hr_workflow, name='hr_execute_workflow'),  # POST
+
+    # Notifications
+    re_path(r'^hr/notifications/templates/?$', hr_agent.list_hr_notification_templates, name='hr_list_notification_templates'),  # GET
+    re_path(r'^hr/notifications/templates/create/?$', hr_agent.create_hr_notification_template, name='hr_create_notification_template'),  # POST
+    re_path(r'^hr/notifications/scheduled/?$', hr_agent.list_hr_scheduled_notifications, name='hr_list_scheduled_notifications'),  # GET
+
+    # Meetings
+    re_path(r'^hr/meetings/?$', hr_agent.list_hr_meetings, name='hr_list_meetings'),  # GET
+    re_path(r'^hr/meetings/create/?$', hr_agent.create_hr_meeting, name='hr_create_meeting'),  # POST
+    re_path(r'^hr/meetings/availability/?$', hr_agent.hr_meeting_availability, name='hr_meeting_availability'),  # GET
+
+    # Leave requests
+    re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
 ]
 
 

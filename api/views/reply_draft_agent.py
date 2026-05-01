@@ -6,14 +6,13 @@ Resolves the CompanyUser to a Django User (same bridge marketing uses) because
 the underlying models (Lead, Reply, EmailAccount) are keyed on User.
 """
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from django.contrib.auth.models import User
-from django.db.models import Count, Max, Prefetch
-from django.db.models.functions import Substr
+from django.db.models import Count, Max, Prefetch, Q
 from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
@@ -57,6 +56,20 @@ def _enforce_module(company_user):
     return None
 
 
+def _get_reply_account(user_ids):
+    """The single EmailAccount flagged for this company's Reply Draft Agent.
+
+    The Reply Draft Agent intentionally uses a dedicated account, isolated
+    from the marketing-campaign account list. Returns None when the company
+    hasn't attached one yet — the UI prompts the user to add one.
+    """
+    return (
+        EmailAccount.objects
+        .filter(owner_id__in=user_ids, is_reply_agent_account=True)
+        .first()
+    )
+
+
 def _sender_name(lead):
     if not lead:
         return ''
@@ -96,15 +109,23 @@ def _serialize_reply(r, *, include_body=False):
 
 
 def _serialize_inbox_email(m, *, include_body=False):
-    """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics."""
+    """Serialize an InboxEmail row. See _serialize_reply for ``include_body`` semantics.
+
+    `to_email` and `direction` are exposed so the frontend Sent tab can
+    render "To: <recipient>" instead of the from-address. `replied_at`
+    is reused as the row's timestamp regardless of direction; the field
+    name is historical (originally only inbound replies were listed).
+    """
     preview = getattr(m, '_list_preview', None)
     if preview is None:
         preview = (m.body or '')[:200]
     out = {
         'id': m.id,
         'source': 'inbox',
+        'direction': m.direction,
         'from_email': m.from_email,
         'from_name': m.from_name,
+        'to_email': m.to_email,
         'from_company': '',
         'from_job_title': '',
         'subject': m.subject or '(no subject)',
@@ -117,6 +138,10 @@ def _serialize_inbox_email(m, *, include_body=False):
     }
     if include_body:
         out['body'] = m.body or ''
+        # `body_html` is only useful at detail-view time — the list view
+        # would otherwise pull tens of MB of markup. Frontend renders this
+        # in a sandboxed iframe and falls back to `body` when empty.
+        out['body_html'] = getattr(m, 'body_html', '') or ''
     return out
 
 
@@ -262,33 +287,39 @@ def dashboard(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_pending_replies(request):
-    """Inbox view: campaign replies + every generic inbox email in the window.
-
-    Generic inbox mail is no longer gated on the sender being a known lead —
-    the Reply Draft UI surfaces the full mailbox so the user can draft a reply
-    to anything. Use ``days`` to widen or disable the rolling window.
+    """Inbox / Sent view: every mail in the company's Reply Draft Agent
+    account in the window, scoped by direction. Isolated from marketing —
+    if the company hasn't attached a Reply Draft Agent account yet, the
+    list is empty by design.
 
     Query params:
-      - campaign: campaign id, or 'none' (generic inbox only), or blank (all)
       - days: 1 / 7 / 30 / 60 / 90 / 120 / 'all' (default: all stored rows;
               the underlying storage window is set per-account via Sync depth)
+      - direction: 'in' (Inbox tab — default, backwards-compat)
+                   'out' (Sent tab — populated by the IMAP Sent-folder sync)
     """
     gate = _enforce_module(request.user)
     if gate is not None:
         return gate
 
     user_ids = _company_bridge_user_ids(request.user)
-    campaign_param = (request.GET.get('campaign') or '').strip()
     days_cutoff = _parse_days_filter(request.GET.get('days'))
+    # 'in' default keeps existing inbox callers unchanged. The Sent tab
+    # passes direction=out explicitly.
+    direction = request.GET.get('direction', 'in')
+    if direction not in ('in', 'out'):
+        direction = 'in'
+
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        # No account attached yet — nothing to show. The UI prompts the user
+        # to add one; the endpoint stays consistent and returns an empty list
+        # instead of 404 so polling code doesn't need special-case branches.
+        return Response({'status': 'success', 'data': [], 'total': 0})
 
     # Only LIVE drafts block their original from re-appearing in the inbox.
     # Rejected/discarded drafts should send the original back to the inbox so
     # the user can draft again.
-    drafted_reply_ids = set(
-        ReplyDraft.objects.filter(owner_id__in=user_ids, original_email_id__isnull=False)
-        .exclude(status='rejected')
-        .values_list('original_email_id', flat=True)
-    )
     drafted_inbox_ids = set(
         ReplyDraft.objects.filter(owner_id__in=user_ids, inbox_email_id__isnull=False)
         .exclude(status='rejected')
@@ -297,53 +328,33 @@ def list_pending_replies(request):
 
     items = []
 
-    # The body / reply_content columns can be 10-100KB each on MSSQL. Pulling
-    # them for the list view tanked /pending-replies to 30s for 350 rows.
-    # We defer them + pre-compute a 200-char preview via SQL SUBSTRING instead;
-    # the full body is loaded lazily by the detail endpoints when a row is clicked.
-    preview_len = 200
-
-    # Campaign replies — included unless the user asked for generic-only ('none').
-    if campaign_param != 'none':
-        reply_qs = (
-            Reply.objects
-            .filter(lead__owner_id__in=user_ids)
-            .exclude(id__in=drafted_reply_ids)
-            .select_related('lead', 'campaign')
-            .defer('reply_content')
-            .annotate(_list_preview=Substr('reply_content', 1, preview_len))
-        )
-        if days_cutoff is not None:
-            reply_qs = reply_qs.filter(replied_at__gte=days_cutoff)
-        if campaign_param and campaign_param != 'none':
-            try:
-                reply_qs = reply_qs.filter(campaign_id=int(campaign_param))
-            except ValueError:
-                pass
-        for r in reply_qs.order_by('-replied_at')[:2000]:
-            items.append((r.replied_at, _serialize_reply(r)))
-
-    # Generic inbox emails — every mail that landed in any of this company's
-    # accounts in the window. Excluded entirely when the user picked a specific
-    # campaign (that filter is inherently lead-scoped).
-    specific_campaign_selected = bool(campaign_param) and campaign_param != 'none'
-    if not specific_campaign_selected:
-        inbox_qs = (
-            InboxEmail.objects.filter(owner_id__in=user_ids)
-            .exclude(id__in=drafted_inbox_ids)
-            .select_related('email_account')
-            .defer('body')
-            .annotate(_list_preview=Substr('body', 1, preview_len))
-        )
-        if days_cutoff is not None:
-            inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
-        for m in inbox_qs.order_by('-received_at')[:2000]:
-            items.append((m.received_at, _serialize_inbox_email(m)))
+    # Defer the body column entirely. Per-row body is 10-100KB on MSSQL, so
+    # fetching it for hundreds of rows just to compute a 200-char preview
+    # was the dominant cost of this endpoint (multi-second responses for the
+    # Sent tab in particular). The list view shows from/subject/date/badge —
+    # body is loaded lazily via getReplyItem when the user clicks a row.
+    # `_list_preview` is set to '' so the serializer's fallback never touches
+    # `m.body` (which would trigger an N+1 query under defer).
+    inbox_qs = (
+        InboxEmail.objects
+        .filter(owner_id__in=user_ids, email_account_id=reply_account.id, direction=direction)
+        .exclude(id__in=drafted_inbox_ids)
+        .select_related('email_account')
+        .defer('body', 'body_html')
+    )
+    if days_cutoff is not None:
+        inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
+    # Cap at 500 — the previous 2000 was a worst-case safety net but with
+    # body deferred + paged list, the user only ever scrolls through the
+    # most recent few hundred. A smaller cap also keeps the JSON payload
+    # tight enough to render instantly on dropdown changes.
+    LIST_LIMIT = 500
+    for m in inbox_qs.order_by('-received_at')[:LIST_LIMIT]:
+        m._list_preview = ''
+        items.append((m.received_at, _serialize_inbox_email(m)))
 
     items.sort(key=lambda pair: pair[0] or timezone.now(), reverse=True)
-    # Cap at 2000 so a broken client can't pull the entire mailbox; in
-    # practice a 120-day window on a typical business inbox stays well below this.
-    payload = [entry for _, entry in items[:2000]]
+    payload = [entry for _, entry in items]
 
     return Response({
         'status': 'success',
@@ -365,7 +376,16 @@ def get_inbox_email(request, email_id):
     if gate is not None:
         return gate
     user_ids = _company_bridge_user_ids(request.user)
-    m = InboxEmail.objects.filter(id=email_id, owner_id__in=user_ids).select_related('email_account').first()
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    # Detail serializer doesn't read any EmailAccount fields, so no
+    # select_related — that join was an unused 200ms tax on every click.
+    m = (
+        InboxEmail.objects
+        .filter(id=email_id, owner_id__in=user_ids, email_account_id=reply_account.id)
+        .first()
+    )
     if m is None:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
     return Response({'status': 'success', 'data': _serialize_inbox_email(m, include_body=True)})
@@ -401,7 +421,12 @@ def list_sync_accounts(request):
     if gate is not None:
         return gate
     user_ids = _company_bridge_user_ids(request.user)
-    accounts = EmailAccount.objects.filter(owner_id__in=user_ids).order_by('-is_default', '-is_active', '-created_at')
+    # Reply Draft Agent is isolated from marketing: it only surfaces the
+    # single EmailAccount explicitly attached to it (is_reply_agent_account).
+    # Accounts added on the Marketing Agent side are intentionally excluded.
+    accounts = EmailAccount.objects.filter(
+        owner_id__in=user_ids, is_reply_agent_account=True,
+    ).order_by('-is_default', '-is_active', '-created_at')
 
     # Single query to avoid N+1 when there are many accounts.
     from django.db.models import Count
@@ -426,7 +451,19 @@ def list_sync_accounts(request):
             'enable_imap_sync': a.enable_imap_sync,
             'imap_ready': imap_ready,   # has all three credential fields
             'will_sync': will_sync,
+            # SMTP connection fields. The password itself is never returned —
+            # the edit form treats a blank password as "keep what's stored".
+            'smtp_host': a.smtp_host or '',
+            'smtp_port': a.smtp_port,
+            'smtp_username': a.smtp_username or '',
+            'use_tls': a.use_tls,
+            'use_ssl': a.use_ssl,
+            'is_gmail_app_password': a.is_gmail_app_password,
+            # IMAP connection fields (same password policy as SMTP above).
             'imap_host': a.imap_host or '',
+            'imap_port': a.imap_port,
+            'imap_username': a.imap_username or '',
+            'imap_use_ssl': a.imap_use_ssl,
             'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
             'test_status': getattr(a, 'test_status', 'not_tested') or 'not_tested',
             # --- First-sync UX signals ---
@@ -588,7 +625,19 @@ def list_drafts(request):
     if gate is not None:
         return gate
     user_ids = _company_bridge_user_ids(request.user)
-    qs = ReplyDraft.objects.filter(owner_id__in=user_ids).select_related('lead', 'original_email', 'inbox_email')
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        return Response({'status': 'success', 'data': []})
+    # Scope drafts to the attached Reply Draft Agent account so older drafts
+    # created from a marketing account before isolation was introduced don't
+    # leak into the view. Drafts with no email_account FK are shown too — they
+    # predate this flag and deleting them silently would be worse than showing.
+    qs = (
+        ReplyDraft.objects
+        .filter(owner_id__in=user_ids)
+        .filter(Q(email_account_id=reply_account.id) | Q(email_account__isnull=True))
+        .select_related('lead', 'original_email', 'inbox_email')
+    )
     status_filter = request.GET.get('status')
     if status_filter:
         qs = qs.filter(status=status_filter)
@@ -716,3 +765,281 @@ def reject_draft(request, draft_id):
     draft.status = 'rejected'
     draft.save(update_fields=['status', 'updated_at'])
     return Response({'status': 'success', 'data': {'draft_id': draft.id, 'status': draft.status}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_reply_account(request):
+    """Create (or re-attach) the single EmailAccount used by the Reply Draft Agent.
+
+    Independent from marketing_agent.create_email_account so that Reply Draft
+    accounts stay out of the Marketing Agent account lists. The account is
+    created with ``is_reply_agent_account=True`` and ``enable_imap_sync=True``;
+    the EmailAccount.save() override demotes any previously-flagged account so
+    there is always at most one per owner.
+
+    Triggers an immediate Celery sync so the inbox starts populating within
+    ~30 seconds instead of waiting for the next beat tick.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    try:
+        user = _get_or_create_user_for_company_user(request.user)
+        data = request.data or {}
+
+        name = (data.get('name') or '').strip() or 'Reply Draft Inbox'
+        email = (data.get('email') or '').strip()
+        if not email:
+            return Response(
+                {'status': 'error', 'message': 'Email is required.', 'error': 'validation'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        smtp_host = (data.get('smtp_host') or '').strip()
+        smtp_port = int(data.get('smtp_port') or 587)
+        smtp_username = (data.get('smtp_username') or '').strip() or email
+        smtp_password = data.get('smtp_password') or ''
+        if not smtp_host or not smtp_password:
+            return Response(
+                {'status': 'error', 'message': 'SMTP host and password are required.', 'error': 'validation'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # IMAP is the whole point of a Reply Draft account — always required.
+        imap_host = (data.get('imap_host') or '').strip()
+        imap_port = int(data.get('imap_port') or 993)
+        imap_username = (data.get('imap_username') or '').strip() or email
+        imap_password = data.get('imap_password') or ''
+        if not imap_host or not imap_password:
+            return Response(
+                {'status': 'error', 'message': 'IMAP host and password are required (the inbox syncs through IMAP).', 'error': 'validation'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify IMAP credentials BEFORE we save the account so the user
+        # sees the auth error immediately. Without this the account gets
+        # created, the background sync fails, and the UI just spins.
+        from api.views.marketing_agent import verify_imap_credentials
+        ok, err = verify_imap_credentials(
+            imap_host, imap_port,
+            bool(data.get('imap_use_ssl', True)),
+            imap_username, imap_password,
+        )
+        if not ok:
+            return Response({
+                'status': 'error',
+                'message': f'IMAP login failed: {err}',
+                'error': 'imap_auth_failed',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Duplicate check — create_unique is per (owner, email). If the user is
+        # re-attaching an existing account by the same email, just promote it
+        # instead of erroring out.
+        existing = EmailAccount.objects.filter(owner=user, email__iexact=email).first()
+        if existing:
+            existing.name = name
+            existing.account_type = data.get('account_type', existing.account_type or 'smtp')
+            existing.smtp_host = smtp_host
+            existing.smtp_port = smtp_port
+            existing.smtp_username = smtp_username
+            existing.smtp_password = smtp_password
+            existing.use_tls = bool(data.get('use_tls', existing.use_tls))
+            existing.use_ssl = bool(data.get('use_ssl', existing.use_ssl))
+            existing.is_gmail_app_password = bool(data.get('is_gmail_app_password', existing.is_gmail_app_password))
+            existing.imap_host = imap_host
+            existing.imap_port = imap_port
+            existing.imap_username = imap_username
+            existing.imap_password = imap_password
+            existing.imap_use_ssl = bool(data.get('imap_use_ssl', True))
+            existing.enable_imap_sync = True
+            existing.is_reply_agent_account = True
+            existing.is_active = True
+            existing.save()
+            account = existing
+        else:
+            account = EmailAccount.objects.create(
+                owner=user,
+                name=name,
+                account_type=data.get('account_type', 'smtp'),
+                email=email,
+                smtp_host=smtp_host,
+                smtp_port=smtp_port,
+                smtp_username=smtp_username,
+                smtp_password=smtp_password,
+                use_tls=bool(data.get('use_tls', True)),
+                use_ssl=bool(data.get('use_ssl', False)),
+                is_gmail_app_password=bool(data.get('is_gmail_app_password', False)),
+                imap_host=imap_host,
+                imap_port=imap_port,
+                imap_username=imap_username,
+                imap_password=imap_password,
+                imap_use_ssl=bool(data.get('imap_use_ssl', True)),
+                enable_imap_sync=True,
+                is_active=True,
+                is_reply_agent_account=True,
+            )
+
+        # Single 120-day sync — batched IMAP fetches in sync_inbox bring
+        # this in around 30s, so the prior 30-day-fast / 120-day-delayed
+        # split is no longer worth its complexity. The 5-min periodic beat
+        # is the fallback if this enqueue fails.
+        sync_queued = False
+        try:
+            from marketing_agent.tasks import sync_inbox_task
+            sync_inbox_task.delay(account_id=account.id)
+            sync_queued = True
+        except Exception:
+            logger.exception('create_reply_account: failed to enqueue immediate inbox sync')
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'account_id': account.id,
+                'email': account.email,
+                'message': 'Reply Draft Agent inbox connected.',
+                'immediate_sync_queued': sync_queued,
+            },
+        }, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception('create_reply_account failed')
+        return Response(
+            {'status': 'error', 'message': str(e), 'error': 'failed'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_reply_account(request):
+    """Detach and delete the Reply Draft Agent's EmailAccount.
+
+    Cascades InboxEmail + ReplyDraft rows tied to this account (per the FK
+    on_delete behavior in the models). The UI gates this behind a confirm
+    dialog — there's no separate soft-detach mode because leaving orphaned
+    InboxEmail rows around after the user clicks "Delete" is more confusing
+    than cleaning them up.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+    try:
+        user_ids = _company_bridge_user_ids(request.user)
+        account = _get_reply_account(user_ids)
+        if account is None:
+            return Response(
+                {'status': 'error', 'message': 'No Reply Draft account attached.', 'error': 'not_attached'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        account_email = account.email
+        account.delete()
+        return Response({
+            'status': 'success',
+            'data': {'message': f'{account_email} disconnected and inbox cleared.'},
+        })
+    except Exception as e:
+        logger.exception('delete_reply_account failed')
+        return Response(
+            {'status': 'error', 'message': str(e), 'error': 'failed'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reply_analytics(request):
+    """Time-series of inbox mail for the attached Reply Draft Agent account.
+
+    Query params:
+      - days: 30 | 60 | 90 | 120 (default 30). Anything out-of-range is clamped.
+
+    Buckets are daily for the 30-day window and weekly for 60/90/120-day
+    windows — aggregating longer spans into weeks keeps the line chart from
+    looking like a flat line with one spike when mail volume is sparse.
+    Scoped to the attached EmailAccount — nothing bleeds in from marketing.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    # Clamp the window to supported values so a bad query string can't cause
+    # a 10,000-bucket payload.
+    ALLOWED_WINDOWS = (30, 60, 90, 120)
+    try:
+        days = int(request.GET.get('days') or 30)
+    except (TypeError, ValueError):
+        days = 30
+    if days not in ALLOWED_WINDOWS:
+        days = min(ALLOWED_WINDOWS, key=lambda w: abs(w - days))
+
+    # 30-day view stays daily (30 points is fine to read). Anything longer
+    # rolls up to 7-day buckets — 60d → 9 points, 90d → 13, 120d → 18.
+    granularity = 'day' if days <= 30 else 'week'
+    bucket_span_days = 1 if granularity == 'day' else 7
+    bucket_count = days if granularity == 'day' else -(-days // 7)  # ceil div
+
+    user_ids = _company_bridge_user_ids(request.user)
+    account = _get_reply_account(user_ids)
+
+    today = timezone.now().date()
+    buckets = []
+    in_qs = None
+    out_qs = None
+    if account is not None:
+        # Split incoming vs outgoing up front so each bucket's two .count()
+        # calls don't re-evaluate the direction filter.
+        in_qs = InboxEmail.objects.filter(
+            owner_id__in=user_ids, email_account_id=account.id, direction='in',
+        )
+        out_qs = InboxEmail.objects.filter(
+            owner_id__in=user_ids, email_account_id=account.id, direction='out',
+        )
+
+    # Walk oldest → newest so the frontend can render the series in order.
+    for i in range(bucket_count - 1, -1, -1):
+        end_day = today - timedelta(days=i * bucket_span_days)
+        start_day = end_day - timedelta(days=bucket_span_days - 1)
+        start_dt = datetime.combine(start_day, datetime.min.time())
+        if timezone.is_naive(start_dt):
+            start_dt = timezone.make_aware(start_dt)
+        end_dt = datetime.combine(end_day, datetime.min.time()) + timedelta(days=1)
+        if timezone.is_naive(end_dt):
+            end_dt = timezone.make_aware(end_dt)
+
+        if in_qs is not None:
+            received = in_qs.filter(received_at__gte=start_dt, received_at__lt=end_dt).count()
+            sent = out_qs.filter(received_at__gte=start_dt, received_at__lt=end_dt).count()
+        else:
+            received = 0
+            sent = 0
+
+        # `date` anchors the bucket at its START — that's the conventional
+        # label for weekly charts ("week of 2026-04-19").
+        # `count` is kept for backwards compatibility with anything still
+        # reading the combined total; new callers should prefer received/sent.
+        buckets.append({
+            'date': start_day.isoformat(),
+            'received': received,
+            'sent': sent,
+            'count': received + sent,
+        })
+
+    received_total = sum(b['received'] for b in buckets)
+    sent_total = sum(b['sent'] for b in buckets)
+    return Response({
+        'status': 'success',
+        'data': {
+            'account_email': account.email if account else None,
+            'days': days,
+            'granularity': granularity,
+            'total': received_total + sent_total,
+            'received_total': received_total,
+            'sent_total': sent_total,
+            'buckets': buckets,
+        },
+    })
+
+

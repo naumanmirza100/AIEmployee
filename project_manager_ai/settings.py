@@ -295,6 +295,7 @@ INSTALLED_APPS = [
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
     'reply_draft_agent.apps.ReplyDraftAgentConfig',  # AI reply drafter (human-in-the-loop)
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
+    'hr_agent.apps.HRAgentConfig',  # HR Support Agent app
     'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app
     'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
@@ -303,6 +304,11 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Gzip-compress JSON / HTML responses. Reply Draft Agent's email
+    # detail payloads ship 100-300KB of `body_html` per click; gzip
+    # cuts that to ~20-40KB and makes "Loading message…" near-instant.
+    # Sits before CommonMiddleware (per Django docs) and after security.
+    'django.middleware.gzip.GZipMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
      'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -358,7 +364,15 @@ DATABASES = {
             'connection_timeout': 60,
             'login_timeout': 60,
         },
-        'CONN_MAX_AGE': 0,
+        # Persistent connections — reuse the same TCP connection for 60s
+        # of idle time across requests instead of dialing a fresh MSSQL
+        # session for every API call. The TCP handshake + login round-trip
+        # is the dominant cost on a remote SQL Server (often 200-500ms);
+        # reusing connections collapses that to ~0 for warm requests.
+        # Health check before reuse so a stale/dropped connection doesn't
+        # surface as a confusing 500 to the user.
+        'CONN_MAX_AGE': 60,
+        'CONN_HEALTH_CHECKS': True,
         'TIME_ZONE': 'UTC',
     }
 }
@@ -871,6 +885,11 @@ REST_FRAMEWORK = {
         'frontline_llm': '60/hour',      # Authenticated LLM-powered endpoints (Q&A, triage, auto-resolve, summarize, extract)
         'frontline_upload': '30/hour',   # Document uploads (expensive: parse + embed)
         'frontline_crud': '300/hour',    # Authenticated CRUD endpoints
+        # HR Support Agent throttles
+        'hr_public': '20/hour',
+        'hr_llm': '60/hour',
+        'hr_upload': '30/hour',
+        'hr_crud': '300/hour',
         # Company auth endpoints (login / register) — by IP, to stop credential stuffing
         'company_auth': '10/hour',
     },

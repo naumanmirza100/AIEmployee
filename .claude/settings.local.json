@@ -46,7 +46,27 @@
       "Bash(npm run *)",
       "Bash(rm reply_draft_agent/migrations/0002_inboxemail_and_optional_source.py)",
       "Read(//d/University/work/AI_Employyes/NewAgentForReply/**)",
-      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")"
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(venv/Scripts/python.exe -X utf8 manage.py check)",
+      "Bash(venv/Scripts/python.exe -c \"import pyodbc; [print\\(d\\) for d in pyodbc.drivers\\(\\)]\")",
+      "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('marketing_agent/management/commands/sync_inbox.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Bash(venv/Scripts/python.exe -X utf8 manage.py shell -c ' *)",
+      "Bash(awk '/22:40:17/,/22:40:25/' \"D:/University/work/AI_Employyes/ReplyAgent/AIEmployee/logs/celery_worker.log\")",
+      "Bash(venv/Scripts/python.exe -X utf8 manage.py makemigrations --dry-run)",
+      "Bash(venv/Scripts/python.exe -X utf8 manage.py makemigrations --dry-run reply_draft_agent)",
+      "Bash(awk '/22:51:57/,/22:55:00/' \"D:/University/work/AI_Employyes/ReplyAgent/AIEmployee/logs/celery_worker.log\")",
+      "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('marketing_agent/management/commands/sync_inbox.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('core/apps.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('core/management/commands/runserver_with_celery.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('project_manager_ai/celery.py', encoding='utf-8'\\).read\\(\\)\\); print\\('all syntax ok'\\)\")",
+      "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('api/views/marketing_agent.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/views/reply_draft_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Bash(tasklist)",
+      "Bash(venv/Scripts/python.exe -X utf8 -c \"import ast; ast.parse\\(open\\('marketing_agent/management/commands/sync_inbox.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/views/reply_draft_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
+      "Bash(venv/Scripts/python.exe *)",
+      "Bash(break)",
+      "Bash(grep -vE \"EMAIL CONFIG|CELERY|SMTP|Backend|Host:|Port:|From:|Broker|Result Backend|Timezone|Using Redis|Scheduled Tasks|Sequence|Inbox sync|Retry|Auto-|Monitor|Sync performance|====|^$\")",
+      "Bash(grep -vE \"EMAIL CONFIG|CELERY CONFIG|Backend:|Host:|Port:|From:|Broker|Result Backend|Timezone|Using Redis|Scheduled Tasks|Sequence|Inbox sync|Retry|Auto-|Monitor|Sync performance|====|^$\")",
+      "Bash(timeout 90 npx --no-install vite build)",
+      "Bash(timeout 120 npx --no-install vite build)",
+      "Bash(npx --no-install vite build)",
+      "Bash(D:/University/work/AI_Employyes/ReplyAgent/AIEmployee/venv/Scripts/python.exe -c ' *)"
     ]
   }
 }
