@@ -74,12 +74,21 @@ import {
   composeCreateDraft,
   composeUpdateDraft,
 } from '@/services/replyDraftService';
+import { API_BASE_URL } from '@/config/apiConfig';
 
 // Mirror the backend caps in api/views/reply_draft_agent.py — keeping these
 // in sync lets us surface a clear, immediate error instead of waiting for
 // the server to 400. If the backend caps change, update both sides.
 const DRAFT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const DRAFT_ATTACHMENT_MAX_COUNT = 20;
+
+// Backend serializers emit `download_url` already prefixed with `/api/...`,
+// so we need just the server origin (no trailing /api). API_BASE_URL is
+// `http://host:port/api` for historical reasons — strip the suffix here so
+// fetch(`${ATTACHMENT_ORIGIN}${att.download_url}`) resolves to the Django
+// host instead of the Vite dev server, which had been silently returning
+// the SPA index.html for these requests and producing "corrupt" downloads.
+const ATTACHMENT_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
 
 // Pure view filter for the inbox list — Celery pre-syncs the full 120-day
 // window on a cron (see marketing_agent/management/commands/sync_inbox.py),
@@ -1654,8 +1663,7 @@ const AttachmentList = ({ attachments }) => {
     // <a href> links wouldn't carry the company-user token and would 401.
     try {
       const token = localStorage.getItem('company_auth_token') || '';
-      const apiBase = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
-      const url = `${apiBase}${att.download_url}`;
+      const url = `${ATTACHMENT_ORIGIN}${att.download_url}`;
       const res = await fetch(url, {
         method: 'GET',
         headers: token ? { Authorization: `Token ${token}` } : {},
@@ -1730,8 +1738,7 @@ const DraftAttachmentsSection = ({ draft, uploading, isReadOnly, onPickFiles, on
     // header and synthesises a download.
     try {
       const token = localStorage.getItem('company_auth_token') || '';
-      const apiBase = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
-      const url = `${apiBase}${att.download_url}`;
+      const url = `${ATTACHMENT_ORIGIN}${att.download_url}`;
       const res = await fetch(url, {
         method: 'GET',
         headers: token ? { Authorization: `Token ${token}` } : {},
@@ -2454,8 +2461,7 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   const handleDownloadAtt = async (att) => {
     try {
       const token = localStorage.getItem('company_auth_token') || '';
-      const apiBase = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
-      const url = `${apiBase}${att.download_url}`;
+      const url = `${ATTACHMENT_ORIGIN}${att.download_url}`;
       const res = await fetch(url, {
         method: 'GET',
         headers: token ? { Authorization: `Token ${token}` } : {},
