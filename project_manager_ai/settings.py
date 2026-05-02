@@ -298,6 +298,7 @@ INSTALLED_APPS = [
     'hr_agent.apps.HRAgentConfig',  # HR Support Agent app
     'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app
+    'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
     'whitenoise.runserver_nostatic',
 ]
 
