@@ -44,6 +44,7 @@ import {
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import hrAgentService from '@/services/hrAgentService';
 import HRKnowledgeQAAgent from './HRKnowledgeQAAgent';
+import HRMeetingScheduler from './HRMeetingScheduler';
 
 const HRDashboard = () => {
   const { toast } = useToast();
@@ -76,9 +77,7 @@ const HRDashboard = () => {
   const [workflows, setWorkflows] = useState([]);
   const [wfLoading, setWfLoading] = useState(false);
 
-  // Meetings
-  const [meetings, setMeetings] = useState([]);
-  const [mtLoading, setMtLoading] = useState(false);
+  // Meetings tab is now handled by `HRMeetingScheduler` component below.
 
   // ---------- Loaders ----------
   const loadStats = async () => {
@@ -129,24 +128,11 @@ const HRDashboard = () => {
     }
   };
 
-  const loadMeetings = async () => {
-    setMtLoading(true);
-    try {
-      const res = await hrAgentService.listHRMeetings();
-      setMeetings(res?.data || []);
-    } catch (e) {
-      toast({ title: 'Failed to load meetings', description: e.message, variant: 'destructive' });
-    } finally {
-      setMtLoading(false);
-    }
-  };
-
   useEffect(() => { loadStats(); }, []);
   useEffect(() => {
     if (activeTab === 'employees') loadEmployees();
     if (activeTab === 'documents') loadDocuments();
     if (activeTab === 'workflows') loadWorkflows();
-    if (activeTab === 'meetings') loadMeetings();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -446,36 +432,7 @@ const HRDashboard = () => {
         {/* MEETINGS */}
         <TabsContent value="meetings" className="mt-6">
           <ErrorBoundary>
-            <Card>
-              <CardHeader>
-                <CardTitle>HR Meetings</CardTitle>
-                <CardDescription>1:1s · performance reviews · onboarding · exits</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {mtLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-                ) : meetings.length === 0 ? (
-                  <div className="text-center py-10 text-muted-foreground">No meetings scheduled yet.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {meetings.map((m) => (
-                      <div key={m.id} className="rounded-md border border-border/50 p-3 flex items-center justify-between">
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">{m.title}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {m.meeting_type} · {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'unscheduled'}
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <Badge variant="secondary" className="text-[10px]">{m.status}</Badge>
-                          <Badge variant="outline" className="text-[10px]">{m.visibility}</Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <HRMeetingScheduler />
           </ErrorBoundary>
         </TabsContent>
       </Tabs>

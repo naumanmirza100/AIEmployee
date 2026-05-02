@@ -2,19 +2,21 @@
 
 Two responsibilities:
 
-1. **CompanyUser ↔ Employee sync.** Every CompanyUser in a company IS an
-   employee. A `post_save` receiver auto-creates an `Employee` row linked by
-   `company_user` OneToOneField when a new CompanyUser is created (or its
-   email/name changes). Manual `Employee.objects.create(...)` still works
-   for contractors / candidates without dashboard logins.
+1. **User → Employee sync.** Every Django ``auth.User`` belonging to a
+   company (via ``UserProfile.company``) IS an employee. A ``post_save``
+   receiver on ``UserProfile`` auto-creates the backing ``Employee`` row.
+   These are the same users the Project Manager Knowledge QA agent
+   surfaces. Manual ``Employee.objects.create(...)`` still works for
+   contractors / candidates that don't have a Django login yet.
 
-2. **HR workflow triggers.** When an Employee or LeaveRequest is saved we
-   evaluate every active `HRWorkflow` whose `trigger_conditions.on` matches
-   the event. Workflows run via `hr_agent.workflow_engine.execute_workflow`.
+2. **HR workflow triggers.** When an ``Employee`` or ``LeaveRequest`` is
+   saved we evaluate every active ``HRWorkflow`` whose
+   ``trigger_conditions.on`` matches the event. Workflows run via
+   ``hr_agent.workflow_engine.execute_workflow``.
 
-Re-entrancy: the workflow engine's `update_employee` step writes back to the
-same Employee row; without a guard we'd loop. Reuses Frontline's
-`workflow_execution_guard` ContextVar — same module, same shape.
+Re-entrancy: the workflow engine's ``update_employee`` step writes back to
+the same Employee row; without a guard we'd loop. Reuses Frontline's
+``workflow_execution_guard`` ContextVar — same module, same shape.
 """
 import logging
 
@@ -22,7 +24,7 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from core.models import CompanyUser
+from core.models import CompanyUser, UserProfile
 from hr_agent.models import Employee, LeaveRequest
 
 
@@ -30,78 +32,95 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------
-# CompanyUser → Employee auto-sync
+# User → Employee auto-sync (via UserProfile.company)
 # --------------------------------------------------------------------------
 
-def _ensure_employee_for_company_user(company_user: CompanyUser) -> Employee:
-    """Create-or-update the Employee row backing a CompanyUser. Idempotent."""
-    if not company_user or not company_user.company_id:
+def _ensure_employee_for_user(user: User, company) -> Employee:
+    """Get-or-create the Employee row backing a (user, company). Idempotent."""
+    if not user or not company:
         return None
-    emp = Employee.objects.filter(company_user=company_user).first()
+    emp = Employee.objects.filter(user=user).first()
     if emp:
-        # Light sync — keep email + name in step with the CompanyUser.
         dirty = []
-        if emp.work_email != (company_user.email or '').lower():
-            emp.work_email = (company_user.email or '').lower()
+        # Light sync — keep email + name in step with the underlying User.
+        target_email = (user.email or '').lower()
+        if target_email and emp.work_email != target_email:
+            emp.work_email = target_email
             dirty.append('work_email')
-        if not emp.full_name and company_user.full_name:
-            emp.full_name = company_user.full_name[:255]
+        full_name = (user.get_full_name() or user.username or '').strip()
+        if full_name and not emp.full_name:
+            emp.full_name = full_name[:255]
             dirty.append('full_name')
+        if emp.company_id != company.id:
+            emp.company = company
+            dirty.append('company')
         if dirty:
             dirty.append('updated_at')
             emp.save(update_fields=list(set(dirty)))
         return emp
-    # Try not to create a duplicate when an Employee with the same email
-    # already exists for this company (e.g. contractor row added manually).
+    # Avoid duplicating a manually-created contractor row with the same email.
     existing_by_email = Employee.objects.filter(
-        company_id=company_user.company_id,
-        work_email__iexact=(company_user.email or ''),
-        company_user__isnull=True,
+        company=company,
+        work_email__iexact=(user.email or ''),
+        user__isnull=True,
     ).first()
     if existing_by_email:
-        existing_by_email.company_user = company_user
-        if not existing_by_email.full_name and company_user.full_name:
-            existing_by_email.full_name = company_user.full_name[:255]
-        existing_by_email.save(update_fields=['company_user', 'full_name', 'updated_at'])
+        existing_by_email.user = user
+        if not existing_by_email.full_name:
+            existing_by_email.full_name = (user.get_full_name() or user.username or '')[:255]
+        existing_by_email.save(update_fields=['user', 'full_name', 'updated_at'])
         return existing_by_email
     return Employee.objects.create(
-        company=company_user.company,
-        company_user=company_user,
-        full_name=(company_user.full_name or company_user.email)[:255],
-        work_email=(company_user.email or '').lower(),
+        company=company,
+        user=user,
+        full_name=(user.get_full_name() or user.username or user.email)[:255],
+        work_email=(user.email or '').lower(),
         employment_status='active',
     )
 
 
-@receiver(post_save, sender=CompanyUser)
-def companyuser_post_save(sender, instance: CompanyUser, created, **kwargs):
-    """Auto-create / sync the Employee row backing this CompanyUser.
-
-    Failures are logged but never break the original save — Employee sync is
-    a side effect, not a precondition for the CompanyUser write.
-    """
+@receiver(post_save, sender=UserProfile)
+def userprofile_post_save(sender, instance: UserProfile, created, **kwargs):
+    """When a UserProfile is saved, ensure the backing Employee row exists for
+    that user under that profile's company. Best-effort — never breaks the
+    triggering save."""
+    if not (instance.company_id and instance.user_id):
+        return
+    if getattr(instance.user, 'is_superuser', False):
+        return
     try:
-        _ensure_employee_for_company_user(instance)
+        _ensure_employee_for_user(instance.user, instance.company)
     except Exception:
-        logger.exception("Failed to sync Employee for CompanyUser %s", instance.id)
+        logger.exception("Failed to sync Employee for UserProfile %s", instance.id)
 
 
 def backfill_employees_for_company(company_id: int) -> int:
-    """One-shot helper used by `list_employees` to make sure every active
-    CompanyUser in a tenant has a backing Employee row before we list them.
+    """One-shot helper used by ``list_employees`` to make sure every Django
+    ``User`` belonging to this company (via ``UserProfile.company``) has a
+    backing ``Employee`` row before we list them.
 
     Returns the number of newly-created Employee rows.
     """
+    from core.models import Company
+
+    company = Company.objects.filter(pk=company_id).first()
+    if not company:
+        return 0
     created = 0
-    for cu in CompanyUser.objects.filter(company_id=company_id, is_active=True):
-        emp = Employee.objects.filter(company_user=cu).first()
-        if emp:
+    profiles = (UserProfile.objects
+                .filter(company=company)
+                .select_related('user')
+                .exclude(user__is_superuser=True))
+    for prof in profiles:
+        if not prof.user_id:
+            continue
+        if Employee.objects.filter(user_id=prof.user_id).exists():
             continue
         try:
-            _ensure_employee_for_company_user(cu)
+            _ensure_employee_for_user(prof.user, company)
             created += 1
         except Exception:
-            logger.exception("backfill: failed for CompanyUser %s", cu.id)
+            logger.exception("backfill: failed for UserProfile %s", prof.id)
     return created
 
 
