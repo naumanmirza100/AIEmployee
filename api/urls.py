@@ -567,6 +567,11 @@ urlpatterns = [
 
     # Knowledge Q&A
     re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
+    # Persisted HR Q&A chats — sidebar history (mirrors PM agent's chat shape)
+    re_path(r'^hr/ai/knowledge-qa/chats/?$', hr_agent.list_hr_knowledge_chats, name='hr_list_knowledge_chats'),  # GET
+    re_path(r'^hr/ai/knowledge-qa/chats/create/?$', hr_agent.create_hr_knowledge_chat, name='hr_create_knowledge_chat'),  # POST
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_knowledge_chat, name='hr_update_knowledge_chat'),  # PATCH
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_knowledge_chat, name='hr_delete_knowledge_chat'),  # DELETE
 
     # Documents
     re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
@@ -588,6 +593,16 @@ urlpatterns = [
     re_path(r'^hr/meetings/?$', hr_agent.list_hr_meetings, name='hr_list_meetings'),  # GET
     re_path(r'^hr/meetings/create/?$', hr_agent.create_hr_meeting, name='hr_create_meeting'),  # POST
     re_path(r'^hr/meetings/availability/?$', hr_agent.hr_meeting_availability, name='hr_meeting_availability'),  # GET
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/?$', hr_agent.get_hr_meeting, name='hr_get_meeting'),  # GET
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/update/?$', hr_agent.update_hr_meeting, name='hr_update_meeting'),  # PATCH
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/cancel/?$', hr_agent.cancel_hr_meeting, name='hr_cancel_meeting'),  # POST
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', hr_agent.extract_hr_meeting_action_items, name='hr_extract_meeting_action_items'),  # POST
+    # Meeting Scheduler — natural-language LLM scheduling (mirrors PM agent)
+    re_path(r'^hr/ai/meetings/schedule/?$', hr_agent.hr_meeting_schedule, name='hr_meeting_schedule'),  # POST
+    re_path(r'^hr/ai/meeting-scheduler/chats/?$', hr_agent.list_hr_meeting_scheduler_chats, name='hr_list_meeting_scheduler_chats'),  # GET
+    re_path(r'^hr/ai/meeting-scheduler/chats/create/?$', hr_agent.create_hr_meeting_scheduler_chat, name='hr_create_meeting_scheduler_chat'),  # POST
+    re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_meeting_scheduler_chat, name='hr_update_meeting_scheduler_chat'),  # PATCH
+    re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_meeting_scheduler_chat, name='hr_delete_meeting_scheduler_chat'),  # DELETE
 
     # Leave requests
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
