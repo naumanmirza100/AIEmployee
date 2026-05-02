@@ -205,3 +205,73 @@ export const getReplyItem = async (source, id) => {
   }
 };
 
+// Create a fresh-compose draft (Gmail-style "+ Compose"). Returns a
+// serialized ReplyDraft so the UI can attach files (uploads need a
+// draft FK), edit further via composeUpdateDraft, and finally send via
+// the existing approveDraft + sendDraft pipeline.
+export const composeCreateDraft = async ({
+  toEmail,
+  subject,
+  body = '',
+  bodyFormat = 'text',
+} = {}) => {
+  try {
+    return await companyApi.post('/reply-draft/drafts/compose', {
+      to_email: toEmail,
+      subject,
+      body,
+      body_format: bodyFormat,
+    });
+  } catch (error) {
+    console.error('Compose create draft error:', error);
+    throw error;
+  }
+};
+
+// Update fields on an in-flight compose draft (recipient/subject/body/format).
+// Reply drafts use approveDraft instead, which only touches subject + body.
+export const composeUpdateDraft = async (draftId, {
+  toEmail,
+  subject,
+  body,
+  bodyFormat,
+} = {}) => {
+  try {
+    const payload = {};
+    if (toEmail !== undefined) payload.to_email = toEmail;
+    if (subject !== undefined) payload.subject = subject;
+    if (body !== undefined) payload.body = body;
+    if (bodyFormat !== undefined) payload.body_format = bodyFormat;
+    return await companyApi.post(`/reply-draft/drafts/${draftId}/compose`, payload);
+  } catch (error) {
+    console.error('Compose update draft error:', error);
+    throw error;
+  }
+};
+
+// Upload a user-picked file as an attachment on the given draft. Posts
+// multipart/form-data — companyApi.post detects FormData and skips the
+// JSON content-type header so the boundary is set correctly. Returns the
+// new attachment object so the UI can append it to its local list.
+export const uploadDraftAttachment = async (draftId, file) => {
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    return await companyApi.post(`/reply-draft/drafts/${draftId}/attachments/upload`, form);
+  } catch (error) {
+    console.error('Upload draft attachment error:', error);
+    throw error;
+  }
+};
+
+// Remove a single attachment from a draft. Backend cascades the file delete
+// via a post_delete signal, so disk/S3 stays in sync with DB.
+export const deleteDraftAttachment = async (draftId, attachmentId) => {
+  try {
+    return await companyApi.delete(`/reply-draft/drafts/${draftId}/attachments/${attachmentId}`);
+  } catch (error) {
+    console.error('Delete draft attachment error:', error);
+    throw error;
+  }
+};
+

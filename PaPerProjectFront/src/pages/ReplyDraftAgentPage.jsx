@@ -19,7 +19,7 @@ import {
   Sparkles,
   Search,
   FileText,
-  Clock, 
+  Clock,
   Building2,
   AtSign,
   AlertCircle,
@@ -29,6 +29,10 @@ import {
   CornerUpLeft,
   Quote,
   X,
+  Paperclip,
+  PenSquare,
+  Code2,
+  Type,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -65,7 +69,26 @@ import {
   createReplyAccount,
   deleteReplyAccount,
   getReplyAnalytics,
+  uploadDraftAttachment,
+  deleteDraftAttachment,
+  composeCreateDraft,
+  composeUpdateDraft,
 } from '@/services/replyDraftService';
+import { API_BASE_URL } from '@/config/apiConfig';
+
+// Mirror the backend caps in api/views/reply_draft_agent.py — keeping these
+// in sync lets us surface a clear, immediate error instead of waiting for
+// the server to 400. If the backend caps change, update both sides.
+const DRAFT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+const DRAFT_ATTACHMENT_MAX_COUNT = 20;
+
+// Backend serializers emit `download_url` already prefixed with `/api/...`,
+// so we need just the server origin (no trailing /api). API_BASE_URL is
+// `http://host:port/api` for historical reasons — strip the suffix here so
+// fetch(`${ATTACHMENT_ORIGIN}${att.download_url}`) resolves to the Django
+// host instead of the Vite dev server, which had been silently returning
+// the SPA index.html for these requests and producing "corrupt" downloads.
+const ATTACHMENT_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
 
 // Pure view filter for the inbox list — Celery pre-syncs the full 120-day
 // window on a cron (see marketing_agent/management/commands/sync_inbox.py),
@@ -237,6 +260,7 @@ const ReplyDraftAgentPage = () => {
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [busy, setBusy] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(false);  // shown during dropdown-triggered refetch so the user sees feedback
   const [sentLoading, setSentLoading] = useState(false);    // mirrors inboxLoading but for the Sent tab's days-window refetch
@@ -244,6 +268,7 @@ const ReplyDraftAgentPage = () => {
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountModalMode, setAccountModalMode] = useState('add'); // 'add' | 'edit'
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
   const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
@@ -415,6 +440,44 @@ const ReplyDraftAgentPage = () => {
     }
   };
 
+  // Jump from a Sent row's "In reply to" chip to the parent inbox email.
+  // We try the cached inbox list first to avoid an extra round-trip; if
+  // the parent isn't loaded (e.g. it's outside the current days-window),
+  // fetch it directly. Switches the left list to the Inbox tab so the
+  // selection is reflected there too.
+  const handleOpenParentEmail = useCallback(async (parent) => {
+    if (!parent?.id) return;
+    setActiveTab('inbox');
+    const cached = pendingReplies.find(
+      (r) => r.id === parent.id && r.source === 'inbox'
+    );
+    if (cached) {
+      handleSelectReply(cached);
+      return;
+    }
+    try {
+      const res = await getReplyItem('inbox', parent.id);
+      const full = res?.data;
+      if (full) {
+        // Synthesize a list-shaped row so handleSelectReply's contract
+        // (it expects a list row + lazy body fetch) still works.
+        const synth = { ...full, source: 'inbox' };
+        setSelectedReply(synth);
+        setSelectedDraft(null);
+        setEditedBody('');
+        setEditedSubject('');
+        setUserContext('');
+        setComposerOpen(false);
+      }
+    } catch (e) {
+      toast({
+        title: 'Could not open original message',
+        description: e.message,
+        variant: 'destructive',
+      });
+    }
+  }, [pendingReplies, toast]);
+
   const handleSelectDraft = (d) => {
     setSelectedDraft(d);
     setSelectedReply(null);
@@ -439,7 +502,7 @@ const ReplyDraftAgentPage = () => {
       });
       const d = res?.data;
       if (d?.draft_id) {
-        toast({ title: 'Draft generated', description: 'Review it below before sending.' });
+        toast({ title: 'Draft generated', description: 'Review it below — you can also attach files before sending.' });
         setEditedSubject(d.subject);
         setEditedBody(d.body);
         setSelectedDraft({
@@ -455,6 +518,9 @@ const ReplyDraftAgentPage = () => {
           to_company: selectedReply.from_company,
           original_subject: selectedReply.subject,
           original_body: selectedReply.body,
+          // Fresh draft starts with no attachments. The user can add them
+          // from the composer below before approving + sending.
+          attachments: [],
         });
         refreshAll();
       }
@@ -479,7 +545,23 @@ const ReplyDraftAgentPage = () => {
         toast({ title: 'Regenerated' });
         setEditedSubject(d.subject);
         setEditedBody(d.body);
-        setSelectedDraft({ ...selectedDraft, id: d.draft_id, subject: d.subject, body: d.body, ai_notes: d.reasoning });
+        // Attachments come along automatically: the backend reassigns the
+        // parent draft's attachment rows to the new child (see
+        // ReplyDraftAgent.regenerate_draft), but we also need to update the
+        // local attachment URLs so they point at the new draft id.
+        const oldAttachments = Array.isArray(selectedDraft.attachments) ? selectedDraft.attachments : [];
+        const carriedAttachments = oldAttachments.map((a) => ({
+          ...a,
+          download_url: `/api/reply-draft/drafts/${d.draft_id}/attachments/${a.id}/download`,
+        }));
+        setSelectedDraft({
+          ...selectedDraft,
+          id: d.draft_id,
+          subject: d.subject,
+          body: d.body,
+          ai_notes: d.reasoning,
+          attachments: carriedAttachments,
+        });
         refreshDrafts();
       }
     } catch (e) {
@@ -502,6 +584,10 @@ const ReplyDraftAgentPage = () => {
       if (sent.status === 'success') {
         toast({ title: 'Reply sent', description: `Delivered to ${selectedDraft.to_email || 'recipient'}.` });
         clearSelection();
+        // refreshAll already pulls inbox + sent + drafts; the agent's
+        // _mirror_sent_to_inbox writes a Sent-row at send time so this
+        // refresh picks it up instantly instead of waiting for the next
+        // 5-minute IMAP sync.
         refreshAll();
       } else {
         throw new Error(sent.message || 'Send failed');
@@ -510,6 +596,76 @@ const ReplyDraftAgentPage = () => {
       toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleAttachFiles = async (fileList) => {
+    if (!selectedDraft?.id) {
+      toast({
+        title: 'Generate a draft first',
+        description: 'Files attach to a specific draft — click Generate AI Draft, then add attachments.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (files.length === 0) return;
+
+    const existing = Array.isArray(selectedDraft.attachments) ? selectedDraft.attachments : [];
+    if (existing.length + files.length > DRAFT_ATTACHMENT_MAX_COUNT) {
+      toast({
+        title: 'Too many attachments',
+        description: `A draft can have at most ${DRAFT_ATTACHMENT_MAX_COUNT} files.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploadingAttachment(true);
+    try {
+      // Upload sequentially so the backend's per-draft count check sees
+      // each prior file before deciding on the next one. Parallel POSTs
+      // would race past the cap when many files are picked at once.
+      const added = [];
+      for (const file of files) {
+        if ((file.size || 0) > DRAFT_ATTACHMENT_MAX_BYTES) {
+          toast({
+            title: 'File too large',
+            description: `${file.name} is over ${Math.floor(DRAFT_ATTACHMENT_MAX_BYTES / (1024 * 1024))} MB and was skipped.`,
+            variant: 'destructive',
+          });
+          continue;
+        }
+        try {
+          const res = await uploadDraftAttachment(selectedDraft.id, file);
+          if (res?.data) added.push(res.data);
+        } catch (e) {
+          toast({ title: `Upload failed: ${file.name}`, description: e.message, variant: 'destructive' });
+        }
+      }
+      if (added.length > 0) {
+        setSelectedDraft((current) => (
+          current && current.id === selectedDraft.id
+            ? { ...current, attachments: [...(current.attachments || []), ...added] }
+            : current
+        ));
+      }
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (attachmentId) => {
+    if (!selectedDraft?.id) return;
+    try {
+      await deleteDraftAttachment(selectedDraft.id, attachmentId);
+      setSelectedDraft((current) => (
+        current && current.id === selectedDraft.id
+          ? { ...current, attachments: (current.attachments || []).filter((a) => a.id !== attachmentId) }
+          : current
+      ));
+    } catch (e) {
+      toast({ title: 'Could not remove attachment', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -681,6 +837,21 @@ const ReplyDraftAgentPage = () => {
                 syncAccounts={syncAccounts}
                 onAddNew={openAddAccountModal}
               />
+
+              {/* Compose: opens a Gmail-style new-email modal. Hidden
+                  until the user attaches an inbox account, since the
+                  send pipeline picks credentials off that account. */}
+              {syncAccounts.length > 0 && (
+                <Button
+                  variant="outline"
+                  className="bg-white/5 border-fuchsia-500/30 text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-fuchsia-100 gap-2"
+                  onClick={() => setComposeOpen(true)}
+                  title="Write a new email"
+                >
+                  <PenSquare className="h-4 w-4" />
+                  <span className="hidden sm:inline text-xs font-medium">Compose</span>
+                </Button>
+              )}
 
               {syncAccounts.length > 0 && (
                 <Button
@@ -966,6 +1137,30 @@ const ReplyDraftAgentPage = () => {
                     <h2 className="text-lg font-bold text-white leading-snug">
                       {originalEmail.subject || '(no subject)'}
                     </h2>
+
+                    {/* "In reply to" chip — only on Sent-tab rows whose
+                        backend payload included a `replies_to` lookup.
+                        Clicking it jumps to the original inbound message
+                        so the user can see what they were replying to. */}
+                    {selectedReply?.replies_to && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenParentEmail(selectedReply.replies_to)}
+                        className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition group max-w-full"
+                        title="Open the message this reply was sent in response to"
+                      >
+                        <CornerUpLeft className="h-3 w-3 shrink-0" />
+                        <span className="text-cyan-300/80 font-semibold">In reply to:</span>
+                        <span className="truncate text-white/90 group-hover:text-white">
+                          {selectedReply.replies_to.subject || '(no subject)'}
+                        </span>
+                        {selectedReply.replies_to.from_email && (
+                          <span className="hidden sm:inline text-cyan-300/60">
+                            · {selectedReply.replies_to.from_name || selectedReply.replies_to.from_email}
+                          </span>
+                        )}
+                      </button>
+                    )}
                   </div>
 
                   <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
@@ -1148,6 +1343,14 @@ const ReplyDraftAgentPage = () => {
                           </div>
                         </div>
 
+                        <DraftAttachmentsSection
+                          draft={selectedDraft}
+                          uploading={uploadingAttachment}
+                          isReadOnly={isReadOnly}
+                          onPickFiles={handleAttachFiles}
+                          onRemove={handleRemoveAttachment}
+                        />
+
                         {selectedDraft.ai_notes && (
                           <div className="p-3 rounded-lg bg-fuchsia-500/5 border border-fuchsia-500/20 flex gap-2.5">
                             <Sparkles className="h-4 w-4 text-fuchsia-300 shrink-0 mt-0.5" />
@@ -1239,8 +1442,20 @@ const ReplyDraftAgentPage = () => {
         }}
         onDeleted={() => {
           setSettingsOpen(false);
+          clearSelection();
           refreshSyncAccounts();
-          refreshInbox();
+          refreshAll();
+        }}
+      />
+
+      <ComposeModal
+        open={composeOpen}
+        onClose={() => setComposeOpen(false)}
+        onSent={() => {
+          setComposeOpen(false);
+          // refreshAll picks up the sent-mirror row + drafts list change
+          // (the compose draft transitions to status='sent' on success).
+          refreshAll();
         }}
       />
 
@@ -1282,12 +1497,14 @@ const HtmlBody = ({ html }) => {
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
-        const next = Math.max(
-          doc.documentElement.scrollHeight,
-          doc.documentElement.offsetHeight,
-          doc.body?.scrollHeight || 0,
-          doc.body?.offsetHeight || 0,
-        );
+        // Prefer body's actual content height. documentElement.scrollHeight
+        // includes the iframe's viewport minimum (~150-180px), so an empty
+        // or short email would otherwise size to that minimum and leave a
+        // big empty box. Fall back to documentElement only when body
+        // hasn't rendered yet (initial load race).
+        const bodyH = Math.max(doc.body?.scrollHeight || 0, doc.body?.offsetHeight || 0);
+        const docH = Math.max(doc.documentElement?.scrollHeight || 0, doc.documentElement?.offsetHeight || 0);
+        const next = bodyH > 0 ? bodyH : docH;
         if (next > 0) iframe.style.height = `${next + 8}px`;
       } catch {
         // Cross-origin sandbox can throw — just leave whatever default height we set.
@@ -1394,14 +1611,20 @@ const HtmlBody = ({ html }) => {
       title="Email body"
       sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
       srcDoc={wrapped}
-      style={{ width: '100%', minHeight: '380px', border: 0, background: 'transparent', display: 'block', colorScheme: 'dark' }}
+      style={{ width: '100%', minHeight: '10px', border: 0, background: 'transparent', display: 'block', colorScheme: 'dark' }}
       onLoad={() => {
         const iframe = ref.current;
         if (!iframe) return;
         try {
           const doc = iframe.contentDocument;
           if (doc) {
-            iframe.style.height = `${(doc.documentElement.scrollHeight || 200) + 8}px`;
+            // Same body-first sizing as the resize() effect — picking
+            // documentElement here gave empty mail a 150-200px viewport
+            // minimum and a big empty box.
+            const bodyH = doc.body?.scrollHeight || 0;
+            const docH = doc.documentElement?.scrollHeight || 0;
+            const h = bodyH > 0 ? bodyH : docH;
+            if (h > 0) iframe.style.height = `${h + 8}px`;
           }
         } catch {}
       }}
@@ -1440,8 +1663,7 @@ const AttachmentList = ({ attachments }) => {
     // <a href> links wouldn't carry the company-user token and would 401.
     try {
       const token = localStorage.getItem('company_auth_token') || '';
-      const apiBase = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
-      const url = `${apiBase}${att.download_url}`;
+      const url = `${ATTACHMENT_ORIGIN}${att.download_url}`;
       const res = await fetch(url, {
         method: 'GET',
         headers: token ? { Authorization: `Token ${token}` } : {},
@@ -1497,6 +1719,138 @@ const AttachmentList = ({ attachments }) => {
           </button>
         ))}
       </div>
+    </div>
+  );
+};
+
+// Outgoing-attachment editor shown inside the draft composer. Reuses the
+// same download/icon helpers as the incoming AttachmentList so the visual
+// language stays consistent — the only behavioral difference is the X
+// remove control on each row plus the upload button.
+const DraftAttachmentsSection = ({ draft, uploading, isReadOnly, onPickFiles, onRemove }) => {
+  const inputRef = React.useRef(null);
+  const attachments = Array.isArray(draft?.attachments) ? draft.attachments : [];
+  const atLimit = attachments.length >= DRAFT_ATTACHMENT_MAX_COUNT;
+
+  const handleDownload = async (att) => {
+    // Same token-auth blob trick as AttachmentList — direct <a href> links
+    // wouldn't carry the company-user token, so this fetches with the
+    // header and synthesises a download.
+    try {
+      const token = localStorage.getItem('company_auth_token') || '';
+      const url = `${ATTACHMENT_ORIGIN}${att.download_url}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: token ? { Authorization: `Token ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = att.filename || 'attachment';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 200);
+    } catch (e) {
+      console.error('Draft attachment download failed', e);
+    }
+  };
+
+  const handlePicked = (e) => {
+    const files = e.target.files;
+    onPickFiles(files);
+    // Reset so the same filename can be picked again after a remove.
+    e.target.value = '';
+  };
+
+  return (
+    <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-gray-300">
+          <Paperclip className="h-3.5 w-3.5 text-emerald-300" />
+          Attachments
+          <span className="text-gray-500 font-normal">
+            ({attachments.length}{attachments.length > 0 ? ` · ${DRAFT_ATTACHMENT_MAX_COUNT} max` : ''})
+          </span>
+        </div>
+        {!isReadOnly && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading || atLimit}
+            className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-7 px-2 text-xs"
+            title={atLimit ? `At most ${DRAFT_ATTACHMENT_MAX_COUNT} files per draft` : 'Add a file'}
+          >
+            {uploading ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <Paperclip className="h-3.5 w-3.5 mr-1.5" />
+            )}
+            {uploading ? 'Uploading…' : 'Add file'}
+          </Button>
+        )}
+      </div>
+
+      {attachments.length === 0 ? (
+        <div className="text-[11px] text-gray-500">
+          {isReadOnly
+            ? 'No attachments were sent with this draft.'
+            : 'Add files (up to 25 MB each) — they\'ll go out with this reply.'}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {attachments.map((att) => (
+            <div
+              key={att.id}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg bg-black/20 border border-white/10 hover:border-emerald-500/30 transition group"
+            >
+              <span className="text-xl shrink-0" aria-hidden="true">
+                {fileIconChar(att.filename, att.content_type)}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleDownload(att)}
+                className="min-w-0 flex-1 text-left"
+                title="Download"
+              >
+                <div className="text-sm text-gray-100 truncate group-hover:text-white">
+                  {att.filename || 'attachment'}
+                </div>
+                <div className="text-[10px] text-gray-500 mt-0.5">
+                  {formatFileSize(att.size_bytes)}
+                  {att.content_type && (
+                    <span className="ml-1 opacity-60">· {att.content_type}</span>
+                  )}
+                </div>
+              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  onClick={() => onRemove(att.id)}
+                  title="Remove attachment"
+                  className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-rose-300 hover:bg-rose-500/10 transition shrink-0"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!isReadOnly && (
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          onChange={handlePicked}
+          className="hidden"
+        />
+      )}
     </div>
   );
 };
@@ -1937,6 +2291,380 @@ const defaultNewForm = () => ({
   imap_password: '',
   imap_use_ssl: true,
 });
+
+// Gmail-style "+ Compose" dialog. Builds a fresh ReplyDraft (no source
+// email) on first user action — either when they pick an attachment or
+// when they hit Send. Until then the form is purely client-side state,
+// so opening + closing the modal without typing creates no DB rows.
+//
+// The HTML toggle flips `body_format` between 'text' and 'html'. Backend
+// uses the body verbatim as text/html when format='html', otherwise
+// derives HTML from the plain body via the same converter that powers
+// AI reply sends — so the recipient experience is identical between
+// reply drafts and compose drafts.
+const ComposeModal = ({ open, onClose, onSent }) => {
+  const { toast } = useToast();
+  const [draftId, setDraftId] = useState(null);
+  const [toEmail, setToEmail] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [bodyFormat, setBodyFormat] = useState('text');
+  const [attachments, setAttachments] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = React.useRef(null);
+
+  // Reset the form whenever the modal closes — without this, opening it
+  // again would briefly show the prior message before the parent
+  // re-renders.
+  useEffect(() => {
+    if (!open) {
+      setDraftId(null);
+      setToEmail('');
+      setSubject('');
+      setBody('');
+      setBodyFormat('text');
+      setAttachments([]);
+      setBusy(false);
+      setUploading(false);
+    }
+  }, [open]);
+
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail.trim());
+  const canSend = validEmail && subject.trim() && body.trim() && !busy && !uploading;
+
+  // Lazy draft creation. Both Send and the first attachment upload need
+  // a draft_id, so they call this. Subsequent calls just return the
+  // already-created draft id.
+  const ensureDraft = useCallback(async () => {
+    if (draftId) return draftId;
+    const res = await composeCreateDraft({
+      toEmail: toEmail.trim(),
+      subject: subject.trim(),
+      body,
+      bodyFormat,
+    });
+    if (res?.status === 'success' && res?.data?.id) {
+      setDraftId(res.data.id);
+      return res.data.id;
+    }
+    throw new Error(res?.message || 'Failed to create draft');
+  }, [draftId, toEmail, subject, body, bodyFormat]);
+
+  const handlePickFiles = async (fileList) => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (files.length === 0) return;
+
+    if (!validEmail || !subject.trim()) {
+      toast({
+        title: 'Add recipient & subject first',
+        description: 'A draft is created when you attach a file — fill these so the draft is valid.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (attachments.length + files.length > DRAFT_ATTACHMENT_MAX_COUNT) {
+      toast({
+        title: 'Too many attachments',
+        description: `A draft can have at most ${DRAFT_ATTACHMENT_MAX_COUNT} files.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const id = await ensureDraft();
+      const added = [];
+      for (const file of files) {
+        if ((file.size || 0) > DRAFT_ATTACHMENT_MAX_BYTES) {
+          toast({
+            title: 'File too large',
+            description: `${file.name} is over ${Math.floor(DRAFT_ATTACHMENT_MAX_BYTES / (1024 * 1024))} MB and was skipped.`,
+            variant: 'destructive',
+          });
+          continue;
+        }
+        try {
+          const res = await uploadDraftAttachment(id, file);
+          if (res?.data) added.push(res.data);
+        } catch (e) {
+          toast({ title: `Upload failed: ${file.name}`, description: e.message, variant: 'destructive' });
+        }
+      }
+      if (added.length > 0) {
+        setAttachments((prev) => [...prev, ...added]);
+      }
+    } catch (e) {
+      toast({ title: 'Could not attach file', description: e.message, variant: 'destructive' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (attachmentId) => {
+    if (!draftId) return;
+    try {
+      await deleteDraftAttachment(draftId, attachmentId);
+      setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+    } catch (e) {
+      toast({ title: 'Could not remove attachment', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleSend = async () => {
+    if (!canSend) return;
+    setBusy(true);
+    try {
+      // Either create the draft (no attachments path) or sync the latest
+      // form state to an existing one (attachments path may have made the
+      // draft earlier with stale subject/body).
+      let id = draftId;
+      if (!id) {
+        id = await ensureDraft();
+      } else {
+        await composeUpdateDraft(id, {
+          toEmail: toEmail.trim(),
+          subject: subject.trim(),
+          body,
+          bodyFormat,
+        });
+      }
+      const ap = await approveDraft(id, { editedSubject: subject.trim(), editedBody: body });
+      if (ap.status !== 'success') throw new Error(ap.message || 'Approve failed');
+      const sent = await sendDraft(id);
+      if (sent.status !== 'success') throw new Error(sent.message || 'Send failed');
+      toast({ title: 'Email sent', description: `Delivered to ${toEmail.trim()}.` });
+      onSent?.();
+    } catch (e) {
+      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDiscard = async () => {
+    // If we already created a draft on the server, mark it rejected so
+    // it doesn't linger in the Drafts tab. Without a draft yet, just
+    // close the modal — there's nothing to clean up.
+    if (draftId) {
+      try {
+        await rejectDraft(draftId);
+      } catch (e) {
+        // Non-fatal; user is closing anyway.
+        console.error('Discard compose failed', e);
+      }
+    }
+    onClose?.();
+  };
+
+  const handleDownloadAtt = async (att) => {
+    try {
+      const token = localStorage.getItem('company_auth_token') || '';
+      const url = `${ATTACHMENT_ORIGIN}${att.download_url}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: token ? { Authorization: `Token ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = att.filename || 'attachment';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 200);
+    } catch (e) {
+      console.error('Compose attachment download failed', e);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !busy) handleDiscard(); }}>
+      {/* Compact Gmail-style composer. Inline-prefixed To/Subject rows
+          collapse the per-field label space; textarea stays modest in
+          height (auto-grows on resize). DialogContent is capped at 85vh
+          with internal scroll so a busy compose with lots of attachments
+          stays inside the viewport. */}
+      <DialogContent className="max-w-2xl bg-[#0d0b1f] border border-white/10 text-white p-4 max-h-[85vh] flex flex-col gap-2">
+        <DialogHeader className="space-y-0">
+          <DialogTitle className="flex items-center gap-2 text-white text-sm font-semibold">
+            <PenSquare className="h-4 w-4 text-fuchsia-300" />
+            New message
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+          {/* To row — inline label so it's a single ~36px row instead of
+              two stacked elements. */}
+          <div className={`flex items-center gap-2 border-b transition ${
+            toEmail && !validEmail ? 'border-rose-500/40' : 'border-white/10'
+          }`}>
+            <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 w-20 shrink-0">To</span>
+            <input
+              type="email"
+              autoComplete="off"
+              value={toEmail}
+              onChange={(e) => setToEmail(e.target.value)}
+              placeholder="recipient@example.com"
+              className="flex-1 bg-transparent py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none"
+              disabled={busy}
+            />
+            {toEmail && !validEmail && (
+              <span className="text-[10px] text-rose-300 shrink-0">invalid</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 border-b border-white/10">
+            <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 w-20 shrink-0">Subject</span>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Subject"
+              className="flex-1 bg-transparent py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none"
+              disabled={busy}
+            />
+            {/* HTML/Text toggle moves up to the subject row so the body
+                section doesn't need its own header strip. */}
+            <div className="flex items-center gap-0.5 text-[10px] shrink-0">
+              <button
+                type="button"
+                onClick={() => setBodyFormat('text')}
+                className={`px-1.5 py-0.5 rounded flex items-center gap-1 transition ${
+                  bodyFormat === 'text'
+                    ? 'bg-cyan-500/20 text-cyan-200'
+                    : 'text-gray-500 hover:text-white'
+                }`}
+                disabled={busy}
+                title="Plain text — URLs autolink, line breaks preserved"
+              >
+                <Type className="h-3 w-3" />
+                Text
+              </button>
+              <button
+                type="button"
+                onClick={() => setBodyFormat('html')}
+                className={`px-1.5 py-0.5 rounded flex items-center gap-1 transition ${
+                  bodyFormat === 'html'
+                    ? 'bg-fuchsia-500/20 text-fuchsia-200'
+                    : 'text-gray-500 hover:text-white'
+                }`}
+                disabled={busy}
+                title="HTML — markup sent as-is"
+              >
+                <Code2 className="h-3 w-3" />
+                HTML
+              </button>
+            </div>
+          </div>
+
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={6}
+            placeholder={bodyFormat === 'html' ? '<p>Your HTML…</p>' : 'Type your message…'}
+            className={`w-full bg-transparent text-sm text-white placeholder-gray-600 focus:outline-none resize-y min-h-[120px] max-h-[32vh] overflow-y-auto ${
+              bodyFormat === 'html' ? 'font-mono text-xs' : 'font-sans leading-relaxed'
+            }`}
+            disabled={busy}
+          />
+
+          {/* Attachments — header is just a button + count to keep this
+              compact. List items are slim 28px-ish rows. */}
+          <div className="border-t border-white/10 pt-2">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-400">
+                <Paperclip className="h-3 w-3 text-emerald-300" />
+                {attachments.length > 0 ? `Attachments · ${attachments.length}` : 'Attachments'}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || busy || attachments.length >= DRAFT_ATTACHMENT_MAX_COUNT}
+                className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-6 px-2 text-[11px]"
+              >
+                {uploading ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <Paperclip className="h-3 w-3 mr-1" />
+                )}
+                {uploading ? 'Uploading…' : 'Attach'}
+              </Button>
+            </div>
+            {attachments.length > 0 && (
+              <div className="space-y-1">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="flex items-center gap-2 px-2 py-1 rounded bg-white/5 border border-white/10 hover:border-emerald-500/30 transition group"
+                  >
+                    <span className="text-sm shrink-0" aria-hidden="true">
+                      {fileIconChar(att.filename, att.content_type)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadAtt(att)}
+                      className="min-w-0 flex-1 text-left text-xs text-gray-100 truncate group-hover:text-white"
+                      title="Download"
+                    >
+                      {att.filename || 'attachment'}
+                      <span className="text-[10px] text-gray-500 ml-1.5">{formatFileSize(att.size_bytes)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(att.id)}
+                      title="Remove"
+                      className="h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:text-rose-300 hover:bg-rose-500/10 transition shrink-0"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={(e) => {
+                handlePickFiles(e.target.files);
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="flex justify-between gap-2 pt-2 border-t border-white/10">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleDiscard}
+            disabled={busy}
+            className="bg-transparent border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Discard
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend}
+            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+            {busy ? 'Sending…' : 'Send'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAccount = null }) => {
   const { toast } = useToast();

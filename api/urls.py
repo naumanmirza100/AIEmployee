@@ -503,10 +503,24 @@ urlpatterns = [
     re_path(r'^reply-draft/leads/?$', reply_draft_api.list_leads, name='reply_draft_list_leads'),
     re_path(r'^reply-draft/drafts/?$', reply_draft_api.list_drafts, name='reply_draft_list_drafts'),
     re_path(r'^reply-draft/drafts/generate/?$', reply_draft_api.generate_draft, name='reply_draft_generate'),
+    # Fresh-compose flow (Gmail-style "+ Compose"). compose/create makes a
+    # blank ReplyDraft tied to no source email, which the user then fills
+    # via compose/<id>/update before going through the existing /approve
+    # + /send pipeline.
+    re_path(r'^reply-draft/drafts/compose/?$', reply_draft_api.compose_create_draft, name='reply_draft_compose_create'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/compose/?$', reply_draft_api.compose_update_draft, name='reply_draft_compose_update'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/regenerate/?$', reply_draft_api.regenerate_draft, name='reply_draft_regenerate'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/approve/?$', reply_draft_api.approve_draft, name='reply_draft_approve'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/reject/?$', reply_draft_api.reject_draft, name='reply_draft_reject'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/send/?$', reply_draft_api.send_draft, name='reply_draft_send'),
+    # Outgoing-attachment endpoints — companion to the inbound /inbox/<id>/attachments/...
+    # routes above. The composer uploads here AFTER an AI draft is generated so the file
+    # rows can be linked to the draft FK; on Send the agent reads them back and attaches
+    # them to the SMTP message.
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/?$', reply_draft_api.list_draft_attachments, name='reply_draft_list_draft_attachments'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/upload/?$', reply_draft_api.upload_draft_attachment, name='reply_draft_upload_draft_attachment'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/(?P<attachment_id>\d+)/download/?$', reply_draft_api.download_draft_attachment, name='reply_draft_download_draft_attachment'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/(?P<attachment_id>\d+)/?$', reply_draft_api.delete_draft_attachment, name='reply_draft_delete_draft_attachment'),
     re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
     re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
     re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
