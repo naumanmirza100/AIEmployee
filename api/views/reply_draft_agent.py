@@ -5,6 +5,7 @@ Mirrors the pattern in api/views/marketing_agent.py: DRF + CompanyUserTokenAuthe
 Resolves the CompanyUser to a Django User (same bridge marketing uses) because
 the underlying models (Lead, Reply, EmailAccount) are keyed on User.
 """
+import base64
 import logging
 import re
 from datetime import datetime, timedelta
@@ -21,7 +22,7 @@ from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
 from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
-from reply_draft_agent.models import ReplyDraft, InboxEmail, InboxAttachment
+from reply_draft_agent.models import ReplyDraft, InboxEmail, InboxAttachment, ReplyDraftAttachment
 from reply_draft_agent.permissions import company_has_module
 
 logger = logging.getLogger(__name__)
@@ -198,52 +199,74 @@ def _is_bounce_metadata(att, *, is_bounce_email=False):
     return False
 
 
-def _rewrite_cid_refs(html, attachments):
-    """Replace ``src="cid:abc@host"`` with the inline attachment's download URL.
+_INLINE_DATA_URI_MAX_BYTES = 1024 * 1024  # 1 MB per inline image — anything bigger we leave as cid: (broken) rather than bloat the JSON
 
-    `attachments` is the queryset/list of the email's InboxAttachment rows
-    (inline + non-inline); we match by ``content_id`` (with surrounding
-    angle brackets stripped, since those are part of the wire format but
-    not what HTML attributes use). Returns the rewritten HTML; pass-through
-    on no matches so the cost is a single regex scan when there's nothing
-    to rewrite.
+
+def _rewrite_cid_refs(html, attachments):
+    """Replace ``src="cid:abc@host"`` with an inline ``data:`` URI.
+
+    Why data URIs and not the auth'd /attachments/.../download endpoint:
+    the email body is rendered inside a sandboxed iframe via srcDoc, so
+    `<img src>` requests browser-side carry no Authorization header
+    (only cookies, and the company-user auth uses a localStorage token).
+    The download endpoint then 401s and the inline icon shows as a
+    broken image with its alt text. Embedding the bytes as a data: URI
+    bypasses that entirely — no request, no auth needed.
+
+    `attachments` is the queryset/list of the email's InboxAttachment
+    rows (inline + non-inline); we match by ``content_id`` (with
+    surrounding angle brackets stripped, since those are part of the
+    wire format but not what HTML attributes use). Returns the
+    rewritten HTML; pass-through on no matches so the cost is a single
+    regex scan when there's nothing to rewrite.
     """
     if not html or '<' not in html:
         return html
-    cid_map = {}
+    # Map cid → (attachment, data-uri) once so multiple cid: references
+    # to the same image only read+encode bytes a single time.
+    cid_to_data_uri = {}
     for att in attachments:
         cid = (att.content_id or '').strip()
         if not cid:
             continue
         # Strip angle brackets ("<image001@…>" → "image001@…") — that's
         # the form they appear as inside HTML's src="cid:…" references.
-        cid = cid.lstrip('<').rstrip('>')
-        cid_map[cid.lower()] = att.id
+        cid = cid.lstrip('<').rstrip('>').lower()
+        # Skip oversized files — embedding a multi-MB blob in JSON
+        # would tank the page response. Falls through to leaving the
+        # original cid: ref, which renders broken (acceptable; the
+        # alternative is a slow page).
+        if (att.size_bytes or 0) > _INLINE_DATA_URI_MAX_BYTES:
+            continue
+        if not att.file:
+            continue
+        try:
+            with att.file.open('rb') as fh:
+                raw = fh.read()
+        except Exception:
+            continue
+        if not raw:
+            continue
+        ct = (att.content_type or 'application/octet-stream').strip()
+        # Default to image/* if a sender shipped an inline image with no
+        # content-type — better than refusing to embed at all.
+        if not ct or ct == 'application/octet-stream':
+            ct = 'image/png'
+        b64 = base64.b64encode(raw).decode('ascii')
+        cid_to_data_uri[cid] = f'data:{ct};base64,{b64}'
 
-    if not cid_map:
+    if not cid_to_data_uri:
         return html
 
-    # We don't know the email_id at this depth, so the caller passes it via
-    # the closure. Build a cheap per-call replacer.
-    def _make_replacer(email_id):
-        def _replace(match):
-            quote = match.group(1)
-            cid = match.group(2).strip().lower()
-            att_id = cid_map.get(cid)
-            if not att_id:
-                return match.group(0)
-            return f'{quote}/api/reply-draft/inbox/{email_id}/attachments/{att_id}/download{quote}'
-        return _replace
+    def _replace(match):
+        quote = match.group(1)
+        cid = match.group(2).strip().lower()
+        data_uri = cid_to_data_uri.get(cid)
+        if not data_uri:
+            return match.group(0)
+        return f'{quote}{data_uri}{quote}'
 
-    # Email_id is bound on the wrapper below — _rewrite_cid_refs itself is
-    # called with `attachments` already attached to a single email, so we
-    # piggy-back on the FK on the first row. Falling back to the original
-    # html when the list is empty keeps this safe under empty-attachment
-    # paths.
-    first = next(iter(attachments), None)
-    if first is None:
-        return html
-    return _CID_REF_RE.sub(_make_replacer(first.inbox_email_id), html)
+    return _CID_REF_RE.sub(_replace, html)
 
 
 def _serialize_inbox_email(m, *, include_body=False):
@@ -317,7 +340,72 @@ def _serialize_inbox_email(m, *, include_body=False):
                 'download_url': f'/api/reply-draft/inbox/{m.id}/attachments/{att.id}/download',
             })
         out['attachments'] = attachments
+
+        # Surface the message this one is replying to so the UI can render
+        # an "In reply to: <subject>" chip on Sent-tab rows. We look up the
+        # parent by Message-ID (always set by our mirror, and present on
+        # most external clients) and fall back to thread_key for messages
+        # whose In-Reply-To header didn't survive (forwarders, mailing list
+        # rewriters). Constrained to the same EmailAccount so a tenant
+        # can't enumerate other accounts' mail by guessing IDs.
+        replies_to = None
+        if m.direction == 'out' and m.email_account_id:
+            parent = None
+            irt = (m.in_reply_to or '').strip().lstrip('<').rstrip('>')
+            if irt:
+                parent = (
+                    InboxEmail.objects
+                    .filter(email_account_id=m.email_account_id, message_id=irt)
+                    .exclude(id=m.id)
+                    .only('id', 'subject', 'from_email', 'from_name',
+                          'received_at', 'direction', 'thread_key')
+                    .first()
+                )
+            # Fallback: same conversation, oldest inbound message in the
+            # thread. Useful when the user's reply chain is longer than
+            # one hop (sent → reply → sent → reply…) and we want to point
+            # at the original inbound, not the most recent outbound.
+            if parent is None and m.thread_key:
+                parent = (
+                    InboxEmail.objects
+                    .filter(
+                        email_account_id=m.email_account_id,
+                        thread_key=m.thread_key,
+                        direction='in',
+                    )
+                    .exclude(id=m.id)
+                    .only('id', 'subject', 'from_email', 'from_name',
+                          'received_at', 'direction', 'thread_key')
+                    .order_by('received_at')
+                    .first()
+                )
+            if parent is not None:
+                replies_to = {
+                    'id': parent.id,
+                    'subject': parent.subject or '(no subject)',
+                    'from_email': parent.from_email,
+                    'from_name': parent.from_name,
+                    'direction': parent.direction,
+                    'received_at': parent.received_at.isoformat() if parent.received_at else None,
+                }
+        out['replies_to'] = replies_to
     return out
+
+
+def _serialize_draft_attachment(att, draft_id):
+    """Shape a ReplyDraftAttachment for the frontend.
+
+    `download_url` lets the composer preview a file the user just uploaded
+    without re-reading the local File object.
+    """
+    return {
+        'id': att.id,
+        'filename': att.filename,
+        'content_type': att.content_type,
+        'size_bytes': att.size_bytes,
+        'created_at': att.created_at.isoformat() if att.created_at else None,
+        'download_url': f'/api/reply-draft/drafts/{draft_id}/attachments/{att.id}/download',
+    }
 
 
 def _serialize_draft(d):
@@ -329,10 +417,26 @@ def _serialize_draft(d):
         to_email = d.inbox_email.from_email
         to_name = d.inbox_email.from_name
         to_company = ''
+    elif getattr(d, 'compose_to_email', ''):
+        # Fresh-compose draft (no source email). The recipient is whatever
+        # the user typed into the To: field; no name/company until we
+        # cross-link to leads/contacts.
+        to_email = d.compose_to_email
+        to_name = ''
+        to_company = ''
     else:
         to_email = ''
         to_name = ''
         to_company = ''
+
+    # Pull user-uploaded attachments so the composer can render the
+    # paperclip list without a second round-trip. Wrapped in try/except so
+    # the draft endpoint stays usable even if an attachment row is in a
+    # weird state (e.g. file missing on disk during a storage migration).
+    try:
+        attachments = [_serialize_draft_attachment(a, d.id) for a in d.attachments.all()]
+    except Exception:
+        attachments = []
 
     return {
         'id': d.id,
@@ -354,6 +458,12 @@ def _serialize_draft(d):
         'updated_at': d.updated_at.isoformat() if d.updated_at else None,
         'sent_at': d.sent_at.isoformat() if d.sent_at else None,
         'send_error': d.send_error,
+        'attachments': attachments,
+        # Compose-flow fields. Reply drafts always have body_format='text'
+        # and an empty compose_to_email; surfacing both lets the frontend
+        # distinguish reply vs compose drafts without an extra round-trip.
+        'body_format': getattr(d, 'body_format', 'text') or 'text',
+        'compose_to_email': getattr(d, 'compose_to_email', '') or '',
     }
 
 
@@ -517,12 +627,17 @@ def list_pending_replies(request):
         # instead of 404 so polling code doesn't need special-case branches.
         return Response({'status': 'success', 'data': [], 'total': 0})
 
-    # Only LIVE drafts block their original from re-appearing in the inbox.
-    # Rejected/discarded drafts should send the original back to the inbox so
-    # the user can draft again.
+    # Only IN-PROGRESS drafts block the original from showing in the inbox.
+    # 'pending' / 'approved' = user is currently working on a reply, so the
+    # source email belongs in the Drafts pane, not the inbox list.
+    # 'sent' / 'failed' / 'rejected' = work is done or abandoned — the
+    # email returns to the inbox (Gmail-style: replied mail stays visible
+    # in the inbox; the user finds their own reply in the Sent tab).
     drafted_inbox_ids = set(
-        ReplyDraft.objects.filter(owner_id__in=user_ids, inbox_email_id__isnull=False)
-        .exclude(status='rejected')
+        ReplyDraft.objects.filter(
+            owner_id__in=user_ids, inbox_email_id__isnull=False,
+            status__in=('pending', 'approved'),
+        )
         .values_list('inbox_email_id', flat=True)
     )
 
@@ -715,6 +830,12 @@ def download_inbox_attachment(request, email_id, attachment_id):
         # Long cache: file content is immutable (sha256 in path). Browser
         # can re-show the same file without another DB / storage round-trip.
         resp['Cache-Control'] = 'private, max-age=3600'
+        # Bypass GZipMiddleware for binary downloads. Gzipping a streaming
+        # FileResponse for already-compressed formats (PDF / PNG / JPEG /
+        # XLSX-which-is-ZIP) corrupted the bytes the browser received —
+        # downloaded files came back unreadable. GZipMiddleware skips any
+        # response that already has a Content-Encoding header set.
+        resp['Content-Encoding'] = 'identity'
         return resp
     except (FileNotFoundError, Http404):
         return Response({'status': 'error', 'message': 'File missing on storage'},
@@ -1017,6 +1138,156 @@ def generate_draft(request):
         return Response({'status': 'error', 'message': result.get('error')},
                         status=status.HTTP_400_BAD_REQUEST)
     return Response({'status': 'success', 'data': result})
+
+
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def compose_create_draft(request):
+    """Create a fresh-compose ReplyDraft (Gmail-style "+ Compose" flow).
+
+    Body params:
+      - to_email (required): recipient address.
+      - subject (required): user-typed subject — sent verbatim, no "Re:"
+        prefix is added (that prefix is reply-only).
+      - body: message body. Plain text by default; pass body_format='html'
+        when the user composed in HTML mode and the body string is HTML
+        markup.
+      - body_format: 'text' (default) | 'html'.
+
+    Returns the serialized draft so the UI can attach files (uploads need
+    a draft FK), edit, and send through the existing endpoints. The draft
+    starts in status='pending' — same lifecycle as reply drafts so the
+    /approve and /send routes work unchanged.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    user = _get_or_create_user_for_company_user(request.user)
+    payload = request.data or {}
+
+    to_email = (payload.get('to_email') or '').strip()
+    subject = (payload.get('subject') or '').strip()
+    body = payload.get('body') or ''
+    body_format = (payload.get('body_format') or 'text').strip().lower()
+    if body_format not in ('text', 'html'):
+        body_format = 'text'
+
+    if not to_email or not _EMAIL_RE.match(to_email):
+        return Response(
+            {'status': 'error', 'message': 'Valid recipient email is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not subject:
+        return Response(
+            {'status': 'error', 'message': 'Subject is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Pin the draft to the company's reply-agent account so /send picks
+    # the right SMTP credentials. Compose drafts created without an attached
+    # account would fall through to the legacy "any active account" lookup,
+    # which violates the agent's isolation guarantee.
+    user_ids = _company_bridge_user_ids(request.user)
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        return Response(
+            {
+                'status': 'error',
+                'message': 'No Reply Draft Agent account is attached. Connect one first.',
+                'error': 'no_reply_account',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    draft = ReplyDraft.objects.create(
+        owner=user,
+        original_email=None,
+        inbox_email=None,
+        lead=None,
+        email_account=reply_account,
+        draft_subject=subject[:500],
+        draft_body=body,
+        compose_to_email=to_email[:254],
+        body_format=body_format,
+        tone='professional',  # unused for compose; column is non-null
+        ai_notes='',
+        generation_prompt='',
+        status='pending',
+    )
+
+    return Response(
+        {'status': 'success', 'data': _serialize_draft(draft)},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def compose_update_draft(request, draft_id):
+    """Edit a compose draft's recipient / subject / body / format in place.
+
+    The reply flow uses /approve (which only updates edited_subject /
+    edited_body) but compose drafts also need the recipient and the
+    body_format flag editable post-creation, so this endpoint exists.
+    Sent / rejected drafts are immutable — same rule as the attachment
+    endpoints.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    draft, err = _resolve_user_draft(request, draft_id)
+    if err is not None:
+        return err
+
+    if draft.status in ('sent', 'rejected'):
+        return Response(
+            {'status': 'error', 'message': f'Cannot edit a {draft.status} draft.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    payload = request.data or {}
+    fields = []
+
+    if 'to_email' in payload:
+        new_to = (payload.get('to_email') or '').strip()
+        if new_to and not _EMAIL_RE.match(new_to):
+            return Response(
+                {'status': 'error', 'message': 'Invalid recipient email.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        draft.compose_to_email = new_to[:254]
+        fields.append('compose_to_email')
+
+    if 'subject' in payload:
+        # Edit goes into edited_subject so the original AI-draft subject
+        # (if any) is preserved for audit. For pure compose drafts both
+        # fields end up the same — get_final_subject() prefers edited.
+        draft.edited_subject = (payload.get('subject') or '').strip()[:500]
+        fields.append('edited_subject')
+
+    if 'body' in payload:
+        draft.edited_body = payload.get('body') or ''
+        fields.append('edited_body')
+
+    if 'body_format' in payload:
+        bf = (payload.get('body_format') or 'text').strip().lower()
+        if bf not in ('text', 'html'):
+            bf = 'text'
+        draft.body_format = bf
+        fields.append('body_format')
+
+    if fields:
+        fields.append('updated_at')
+        draft.save(update_fields=fields)
+
+    return Response({'status': 'success', 'data': _serialize_draft(draft)})
 
 
 @api_view(['POST'])
@@ -1377,5 +1648,210 @@ def reply_analytics(request):
             'buckets': buckets,
         },
     })
+
+
+# Per-file upload cap. SMTP providers cap inbound mail around 25 MB and our
+# total per-message cap matches that — past it the send would fail at the
+# server, so we reject early with a clear error instead.
+_DRAFT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+# Defense-in-depth: cap the count too. The UI nudges below this; this guard
+# stops a scripted POST from uploading hundreds of files to one draft.
+_DRAFT_ATTACHMENT_MAX_PER_DRAFT = 20
+
+
+def _resolve_user_draft(request, draft_id):
+    """Look up a ReplyDraft owned by the calling company user.
+
+    Returns ``(draft, error_response)``. The bridged Django User is what the
+    draft's ``owner`` FK points at, so we filter by id+owner — this also
+    serves as the tenancy check (a different company's draft just 404s).
+    """
+    user = _get_or_create_user_for_company_user(request.user)
+    draft = (
+        ReplyDraft.objects
+        .filter(id=draft_id, owner=user)
+        .select_related('email_account')
+        .first()
+    )
+    if draft is None:
+        return None, Response({'status': 'error', 'message': 'Draft not found'},
+                              status=status.HTTP_404_NOT_FOUND)
+    return draft, None
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def upload_draft_attachment(request, draft_id):
+    """Attach a user-uploaded file to a draft.
+
+    Accepts a single ``file`` field in a multipart/form-data POST. Returns
+    the new attachment metadata so the frontend can render a row in the
+    paperclip list immediately, without a follow-up GET. SHA-256 + size are
+    computed here so the row is queryable without re-reading the blob.
+
+    Sent / rejected drafts are immutable — uploading to them would only
+    confuse the user (they can't be re-sent), so we 409 instead of silently
+    succeeding.
+    """
+    import hashlib
+
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    draft, err = _resolve_user_draft(request, draft_id)
+    if err is not None:
+        return err
+
+    if draft.status in ('sent', 'rejected'):
+        return Response(
+            {'status': 'error', 'message': f'Cannot attach files to a {draft.status} draft.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    upload = request.FILES.get('file')
+    if upload is None:
+        return Response({'status': 'error', 'message': 'No file uploaded (expected `file` field).'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    size = upload.size or 0
+    if size <= 0:
+        return Response({'status': 'error', 'message': 'Uploaded file is empty.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if size > _DRAFT_ATTACHMENT_MAX_BYTES:
+        return Response(
+            {'status': 'error', 'message': f'File exceeds {_DRAFT_ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB limit.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if draft.attachments.count() >= _DRAFT_ATTACHMENT_MAX_PER_DRAFT:
+        return Response(
+            {'status': 'error', 'message': f'A draft can have at most {_DRAFT_ATTACHMENT_MAX_PER_DRAFT} attachments.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Hash up front so the storage path includes the prefix (mirrors the
+    # InboxAttachment layout). Reset the pointer afterwards because Django
+    # will read it again when saving the FileField.
+    sha = hashlib.sha256()
+    for chunk in upload.chunks():
+        sha.update(chunk)
+    digest = sha.hexdigest()
+    upload.seek(0)
+
+    att = ReplyDraftAttachment(
+        draft=draft,
+        filename=upload.name or 'attachment',
+        content_type=upload.content_type or 'application/octet-stream',
+        size_bytes=size,
+        sha256=digest,
+    )
+    att.file.save(upload.name or 'attachment', upload, save=False)
+    att.save()
+
+    return Response({'status': 'success', 'data': _serialize_draft_attachment(att, draft.id)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_draft_attachments(request, draft_id):
+    """List the user-uploaded attachments on a draft.
+
+    The draft serializer already inlines this list, so the frontend usually
+    doesn't need this — kept for parity with the inbox attachment endpoint
+    and for any future "Files" view that loads attachments standalone.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    draft, err = _resolve_user_draft(request, draft_id)
+    if err is not None:
+        return err
+
+    data = [_serialize_draft_attachment(a, draft.id) for a in draft.attachments.all()]
+    return Response({'status': 'success', 'data': data})
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_draft_attachment(request, draft_id, attachment_id):
+    """Remove a single attachment from a draft.
+
+    The ``post_delete`` signal in ``reply_draft_agent.apps`` removes the
+    underlying file from storage too — keeps disk/S3 in sync with DB.
+    """
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    draft, err = _resolve_user_draft(request, draft_id)
+    if err is not None:
+        return err
+
+    if draft.status in ('sent', 'rejected'):
+        return Response(
+            {'status': 'error', 'message': f'Cannot modify attachments on a {draft.status} draft.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    att = ReplyDraftAttachment.objects.filter(id=attachment_id, draft_id=draft.id).first()
+    if att is None:
+        return Response({'status': 'error', 'message': 'Attachment not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    att.delete()
+    return Response({'status': 'success', 'data': {'id': int(attachment_id), 'draft_id': draft.id}})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def download_draft_attachment(request, draft_id, attachment_id):
+    """Stream the bytes for a single draft attachment.
+
+    Same tenant scoping as the other endpoints — the draft must belong to
+    the caller, and the attachment must belong to that draft. 404 (not 403)
+    on mismatch so we don't leak existence.
+    """
+    from django.http import FileResponse, Http404
+
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    draft, err = _resolve_user_draft(request, draft_id)
+    if err is not None:
+        return err
+
+    att = ReplyDraftAttachment.objects.filter(id=attachment_id, draft_id=draft.id).first()
+    if att is None or not att.file:
+        return Response({'status': 'error', 'message': 'Attachment not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        fh = att.file.open('rb')
+        resp = FileResponse(
+            fh,
+            content_type=att.content_type or 'application/octet-stream',
+            as_attachment=True,
+            filename=att.filename or 'attachment',
+        )
+        resp['Cache-Control'] = 'private, max-age=3600'
+        # Same gzip bypass as the inbox-attachment endpoint — see the note
+        # there. Without this, downloads of already-compressed binaries
+        # (PDF / PNG / JPEG / XLSX) come back corrupted.
+        resp['Content-Encoding'] = 'identity'
+        return resp
+    except (FileNotFoundError, Http404):
+        return Response({'status': 'error', 'message': 'File missing on storage'},
+                        status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.exception('download_draft_attachment failed')
+        return Response({'status': 'error', 'message': str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

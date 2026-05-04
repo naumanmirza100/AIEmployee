@@ -47,10 +47,18 @@ class Employee(models.Model):
     ]
 
     company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='employees')
+    # Canonical link — every "real" employee is a Django auth.User belonging to this
+    # company via UserProfile. The CompanyUser link below is kept for tenants that
+    # only use dashboard logins (no separate User row).
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='hr_employee',
+        help_text='Django auth.User row this employee corresponds to.',
+    )
     company_user = models.OneToOneField(
         'core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='hr_employee',
-        help_text='Linked dashboard login if this employee has a self-service account.',
+        help_text='Optional dashboard-login link for self-service.',
     )
     full_name = models.CharField(max_length=255)
     work_email = models.EmailField(help_text='Primary contact — unique per company.')
@@ -537,6 +545,41 @@ class HRScheduledNotification(models.Model):
 # ============================================================================
 # Knowledge Q&A — chat session + feedback (mirror of Frontline's QA models)
 # ============================================================================
+
+class HRMeetingSchedulerChat(models.Model):
+    """Conversation transcript for natural-language meeting scheduling.
+
+    Mirrors the PM agent's `MeetingSchedulerChat` shape: each chat is
+    company-user-scoped, holds the back-and-forth between the user and the
+    LLM scheduling agent, and lives in the sidebar of `HRMeetingScheduler`.
+    """
+    company_user = models.ForeignKey('core.CompanyUser', on_delete=models.CASCADE,
+                                     related_name='hr_meeting_scheduler_chats')
+    title = models.CharField(max_length=255, default='Meeting chat')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"HR meeting chat {self.id}: {self.title[:40]}"
+
+
+class HRMeetingSchedulerChatMessage(models.Model):
+    ROLE_CHOICES = [('user', 'User'), ('assistant', 'Assistant')]
+    chat = models.ForeignKey(HRMeetingSchedulerChat, on_delete=models.CASCADE, related_name='messages')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField()
+    response_data = models.JSONField(null=True, blank=True,
+                                     help_text='Structured payload from the LLM (e.g. created meeting id, agenda).')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['created_at']
+
 
 class HRKnowledgeChat(models.Model):
     """Q&A session for an employee. Multi-turn conversation context lives

@@ -47,12 +47,61 @@ export const createHREmployee = async (payload) => {
 };
 
 // ---------- Knowledge Q&A ----------
-export const askHRKnowledge = async (question) => {
+/**
+ * Ask the HR knowledge agent. `chatHistory` is an optional list of
+ * `{role: 'user'|'assistant', content}` for multi-turn coherence.
+ */
+export const askHRKnowledge = async (question, chatHistory = []) => {
   try {
-    const response = await companyApi.post('/hr/knowledge-qa', { question });
+    const payload = { question };
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      payload.chat_history = chatHistory;
+    }
+    const response = await companyApi.post('/hr/knowledge-qa', payload);
     return response;
   } catch (error) {
     console.error('HR knowledge QA error:', error);
+    throw error;
+  }
+};
+
+// ---------- Persisted HR Q&A chats ----------
+export const listHRKnowledgeChats = async () => {
+  try {
+    const response = await companyApi.get('/hr/ai/knowledge-qa/chats');
+    return response;
+  } catch (error) {
+    console.error('List HR knowledge chats error:', error);
+    throw error;
+  }
+};
+
+export const createHRKnowledgeChat = async (payload = {}) => {
+  try {
+    const response = await companyApi.post('/hr/ai/knowledge-qa/chats/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create HR knowledge chat error:', error);
+    throw error;
+  }
+};
+
+export const updateHRKnowledgeChat = async (chatId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/ai/knowledge-qa/chats/${chatId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR knowledge chat error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRKnowledgeChat = async (chatId) => {
+  try {
+    const response = await companyApi.delete(`/hr/ai/knowledge-qa/chats/${chatId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR knowledge chat error:', error);
     throw error;
   }
 };
@@ -172,7 +221,102 @@ export const listHRScheduledNotifications = async () => {
   }
 };
 
-// ---------- Meetings ----------
+// ---------- Meetings (CRUD + scheduling chat) ----------
+/** Natural-language meeting scheduling. Body: `{message, chat_history?: [...]}` */
+export const hrMeetingSchedule = async (message, chatHistory = []) => {
+  try {
+    const payload = { message };
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      payload.chat_history = chatHistory;
+    }
+    const response = await companyApi.post('/hr/ai/meetings/schedule', payload);
+    return response;
+  } catch (error) {
+    console.error('HR meeting schedule error:', error);
+    throw error;
+  }
+};
+
+export const listHRMeetingSchedulerChats = async () => {
+  try {
+    const response = await companyApi.get('/hr/ai/meeting-scheduler/chats');
+    return response;
+  } catch (error) {
+    console.error('List HR meeting scheduler chats error:', error);
+    throw error;
+  }
+};
+
+export const createHRMeetingSchedulerChat = async (payload = {}) => {
+  try {
+    const response = await companyApi.post('/hr/ai/meeting-scheduler/chats/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create HR meeting scheduler chat error:', error);
+    throw error;
+  }
+};
+
+export const updateHRMeetingSchedulerChat = async (chatId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/ai/meeting-scheduler/chats/${chatId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR meeting scheduler chat error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRMeetingSchedulerChat = async (chatId) => {
+  try {
+    const response = await companyApi.delete(`/hr/ai/meeting-scheduler/chats/${chatId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR meeting scheduler chat error:', error);
+    throw error;
+  }
+};
+
+export const getHRMeeting = async (meetingId) => {
+  try {
+    const response = await companyApi.get(`/hr/meetings/${meetingId}`);
+    return response;
+  } catch (error) {
+    console.error('Get HR meeting error:', error);
+    throw error;
+  }
+};
+
+export const updateHRMeeting = async (meetingId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/meetings/${meetingId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR meeting error:', error);
+    throw error;
+  }
+};
+
+export const cancelHRMeeting = async (meetingId, reason = '') => {
+  try {
+    const response = await companyApi.post(`/hr/meetings/${meetingId}/cancel`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Cancel HR meeting error:', error);
+    throw error;
+  }
+};
+
+export const extractHRMeetingActionItems = async (meetingId) => {
+  try {
+    const response = await companyApi.post(`/hr/meetings/${meetingId}/extract-action-items`);
+    return response;
+  } catch (error) {
+    console.error('Extract HR meeting action items error:', error);
+    throw error;
+  }
+};
+
 export const listHRMeetings = async () => {
   try {
     const response = await companyApi.get('/hr/meetings');
@@ -230,6 +374,10 @@ export default {
   listHREmployees,
   createHREmployee,
   askHRKnowledge,
+  listHRKnowledgeChats,
+  createHRKnowledgeChat,
+  updateHRKnowledgeChat,
+  deleteHRKnowledgeChat,
   uploadHRDocument,
   listHRDocuments,
   summarizeHRDocument,
@@ -239,6 +387,15 @@ export default {
   listHRNotificationTemplates,
   createHRNotificationTemplate,
   listHRScheduledNotifications,
+  hrMeetingSchedule,
+  listHRMeetingSchedulerChats,
+  createHRMeetingSchedulerChat,
+  updateHRMeetingSchedulerChat,
+  deleteHRMeetingSchedulerChat,
+  getHRMeeting,
+  updateHRMeeting,
+  cancelHRMeeting,
+  extractHRMeetingActionItems,
   listHRMeetings,
   createHRMeeting,
   checkHRMeetingAvailability,

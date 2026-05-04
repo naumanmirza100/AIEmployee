@@ -38,13 +38,13 @@ import {
   FileText,
   GitBranch,
   CalendarClock,
-  Sparkles,
-  Send,
   Plus,
   Upload,
 } from 'lucide-react';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import hrAgentService from '@/services/hrAgentService';
+import HRKnowledgeQAAgent from './HRKnowledgeQAAgent';
+import HRMeetingScheduler from './HRMeetingScheduler';
 
 const HRDashboard = () => {
   const { toast } = useToast();
@@ -54,10 +54,7 @@ const HRDashboard = () => {
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
 
-  // Q&A
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState(null);
-  const [answerLoading, setAnswerLoading] = useState(false);
+  // Q&A is now handled by `HRKnowledgeQAAgent` (see qa tab)
 
   // Employees
   const [employees, setEmployees] = useState([]);
@@ -80,9 +77,7 @@ const HRDashboard = () => {
   const [workflows, setWorkflows] = useState([]);
   const [wfLoading, setWfLoading] = useState(false);
 
-  // Meetings
-  const [meetings, setMeetings] = useState([]);
-  const [mtLoading, setMtLoading] = useState(false);
+  // Meetings tab is now handled by `HRMeetingScheduler` component below.
 
   // ---------- Loaders ----------
   const loadStats = async () => {
@@ -133,28 +128,16 @@ const HRDashboard = () => {
     }
   };
 
-  const loadMeetings = async () => {
-    setMtLoading(true);
-    try {
-      const res = await hrAgentService.listHRMeetings();
-      setMeetings(res?.data || []);
-    } catch (e) {
-      toast({ title: 'Failed to load meetings', description: e.message, variant: 'destructive' });
-    } finally {
-      setMtLoading(false);
-    }
-  };
-
   useEffect(() => { loadStats(); }, []);
   useEffect(() => {
     if (activeTab === 'employees') loadEmployees();
     if (activeTab === 'documents') loadDocuments();
     if (activeTab === 'workflows') loadWorkflows();
-    if (activeTab === 'meetings') loadMeetings();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   // ---------- Handlers ----------
+
   const handleUpload = async () => {
     if (!uploadFile) {
       toast({ title: 'Pick a file first', variant: 'destructive' });
@@ -183,21 +166,6 @@ const HRDashboard = () => {
       toast({ title: 'Upload failed', description: e.message, variant: 'destructive' });
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleAsk = async () => {
-    const q = question.trim();
-    if (!q) return;
-    setAnswerLoading(true);
-    setAnswer(null);
-    try {
-      const res = await hrAgentService.askHRKnowledge(q);
-      setAnswer(res?.data || null);
-    } catch (e) {
-      toast({ title: 'Failed to ask question', description: e.message, variant: 'destructive' });
-    } finally {
-      setAnswerLoading(false);
     }
   };
 
@@ -244,51 +212,10 @@ const HRDashboard = () => {
           </ErrorBoundary>
         </TabsContent>
 
-        {/* KNOWLEDGE Q&A */}
+        {/* KNOWLEDGE Q&A — full chat UI matching Project Pilot */}
         <TabsContent value="qa" className="mt-6">
           <ErrorBoundary>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-violet-400" />Ask HR</CardTitle>
-                <CardDescription>
-                  Answers come from your indexed HR documents. Confidentiality is respected — managers see manager-level docs, ICs don't.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Textarea
-                  rows={3}
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  placeholder='e.g. "How many vacation days do I have left?" or "What is the parental leave policy?"'
-                />
-                <div className="flex justify-end">
-                  <Button onClick={handleAsk} disabled={answerLoading || !question.trim()}>
-                    {answerLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
-                    Ask
-                  </Button>
-                </div>
-                {answer && (
-                  <div className="rounded-md border border-border/50 bg-muted/30 p-3 space-y-2">
-                    <div className="text-sm whitespace-pre-wrap">
-                      {answer.answer || '(no answer)'}
-                    </div>
-                    {answer.citations?.length > 0 && (
-                      <div className="border-t border-border/40 pt-2 text-xs text-muted-foreground">
-                        <div className="font-medium mb-1">Sources</div>
-                        <ol className="list-decimal list-inside space-y-1">
-                          {answer.citations.map((c, i) => (
-                            <li key={i}><span className="font-medium">{c.title}</span>{c.score != null ? ` · score ${c.score}` : ''}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    )}
-                    {answer.has_verified_info === false && (
-                      <Badge variant="secondary" className="text-xs">No verified info — escalating to HR</Badge>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <HRKnowledgeQAAgent />
           </ErrorBoundary>
         </TabsContent>
 
@@ -505,36 +432,7 @@ const HRDashboard = () => {
         {/* MEETINGS */}
         <TabsContent value="meetings" className="mt-6">
           <ErrorBoundary>
-            <Card>
-              <CardHeader>
-                <CardTitle>HR Meetings</CardTitle>
-                <CardDescription>1:1s · performance reviews · onboarding · exits</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {mtLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-                ) : meetings.length === 0 ? (
-                  <div className="text-center py-10 text-muted-foreground">No meetings scheduled yet.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {meetings.map((m) => (
-                      <div key={m.id} className="rounded-md border border-border/50 p-3 flex items-center justify-between">
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">{m.title}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {m.meeting_type} · {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'unscheduled'}
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <Badge variant="secondary" className="text-[10px]">{m.status}</Badge>
-                          <Badge variant="outline" className="text-[10px]">{m.visibility}</Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <HRMeetingScheduler />
           </ErrorBoundary>
         </TabsContent>
       </Tabs>

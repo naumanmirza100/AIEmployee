@@ -504,10 +504,24 @@ urlpatterns = [
     re_path(r'^reply-draft/leads/?$', reply_draft_api.list_leads, name='reply_draft_list_leads'),
     re_path(r'^reply-draft/drafts/?$', reply_draft_api.list_drafts, name='reply_draft_list_drafts'),
     re_path(r'^reply-draft/drafts/generate/?$', reply_draft_api.generate_draft, name='reply_draft_generate'),
+    # Fresh-compose flow (Gmail-style "+ Compose"). compose/create makes a
+    # blank ReplyDraft tied to no source email, which the user then fills
+    # via compose/<id>/update before going through the existing /approve
+    # + /send pipeline.
+    re_path(r'^reply-draft/drafts/compose/?$', reply_draft_api.compose_create_draft, name='reply_draft_compose_create'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/compose/?$', reply_draft_api.compose_update_draft, name='reply_draft_compose_update'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/regenerate/?$', reply_draft_api.regenerate_draft, name='reply_draft_regenerate'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/approve/?$', reply_draft_api.approve_draft, name='reply_draft_approve'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/reject/?$', reply_draft_api.reject_draft, name='reply_draft_reject'),
     re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/send/?$', reply_draft_api.send_draft, name='reply_draft_send'),
+    # Outgoing-attachment endpoints — companion to the inbound /inbox/<id>/attachments/...
+    # routes above. The composer uploads here AFTER an AI draft is generated so the file
+    # rows can be linked to the draft FK; on Send the agent reads them back and attaches
+    # them to the SMTP message.
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/?$', reply_draft_api.list_draft_attachments, name='reply_draft_list_draft_attachments'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/upload/?$', reply_draft_api.upload_draft_attachment, name='reply_draft_upload_draft_attachment'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/(?P<attachment_id>\d+)/download/?$', reply_draft_api.download_draft_attachment, name='reply_draft_download_draft_attachment'),
+    re_path(r'^reply-draft/drafts/(?P<draft_id>\d+)/attachments/(?P<attachment_id>\d+)/?$', reply_draft_api.delete_draft_attachment, name='reply_draft_delete_draft_attachment'),
     re_path(r'^reply-draft/accounts/create/?$', reply_draft_api.create_reply_account, name='reply_draft_create_account'),
     re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
     re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
@@ -591,6 +605,11 @@ urlpatterns = [
 
     # Knowledge Q&A
     re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
+    # Persisted HR Q&A chats — sidebar history (mirrors PM agent's chat shape)
+    re_path(r'^hr/ai/knowledge-qa/chats/?$', hr_agent.list_hr_knowledge_chats, name='hr_list_knowledge_chats'),  # GET
+    re_path(r'^hr/ai/knowledge-qa/chats/create/?$', hr_agent.create_hr_knowledge_chat, name='hr_create_knowledge_chat'),  # POST
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_knowledge_chat, name='hr_update_knowledge_chat'),  # PATCH
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_knowledge_chat, name='hr_delete_knowledge_chat'),  # DELETE
 
     # Documents
     re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
@@ -612,6 +631,16 @@ urlpatterns = [
     re_path(r'^hr/meetings/?$', hr_agent.list_hr_meetings, name='hr_list_meetings'),  # GET
     re_path(r'^hr/meetings/create/?$', hr_agent.create_hr_meeting, name='hr_create_meeting'),  # POST
     re_path(r'^hr/meetings/availability/?$', hr_agent.hr_meeting_availability, name='hr_meeting_availability'),  # GET
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/?$', hr_agent.get_hr_meeting, name='hr_get_meeting'),  # GET
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/update/?$', hr_agent.update_hr_meeting, name='hr_update_meeting'),  # PATCH
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/cancel/?$', hr_agent.cancel_hr_meeting, name='hr_cancel_meeting'),  # POST
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', hr_agent.extract_hr_meeting_action_items, name='hr_extract_meeting_action_items'),  # POST
+    # Meeting Scheduler — natural-language LLM scheduling (mirrors PM agent)
+    re_path(r'^hr/ai/meetings/schedule/?$', hr_agent.hr_meeting_schedule, name='hr_meeting_schedule'),  # POST
+    re_path(r'^hr/ai/meeting-scheduler/chats/?$', hr_agent.list_hr_meeting_scheduler_chats, name='hr_list_meeting_scheduler_chats'),  # GET
+    re_path(r'^hr/ai/meeting-scheduler/chats/create/?$', hr_agent.create_hr_meeting_scheduler_chat, name='hr_create_meeting_scheduler_chat'),  # POST
+    re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_meeting_scheduler_chat, name='hr_update_meeting_scheduler_chat'),  # PATCH
+    re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_meeting_scheduler_chat, name='hr_delete_meeting_scheduler_chat'),  # DELETE
 
     # Leave requests
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST

@@ -69,6 +69,7 @@
       "Bash(D:/University/work/AI_Employyes/ReplyAgent/AIEmployee/venv/Scripts/python.exe -c ' *)",
       "PowerShell(& \"d:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\pip.exe\" show django)",
       "Bash(C:\\\\Python313\\\\python.exe manage.py migrate ai_sdr_agent)"
+      "Read(//tmp/**)"
     ]
   }
 }

@@ -238,6 +238,25 @@ class ReplyDraft(models.Model):
     edited_subject = models.CharField(max_length=500, blank=True, help_text='User-edited subject (overrides draft)')
     edited_body = models.TextField(blank=True, help_text='User-edited body (overrides draft)')
 
+    # Recipient for fresh-compose drafts (the Gmail-style "+ Compose" flow,
+    # not a reply to anything). Reply drafts leave this blank and resolve
+    # the recipient through `lead.email` or `inbox_email.from_email`.
+    compose_to_email = models.EmailField(blank=True, default='',
+                                         help_text='Recipient address for fresh-compose drafts (no source email)')
+
+    # Whether `draft_body` / `edited_body` should be treated as plain text
+    # or as HTML. AI-generated reply drafts are always 'text' (the model
+    # outputs plain text), so this defaults to 'text' for backwards
+    # compatibility. Compose drafts written in HTML mode flip this to
+    # 'html', which makes send_approved use the body as-is for the HTML
+    # MIME alternative instead of running it through the plain→HTML
+    # converter.
+    BODY_FORMAT_CHOICES = [
+        ('text', 'Plain text'),
+        ('html', 'HTML'),
+    ]
+    body_format = models.CharField(max_length=4, choices=BODY_FORMAT_CHOICES, default='text')
+
     tone = models.CharField(max_length=20, choices=TONE_CHOICES, default='professional')
     ai_notes = models.TextField(blank=True, help_text='AI reasoning / notes about the draft')
     generation_prompt = models.TextField(blank=True, help_text='Extra instructions the user provided')
@@ -279,6 +298,8 @@ class ReplyDraft(models.Model):
             return 'reply'
         if self.inbox_email_id:
             return 'inbox'
+        if self.compose_to_email:
+            return 'compose'
         return 'unknown'
 
     def get_recipient_email(self):
@@ -287,6 +308,10 @@ class ReplyDraft(models.Model):
             return self.lead.email
         if self.inbox_email_id and self.inbox_email:
             return self.inbox_email.from_email
+        # Fresh-compose draft: the user typed the recipient directly into
+        # the To: field; no lead or source email is involved.
+        if self.compose_to_email:
+            return self.compose_to_email
         return ''
 
     def get_recipient_name(self):
@@ -343,3 +368,57 @@ class ReplyDraft(models.Model):
         self.status = 'failed'
         self.send_error = str(error)[:2000]
         self.save(update_fields=['status', 'send_error', 'updated_at'])
+
+
+def _reply_draft_attachment_upload_path(instance, original_filename):
+    """Where Django stores the uploaded file under ``default_storage``.
+
+    Layout: ``reply_draft_attachments/<owner_id>/<draft_id>/<sha8>-<filename>``.
+    Bucketing by owner + draft mirrors the inbox-attachment layout so the
+    later S3 swap is a one-line setting flip with no path rewrites.
+    """
+    sha_prefix = (instance.sha256 or '')[:8]
+    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', original_filename)[:120] or 'attachment.bin'
+    owner_id = getattr(instance.draft, 'owner_id', 0) if instance.draft_id else 0
+    return (
+        f'reply_draft_attachments/'
+        f'{owner_id}/'
+        f'{instance.draft_id}/'
+        f'{sha_prefix}-{safe_name}'
+    )
+
+
+class ReplyDraftAttachment(models.Model):
+    """User-uploaded attachment for an outgoing ReplyDraft.
+
+    Stored via ``default_storage`` (local disk today, S3 later) so the DB
+    holds metadata only. Wired into ``ReplyDraftAgent.send_approved`` —
+    every row tied to the draft is attached to the outbound SMTP message
+    when the user clicks Send.
+    """
+
+    draft = models.ForeignKey(
+        ReplyDraft, on_delete=models.CASCADE, related_name='attachments',
+        help_text='Draft this file is attached to. CASCADE drops the row when the draft is deleted; '
+                  'the underlying file is removed by the post_delete signal wired up in apps.py.',
+    )
+    filename = models.CharField(max_length=255, help_text='Original filename uploaded by the user.')
+    content_type = models.CharField(max_length=120, blank=True, default='')
+    size_bytes = models.BigIntegerField(default=0)
+    file = models.FileField(
+        upload_to=_reply_draft_attachment_upload_path, max_length=1000,
+        help_text='Stored via default_storage (local FS now, S3 later).',
+    )
+    sha256 = models.CharField(max_length=64, blank=True, default='', db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_replydraftagent_replydraftattachment'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['draft', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"ReplyDraftAttachment {self.filename} ({self.size_bytes}B) on draft #{self.draft_id}"

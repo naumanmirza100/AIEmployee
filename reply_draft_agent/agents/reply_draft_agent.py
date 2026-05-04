@@ -5,11 +5,92 @@ Designed as a tool, not a pipeline: each invocation handles one draft at
 a time. Every send requires explicit user approval — the agent never
 auto-sends.
 """
+import html as _html
 import json
 import logging
 import re
 
 from django.utils import timezone
+
+
+# Bare http(s) URL detector. Negative lookbehind avoids picking up URLs
+# that already sit inside an attribute we just emitted (href="..."), since
+# autolinking runs once over the whole already-HTML-escaped string.
+_AUTOLINK_URL_RE = re.compile(r'(?<![\"\'>=])(https?://[^\s<>"\']+)', re.IGNORECASE)
+
+
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+
+
+def _html_body_to_plain(html):
+    """Cheap text/plain fallback derived from a user-composed HTML body.
+
+    Used when the user writes the email in HTML mode — we still send a
+    text/plain alternative for accessibility / text-only clients, and the
+    Sent-tab mirror needs both shapes (`body` + `body_html`) to stay
+    consistent with how reply drafts are stored.
+
+    Strategy: drop tags + decode entities + collapse whitespace. Not a
+    full HTML→text converter (no list bullets, no link footers); good
+    enough for the fallback that 99% of clients ignore.
+    """
+    if not html:
+        return ''
+    no_tags = _HTML_TAG_RE.sub('', html)
+    decoded = _html.unescape(no_tags)
+    # Collapse runs of blank lines and trailing/leading whitespace so the
+    # plain text doesn't look like the raw HTML with tags excised.
+    cleaned = re.sub(r'\n\s*\n+', '\n\n', decoded).strip()
+    return cleaned
+
+
+def _plain_body_to_html(text):
+    """Convert a plain-text email body into minimal, safe HTML.
+
+    Used at send time to give recipients (and our own Sent-tab view) a
+    rendered version of the AI/user-edited plain body. Steps:
+
+      1. HTML-escape — anything `< > &` the user typed must not render as
+         markup. This is the only XSS-relevant step here; everything below
+         only operates on the already-escaped string.
+      2. Autolink bare http(s):// URLs so they're clickable in the
+         recipient's client (Gmail/Outlook fold raw URLs but our Sent-tab
+         iframe needs explicit `<a>` tags to apply its link styling).
+      3. Paragraph breaks on blank lines + `<br>` on single newlines so
+         the formatting the user typed survives — without this most clients
+         collapse all whitespace into a single line.
+
+    Returns '' for empty input — callers treat that as "no html alternative,
+    send text/plain only".
+    """
+    if not text or not text.strip():
+        return ''
+
+    escaped = _html.escape(text, quote=False)
+
+    def _link(m):
+        url = m.group(1)
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
+
+    linked = _AUTOLINK_URL_RE.sub(_link, escaped)
+
+    # Split on one-or-more blank lines → paragraphs. Single newlines stay
+    # as <br> inside the paragraph so multi-line lists / sign-offs aren't
+    # collapsed.
+    blocks = []
+    for chunk in re.split(r'\n\s*\n', linked):
+        if not chunk.strip():
+            continue
+        blocks.append('<p style="margin:0 0 1em 0;">' + chunk.replace('\n', '<br>') + '</p>')
+    if not blocks:
+        return ''
+
+    return (
+        '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+        'font-size:14px;line-height:1.5;color:#222;">'
+        + ''.join(blocks)
+        + '</div>'
+    )
 
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 from marketing_agent.models import Reply, EmailAccount, EmailSendHistory
@@ -330,6 +411,19 @@ class ReplyDraftAgent(MarketingBaseAgent):
 
         # If the new draft was created successfully, supersede the parent.
         if result.get('success') and result.get('draft_id') and existing.status != 'rejected':
+            # Reassign attachments from the parent to the child so the user
+            # doesn't lose uploads on Regenerate. Cheaper than copying file
+            # bytes — we just point the row's FK at the new draft. The
+            # parent is being marked 'rejected' anyway, so no path keeps a
+            # reference to its (now empty) attachments.
+            try:
+                from ..models import ReplyDraftAttachment
+                ReplyDraftAttachment.objects.filter(draft_id=existing.id).update(
+                    draft_id=result['draft_id'],
+                )
+            except Exception:
+                logger.exception('regenerate_draft: failed to reassign attachments to new draft')
+
             existing.status = 'rejected'
             existing.save(update_fields=['status', 'updated_at'])
 
@@ -378,16 +472,72 @@ class ReplyDraftAgent(MarketingBaseAgent):
             return {'success': False, 'error': 'Draft has no recipient email'}
 
         in_reply_to = self._resolve_in_reply_to(draft)
+        references = self._resolve_references(draft, in_reply_to)
+
+        # Collect user-uploaded attachments. Read bytes once here so
+        # email_service stays storage-backend agnostic (file lives on local
+        # disk today, S3 tomorrow — same call site).
+        attachments_payload = []
+        for att in draft.attachments.all():
+            if not att.file:
+                continue
+            try:
+                with att.file.open('rb') as fh:
+                    raw = fh.read()
+            except Exception:
+                logger.warning('send_approved: could not read attachment id=%s for draft %s', att.id, draft.id)
+                continue
+            if not raw:
+                continue
+            attachments_payload.append((
+                att.filename or 'attachment',
+                raw,
+                att.content_type or 'application/octet-stream',
+            ))
+
+        # Build the (text, html) pair we send + mirror. Two paths:
+        #
+        #   format='text' (AI replies, plain compose)
+        #     stored body IS the plain text. We derive HTML from it via
+        #     the autolink/<br> converter so recipients in HTML clients
+        #     get clickable links + preserved formatting.
+        #
+        #   format='html' (Gmail-style compose with HTML toggle on)
+        #     stored body IS the HTML markup the user typed. We derive a
+        #     plain-text fallback by stripping tags so the multipart's
+        #     text/plain alternative isn't empty (text-only clients +
+        #     accessibility readers depend on it).
+        #
+        # Re: subject prefixing — only reply drafts get the "Re:" prefix
+        # auto-added. A fresh compose has no parent subject and the user's
+        # typed subject should go out verbatim, so _ensure_re_prefix is
+        # gated on the presence of a source email.
+        final_body = draft.get_final_body()
+        if draft.body_format == 'html':
+            body_html = final_body or ''
+            plain_body = _html_body_to_plain(body_html)
+        else:
+            body_html = _plain_body_to_html(final_body)
+            plain_body = final_body
+
+        is_reply = bool(draft.original_email_id or draft.inbox_email_id)
+        outgoing_subject = (
+            self._ensure_re_prefix(draft.get_final_subject())
+            if is_reply else (draft.get_final_subject() or '')
+        )
 
         result = email_service.send_raw_email(
             to_email=recipient_email,
-            subject=self._ensure_re_prefix(draft.get_final_subject()),
-            body=draft.get_final_body(),
+            subject=outgoing_subject,
+            body=plain_body,
             email_account=draft.email_account,
             owner=self.user,
             in_reply_to=in_reply_to,
+            references=references,
             campaign=draft.original_email.campaign if draft.original_email_id else None,
             lead=draft.lead,
+            html_body=body_html or None,
+            attachments=attachments_payload or None,
         )
 
         if result.get('success'):
@@ -397,6 +547,39 @@ class ReplyDraftAgent(MarketingBaseAgent):
                 sent_history = EmailSendHistory.objects.filter(id=sh_id).first()
             draft.mark_sent(sent_history)
             self.log_action('sent_draft', {'draft_id': draft.id, 'to': recipient_email})
+
+            # Mirror the outgoing message into our InboxEmail/InboxAttachment
+            # tables so:
+            #   1) the Sent tab shows it immediately (no 5-min wait for the
+            #      next IMAP sync);
+            #   2) thread linkage is correct regardless of what
+            #      compute_thread_key would derive from the headers (a fresh
+            #      inbound message has no References, so its key is `subj:..`,
+            #      while the sent reply's would be `root:..` — the only way
+            #      to put them in the same thread is to copy the parent's
+            #      key explicitly, which we can do here);
+            #   3) attachments are visible in the Sent UI even when the
+            #      upstream SMTP provider doesn't auto-save to the IMAP Sent
+            #      folder (Hostinger/cPanel/etc.).
+            # Idempotent — the (account, message_id) unique constraint stops
+            # the later IMAP sync from inserting a duplicate.
+            try:
+                self._mirror_sent_to_inbox(
+                    draft=draft,
+                    recipient_email=recipient_email,
+                    in_reply_to=in_reply_to,
+                    references=references,
+                    message_id=result.get('message_id') or '',
+                    attachments=attachments_payload,
+                    body_html=body_html,
+                    plain_body=plain_body,
+                    outgoing_subject=outgoing_subject,
+                )
+            except Exception:
+                logger.exception(
+                    'send_approved: failed to mirror sent message into InboxEmail '
+                    '— Sent tab will still pick it up via the next IMAP sync'
+                )
         else:
             draft.mark_failed(result.get('error', 'unknown error'))
             self.log_action('send_failed', {'draft_id': draft.id, 'error': result.get('error')})
@@ -632,3 +815,168 @@ class ReplyDraftAgent(MarketingBaseAgent):
         if draft.inbox_email_id and draft.inbox_email:
             return draft.inbox_email.message_id or None
         return None
+
+    @staticmethod
+    def _resolve_references(draft, in_reply_to):
+        """Build the RFC 5322 References chain for the outbound reply.
+
+        Per the spec, References should be the parent's existing References
+        chain followed by its Message-ID. This is what mail clients use to
+        reconstruct the thread tree, so getting it right matters for the
+        recipient's inbox just as much as for our own Sent-tab linkage.
+        Without this we'd send References = just the immediate parent, and
+        any deep thread would lose its earlier context in clients that walk
+        the full chain (Apple Mail / mutt / Outlook desktop).
+        """
+        irt = (in_reply_to or '').strip().strip('<>')
+        if not irt:
+            return None
+
+        # Pull the parent's existing References chain when we have it.
+        existing_refs = ''
+        if draft.inbox_email_id and draft.inbox_email:
+            existing_refs = (draft.inbox_email.references or '').strip()
+        elif draft.original_email_id and draft.original_email:
+            triggering = getattr(draft.original_email, 'triggering_email', None)
+            if triggering:
+                existing_refs = (getattr(triggering, 'references', '') or '').strip()
+
+        wrapped_irt = f'<{irt}>'
+        if not existing_refs:
+            return wrapped_irt
+        # Existing chain may or may not already include irt; append only if
+        # it's not already the last entry to avoid `… <X> <X>` duplication.
+        last_token = existing_refs.split()[-1].strip().lstrip('<').rstrip('>') if existing_refs else ''
+        if last_token == irt:
+            return existing_refs
+        return f'{existing_refs} {wrapped_irt}'
+
+    def _mirror_sent_to_inbox(self, *, draft, recipient_email, in_reply_to, references,
+                              message_id, attachments, body_html='', plain_body=None,
+                              outgoing_subject=None):
+        """Insert a direction='out' InboxEmail row mirroring the message we just sent.
+
+        Why a mirror (instead of just relying on the IMAP Sent-folder sync):
+          - Many SMTP providers (Hostinger / cPanel / generic IMAP+SMTP)
+            don't auto-copy SMTP submissions into the Sent IMAP folder, so
+            the user would never see their reply in the Sent tab without
+            this mirror.
+          - Even on providers that do (Gmail), the IMAP sync runs every
+            5 minutes — the mirror gives instant feedback.
+          - The thread_key derived by compute_thread_key from message
+            headers alone doesn't always match the parent inbox row (a new
+            external email arrives with no References → its key is
+            `subj:..`, but its reply's key would be `root:..`). Copying the
+            parent's key explicitly is the only way to keep both messages
+            in the same thread group.
+
+        Idempotent on (account, message_id) — the unique constraint on
+        InboxEmail makes this safe to call alongside the later IMAP sync.
+        """
+        from .models import InboxEmail, InboxAttachment
+
+        if not draft.email_account or not message_id:
+            return
+
+        msg_id = message_id.strip().strip('<>')[:500]
+        if not msg_id:
+            return
+
+        # Idempotent: if a previous attempt (or a fast IMAP sync) already
+        # landed this row, don't insert again. Cheaper than letting the
+        # unique constraint raise.
+        if InboxEmail.objects.filter(
+            email_account_id=draft.email_account_id, message_id=msg_id,
+        ).exists():
+            return
+
+        # Inherit the parent's thread_key when the source is an inbox email
+        # so this reply lands in the same conversation. Falls back to the
+        # standard derivation when sending to a campaign-Reply source or
+        # when the parent has no key yet.
+        from_email = draft.email_account.email or ''
+        # Prefer the subject we actually put on the wire (may have a "Re:"
+        # prefix added for replies) so the Sent-tab row matches what the
+        # recipient sees. Falls back to draft fields if the caller
+        # didn't pass it through.
+        subject = (outgoing_subject if outgoing_subject is not None else draft.get_final_subject()) or ''
+        # Same idea for the body — `plain_body` is the text/plain side of
+        # the multipart we sent, which is the right thing to store as the
+        # row's `body` regardless of whether the user composed in plain
+        # text or HTML mode.
+        body = plain_body if plain_body is not None else (draft.get_final_body() or '')
+
+        thread_key = ''
+        if draft.inbox_email_id and draft.inbox_email:
+            thread_key = (draft.inbox_email.thread_key or '').strip()
+        if not thread_key:
+            thread_key = InboxEmail.compute_thread_key(
+                references=references or '',
+                in_reply_to=in_reply_to or '',
+                subject=subject,
+                from_email=from_email,
+                to_email=recipient_email,
+            )
+
+        irt_clean = (in_reply_to or '').strip().strip('<>')[:500]
+
+        from_name = (draft.email_account.name or '').strip()[:255]
+
+        row = InboxEmail.objects.create(
+            owner=self.user,
+            email_account=draft.email_account,
+            message_id=msg_id,
+            in_reply_to=irt_clean,
+            references=(references or '')[:4000],
+            from_email=from_email,
+            from_name=from_name,
+            subject=subject[:500],
+            body=body,
+            # Storing the HTML version that went out via SMTP keeps the
+            # Sent tab visually consistent with the Inbox tab — both render
+            # through HtmlBody's iframe with dark-theme overrides. When
+            # body_html is empty (e.g. the plain body was empty), the
+            # frontend falls back to plain-text rendering automatically.
+            body_html=body_html or '',
+            received_at=timezone.now(),
+            to_email=(recipient_email or '')[:254],
+            direction='out',
+            thread_key=thread_key,
+        )
+
+        # Mirror the user's uploaded files as InboxAttachment rows on the
+        # sent message. We REUSE the source file path instead of re-writing
+        # the bytes through a new ContentFile/save() cycle:
+        #
+        #   - Re-writing was the wrong design: we already have a copy of
+        #     these bytes on disk under reply_draft_attachments/, and a
+        #     second write at send time hit a file-corruption issue
+        #     (downloaded JPEGs failed to open, OGGs wouldn't play). The
+        #     extra write also doubled storage usage and dropped the sha8
+        #     prefix from the new filename.
+        #   - File sharing means both ReplyDraftAttachment and InboxAttachment
+        #     rows reference the same path. The post_delete signals in
+        #     reply_draft_agent.apps now check for sibling references before
+        #     unlinking, so deleting one row doesn't orphan the other.
+        for src_att in draft.attachments.all():
+            if not src_att.file or not src_att.file.name:
+                continue
+            try:
+                att = InboxAttachment(
+                    inbox_email_id=row.id,
+                    filename=(src_att.filename or 'attachment')[:255],
+                    content_type=(src_att.content_type or '')[:120],
+                    size_bytes=src_att.size_bytes or 0,
+                    sha256=(src_att.sha256 or '')[:64],
+                    is_inline=False,
+                )
+                # Set the path directly so the row points at the source
+                # file. Skipping FieldFile.save() bypasses upload_to + the
+                # storage round-trip — exactly what we want here.
+                att.file.name = src_att.file.name
+                att.save()
+            except Exception:
+                logger.warning(
+                    'mirror_sent: failed to attach source file %r onto sent inbox row %s',
+                    src_att.filename, row.id,
+                )
