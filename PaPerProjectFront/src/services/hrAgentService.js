@@ -149,6 +149,26 @@ export const listHRDocuments = async (params = {}) => {
   }
 };
 
+export const getHRDocument = async (documentId) => {
+  try {
+    const response = await companyApi.get(`/hr/documents/${documentId}`);
+    return response;
+  } catch (error) {
+    console.error('Get HR document error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRDocument = async (documentId) => {
+  try {
+    const response = await companyApi.delete(`/hr/documents/${documentId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR document error:', error);
+    throw error;
+  }
+};
+
 export const summarizeHRDocument = async (documentId, options = {}) => {
   try {
     const response = await companyApi.post(`/hr/documents/${documentId}/summarize`, options);
@@ -186,6 +206,59 @@ export const createHRWorkflow = async (payload) => {
     return response;
   } catch (error) {
     console.error('Create HR workflow error:', error);
+    throw error;
+  }
+};
+
+export const getHRWorkflow = async (workflowId) => {
+  try {
+    const response = await companyApi.get(`/hr/workflows/${workflowId}`);
+    return response;
+  } catch (error) {
+    console.error('Get HR workflow error:', error);
+    throw error;
+  }
+};
+
+export const updateHRWorkflow = async (workflowId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/workflows/${workflowId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR workflow error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRWorkflow = async (workflowId) => {
+  try {
+    const response = await companyApi.delete(`/hr/workflows/${workflowId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR workflow error:', error);
+    throw error;
+  }
+};
+
+export const executeHRWorkflow = async (workflowId, context = {}, options = {}) => {
+  try {
+    const payload = { context };
+    if (options.simulate) payload.simulate = true;
+    const response = await companyApi.post(`/hr/workflows/${workflowId}/execute`, payload);
+    return response;
+  } catch (error) {
+    console.error('Execute HR workflow error:', error);
+    throw error;
+  }
+};
+
+export const listHRWorkflowExecutions = async (workflowId = null) => {
+  try {
+    const qs = workflowId ? `?workflow_id=${workflowId}` : '';
+    const response = await companyApi.get(`/hr/workflows/executions${qs}`);
+    return response;
+  } catch (error) {
+    console.error('List HR workflow executions error:', error);
     throw error;
   }
 };
@@ -380,10 +453,17 @@ export default {
   deleteHRKnowledgeChat,
   uploadHRDocument,
   listHRDocuments,
+  getHRDocument,
+  deleteHRDocument,
   summarizeHRDocument,
   extractHRDocument,
   listHRWorkflows,
   createHRWorkflow,
+  getHRWorkflow,
+  updateHRWorkflow,
+  deleteHRWorkflow,
+  executeHRWorkflow,
+  listHRWorkflowExecutions,
   listHRNotificationTemplates,
   createHRNotificationTemplate,
   listHRScheduledNotifications,

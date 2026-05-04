@@ -654,6 +654,204 @@ def extract_hr_document(request, document_id):
 # 3. Workflow / SOP Runner
 # ============================================================================
 
+# --- Per-document GET / DELETE ----------------------------------------------
+
+def _serialize_hr_document(d: HRDocument, *, include_content: bool = False) -> dict:
+    out = {
+        'id': d.id, 'title': d.title, 'description': d.description,
+        'document_type': d.document_type, 'confidentiality': d.confidentiality,
+        'employee_id': d.employee_id,
+        'file_format': d.file_format, 'file_size': d.file_size,
+        'mime_type': d.mime_type,
+        'processing_status': d.processing_status,
+        'processing_error': d.processing_error,
+        'is_indexed': d.is_indexed,
+        'chunks_processed': d.chunks_processed, 'chunks_total': d.chunks_total,
+        'extracted_fields': d.extracted_fields or {},
+        'retention_days': d.retention_days,
+        'created_at': d.created_at.isoformat() if d.created_at else None,
+        'updated_at': d.updated_at.isoformat() if d.updated_at else None,
+    }
+    if include_content:
+        out['document_content'] = (d.document_content or '')[:50000]
+    return out
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def get_hr_document(request, document_id):
+    """Single document detail incl. extracted text (capped at 50k chars)."""
+    try:
+        company = request.user.company
+        d = HRDocument.objects.filter(pk=document_id, company=company).first()
+        if not d:
+            return Response({'status': 'error', 'message': 'Document not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': _serialize_hr_document(d, include_content=True)})
+    except Exception:
+        logger.exception("get_hr_document failed")
+        return Response({'status': 'error', 'message': 'Failed to load document'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_hr_document(request, document_id):
+    """Delete an HR document (and its file on disk + indexed chunks via FK CASCADE)."""
+    try:
+        company = request.user.company
+        d = HRDocument.objects.filter(pk=document_id, company=company).first()
+        if not d:
+            return Response({'status': 'error', 'message': 'Document not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        # Best-effort file unlink — don't fail the API call if storage is gone.
+        try:
+            from django.conf import settings as _s
+            from pathlib import Path as _P
+            if d.file_path:
+                p = _P(_s.MEDIA_ROOT) / d.file_path
+                if p.exists():
+                    p.unlink()
+        except Exception:
+            logger.warning("delete_hr_document: failed to unlink file for doc %s", d.id)
+        deleted_id = d.id
+        d.delete()
+        return Response({'status': 'success', 'data': {'deleted_id': deleted_id}})
+    except Exception:
+        logger.exception("delete_hr_document failed")
+        return Response({'status': 'error', 'message': 'Failed to delete document'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Workflow / SOP runner
+# ============================================================================
+
+# --- Workflow CRUD --------------------------------------------------------
+
+def _serialize_hr_workflow(w: HRWorkflow) -> dict:
+    return {
+        'id': w.id, 'name': w.name, 'description': w.description,
+        'trigger_conditions': w.trigger_conditions or {},
+        'steps': w.steps or [],
+        'is_active': w.is_active, 'requires_approval': w.requires_approval,
+        'timeout_seconds': w.timeout_seconds,
+        'created_at': w.created_at.isoformat() if w.created_at else None,
+        'updated_at': w.updated_at.isoformat() if w.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def get_hr_workflow(request, workflow_id):
+    company = request.user.company
+    w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
+    if not w:
+        return Response({'status': 'error', 'message': 'Workflow not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _serialize_hr_workflow(w)})
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_hr_workflow(request, workflow_id):
+    """Update name/description/trigger/steps/is_active/timeout."""
+    company = request.user.company
+    w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
+    if not w:
+        return Response({'status': 'error', 'message': 'Workflow not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    d = request.data or {}
+    dirty = []
+    if 'name' in d:
+        name = (d['name'] or '').strip()
+        if not name:
+            return Response({'status': 'error', 'message': 'name cannot be blank'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        w.name = name[:200]
+        dirty.append('name')
+    if 'description' in d:
+        w.description = str(d['description'] or '')
+        dirty.append('description')
+    if 'trigger_conditions' in d:
+        tc = d['trigger_conditions']
+        if not isinstance(tc, dict):
+            return Response({'status': 'error', 'message': 'trigger_conditions must be a dict'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        w.trigger_conditions = tc
+        dirty.append('trigger_conditions')
+    if 'steps' in d:
+        steps = d['steps']
+        if not isinstance(steps, list):
+            return Response({'status': 'error', 'message': 'steps must be a list'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        w.steps = steps
+        dirty.append('steps')
+    if 'is_active' in d:
+        w.is_active = bool(d['is_active'])
+        dirty.append('is_active')
+    if 'requires_approval' in d:
+        w.requires_approval = bool(d['requires_approval'])
+        dirty.append('requires_approval')
+    if 'timeout_seconds' in d:
+        try:
+            w.timeout_seconds = max(0, int(d['timeout_seconds']))
+            dirty.append('timeout_seconds')
+        except (TypeError, ValueError):
+            pass
+    if dirty:
+        dirty.append('updated_at')
+        w.save(update_fields=list(set(dirty)))
+    return Response({'status': 'success', 'data': _serialize_hr_workflow(w)})
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_hr_workflow(request, workflow_id):
+    company = request.user.company
+    w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
+    if not w:
+        return Response({'status': 'error', 'message': 'Workflow not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    deleted_id = w.id
+    w.delete()
+    return Response({'status': 'success', 'data': {'deleted_id': deleted_id}})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_workflow_executions(request):
+    """Recent execution history. ``?workflow_id=`` filters to a single workflow."""
+    company = request.user.company
+    qs = HRWorkflowExecution.objects.filter(workflow__company=company).order_by('-started_at')
+    wf_id = request.GET.get('workflow_id')
+    if wf_id:
+        qs = qs.filter(workflow_id=wf_id)
+    rows = [{
+        'id': e.id, 'workflow_id': e.workflow_id, 'workflow_name': e.workflow_name,
+        'status': e.status,
+        'employee_id': e.employee_id,
+        'started_at': e.started_at.isoformat() if e.started_at else None,
+        'completed_at': e.completed_at.isoformat() if e.completed_at else None,
+        'resume_at': e.resume_at.isoformat() if e.resume_at else None,
+        'error_message': e.error_message,
+        'steps_completed': (e.result_data or {}).get('steps_completed') if isinstance(e.result_data, dict) else None,
+    } for e in qs[:100]]
+    return Response({'status': 'success', 'data': rows})
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -661,14 +859,8 @@ def extract_hr_document(request, document_id):
 def list_hr_workflows(request):
     company = request.user.company
     qs = HRWorkflow.objects.filter(company=company).order_by('-updated_at')[:200]
-    rows = [{
-        'id': w.id, 'name': w.name, 'description': w.description,
-        'trigger_conditions': w.trigger_conditions, 'steps': w.steps,
-        'is_active': w.is_active, 'requires_approval': w.requires_approval,
-        'timeout_seconds': w.timeout_seconds,
-        'created_at': w.created_at.isoformat(), 'updated_at': w.updated_at.isoformat(),
-    } for w in qs]
-    return Response({'status': 'success', 'data': rows})
+    return Response({'status': 'success',
+                     'data': [_serialize_hr_workflow(w) for w in qs]})
 
 
 @api_view(['POST'])

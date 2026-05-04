@@ -600,13 +600,19 @@ urlpatterns = [
     # Documents
     re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
     re_path(r'^hr/documents/upload/?$', hr_agent.upload_hr_document, name='hr_upload_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/?$', hr_agent.get_hr_document, name='hr_get_document'),  # GET
     re_path(r'^hr/documents/(?P<document_id>\d+)/summarize/?$', hr_agent.summarize_hr_document, name='hr_summarize_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/extract/?$', hr_agent.extract_hr_document, name='hr_extract_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/delete/?$', hr_agent.delete_hr_document, name='hr_delete_document'),  # DELETE/POST
 
     # Workflows / SOPs
     re_path(r'^hr/workflows/?$', hr_agent.list_hr_workflows, name='hr_list_workflows'),  # GET
     re_path(r'^hr/workflows/create/?$', hr_agent.create_hr_workflow, name='hr_create_workflow'),  # POST
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/?$', hr_agent.get_hr_workflow, name='hr_get_workflow'),  # GET
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/update/?$', hr_agent.update_hr_workflow, name='hr_update_workflow'),  # PATCH
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/delete/?$', hr_agent.delete_hr_workflow, name='hr_delete_workflow'),  # DELETE/POST
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/execute/?$', hr_agent.execute_hr_workflow, name='hr_execute_workflow'),  # POST
+    re_path(r'^hr/workflows/executions/?$', hr_agent.list_hr_workflow_executions, name='hr_list_workflow_executions'),  # GET
 
     # Notifications
     re_path(r'^hr/notifications/templates/?$', hr_agent.list_hr_notification_templates, name='hr_list_notification_templates'),  # GET
