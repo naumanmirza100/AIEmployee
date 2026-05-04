@@ -219,6 +219,78 @@ export const enrollLeads = async (campaignId, leadIds) => {
   }
 };
 
+export const updateCampaign = async (id, data) => {
+  try {
+    return await companyApi.put(`/sdr/campaigns/${id}/`, data);
+  } catch (error) {
+    console.error('Update campaign error:', error);
+    throw error;
+  }
+};
+
+export const addCampaignStep = async (campaignId, data) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${campaignId}/steps/`, data);
+  } catch (error) {
+    console.error('Add campaign step error:', error);
+    throw error;
+  }
+};
+
+export const updateCampaignStep = async (campaignId, stepId, data) => {
+  try {
+    return await companyApi.put(`/sdr/campaigns/${campaignId}/steps/${stepId}/`, data);
+  } catch (error) {
+    console.error('Update campaign step error:', error);
+    throw error;
+  }
+};
+
+export const deleteCampaignStep = async (campaignId, stepId) => {
+  try {
+    return await companyApi.delete(`/sdr/campaigns/${campaignId}/steps/${stepId}/`);
+  } catch (error) {
+    console.error('Delete campaign step error:', error);
+    throw error;
+  }
+};
+
+export const processOutreach = async (campaignId) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${campaignId}/process/`);
+  } catch (error) {
+    console.error('Process outreach error:', error);
+    throw error;
+  }
+};
+
+export const markReplied = async (campaignId, enrollmentId, data) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${campaignId}/enrollments/${enrollmentId}/reply/`, data);
+  } catch (error) {
+    console.error('Mark replied error:', error);
+    throw error;
+  }
+};
+
+export const resetEnrollment = async (campaignId, enrollmentId) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${campaignId}/enrollments/${enrollmentId}/reset/`);
+  } catch (error) {
+    console.error('Reset enrollment error:', error);
+    throw error;
+  }
+};
+
+export const checkReplies = async (campaignId) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${campaignId}/check-replies/`);
+  } catch (error) {
+    console.error('Check replies error:', error);
+    throw error;
+  }
+};
+
 // Meetings
 export const listMeetings = async ({ status = '' } = {}) => {
   try {

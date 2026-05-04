@@ -128,6 +128,190 @@ class SDRLead(models.Model):
         )
 
 
+class SDRCampaign(models.Model):
+    """An outreach campaign that sequences emails and LinkedIn touches to SDR leads."""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('completed', 'Completed'),
+    ]
+
+    company_user = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_campaigns'
+    )
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+
+    # Sender identity (used for email personalisation)
+    sender_name = models.CharField(max_length=255, blank=True)
+    sender_title = models.CharField(max_length=255, blank=True)
+    sender_company = models.CharField(max_length=255, blank=True)
+
+    # SMTP settings (per-campaign, self-contained)
+    from_email = models.CharField(max_length=255, blank=True)
+    smtp_host = models.CharField(max_length=255, blank=True)
+    smtp_port = models.IntegerField(default=587)
+    smtp_username = models.CharField(max_length=255, blank=True)
+    smtp_password = models.CharField(max_length=500, blank=True)
+    smtp_use_tls = models.BooleanField(default=True)
+
+    # IMAP settings for reply detection (falls back to env EMAIL_HOST_USER/PASSWORD)
+    imap_host = models.CharField(max_length=255, blank=True)
+    imap_port = models.IntegerField(default=993)
+
+    # Scheduling / handoff
+    calendar_link = models.CharField(max_length=500, blank=True)  # Calendly / calendar URL
+
+    # Stats (denormalised for quick reads)
+    total_leads = models.IntegerField(default=0)
+    emails_sent = models.IntegerField(default=0)
+    replies_received = models.IntegerField(default=0)
+    meetings_booked = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sdr_campaign'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"
+
+
+class SDRCampaignStep(models.Model):
+    """One step in an outreach campaign (email or LinkedIn touch)."""
+
+    STEP_TYPE_CHOICES = [
+        ('email', 'Email'),
+        ('linkedin', 'LinkedIn Request'),
+    ]
+
+    campaign = models.ForeignKey(SDRCampaign, on_delete=models.CASCADE, related_name='steps')
+    step_order = models.IntegerField(default=1)
+    step_type = models.CharField(max_length=30, choices=STEP_TYPE_CHOICES, default='email')
+    delay_days = models.IntegerField(default=1)   # days from enrollment start (cumulative)
+    name = models.CharField(max_length=255, blank=True)
+    subject_template = models.CharField(max_length=500, blank=True)
+    body_template = models.TextField(blank=True)
+    ai_personalize = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'sdr_campaign_step'
+        ordering = ['step_order']
+
+    def __str__(self):
+        return f"Step {self.step_order} — Day {self.delay_days} ({self.step_type})"
+
+
+class SDRCampaignEnrollment(models.Model):
+    """Tracks a single lead's progress through a campaign."""
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('replied', 'Replied'),
+        ('completed', 'Completed'),
+        ('unsubscribed', 'Unsubscribed'),
+        ('bounced', 'Bounced'),
+    ]
+
+    campaign = models.ForeignKey(SDRCampaign, on_delete=models.CASCADE, related_name='enrollments')
+    lead = models.ForeignKey(SDRLead, on_delete=models.CASCADE, related_name='campaign_enrollments')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    current_step = models.IntegerField(default=0)   # index of next step to execute
+    next_action_at = models.DateTimeField(null=True, blank=True)
+
+    replied_at = models.DateTimeField(null=True, blank=True)
+    reply_content = models.TextField(blank=True)
+    reply_sentiment = models.CharField(max_length=20, blank=True)  # positive/negative/neutral
+
+    enrolled_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'sdr_campaign_enrollment'
+        unique_together = ['campaign', 'lead']
+        ordering = ['-enrolled_at']
+
+    def __str__(self):
+        return f"{self.lead.display_name} → {self.campaign.name} ({self.status})"
+
+
+class SDROutreachLog(models.Model):
+    """Audit log of every outreach action (email sent, LinkedIn noted, etc.)."""
+
+    STATUS_CHOICES = [
+        ('sent', 'Sent'),
+        ('failed', 'Failed'),
+        ('skipped', 'Skipped'),
+    ]
+
+    enrollment = models.ForeignKey(
+        SDRCampaignEnrollment, on_delete=models.CASCADE, related_name='logs'
+    )
+    step = models.ForeignKey(SDRCampaignStep, on_delete=models.SET_NULL, null=True, blank=True)
+    step_order = models.IntegerField(default=1)
+    action_type = models.CharField(max_length=30)   # 'email' | 'linkedin'
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='sent')
+    subject_sent = models.CharField(max_length=500, blank=True)
+    body_sent = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'sdr_outreach_log'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.action_type} — {self.status} ({self.enrollment})"
+
+
+class SDRMeeting(models.Model):
+    """Meeting booked with a lead after a positive reply — scheduling agent output."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('scheduled', 'Scheduled'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+        ('no_show', 'No Show'),
+    ]
+
+    company_user = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_meetings'
+    )
+    lead = models.ForeignKey(SDRLead, on_delete=models.CASCADE, related_name='meetings')
+    enrollment = models.ForeignKey(
+        SDRCampaignEnrollment, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='meetings'
+    )
+
+    title = models.CharField(max_length=255, default='Discovery Call')
+    notes = models.TextField(blank=True)
+    reply_snippet = models.TextField(blank=True)   # the reply that triggered this
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    duration_minutes = models.IntegerField(default=30)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    calendar_link = models.CharField(max_length=500, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sdr_meeting'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Meeting with {self.lead.display_name} ({self.status})"
+
+
 class SDRLeadResearchJob(models.Model):
     """Tracks async lead-research jobs (Apollo search or AI generation)."""
 

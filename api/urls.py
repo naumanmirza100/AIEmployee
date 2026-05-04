@@ -565,6 +565,20 @@ urlpatterns = [
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/qualify/?$', sdr_api.qualify_lead, name='sdr_qualify_lead'),  # POST
+    # Campaigns
+    re_path(r'^sdr/campaigns/?$', sdr_api.sdr_campaigns_list, name='sdr_campaigns_list'),  # GET, POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/?$', sdr_api.sdr_campaign_detail, name='sdr_campaign_detail'),  # GET, PUT, DELETE
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/?$', sdr_api.sdr_campaign_steps, name='sdr_campaign_steps'),  # GET, POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/(?P<step_id>\d+)/?$', sdr_api.sdr_campaign_step_detail, name='sdr_campaign_step_detail'),  # PUT, DELETE
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/generate-steps/?$', sdr_api.sdr_generate_steps, name='sdr_generate_steps'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enroll/?$', sdr_api.sdr_enroll_leads, name='sdr_enroll_leads'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/contacts/?$', sdr_api.sdr_campaign_enrollments, name='sdr_campaign_enrollments'),  # GET
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/process/?$', sdr_api.sdr_process_outreach, name='sdr_process_outreach'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reply/?$', sdr_api.sdr_mark_replied, name='sdr_mark_replied'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reset/?$', sdr_api.sdr_reset_enrollment, name='sdr_reset_enrollment'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/check-replies/?$', sdr_api.sdr_check_replies, name='sdr_check_replies'),  # POST
+    re_path(r'^sdr/meetings/?$', sdr_api.sdr_meetings_list, name='sdr_meetings_list'),  # GET, POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/?$', sdr_api.sdr_meeting_detail, name='sdr_meeting_detail'),  # GET, PUT, DELETE
     # ---------------------------------------------------------------------
     # HR Support Agent
     # ---------------------------------------------------------------------
