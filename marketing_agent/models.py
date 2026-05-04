@@ -704,6 +704,25 @@ class EmailAccount(models.Model):
         db_table = 'ppp_marketingagent_emailaccount'
         ordering = ['-is_default', '-is_active', '-created_at']
         unique_together = [('email', 'owner')]
+        constraints = [
+            # A given mailbox can only be attached as a Reply Draft Agent
+            # inbox by ONE company at a time. Enforced at the DB level so a
+            # race between two simultaneous create_reply_account requests
+            # for the same email can't both succeed past the app-level
+            # check — the second one fails the constraint and raises
+            # IntegrityError, which the view turns into a 409.
+            #
+            # Partial unique constraint (only rows with the flag set are
+            # constrained). Django generates a filtered unique index on
+            # SQL Server / Postgres. Marketing accounts (is_reply_agent_
+            # account=False) are unaffected — multiple companies can still
+            # use the same email for outbound campaign sending.
+            models.UniqueConstraint(
+                fields=['email'],
+                condition=models.Q(is_reply_agent_account=True),
+                name='unique_reply_agent_email',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.email})"

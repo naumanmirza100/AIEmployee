@@ -526,6 +526,39 @@ class ReplyDraftAgent(MarketingBaseAgent):
             if is_reply else (draft.get_final_subject() or '')
         )
 
+        # Pre-generate the Message-ID and APPEND it to the draft's history
+        # BEFORE the SMTP attempt. If the provider rejects the message
+        # (e.g. Gmail's 552 security block), the success-path code below
+        # never runs and we'd otherwise have no record of which Message-ID
+        # went on the wire. The Sent-tab listing uses these IDs to suppress
+        # IMAP-synced copies of failed sends — Gmail retains a Sent-folder
+        # copy of each 552-rejected attempt with that attempt's own ID.
+        #
+        # APPEND (don't overwrite): a draft retried 3 times must filter all
+        # 3 prior IDs, not just the latest. The earlier singular field
+        # caused retries to leak older shadow-sends into the Sent tab.
+        import uuid as _uuid
+        from_email_for_id = (draft.email_account.email or '')
+        domain_for_id = from_email_for_id.split('@')[1] if '@' in from_email_for_id else 'localhost'
+        attempted_mid = f"{_uuid.uuid4().hex}@{domain_for_id}"
+        try:
+            existing_ids = (draft.attempted_message_ids or '').strip()
+            draft.attempted_message_ids = (
+                f"{existing_ids}\n{attempted_mid}" if existing_ids else attempted_mid
+            )
+            # Mirror to the legacy singular field for older read paths that
+            # might still consult it; the plural field is the source of
+            # truth going forward.
+            draft.attempted_message_id = attempted_mid
+            draft.save(update_fields=[
+                'attempted_message_ids', 'attempted_message_id', 'updated_at',
+            ])
+        except Exception:
+            # Non-fatal — worst case we lose the dedupe hint for this
+            # attempt and the 552-rejected shadow-send might surface in
+            # the Sent tab once.
+            logger.warning('send_approved: could not persist attempted_message_ids on draft %s', draft.id)
+
         result = email_service.send_raw_email(
             to_email=recipient_email,
             subject=outgoing_subject,
@@ -538,6 +571,7 @@ class ReplyDraftAgent(MarketingBaseAgent):
             lead=draft.lead,
             html_body=body_html or None,
             attachments=attachments_payload or None,
+            message_id=attempted_mid,
         )
 
         if result.get('success'):

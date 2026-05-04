@@ -357,6 +357,7 @@ class EmailService:
         lead: Optional[Lead] = None,
         html_body: Optional[str] = None,
         attachments: Optional[list] = None,
+        message_id: Optional[str] = None,
     ) -> Dict:
         """Send a one-off email with subject/body directly (no template rendering).
 
@@ -369,6 +370,13 @@ class EmailService:
         ``EmailMultiAlternatives.attach``. Bytes are read by the caller (e.g.
         the reply-draft agent reads them from default_storage) so this method
         stays storage-backend agnostic.
+
+        ``message_id`` lets the caller pre-generate and persist the RFC
+        Message-ID before the SMTP attempt — important when the caller
+        needs to track failed sends by ID (e.g. to suppress an IMAP-synced
+        copy of a 552-rejected message from the Sent tab). If omitted, one
+        is generated here and returned in the result for both success and
+        failure paths.
         """
         if not to_email:
             return {'success': False, 'error': 'to_email is required'}
@@ -401,6 +409,19 @@ class EmailService:
             send_history.tracking_token = send_history.generate_tracking_token()
             send_history.save()
 
+        # Generate the Message-ID outside the try block so the same value is
+        # used in the SMTP envelope AND returned to the caller on failure
+        # (caller may need to dedupe an IMAP-synced copy of the rejected
+        # message later).
+        import uuid
+        from_email = email_account.email
+        domain = from_email.split('@')[1] if '@' in from_email else 'localhost'
+        if not message_id:
+            message_id = f"<{uuid.uuid4().hex}@{domain}>"
+        elif not message_id.startswith('<'):
+            message_id = f"<{message_id}>"
+        message_id_clean = message_id.strip('<>')
+
         try:
             from django.core.mail.backends.smtp import EmailBackend
             smtp_backend = EmailBackend(
@@ -412,11 +433,6 @@ class EmailService:
                 use_ssl=email_account.use_ssl,
                 fail_silently=False,
             )
-
-            import uuid
-            from_email = email_account.email
-            domain = from_email.split('@')[1] if '@' in from_email else 'localhost'
-            message_id = f"<{uuid.uuid4().hex}@{domain}>"
 
             email = EmailMultiAlternatives(
                 subject=subject,
@@ -453,12 +469,12 @@ class EmailService:
             if send_history:
                 send_history.status = 'sent'
                 send_history.sent_at = timezone.now()
-                send_history.message_id = message_id.strip('<>')
+                send_history.message_id = message_id_clean
                 send_history.save()
 
             self.sent_count += 1
             logger.info(f"Raw email sent to {to_email} (subject: {subject[:60]})")
-            result = {'success': True, 'message_id': message_id.strip('<>')}
+            result = {'success': True, 'message_id': message_id_clean}
             if send_history:
                 result['send_history_id'] = send_history.id
             return result
@@ -468,9 +484,12 @@ class EmailService:
                 send_history.error_message = str(e)
                 send_history.save()
             logger.error(f"Error sending raw email to {to_email}: {str(e)}")
+            # Return the attempted message_id even on failure so callers can
+            # dedupe an IMAP-synced copy of a rejected send.
             return {
                 'success': False,
                 'error': str(e),
+                'message_id': message_id_clean,
                 **({'send_history_id': send_history.id} if send_history else {}),
             }
 
