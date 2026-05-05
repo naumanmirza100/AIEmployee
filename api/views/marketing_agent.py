@@ -265,7 +265,11 @@ def _build_campaign_detail(campaign, user):
     When a lead replies, the triggering_email is marked as opened (see Reply post_save signal).
     """
     leads = campaign.leads.all().order_by('-created_at')[:200]
-    all_email_sends = EmailSendHistory.objects.filter(campaign=campaign)
+    # Exclude reply-draft agent's one-off sends (template_id=None from send_raw_email);
+    # they belong to the reply agent, not the marketing campaign.
+    all_email_sends = EmailSendHistory.objects.filter(
+        campaign=campaign, email_template__isnull=False
+    )
     total_sent = all_email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
     total_opened = all_email_sends.filter(status__in=['opened', 'clicked']).count()
     total_clicked = all_email_sends.filter(status='clicked').count()
@@ -393,7 +397,9 @@ def _build_campaign_detail(campaign, user):
         'replied': replied_list,
     }
 
-    recent_sends = EmailSendHistory.objects.filter(campaign=campaign).order_by('-sent_at', '-created_at')[:10]
+    recent_sends = EmailSendHistory.objects.filter(
+        campaign=campaign, email_template__isnull=False
+    ).order_by('-sent_at', '-created_at')[:10]
     email_sends = [
         {
             'id': e.id,
@@ -2078,7 +2084,13 @@ def update_template(request, campaign_id, template_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def delete_template(request, campaign_id, template_id):
-    """Delete an email template."""
+    """Delete an email template.
+
+    Refuses the delete when the template is in use:
+    - the campaign is currently active (running), or
+    - the template has any linked send history rows.
+    In both cases the user can still edit the template — only the delete is blocked.
+    """
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
@@ -2094,6 +2106,32 @@ def delete_template(request, campaign_id, template_id):
                 {'status': 'error', 'message': 'Template not found.', 'error': 'not_found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+        if campaign.status == 'active':
+            return Response(
+                {
+                    'status': 'error',
+                    'message': 'Cannot delete a template while the campaign is running. Pause the campaign first, or edit the template instead.',
+                    'error': 'campaign_active',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sends_count = template.sends.count()
+        if sends_count > 0:
+            return Response(
+                {
+                    'status': 'error',
+                    'message': (
+                        f'Cannot delete this template — it is linked to {sends_count} sent email(s). '
+                        'You can still edit it, but deleting would break that history.'
+                    ),
+                    'error': 'template_in_use',
+                    'data': {'sends_count': sends_count},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         name = template.name
         template.delete()
         return Response({
@@ -2368,9 +2406,12 @@ def get_email_status_full(request, campaign_id):
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+        # Scope to campaign-sequence sends only. Rows with email_template=None
+        # come from the reply-draft agent's send_raw_email path (one-off replies)
+        # and must stay isolated from the marketing campaign view.
         all_email_history = (
             EmailSendHistory.objects
-            .filter(campaign=campaign)
+            .filter(campaign=campaign, email_template__isnull=False)
             .select_related('email_template', 'lead')
             .order_by('-sent_at', '-created_at')
         )
@@ -2483,6 +2524,7 @@ def get_email_status_full(request, campaign_id):
                 emails_by_sequence[seq_name] = []
             emails_by_sequence[seq_name].append({
                 'id': email_send.id,
+                'lead_id': email_send.lead_id,
                 'recipient_email': email_send.recipient_email,
                 'subject': email_send.subject,
                 'status': email_send.status,
@@ -2513,6 +2555,7 @@ def get_email_status_full(request, campaign_id):
                     interest_level = (reply.contact.reply_interest_level or 'not_analyzed')
                 r = {
                     'id': reply.id,
+                    'lead_id': reply.lead_id,
                     'lead_email': reply.lead.email if reply.lead else None,
                     'sequence_name': seq_name,
                     'sequence_id': reply.sequence_id,
@@ -2522,6 +2565,7 @@ def get_email_status_full(request, campaign_id):
                     'replied_at': reply.replied_at.isoformat() if reply.replied_at else None,
                     'reply_subject': reply.reply_subject or '',
                     'reply_content': reply_content,
+                    'triggering_email_id': reply.triggering_email_id,
                     'in_reply_to_subject': reply.triggering_email.subject if reply.triggering_email else None,
                 }
                 replies_list.append(r)

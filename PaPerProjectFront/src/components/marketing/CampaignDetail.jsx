@@ -230,6 +230,7 @@ const CampaignDetail = () => {
   const [editingLead, setEditingLead] = useState(null);
   const [editLeadForm, setEditLeadForm] = useState({});
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [deleteLeadConfirm, setDeleteLeadConfirm] = useState(null);
 
   const fetchDetail = useCallback(async (silent = false) => {
@@ -309,6 +310,12 @@ const CampaignDetail = () => {
       }, id);
       if (result?.success === false) {
         toast({ title: 'Launch failed', description: result.error || 'Campaign could not be launched', variant: 'destructive' });
+        // Backend signals "no sending account set" — close the launch dialog
+        // and surface the account picker so the user can fix it in one click.
+        if (result?.error_code === 'no_email_account') {
+          setLaunchOpen(false);
+          openAccountModal();
+        }
         return;
       }
       toast({ title: 'Success', description: result?.message || 'Campaign launched' });
@@ -343,7 +350,7 @@ const CampaignDetail = () => {
   };
 
   const handleStop = async () => {
-    if (!window.confirm('Are you sure you want to stop this campaign?')) return;
+    setStopConfirmOpen(false);
     setActionLoading('stop');
     try {
       await marketingAgentService.campaignStop(id);
@@ -560,6 +567,18 @@ const CampaignDetail = () => {
             <Button
               size="sm"
               onClick={() => {
+                // Block launch if no sending account is set: the campaign would
+                // otherwise fall back to an arbitrary active account on the
+                // owner. Push the user straight into the account picker.
+                if (!campaign.email_account_id && !campaign.email_account_email) {
+                  toast({
+                    title: 'Set a sending account first',
+                    description: 'Pick which email account this campaign should send from before launching.',
+                    variant: 'destructive',
+                  });
+                  openAccountModal();
+                  return;
+                }
                 const today = formatDateLocal(new Date());
                 const start = campaign.start_date ? campaign.start_date.slice(0, 10) : today;
                 const end = campaign.end_date ? campaign.end_date.slice(0, 10) : '';
@@ -589,7 +608,7 @@ const CampaignDetail = () => {
             </Button>
           )}
           {isActive && (
-            <Button size="sm" variant="outline" onClick={handleStop} disabled={!!actionLoading}>
+            <Button size="sm" variant="outline" onClick={() => setStopConfirmOpen(true)} disabled={!!actionLoading}>
               <Pause className="mr-2 h-4 w-4" />
               Stop
             </Button>
@@ -1038,46 +1057,42 @@ const CampaignDetail = () => {
 
       {/* Edit campaign modal */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <DialogHeader>
             <DialogTitle>Edit campaign</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 py-4">
+            <div className="sm:col-span-2">
               <Label>Name</Label>
               <Input value={editForm.name || ''} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} className="mt-1" />
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <Label>Description</Label>
               <Input value={editForm.description || ''} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} className="mt-1" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Target leads</Label>
-                <Input type="number" value={editForm.target_leads ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, target_leads: e.target.value ? parseInt(e.target.value, 10) : '' }))} className="mt-1" />
-              </div>
-              <div>
-                <Label>Target conversions</Label>
-                <Input type="number" value={editForm.target_conversions ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, target_conversions: e.target.value ? parseInt(e.target.value, 10) : '' }))} className="mt-1" />
-              </div>
+            <div>
+              <Label>Target leads</Label>
+              <Input type="number" value={editForm.target_leads ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, target_leads: e.target.value ? parseInt(e.target.value, 10) : '' }))} className="mt-1" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Start date</Label>
-                <DatePicker
-                  date={editForm.start_date ? parseDateLocal(editForm.start_date) : undefined}
-                  setDate={(d) => setEditForm((f) => ({ ...f, start_date: d ? formatDateLocal(d) : '' }))}
-                  placeholder="Select start date"
-                />
-              </div>
-              <div>
-                <Label>End date</Label>
-                <DatePicker
-                  date={editForm.end_date ? parseDateLocal(editForm.end_date) : undefined}
-                  setDate={(d) => setEditForm((f) => ({ ...f, end_date: d ? formatDateLocal(d) : '' }))}
-                  placeholder="Select end date"
-                />
-              </div>
+            <div>
+              <Label>Target conversions</Label>
+              <Input type="number" value={editForm.target_conversions ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, target_conversions: e.target.value ? parseInt(e.target.value, 10) : '' }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Start date</Label>
+              <DatePicker
+                date={editForm.start_date ? parseDateLocal(editForm.start_date) : undefined}
+                setDate={(d) => setEditForm((f) => ({ ...f, start_date: d ? formatDateLocal(d) : '' }))}
+                placeholder="Select start date"
+              />
+            </div>
+            <div>
+              <Label>End date</Label>
+              <DatePicker
+                date={editForm.end_date ? parseDateLocal(editForm.end_date) : undefined}
+                setDate={(d) => setEditForm((f) => ({ ...f, end_date: d ? formatDateLocal(d) : '' }))}
+                placeholder="Select end date"
+              />
             </div>
             <div>
               <Label>Location</Label>
@@ -1087,7 +1102,7 @@ const CampaignDetail = () => {
               <Label>Industry</Label>
               <Input value={editForm.industry || ''} onChange={(e) => setEditForm((f) => ({ ...f, industry: e.target.value }))} className="mt-1" />
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <Label>Company size</Label>
               <Input value={editForm.company_size || ''} onChange={(e) => setEditForm((f) => ({ ...f, company_size: e.target.value }))} className="mt-1" />
             </div>
@@ -1285,6 +1300,27 @@ const CampaignDetail = () => {
             <Button onClick={handleUpdateLead} disabled={actionLoading === 'editLead'}>
               {actionLoading === 'editLead' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stop Campaign Confirmation Dialog */}
+      <Dialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Stop Campaign</DialogTitle>
+            <DialogDescription>
+              This will pause sending for the campaign. You can launch it again later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setStopConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleStop} disabled={actionLoading === 'stop'}>
+              <Pause className="mr-2 h-4 w-4" />
+              Stop campaign
             </Button>
           </DialogFooter>
         </DialogContent>

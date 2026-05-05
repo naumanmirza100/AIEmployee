@@ -123,10 +123,13 @@ def email_sending_status(request, campaign_id):
     last_24_hours = now - timedelta(hours=24)
     horizon = now + timedelta(hours=24)
 
-    # Get ALL email history (not just last 24 hours) for detailed view
+    # Get ALL email history (not just last 24 hours) for detailed view.
+    # Scope to campaign-sequence sends only. Rows with email_template=None
+    # come from the reply-draft agent's send_raw_email path (one-off replies)
+    # and must stay isolated from the marketing campaign view.
     all_email_history_queryset = (
         EmailSendHistory.objects
-        .filter(campaign=campaign)
+        .filter(campaign=campaign, email_template__isnull=False)
         .select_related('email_template', 'lead')
         .prefetch_related('email_template__sequence_steps__sequence', 'email_template__sequence_steps__sequence__campaign')
         .order_by('-sent_at', '-created_at')

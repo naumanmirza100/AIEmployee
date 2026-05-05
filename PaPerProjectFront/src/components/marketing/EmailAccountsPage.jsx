@@ -732,7 +732,7 @@ const EmailAccountsPage = () => {
 
       {/* Add/Edit modal */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto p-0">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -746,7 +746,7 @@ const EmailAccountsPage = () => {
                 {editingId ? 'Edit Email Account' : 'Add Email Account'}
               </DialogTitle>
               <DialogDescription>
-                {editingId 
+                {editingId
                   ? 'Update your SMTP settings. Leave password blank to keep existing.'
                   : 'Configure SMTP settings for sending campaign emails.'}
               </DialogDescription>
@@ -754,180 +754,182 @@ const EmailAccountsPage = () => {
 
             <form onSubmit={handleSubmit} className="px-6 py-4">
               <div className="space-y-5">
-                {/* Basic Information */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
-                    <Mail className="h-4 w-4" />
-                    Basic Information
-                  </h3>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Account Name *</Label>
-                      <Input
-                        value={form.name}
-                        onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                        placeholder="e.g. Main Gmail"
-                        className="h-10"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>Account Type</Label>
-                      <Select value={form.account_type} onValueChange={applyTypeDefaults}>
-                        <SelectTrigger className="h-10">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ACCOUNT_TYPES.map((t) => (
-                            <SelectItem key={t.value} value={t.value}>
-                              <div className="flex items-center gap-2">
-                                <t.icon className={cn("h-4 w-4", t.color)} />
-                                <span>{t.label}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+                {/* Basic Information + SMTP Settings, side-by-side on lg+ */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Basic Information */}
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
+                      <Mail className="h-4 w-4" />
+                      Basic Information
+                    </h3>
 
-                  <div className="space-y-2">
-                    <Label>Email Address *</Label>
-                    <Input
-                      type="email"
-                      value={form.email}
-                      onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                      placeholder="your@email.com"
-                      className="h-10"
-                    />
-                  </div>
-                </div>
-
-                {/* SMTP Settings */}
-                <div className="space-y-4 pt-2 border-t">
-                  <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
-                    <Server className="h-4 w-4" />
-                    SMTP Settings
-                  </h3>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>SMTP Host *</Label>
-                      <Input
-                        value={form.smtp_host}
-                        onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
-                        placeholder="smtp.gmail.com"
-                        className="h-10"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>SMTP Port</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={form.smtp_port}
-                        onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
-                        className="h-10"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>SMTP Username *</Label>
-                      <Input
-                        value={form.smtp_username}
-                        onChange={(e) => setForm((p) => ({ ...p, smtp_username: e.target.value }))}
-                        placeholder="Usually same as email"
-                        className="h-10"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>SMTP Password * {editingId && '(leave blank to keep)'}</Label>
-                      <div className="relative">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Account Name *</Label>
                         <Input
-                          type={showPassword ? 'text' : 'password'}
-                          value={form.smtp_password}
-                          onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
-                          placeholder="••••••••"
-                          className="h-10 pr-10"
+                          value={form.name}
+                          onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                          placeholder="e.g. Main Gmail"
+                          className="h-10"
                         />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
-                          onClick={() => setShowPassword(!showPassword)}
-                        >
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </Button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Account Type</Label>
+                        <Select value={form.account_type} onValueChange={applyTypeDefaults}>
+                          <SelectTrigger className="h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ACCOUNT_TYPES.map((t) => (
+                              <SelectItem key={t.value} value={t.value}>
+                                <div className="flex items-center gap-2">
+                                  <t.icon className={cn("h-4 w-4", t.color)} />
+                                  <span>{t.label}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Email Address *</Label>
+                      <Input
+                        type="email"
+                        value={form.email}
+                        onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                        placeholder="your@email.com"
+                        className="h-10"
+                      />
+                    </div>
+
+                    {/* Account Status moved here so it shares the left column */}
+                    <div className="pt-3 border-t space-y-3">
+                      <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
+                        <Shield className="h-4 w-4" />
+                        Account Status
+                      </h4>
+                      <div className="flex flex-wrap gap-6">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={form.is_active}
+                            onCheckedChange={(checked) => setForm((p) => ({ ...p, is_active: checked }))}
+                            id="is-active"
+                          />
+                          <Label htmlFor="is-active" className="text-sm cursor-pointer">Active (can send emails)</Label>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={form.is_default}
+                            onCheckedChange={(checked) => setForm((p) => ({ ...p, is_default: checked }))}
+                            id="is-default"
+                          />
+                          <Label htmlFor="is-default" className="text-sm cursor-pointer">Default account</Label>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-6 pt-2">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={form.use_tls}
-                        onCheckedChange={(checked) => setForm((p) => ({ ...p, use_tls: checked }))}
-                        id="use-tls"
-                      />
-                      <Label htmlFor="use-tls" className="text-sm cursor-pointer">Use TLS</Label>
+                  {/* SMTP Settings */}
+                  <div className="space-y-4 lg:border-l lg:pl-6">
+                    <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
+                      <Server className="h-4 w-4" />
+                      SMTP Settings
+                    </h3>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>SMTP Host *</Label>
+                        <Input
+                          value={form.smtp_host}
+                          onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
+                          placeholder="smtp.gmail.com"
+                          className="h-10"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>SMTP Port</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={form.smtp_port}
+                          onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                          className="h-10"
+                        />
+                      </div>
                     </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={form.use_ssl}
-                        onCheckedChange={(checked) => setForm((p) => ({ ...p, use_ssl: checked }))}
-                        id="use-ssl"
-                      />
-                      <Label htmlFor="use-ssl" className="text-sm cursor-pointer">Use SSL</Label>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>SMTP Username *</Label>
+                        <Input
+                          value={form.smtp_username}
+                          onChange={(e) => setForm((p) => ({ ...p, smtp_username: e.target.value }))}
+                          placeholder="Usually same as email"
+                          className="h-10"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>SMTP Password * {editingId && '(leave blank to keep)'}</Label>
+                        <div className="relative">
+                          <Input
+                            type={showPassword ? 'text' : 'password'}
+                            value={form.smtp_password}
+                            onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
+                            placeholder="••••••••"
+                            className="h-10 pr-10"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+                            onClick={() => setShowPassword(!showPassword)}
+                          >
+                            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    
-                    {form.account_type === 'gmail' && (
+
+                    <div className="flex flex-wrap gap-6 pt-2">
                       <div className="flex items-center gap-2">
                         <Switch
-                          checked={form.is_gmail_app_password}
-                          onCheckedChange={(checked) => setForm((p) => ({ ...p, is_gmail_app_password: checked }))}
-                          id="app-password"
+                          checked={form.use_tls}
+                          onCheckedChange={(checked) => setForm((p) => ({ ...p, use_tls: checked }))}
+                          id="use-tls"
                         />
-                        <Label htmlFor="app-password" className="text-sm cursor-pointer flex items-center gap-1">
-                          <Lock className="h-3 w-3" />
-                          Gmail App Password
-                        </Label>
+                        <Label htmlFor="use-tls" className="text-sm cursor-pointer">Use TLS</Label>
                       </div>
-                    )}
-                  </div>
-                </div>
 
-                {/* Account Status */}
-                <div className="space-y-4 pt-2 border-t">
-                  <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
-                    <Shield className="h-4 w-4" />
-                    Account Status
-                  </h3>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={form.use_ssl}
+                          onCheckedChange={(checked) => setForm((p) => ({ ...p, use_ssl: checked }))}
+                          id="use-ssl"
+                        />
+                        <Label htmlFor="use-ssl" className="text-sm cursor-pointer">Use SSL</Label>
+                      </div>
 
-                  <div className="flex flex-wrap gap-6">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={form.is_active}
-                        onCheckedChange={(checked) => setForm((p) => ({ ...p, is_active: checked }))}
-                        id="is-active"
-                      />
-                      <Label htmlFor="is-active" className="text-sm cursor-pointer">Active (can send emails)</Label>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={form.is_default}
-                        onCheckedChange={(checked) => setForm((p) => ({ ...p, is_default: checked }))}
-                        id="is-default"
-                      />
-                      <Label htmlFor="is-default" className="text-sm cursor-pointer">Default account</Label>
+                      {form.account_type === 'gmail' && (
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={form.is_gmail_app_password}
+                            onCheckedChange={(checked) => setForm((p) => ({ ...p, is_gmail_app_password: checked }))}
+                            id="app-password"
+                          />
+                          <Label htmlFor="app-password" className="text-sm cursor-pointer flex items-center gap-1">
+                            <Lock className="h-3 w-3" />
+                            Gmail App Password
+                          </Label>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

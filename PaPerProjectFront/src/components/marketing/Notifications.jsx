@@ -6,6 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { 
   Loader2, 
   RefreshCw, 
@@ -264,6 +271,7 @@ const Notifications = ({ onUnreadCountChange }) => {
   const [monitorSummary, setMonitorSummary] = useState(null);
   const [error, setError] = useState(null);
   const [actioningId, setActioningId] = useState(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [filterType, setFilterType] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
 
@@ -455,8 +463,10 @@ const Notifications = ({ onUnreadCountChange }) => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this notification?')) return;
+  const handleDelete = async (idArg) => {
+    const id = idArg ?? deleteConfirmId;
+    if (!id) return;
+    setDeleteConfirmId(null);
     setActioningId(id);
     try {
       const response = await marketingAgentService.deleteNotification(id);
@@ -650,7 +660,7 @@ const Notifications = ({ onUnreadCountChange }) => {
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
               disabled={actioningId === n.id}
-              onClick={() => handleDelete(n.id)}
+              onClick={() => setDeleteConfirmId(n.id)}
               title="Delete"
             >
               {actioningId === n.id ? (
@@ -1139,6 +1149,27 @@ const Notifications = ({ onUnreadCountChange }) => {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Delete notification confirmation */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete notification?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the notification. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => handleDelete()}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 };
