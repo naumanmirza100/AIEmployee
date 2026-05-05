@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from django.db.models import Count, Max, Prefetch, Q
 from django.utils import timezone
 
@@ -453,6 +454,11 @@ def _serialize_draft(d):
         'inbox_email_id': d.inbox_email_id,
         'original_subject': d.get_original_subject(),
         'original_body': d.get_original_body(),
+        # HTML source of the original message when available (e.g. for
+        # IMAP-synced HTML mail). The frontend prefers this over the plain
+        # `original_body` when rendering the thread-context pane so the
+        # original email looks the same as it does in the Inbox tab.
+        'original_body_html': d.get_original_body_html(),
         'regeneration_count': d.regeneration_count,
         'created_at': d.created_at.isoformat(),
         'updated_at': d.updated_at.isoformat() if d.updated_at else None,
@@ -659,6 +665,37 @@ def list_pending_replies(request):
     )
     if days_cutoff is not None:
         inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
+
+    # Sent tab: hide IMAP-synced copies of messages we tried to send but
+    # the SMTP provider rejected. Gmail in particular retains a Sent-folder
+    # copy of each 552-rejected ("dangerous content") attempt with that
+    # attempt's own Message-ID. Without this filter the user sees those
+    # in our Sent tab as if the send had succeeded.
+    #
+    # We read from `attempted_message_ids` (newline-separated, every retry
+    # appended) so a draft that was retried multiple times suppresses ALL
+    # of its prior IDs, not just the latest. Falls back to the legacy
+    # `attempted_message_id` for any rows the data migration missed.
+    if direction == 'out':
+        failed_drafts = (
+            ReplyDraft.objects
+            .filter(
+                owner_id__in=user_ids,
+                status__in=('failed', 'rejected'),
+            )
+            .values_list('attempted_message_ids', 'attempted_message_id')
+        )
+        failed_attempted_ids = set()
+        for ids_text, legacy_id in failed_drafts:
+            for tok in (ids_text or '').replace(',', '\n').split('\n'):
+                tok = tok.strip()
+                if tok:
+                    failed_attempted_ids.add(tok)
+            legacy = (legacy_id or '').strip()
+            if legacy:
+                failed_attempted_ids.add(legacy)
+        if failed_attempted_ids:
+            inbox_qs = inbox_qs.exclude(message_id__in=failed_attempted_ids)
     # Cap at 500 — the previous 2000 was a worst-case safety net but with
     # body deferred + paged list, the user only ever scrolls through the
     # most recent few hundred. A smaller cap also keeps the JSON payload
@@ -1397,7 +1434,11 @@ def create_reply_account(request):
         data = request.data or {}
 
         name = (data.get('name') or '').strip() or 'Reply Draft Inbox'
-        email = (data.get('email') or '').strip()
+        # Normalize to lowercase so two requests with mixed casing
+        # ("Foo@Gmail.com" vs "foo@gmail.com") can't bypass the
+        # cross-tenant uniqueness check below by claiming the same
+        # mailbox under different DB casings.
+        email = (data.get('email') or '').strip().lower()
         if not email:
             return Response(
                 {'status': 'error', 'message': 'Email is required.', 'error': 'validation'},
@@ -1440,6 +1481,28 @@ def create_reply_account(request):
                 'message': f'IMAP login failed: {err}',
                 'error': 'imap_auth_failed',
             }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cross-tenant uniqueness: a mailbox should only be attached to
+        # ONE company at a time, regardless of role (marketing-sender or
+        # reply-agent inbox). Two companies sharing an email split SPF/
+        # DKIM/DMARC alignment, mix campaign analytics, race on IMAP
+        # sessions, and confuse the audit trail. Same rule the marketing
+        # create_email_account endpoint enforces.
+        # Runs AFTER the IMAP verify so an attacker can't probe whether
+        # some email is registered without proving they hold its
+        # credentials, and BEFORE any DB write.
+        cross_tenant = (
+            EmailAccount.objects
+            .filter(email__iexact=email)
+            .exclude(owner=user)
+            .first()
+        )
+        if cross_tenant is not None:
+            return Response({
+                'status': 'error',
+                'message': f'{email} is not available — please use a different mailbox.',
+                'error': 'email_already_used_by_another_company',
+            }, status=status.HTTP_409_CONFLICT)
 
         # Duplicate check — create_unique is per (owner, email). If the user is
         # re-attaching an existing account by the same email, just promote it
@@ -1509,6 +1572,18 @@ def create_reply_account(request):
                 'immediate_sync_queued': sync_queued,
             },
         }, status=status.HTTP_201_CREATED)
+    except IntegrityError:
+        # Race against a simultaneous create_reply_account from another
+        # company for the same email — the partial-unique constraint
+        # (unique_reply_agent_email) is the backstop for the app-level
+        # cross-tenant check above. Surface the same 409 message so the
+        # user sees a coherent story regardless of which layer caught it.
+        logger.info('create_reply_account: cross-tenant uniqueness race for %s', email)
+        return Response({
+            'status': 'error',
+            'message': f'{email} is not available — please use a different mailbox.',
+            'error': 'email_already_used_by_another_company',
+        }, status=status.HTTP_409_CONFLICT)
     except Exception as e:
         logger.exception('create_reply_account failed')
         return Response(
@@ -1659,6 +1734,117 @@ _DRAFT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 _DRAFT_ATTACHMENT_MAX_PER_DRAFT = 20
 
 
+# File-format magic bytes. Browsers set Content-Type from the file extension,
+# so a "Save Page As..." HTML document renamed to .pdf still arrives labelled
+# application/pdf — we'd happily attach it, the recipient's PDF viewer would
+# fail to parse it, and the sender would have no idea why. Sniffing the first
+# few bytes catches the mismatch at upload time. Only formats with a stable,
+# well-known signature are listed; text-ish types (txt, csv, html, json, xml)
+# have no reliable magic so they're skipped.
+#
+# WebP is special-cased below because its magic spans non-contiguous offsets
+# (RIFF at 0..4, WEBP at 8..12). Old Office formats (.doc/.xls/.ppt) all share
+# the OLE2 compound-file header so they map to the same prefix.
+_MAGIC_BYTE_SIGNATURES = {
+    'application/pdf': [b'%PDF-'],
+    'image/png': [b'\x89PNG\r\n\x1a\n'],
+    'image/jpeg': [b'\xff\xd8\xff'],
+    'image/jpg': [b'\xff\xd8\xff'],
+    'image/gif': [b'GIF87a', b'GIF89a'],
+    'image/bmp': [b'BM'],
+    # ZIP-family. xlsx/docx/pptx are zips under the hood, so the same prefix
+    # validates all of them.
+    'application/zip': [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'],
+    'application/x-zip-compressed': [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [b'PK\x03\x04'],
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [b'PK\x03\x04'],
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': [b'PK\x03\x04'],
+    # OLE2 — old Office.
+    'application/msword': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+    'application/vnd.ms-excel': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+    'application/vnd.ms-powerpoint': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+    'application/x-7z-compressed': [b'7z\xbc\xaf\x27\x1c'],
+    'application/vnd.rar': [b'Rar!\x1a\x07'],
+    'application/x-rar-compressed': [b'Rar!\x1a\x07'],
+    'application/gzip': [b'\x1f\x8b'],
+    'application/x-gzip': [b'\x1f\x8b'],
+}
+
+
+def _validate_upload_magic_bytes(upload, content_type):
+    """Return None if the upload's first bytes match its declared content_type,
+    or a user-facing error string if they don't.
+
+    Permissive by design — unknown content_types and text-ish formats pass
+    through unchecked. We only reject when we have a reliable signature for
+    the declared type AND the file's actual prefix doesn't match it. This
+    keeps false positives near zero while still catching the realistic
+    failure mode (saved-as-HTML masquerading as a real PDF/image/etc.).
+
+    Always seeks the upload back to position 0 before returning so downstream
+    hashing + storage save read the full content.
+    """
+    ct = (content_type or '').lower().strip()
+    # Generic / unknown / text-ish — nothing reliable to check.
+    if not ct or ct == 'application/octet-stream':
+        return None
+
+    try:
+        head = upload.read(16)
+    finally:
+        try:
+            upload.seek(0)
+        except Exception:
+            # If seek fails the caller will hit an empty body during save —
+            # that's a worse error than a false-positive validation skip,
+            # so just bail without rejecting.
+            return None
+    if not head:
+        return None
+
+    # WebP's magic isn't a simple prefix: bytes 0..4 are 'RIFF', 8..12 are 'WEBP'.
+    if ct == 'image/webp':
+        if len(head) >= 12 and head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+            return None
+        return (
+            "This file is labelled image/webp but doesn't look like a real WebP "
+            "image. The recipient's image viewer won't be able to open it."
+        )
+
+    sigs = _MAGIC_BYTE_SIGNATURES.get(ct)
+    if sigs is None:
+        # Type we don't have a signature for — let it through.
+        return None
+    if any(head.startswith(s) for s in sigs):
+        return None
+
+    # Pretty-print the type the user sees on the picker (xlsx, pdf, etc.) when
+    # we can; fall back to the raw mime when it's an obscure one.
+    pretty = {
+        'application/pdf': 'PDF',
+        'image/png': 'PNG',
+        'image/jpeg': 'JPEG', 'image/jpg': 'JPEG',
+        'image/gif': 'GIF',
+        'image/bmp': 'BMP',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel (.xlsx)',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word (.docx)',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint (.pptx)',
+        'application/msword': 'Word (.doc)',
+        'application/vnd.ms-excel': 'Excel (.xls)',
+        'application/vnd.ms-powerpoint': 'PowerPoint (.ppt)',
+        'application/zip': 'ZIP', 'application/x-zip-compressed': 'ZIP',
+        'application/x-7z-compressed': '7-Zip',
+        'application/vnd.rar': 'RAR', 'application/x-rar-compressed': 'RAR',
+        'application/gzip': 'gzip', 'application/x-gzip': 'gzip',
+    }.get(ct, ct)
+    return (
+        f"This file is labelled as {pretty} but its contents don't match — "
+        "it looks like a different format (often a saved webpage with the "
+        "wrong extension). The recipient won't be able to open it. Please "
+        "re-attach the original file."
+    )
+
+
 def _resolve_user_draft(request, draft_id):
     """Look up a ReplyDraft owned by the calling company user.
 
@@ -1722,6 +1908,13 @@ def upload_draft_attachment(request, draft_id):
     if size > _DRAFT_ATTACHMENT_MAX_BYTES:
         return Response(
             {'status': 'error', 'message': f'File exceeds {_DRAFT_ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB limit.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    magic_err = _validate_upload_magic_bytes(upload, upload.content_type)
+    if magic_err:
+        return Response(
+            {'status': 'error', 'message': magic_err},
             status=status.HTTP_400_BAD_REQUEST,
         )
 

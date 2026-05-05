@@ -2629,12 +2629,34 @@ def create_email_account(request):
         user = _get_or_create_user_for_company_user(company_user)
         data = request.data
         name = (data.get('name') or '').strip() or 'Email Account'
-        email = (data.get('email') or '').strip()
+        # Lowercase so case variations can't bypass the cross-tenant check.
+        email = (data.get('email') or '').strip().lower()
         if not email:
             return Response(
                 {'status': 'error', 'message': 'Email is required.', 'error': 'validation'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # Cross-tenant uniqueness for marketing/sender accounts.
+        # A given mailbox should only be attached to ONE company at a time
+        # — two companies sending FROM the same address would split SPF/
+        # DKIM/DMARC alignment, mix campaign analytics, and confuse the
+        # audit trail. Same rule we apply to Reply Draft Agent inboxes.
+        # Existing legacy duplicates (same email under different owners
+        # before this rule shipped) are grandfathered in by the absence
+        # of a DB constraint; the app-level check below stops NEW dupes.
+        cross_tenant = (
+            EmailAccount.objects
+            .filter(email__iexact=email)
+            .exclude(owner=user)
+            .first()
+        )
+        if cross_tenant is not None:
+            return Response({
+                'status': 'error',
+                'message': f'{email} is not available — please use a different mailbox.',
+                'error': 'email_already_used_by_another_company',
+            }, status=status.HTTP_409_CONFLICT)
         smtp_host = (data.get('smtp_host') or '').strip()
         if not smtp_host:
             return Response(

@@ -90,6 +90,94 @@ const DRAFT_ATTACHMENT_MAX_COUNT = 20;
 // the SPA index.html for these requests and producing "corrupt" downloads.
 const ATTACHMENT_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
 
+// Map raw SMTP / send-pipeline failures to a short user-facing message.
+// Backends bubble the provider's error string back ("(552, b'5.7.0 This
+// message was blocked because…')"); rendering that verbatim is noisy and
+// confuses non-technical users. We pick the message off the SMTP code +
+// well-known phrases, falling back to a generic "send failed" if nothing
+// matches. The original text is logged via console.error in the caller so
+// we don't lose diagnostic info.
+const humanizeSendError = (raw) => {
+  const text = (raw || '').toString();
+  const lower = text.toLowerCase();
+  // Gmail security block — the most common reason an attached file can't
+  // go through (executable, suspected phishing, etc.). 552 + 5.7.0 is the
+  // canonical signature; "blocked" + "security" catches provider variants.
+  if (/\b552\b/.test(text) || /5\.7\.0/.test(text) || (lower.includes('blocked') && lower.includes('security'))) {
+    return 'Message blocked by the recipient mail provider for security reasons. This usually means an attachment type or message content triggered their malware/phishing filter. Try removing attachments or rewording, then resend.';
+  }
+  if (/\b554\b/.test(text) || lower.includes('spam')) {
+    return 'Rejected as spam by the recipient mail provider. Try simpler wording or fewer links and resend.';
+  }
+  if (/\b550\b/.test(text) || /5\.1\.1/.test(text) || lower.includes('no such user') || lower.includes('mailbox unavailable')) {
+    return "The recipient address doesn't exist or can't accept mail. Double-check the address and try again.";
+  }
+  if (/\b535\b/.test(text) || lower.includes('authentication failed')) {
+    return 'Email account authentication failed. Reconnect the account in Settings and try again.';
+  }
+  if (/\b421\b/.test(text) || lower.includes('service unavailable') || lower.includes('try again later')) {
+    return 'The mail provider is temporarily unavailable or rate-limiting. Wait a minute and resend.';
+  }
+  // Fallback — keep the original first line so power users still see what
+  // happened, but trimmed so it fits in the inline banner.
+  const firstLine = text.split('\n')[0].trim();
+  return firstLine ? `Send failed: ${firstLine.slice(0, 200)}` : 'Send failed. Please try again.';
+};
+
+// AI-pipeline error humanizer. The reply-draft endpoint surfaces raw
+// errors from the LLM provider (rate-limit JSON, HTTP status codes, JSON
+// schema parse errors, etc.) and rendering those verbatim in a toast just
+// confuses users. Maps the common cases to short, actionable messages.
+// Original text is preserved via console.error in the caller.
+const humanizeAiError = (raw) => {
+  const text = (raw || '').toString();
+  const lower = text.toLowerCase();
+
+  // Quota / rate limit — the by far most common failure when the user
+  // generates several drafts in a row, or when the workspace's monthly
+  // credit allowance is exhausted. 429 covers the HTTP-level rate limit;
+  // "insufficient_quota" / "billing" / "credits" catch provider-specific
+  // wording (OpenAI, Anthropic, etc.).
+  if (
+    /\b429\b/.test(text)
+    || lower.includes('rate limit')
+    || lower.includes('rate_limit')
+    || lower.includes('too many requests')
+    || lower.includes('insufficient_quota')
+    || lower.includes('insufficient quota')
+    || lower.includes('quota')
+    || lower.includes('credits')
+    || lower.includes('billing')
+  ) {
+    return 'AI request limit reached. Please try again in a few minutes — or contact support if this keeps happening.';
+  }
+
+  // Auth — usually a missing / expired API key on the server side. The
+  // user can't fix this themselves; nudge them to support.
+  if (/\b401\b/.test(text) || /\b403\b/.test(text) || lower.includes('unauthorized') || lower.includes('api key') || lower.includes('forbidden')) {
+    return 'AI service authentication failed. This needs admin attention — please contact support.';
+  }
+
+  // Provider outage / 5xx. Worth a retry rather than a support ticket.
+  if (/\b5\d\d\b/.test(text) || lower.includes('service unavailable') || lower.includes('bad gateway') || lower.includes('overloaded')) {
+    return 'AI service is temporarily unavailable. Please try again in a moment.';
+  }
+
+  // Timeouts — happens when the prompt is huge (long thread context) or
+  // when the provider is slow. Suggest shortening or retrying.
+  if (/\b408\b/.test(text) || /\b504\b/.test(text) || lower.includes('timeout') || lower.includes('timed out')) {
+    return 'AI request timed out. Try again, or shorten any custom instructions you provided.';
+  }
+
+  // Content policy refusal — model returned a safety block instead of a draft.
+  if (lower.includes('content policy') || lower.includes('content_policy') || lower.includes('safety') || lower.includes('refused')) {
+    return 'The AI declined to draft this reply (content policy). Try editing the source message excerpt or your instructions and retry.';
+  }
+
+  const firstLine = text.split('\n')[0].trim();
+  return firstLine ? `Generation failed: ${firstLine.slice(0, 200)}` : 'Generation failed. Please try again.';
+};
+
 // Pure view filter for the inbox list — Celery pre-syncs the full 120-day
 // window on a cron (see marketing_agent/management/commands/sync_inbox.py),
 // so switching the dropdown just slices already-cached rows and is instant.
@@ -525,7 +613,12 @@ const ReplyDraftAgentPage = () => {
         refreshAll();
       }
     } catch (e) {
-      toast({ title: 'Generation failed', description: e.message, variant: 'destructive' });
+      console.error('Generate draft failed', e);
+      toast({
+        title: 'Could not generate draft',
+        description: humanizeAiError(e?.message),
+        variant: 'destructive',
+      });
     } finally {
       setBusy(false);
     }
@@ -565,7 +658,12 @@ const ReplyDraftAgentPage = () => {
         refreshDrafts();
       }
     } catch (e) {
-      toast({ title: 'Regeneration failed', description: e.message, variant: 'destructive' });
+      console.error('Regenerate draft failed', e);
+      toast({
+        title: 'Could not regenerate draft',
+        description: humanizeAiError(e?.message),
+        variant: 'destructive',
+      });
     } finally {
       setBusy(false);
     }
@@ -593,7 +691,23 @@ const ReplyDraftAgentPage = () => {
         throw new Error(sent.message || 'Send failed');
       }
     } catch (e) {
-      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      // No toast on failure — the inline "Send failed" banner inside the
+      // draft pane (gated on selectedDraft.status === 'failed' &&
+      // selectedDraft.send_error) renders the same humanized message and
+      // persists until the user fixes the issue or discards. Toasts pop
+      // out of the modal and dismiss themselves; for SMTP rejections we
+      // want the error visible while the user edits attachments / body.
+      // Backend already called mark_failed; mirror that state locally so
+      // the banner renders immediately instead of after a refresh.
+      console.error('Approve+send failed', e);
+      setSelectedDraft((curr) => (
+        curr && curr.id === selectedDraft.id
+          ? { ...curr, status: 'failed', send_error: e?.message || 'Send failed' }
+          : curr
+      ));
+      // Keep the Drafts list in sync with the new 'failed' status so the
+      // status pill on the row matches what the pane shows.
+      refreshDrafts();
     } finally {
       setBusy(false);
     }
@@ -788,15 +902,33 @@ const ReplyDraftAgentPage = () => {
       : null;
 
   // `body_html` is forwarded so EmailBody can render the original markup
-  // for synced messages. ReplyDraft thread context only has plain
-  // `original_body` — drafts don't store the source HTML.
+  // for synced messages. The draft serializer now ships `original_body_html`
+  // for inbox-sourced drafts (IMAP-synced HTML mail), so newsletter /
+  // marketing emails render the same way they do in the Inbox tab. Falls
+  // back to empty when the source had no HTML (e.g. campaign-Reply rows).
   const originalEmail = selectedReply
     ? { ...selectedReply }
     : (selectedDraft
-        ? { subject: selectedDraft.original_subject, body: selectedDraft.original_body, body_html: '', replied_at: selectedDraft.created_at }
+        ? {
+            subject: selectedDraft.original_subject,
+            body: selectedDraft.original_body,
+            body_html: selectedDraft.original_body_html || '',
+            replied_at: selectedDraft.created_at,
+          }
         : null);
 
   const isReadOnly = selectedDraft?.status === 'sent' || selectedDraft?.status === 'rejected';
+  // Fresh-compose drafts have no source email — `original_subject` and
+  // `original_body` come back empty from the serializer. Without this
+  // flag we'd render the big "Original Email Viewer" card with nothing
+  // inside it sitting above the composer, which looks broken. Detected
+  // by the backend's `source` field (set to 'compose' when the draft
+  // was created via the New Message modal) with a content-empty
+  // fallback for older drafts that predate the field.
+  const isComposeDraft = !selectedReply && !!selectedDraft && (
+    selectedDraft.source === 'compose'
+    || (!selectedDraft.original_subject && !selectedDraft.original_body)
+  );
 
   return (
     <>
@@ -898,7 +1030,7 @@ const ReplyDraftAgentPage = () => {
               <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)]">
                 {/* Tabs */}
                 <div className="p-2 border-b border-white/10 flex items-center gap-2">
-                  <div className="flex-1 flex gap-1">
+                  <div className="flex-1 flex">
                     <button
                       onClick={() => setActiveTab('inbox')}
                       className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -1090,8 +1222,17 @@ const ReplyDraftAgentPage = () => {
                   right pane scrolls, so the viewer keeps its full
                   height instead of shrinking. */}
               {(selectedReply || selectedDraft) && originalEmail && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)] lg:flex-shrink-0">
-                  <div className="p-5 border-b border-white/10">
+                // Compose drafts get a compact "To: <recipient>" header
+                // instead of the full email viewer — there's no source
+                // message to show, so the body / attachments / AI-analysis
+                // section below would just render as empty whitespace.
+                // Fixed-height layout (`lg:h-[calc(...)]`) is also dropped
+                // for compose so the composer underneath rises up to the
+                // top of the pane like a Gmail compose window.
+                <div className={`rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:flex-shrink-0 ${
+                  isComposeDraft ? '' : 'lg:h-[calc(100vh-220px)]'
+                }`}>
+                  <div className={isComposeDraft ? 'p-4' : 'p-5 border-b border-white/10'}>
                     <div className="flex items-start justify-between gap-4 mb-4">
                       <div className="flex items-start gap-3 min-w-0 flex-1">
                         <Avatar name={selectedContact?.name} email={selectedContact?.email} size="lg" />
@@ -1134,9 +1275,19 @@ const ReplyDraftAgentPage = () => {
                         </div>
                       )}
                     </div>
-                    <h2 className="text-lg font-bold text-white leading-snug">
-                      {originalEmail.subject || '(no subject)'}
-                    </h2>
+                    {!isComposeDraft && (
+                      <h2 className="text-lg font-bold text-white leading-snug">
+                        {originalEmail.subject || '(no subject)'}
+                      </h2>
+                    )}
+
+                    {isComposeDraft && (
+                      <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/30 text-xs text-fuchsia-200">
+                        <PenSquare className="h-3 w-3 shrink-0" />
+                        <span className="font-semibold">New message</span>
+                        <span className="text-fuchsia-300/70">— edit and send below</span>
+                      </div>
+                    )}
 
                     {/* "In reply to" chip — only on Sent-tab rows whose
                         backend payload included a `replies_to` lookup.
@@ -1163,21 +1314,33 @@ const ReplyDraftAgentPage = () => {
                     )}
                   </div>
 
-                  <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
-                    <EmailBody body={originalEmail.body} bodyHtml={originalEmail.body_html} isIncomingReply={!!selectedReply} />
-                    {Array.isArray(originalEmail.attachments) && originalEmail.attachments.length > 0 && (
-                      <AttachmentList attachments={originalEmail.attachments} />
-                    )}
-                    {selectedReply?.analysis && (
-                      <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
-                        <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-semibold text-cyan-200 mb-0.5">AI Analysis</div>
-                          <div className="text-xs text-gray-300 leading-relaxed">{selectedReply.analysis}</div>
+                  {!isComposeDraft && (
+                    <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
+                      <EmailBody
+                        body={originalEmail.body}
+                        bodyHtml={originalEmail.body_html}
+                        direction={
+                          // For inbox/sent rows, trust the row's own direction.
+                          // For draft-context views (selectedDraft path), the
+                          // pane shows the *source* incoming email being
+                          // replied to, so it's always 'in'.
+                          selectedReply ? (selectedReply.direction || 'in') : 'in'
+                        }
+                      />
+                      {Array.isArray(originalEmail.attachments) && originalEmail.attachments.length > 0 && (
+                        <AttachmentList attachments={originalEmail.attachments} />
+                      )}
+                      {selectedReply?.analysis && (
+                        <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
+                          <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="text-xs font-semibold text-cyan-200 mb-0.5">AI Analysis</div>
+                            <div className="text-xs text-gray-300 leading-relaxed">{selectedReply.analysis}</div>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Reply CTA — sticks to the bottom of the viewer card
                       and reveals the AI-draft composer below on click.
@@ -1260,8 +1423,13 @@ const ReplyDraftAgentPage = () => {
                   </div>
 
                   <div className="p-5 space-y-4">
-                    {/* Tone + Length + Instructions */}
-                    {!isReadOnly && (
+                    {/* Tone + Length + Instructions — only meaningful for
+                        AI-drafted replies. Compose drafts are user-typed
+                        from scratch with no source email; the AI doesn't
+                        regenerate them, so these controls just confuse
+                        the user (and Regenerate would 400 with
+                        "original_email_id or inbox_email_id is required"). */}
+                    {!isReadOnly && !isComposeDraft && (
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Tone</label>
@@ -1373,7 +1541,13 @@ const ReplyDraftAgentPage = () => {
                             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                             <div>
                               <div className="font-semibold mb-0.5">Send failed</div>
-                              <div className="text-red-300/80">{selectedDraft.send_error}</div>
+                              {/* Run the stored backend error through the
+                                  same humanizer the Compose modal uses, so
+                                  the user reads "blocked for security
+                                  reasons" instead of a raw 552 / 5.7.0
+                                  SMTP response dump. The original string
+                                  is still logged on the server side. */}
+                              <div className="text-red-300/80">{humanizeSendError(selectedDraft.send_error)}</div>
                             </div>
                           </div>
                         )}
@@ -1390,15 +1564,24 @@ const ReplyDraftAgentPage = () => {
                               Discard
                             </Button>
                             <div className="flex items-center gap-2">
-                              <Button
-                                onClick={handleRegenerate}
-                                disabled={busy}
-                                variant="outline"
-                                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                              >
-                                {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                                Regenerate
-                              </Button>
+                              {/* Regenerate is an AI flow that needs a
+                                  source message (Reply or InboxEmail) to
+                                  riff off. Compose drafts have neither —
+                                  hiding the button avoids the confusing
+                                  "original_email_id or inbox_email_id is
+                                  required" error and matches user intent
+                                  (compose = manual writing, not AI). */}
+                              {!isComposeDraft && (
+                                <Button
+                                  onClick={handleRegenerate}
+                                  disabled={busy}
+                                  variant="outline"
+                                  className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+                                >
+                                  {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                                  Regenerate
+                                </Button>
+                              )}
                               <Button
                                 onClick={handleApproveAndSend}
                                 disabled={busy || !editedBody.trim() || !editedSubject.trim()}
@@ -1450,7 +1633,14 @@ const ReplyDraftAgentPage = () => {
 
       <ComposeModal
         open={composeOpen}
-        onClose={() => setComposeOpen(false)}
+        onClose={() => {
+          setComposeOpen(false);
+          // ComposeModal autosaves on close so a half-finished compose
+          // lands in the Drafts tab. Refresh the drafts list immediately
+          // so the new/updated row appears without waiting for the next
+          // tab switch or manual refresh.
+          refreshDrafts();
+        }}
         onSent={() => {
           setComposeOpen(false);
           // refreshAll picks up the sent-mirror row + drafts list change
@@ -1855,7 +2045,18 @@ const DraftAttachmentsSection = ({ draft, uploading, isReadOnly, onPickFiles, on
   );
 };
 
-const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
+const EmailBody = ({ body, bodyHtml, direction = 'in' }) => {
+  // Header label semantics:
+  //   - "Their reply" / "Your reply" — only when the body genuinely looks
+  //     like a reply (plain-text quote-folding finds a quoted thread).
+  //     Marketing emails, fresh incoming mail, and HTML mail without a
+  //     visible quoted section are NOT replies, so we used to mislabel
+  //     every opened email as "Their reply" — fixed below.
+  //   - "Their message" / "Your message" — for everything else, picked by
+  //     direction so an outbound (Sent-tab) row never says "Their".
+  const isOutgoing = direction === 'out';
+  const messageLabel = isOutgoing ? 'Your message' : 'Their message';
+  const replyLabelForQuote = isOutgoing ? 'Your reply' : 'Their reply';
   const [showQuoted, setShowQuoted] = useState(false);
   // `body === undefined` means the list endpoint returned just a preview and
   // the detail fetch is still in flight. Show a gentle loading state instead
@@ -1873,12 +2074,11 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
   // visual fidelity. Quote-folding only applies to plain text (parseReplyBody
   // is regex-based and would mangle markup), so HTML mail is shown whole.
   if (bodyHtml && bodyHtml.trim()) {
-    const replyLabel = isIncomingReply ? "Their reply" : "Message";
     return (
       <div>
         <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
-          {replyLabel}
+          {messageLabel}
         </div>
         <HtmlBody html={bodyHtml} />
       </div>
@@ -1889,7 +2089,6 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
     return <div className="text-sm text-gray-500 italic">No content.</div>;
   }
   const { reply, quoted } = parseReplyBody(body);
-  const replyLabel = isIncomingReply ? "Their reply" : "Message";
 
   // Nothing was detected as a quote — render the whole body as the message.
   if (!quoted) {
@@ -1897,7 +2096,7 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
       <div>
         <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
-          {replyLabel}
+          {messageLabel}
         </div>
         <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed">
           {reply}
@@ -1914,7 +2113,7 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
         <div>
           <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
             <CornerUpLeft className="h-3 w-3" />
-            {replyLabel}
+            {replyLabelForQuote}
           </div>
           <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed bg-cyan-500/5 border border-cyan-500/15 rounded-lg p-3">
             {reply}
@@ -2312,6 +2511,17 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   const [attachments, setAttachments] = useState([]);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Inline send error — displayed in a banner inside the modal so the user
+  // doesn't dismiss it without reading (a toast pops out of the modal and
+  // disappears on its own; for SMTP rejections we want it to persist until
+  // the user takes action).
+  const [sendError, setSendError] = useState('');
+  // True once the user has attempted Send (regardless of outcome). Used to
+  // decide whether closing the modal should auto-reject the draft. Without
+  // this, a failed send followed by an accidental Esc / outside click would
+  // discard the draft on the server, surprising the user — they couldn't
+  // even reopen it from the Drafts tab to fix and retry.
+  const [sendAttempted, setSendAttempted] = useState(false);
   const fileInputRef = React.useRef(null);
 
   // Reset the form whenever the modal closes — without this, opening it
@@ -2327,6 +2537,8 @@ const ComposeModal = ({ open, onClose, onSent }) => {
       setAttachments([]);
       setBusy(false);
       setUploading(false);
+      setSendError('');
+      setSendAttempted(false);
     }
   }, [open]);
 
@@ -2415,6 +2627,8 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   const handleSend = async () => {
     if (!canSend) return;
     setBusy(true);
+    setSendError('');
+    setSendAttempted(true);
     try {
       // Either create the draft (no attachments path) or sync the latest
       // form state to an existing one (attachments path may have made the
@@ -2437,22 +2651,69 @@ const ComposeModal = ({ open, onClose, onSent }) => {
       toast({ title: 'Email sent', description: `Delivered to ${toEmail.trim()}.` });
       onSent?.();
     } catch (e) {
-      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      // Render inside the modal instead of a toast so SMTP rejections (e.g.
+      // Gmail's 552 security block) stay visible while the user edits.
+      // Preserve the raw error in the console for diagnostics.
+      console.error('Compose send failed', e);
+      setSendError(humanizeSendError(e?.message));
     } finally {
       setBusy(false);
     }
   };
 
   const handleDiscard = async () => {
-    // If we already created a draft on the server, mark it rejected so
-    // it doesn't linger in the Drafts tab. Without a draft yet, just
-    // close the modal — there's nothing to clean up.
+    // Explicit Discard button — the user wants the draft gone.
     if (draftId) {
       try {
         await rejectDraft(draftId);
       } catch (e) {
         // Non-fatal; user is closing anyway.
         console.error('Discard compose failed', e);
+      }
+    }
+    onClose?.();
+  };
+
+  // Closing via the dialog's top-right X / Esc / outside click. Distinct
+  // from Discard: a soft close should AUTOSAVE the message so it shows up
+  // in the Drafts tab — Gmail-style. The user can come back later, edit,
+  // and send. Discard (explicit) is the only path that destroys the draft.
+  //
+  // Three branches:
+  //   1. Draft already exists on the server (created via attach or a
+  //      prior Send attempt) → push the latest typed content so what's
+  //      saved matches what the user just had on screen.
+  //   2. No draft yet, but user has the minimum (valid email + subject)
+  //      → create one so it lands in Drafts.
+  //   3. Empty / partial compose (no email or no subject) → nothing to
+  //      save; just close. The backend's compose_create_draft requires
+  //      both fields; respecting that here keeps Drafts tab tidy and
+  //      avoids 400-on-close noise.
+  const handleClose = async () => {
+    const trimmedTo = toEmail.trim();
+    const trimmedSubject = subject.trim();
+    const hasMinimum = validEmail && !!trimmedSubject;
+    if (draftId) {
+      try {
+        await composeUpdateDraft(draftId, {
+          toEmail: trimmedTo,
+          subject: trimmedSubject,
+          body,
+          bodyFormat,
+        });
+      } catch (e) {
+        console.error('Compose autosave on close (update) failed', e);
+      }
+    } else if (hasMinimum) {
+      try {
+        await composeCreateDraft({
+          toEmail: trimmedTo,
+          subject: trimmedSubject,
+          body,
+          bodyFormat,
+        });
+      } catch (e) {
+        console.error('Compose autosave on close (create) failed', e);
       }
     }
     onClose?.();
@@ -2482,7 +2743,7 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v && !busy) handleDiscard(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !busy) handleClose(); }}>
       {/* Compact Gmail-style composer. Inline-prefixed To/Subject rows
           collapse the per-field label space; textarea stays modest in
           height (auto-grows on resize). DialogContent is capped at 85vh
@@ -2639,6 +2900,27 @@ const ComposeModal = ({ open, onClose, onSent }) => {
             />
           </div>
         </div>
+
+        {sendError && (
+          <div
+            className="mt-1 mb-1 flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100"
+            role="alert"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-300" />
+            <div className="flex-1 leading-snug">
+              <div className="font-semibold text-rose-200 mb-0.5">Send failed</div>
+              <div className="text-rose-100/90">{sendError}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSendError('')}
+              className="shrink-0 text-rose-300/70 hover:text-rose-100 transition"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
 
         <DialogFooter className="flex justify-between gap-2 pt-2 border-t border-white/10">
           <Button
