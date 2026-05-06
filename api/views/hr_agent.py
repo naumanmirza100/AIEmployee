@@ -12,6 +12,7 @@ auth + throttle pattern as Frontline:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ from hr_agent.models import (
     HRMeeting,
     HRNotificationTemplate, HRScheduledNotification,
     HRKnowledgeChat, HRKnowledgeChatMessage,
+    HRMeetingSchedulerChat, HRMeetingSchedulerChatMessage,
 )
 from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
@@ -111,6 +113,10 @@ def _resolve_asker_role(company_user: CompanyUser) -> str:
 def _serialize_employee(e: Employee) -> dict:
     return {
         'id': e.id,
+        # Underlying Django auth.User — same identity the PM Knowledge QA agent
+        # returns when asked about company users.
+        'user_id': e.user_id,
+        'username': e.user.username if e.user_id else None,
         'full_name': e.full_name,
         'work_email': e.work_email,
         'job_title': e.job_title,
@@ -135,9 +141,21 @@ def _serialize_employee(e: Employee) -> dict:
 @throttle_classes([HRCRUDThrottle])
 def list_employees(request):
     """List employees in the caller's company. Supports ?q=substring,
-    ?department=, ?status=, ?limit/?offset (defaults 50/0)."""
+    ?department=, ?status=, ?limit/?offset (defaults 50/0).
+
+    Backfills any CompanyUser without a backing Employee before listing —
+    employees in HR are the company users of the same tenant. The
+    CompanyUser→Employee sync signal handles new/updated rows; this catches
+    pre-existing CompanyUsers from before the sync was wired.
+    """
     try:
         company = request.user.company
+        # Backfill — idempotent + cheap.
+        from hr_agent.signals import backfill_employees_for_company
+        try:
+            backfill_employees_for_company(company.id)
+        except Exception:
+            logger.exception("list_employees: backfill failed for company %s", company.id)
         qs = Employee.objects.filter(company=company)
         q = (request.GET.get('q') or '').strip()
         if q:
@@ -206,7 +224,12 @@ def create_employee(request):
 def hr_knowledge_qa(request):
     """Ask the HR knowledge agent. Personalises the answer to the asking
     employee when the CompanyUser is linked to one (the HRAgent stitches in
-    leave balance / manager / department from `Employee`)."""
+    leave balance / manager / department from `Employee`).
+
+    Optional body fields:
+      ``chat_history``: list of ``{role: 'user'|'assistant', content: str}``
+        — last few turns for multi-turn coherence.
+    """
     try:
         company_user = request.user
         company = company_user.company
@@ -216,9 +239,27 @@ def hr_knowledge_qa(request):
                             status=status.HTTP_400_BAD_REQUEST)
         asker_employee = (Employee.objects.filter(company=company, company_user=company_user).first()
                           or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+
+        # Multi-turn — prepend the last few turns to the question so the
+        # retriever has something to ground on for follow-ups like "what about
+        # for managers?". Cap length so prompts don't balloon.
+        history = request.data.get('chat_history') or []
+        contextualized = question
+        if isinstance(history, list) and history:
+            recent = []
+            for turn in history[-6:]:
+                if not isinstance(turn, dict):
+                    continue
+                role = (turn.get('role') or '').lower()
+                content = (turn.get('content') or '')[:1500]
+                if role in ('user', 'assistant') and content:
+                    recent.append(f"{role.capitalize()}: {content}")
+            if recent:
+                contextualized = "Previous conversation:\n" + "\n".join(recent) + "\n\nCurrent question: " + question
+
         agent = HRAgent(company_id=company.id)
         result = agent.answer_question(
-            question,
+            contextualized,
             asker_role=_resolve_asker_role(company_user),
             asker_employee=asker_employee,
         )
@@ -226,6 +267,131 @@ def hr_knowledge_qa(request):
     except Exception:
         logger.exception("hr_knowledge_qa failed")
         return Response({'status': 'error', 'message': 'Failed to answer question'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# HR Knowledge Q&A — chat persistence (mirrors PM agent's chat shape)
+# ============================================================================
+
+def _normalize_chat(chat: HRKnowledgeChat) -> dict:
+    """Compact wire shape; messages oldest-first."""
+    msgs = []
+    for m in chat.messages.order_by('created_at'):
+        item = {'role': m.role, 'content': m.content}
+        if m.response_data:
+            item['responseData'] = m.response_data
+        msgs.append(item)
+    return {
+        'id': str(chat.id),
+        'title': chat.title or 'HR chat',
+        'messages': msgs,
+        'updatedAt': chat.updated_at.isoformat() if chat.updated_at else None,
+        'timestamp': chat.updated_at.isoformat() if chat.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_knowledge_chats(request):
+    """List the caller's HR Q&A chats (most recent first, capped at 50)."""
+    try:
+        chats = (HRKnowledgeChat.objects.filter(company_user=request.user)
+                 .order_by('-updated_at')[:50])
+        return Response({'status': 'success',
+                         'data': [_normalize_chat(c) for c in chats]})
+    except Exception:
+        logger.exception("list_hr_knowledge_chats failed")
+        return Response({'status': 'error', 'message': 'Failed to list chats'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_hr_knowledge_chat(request):
+    """Create a new chat with optional initial messages."""
+    try:
+        d = request.data or {}
+        title = (d.get('title') or 'HR chat')[:255]
+        chat = HRKnowledgeChat.objects.create(company_user=request.user, title=title)
+        for m in (d.get('messages') or []):
+            if not isinstance(m, dict):
+                continue
+            role = (m.get('role') or '').lower()
+            if role not in ('user', 'assistant'):
+                continue
+            HRKnowledgeChatMessage.objects.create(
+                chat=chat, role=role,
+                content=str(m.get('content') or '')[:50000],
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _normalize_chat(chat)},
+                        status=status.HTTP_201_CREATED)
+    except Exception:
+        logger.exception("create_hr_knowledge_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to create chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_hr_knowledge_chat(request, chat_id):
+    """Replace title and/or message list. Caller sends the full message
+    array (PM agent's pattern) so we don't have to merge deltas — simple,
+    deterministic, idempotent."""
+    try:
+        chat = HRKnowledgeChat.objects.filter(pk=chat_id, company_user=request.user).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        if 'title' in d:
+            chat.title = (d['title'] or 'HR chat')[:255]
+        chat.save()
+        if 'messages' in d:
+            HRKnowledgeChatMessage.objects.filter(chat=chat).delete()
+            for m in d.get('messages') or []:
+                if not isinstance(m, dict):
+                    continue
+                role = (m.get('role') or '').lower()
+                if role not in ('user', 'assistant'):
+                    continue
+                HRKnowledgeChatMessage.objects.create(
+                    chat=chat, role=role,
+                    content=str(m.get('content') or '')[:50000],
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _normalize_chat(chat)})
+    except Exception:
+        logger.exception("update_hr_knowledge_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to update chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_hr_knowledge_chat(request, chat_id):
+    try:
+        deleted, _ = HRKnowledgeChat.objects.filter(
+            pk=chat_id, company_user=request.user,
+        ).delete()
+        if not deleted:
+            return Response({'status': 'error', 'message': 'Chat not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': {'deleted': True}})
+    except Exception:
+        logger.exception("delete_hr_knowledge_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to delete chat'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -874,3 +1040,477 @@ def hr_dashboard(request):
         logger.exception("hr_dashboard failed")
         return Response({'status': 'error', 'message': 'Failed to load HR dashboard'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Meeting Scheduling Agent — chat + LLM scheduling, mirrors PM agent
+# ============================================================================
+
+def _serialize_hr_meeting(m: HRMeeting) -> dict:
+    """Compact wire shape used by both list endpoints and the scheduler chat."""
+    return {
+        'id': m.id,
+        'title': m.title,
+        'description': m.description,
+        'meeting_type': m.meeting_type,
+        'visibility': m.visibility,
+        'status': m.status,
+        'organizer_id': m.organizer_id,
+        'organizer_name': m.organizer.full_name if m.organizer_id else None,
+        'participant_ids': list(m.participants.values_list('id', flat=True)),
+        'participants': [
+            {'id': p.id, 'full_name': p.full_name, 'work_email': p.work_email}
+            for p in m.participants.all()
+        ],
+        'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+        'duration_minutes': m.duration_minutes,
+        'timezone_name': m.timezone_name,
+        'meeting_link': m.meeting_link,
+        'location': m.location,
+        'notes': m.notes,
+        'transcript': m.transcript,
+        'action_items': m.action_items or [],
+        'created_at': m.created_at.isoformat() if m.created_at else None,
+        'updated_at': m.updated_at.isoformat() if m.updated_at else None,
+    }
+
+
+def _serialize_meeting_chat(chat: HRMeetingSchedulerChat) -> dict:
+    msgs = []
+    for m in chat.messages.order_by('created_at'):
+        item = {'role': m.role, 'content': m.content}
+        if m.response_data:
+            item['responseData'] = m.response_data
+        msgs.append(item)
+    return {
+        'id': str(chat.id),
+        'title': chat.title or 'Meeting chat',
+        'messages': msgs,
+        'updatedAt': chat.updated_at.isoformat() if chat.updated_at else None,
+        'timestamp': chat.updated_at.isoformat() if chat.updated_at else None,
+    }
+
+
+# ----- Chat CRUD ---------------------------------------------------------
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_meeting_scheduler_chats(request):
+    try:
+        chats = (HRMeetingSchedulerChat.objects.filter(company_user=request.user)
+                 .order_by('-updated_at')[:50])
+        return Response({'status': 'success',
+                         'data': [_serialize_meeting_chat(c) for c in chats]})
+    except Exception:
+        logger.exception("list_hr_meeting_scheduler_chats failed")
+        return Response({'status': 'error', 'message': 'Failed to list chats'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_hr_meeting_scheduler_chat(request):
+    try:
+        d = request.data or {}
+        title = (d.get('title') or 'Meeting chat')[:255]
+        chat = HRMeetingSchedulerChat.objects.create(
+            company_user=request.user, title=title,
+        )
+        for m in (d.get('messages') or []):
+            if not isinstance(m, dict):
+                continue
+            role = (m.get('role') or '').lower()
+            if role not in ('user', 'assistant'):
+                continue
+            HRMeetingSchedulerChatMessage.objects.create(
+                chat=chat, role=role,
+                content=str(m.get('content') or '')[:50000],
+                response_data=m.get('responseData'),
+            )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_meeting_chat(chat)},
+                        status=status.HTTP_201_CREATED)
+    except Exception:
+        logger.exception("create_hr_meeting_scheduler_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to create chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_hr_meeting_scheduler_chat(request, chat_id):
+    try:
+        chat = HRMeetingSchedulerChat.objects.filter(
+            pk=chat_id, company_user=request.user,
+        ).first()
+        if not chat:
+            return Response({'status': 'error', 'message': 'Chat not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        if 'title' in d:
+            chat.title = (d['title'] or 'Meeting chat')[:255]
+        chat.save()
+        if 'messages' in d:
+            HRMeetingSchedulerChatMessage.objects.filter(chat=chat).delete()
+            for m in d.get('messages') or []:
+                if not isinstance(m, dict):
+                    continue
+                role = (m.get('role') or '').lower()
+                if role not in ('user', 'assistant'):
+                    continue
+                HRMeetingSchedulerChatMessage.objects.create(
+                    chat=chat, role=role,
+                    content=str(m.get('content') or '')[:50000],
+                    response_data=m.get('responseData'),
+                )
+        chat.refresh_from_db()
+        return Response({'status': 'success', 'data': _serialize_meeting_chat(chat)})
+    except Exception:
+        logger.exception("update_hr_meeting_scheduler_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to update chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_hr_meeting_scheduler_chat(request, chat_id):
+    try:
+        deleted, _ = HRMeetingSchedulerChat.objects.filter(
+            pk=chat_id, company_user=request.user,
+        ).delete()
+        if not deleted:
+            return Response({'status': 'error', 'message': 'Chat not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': {'deleted': True}})
+    except Exception:
+        logger.exception("delete_hr_meeting_scheduler_chat failed")
+        return Response({'status': 'error', 'message': 'Failed to delete chat'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ----- LLM-driven natural-language scheduling -----------------------------
+
+def _parse_iso_dt(s: str):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRLLMThrottle])
+def hr_meeting_schedule(request):
+    """Natural-language meeting scheduling. Body: ``{message: str}`` plus an
+    optional ``chat_history`` list of recent turns. The LLM interprets the
+    message + the company's employee directory and returns a JSON intent;
+    we materialise that into an `HRMeeting` row and reply in chat.
+
+    Returns ``{reply: str, meeting: serialized | None, parsed: {...}}``.
+    """
+    try:
+        company_user = request.user
+        company = company_user.company
+        message = (request.data.get('message') or '').strip()
+        if not message:
+            return Response({'status': 'error', 'message': 'message is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Build a tiny employee directory the LLM can name-match against.
+        emp_rows = list(Employee.objects.filter(company=company)
+                        .values('id', 'full_name', 'work_email', 'job_title')[:200])
+        directory_lines = [
+            f"- id={e['id']}, name={e['full_name']!r}, email={e['work_email']}, role={e['job_title'] or 'n/a'}"
+            for e in emp_rows
+        ]
+
+        # Resolve the asking employee (organizer default).
+        asker = (Employee.objects.filter(company=company, company_user=company_user).first()
+                 or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+        organizer_id = asker.id if asker else None
+
+        history_text = ''
+        history = request.data.get('chat_history') or []
+        if isinstance(history, list) and history:
+            recent = []
+            for turn in history[-6:]:
+                if not isinstance(turn, dict):
+                    continue
+                role = (turn.get('role') or '').lower()
+                content = (turn.get('content') or '')[:1000]
+                if role in ('user', 'assistant') and content:
+                    recent.append(f"{role.capitalize()}: {content}")
+            if recent:
+                history_text = "Previous conversation:\n" + "\n".join(recent) + "\n\n"
+
+        from datetime import timezone as _dtz
+        now_iso = timezone.now().astimezone(_dtz.utc).isoformat()
+
+        prompt = (
+            f"{history_text}You are an HR meeting scheduling assistant. Today (UTC) is "
+            f"{now_iso}. From the user's request, extract a meeting intent and return ONLY "
+            "a JSON object with these keys (use null when a value is not specified):\n"
+            "  {\"intent\": \"create\"|\"update\"|\"cancel\"|\"clarify\",\n"
+            "   \"title\": str|null, \"description\": str|null,\n"
+            "   \"meeting_type\": one of [onboarding_orientation, one_on_one, performance_review,\n"
+            "                              mid_year_check_in, exit_interview, grievance_hearing,\n"
+            "                              training_session, benefits_consult, other]|null,\n"
+            "   \"scheduled_at\": ISO-8601 UTC datetime|null, \"duration_minutes\": int|null,\n"
+            "   \"participant_ids\": [int]|null,  // pick ids from the directory below by name match\n"
+            "   \"location\": str|null, \"meeting_link\": str|null,\n"
+            "   \"reply\": str  // friendly natural-language reply to show the user\n"
+            "  }\n"
+            "Default duration_minutes=30 when unspecified. Default meeting_type='one_on_one'.\n"
+            f"Visibility for exit_interview/grievance_hearing/performance_review will be set to private automatically.\n\n"
+            f"Employee directory ({len(emp_rows)} rows):\n" + "\n".join(directory_lines) + "\n\n"
+            f"User message: {message}"
+        )
+
+        agent = HRAgent(company_id=company.id)
+        try:
+            raw = agent._call_llm(
+                prompt=prompt,
+                system_prompt=(
+                    "You are a precise meeting-scheduling assistant. Output ONLY a single valid "
+                    "JSON object — no commentary, no markdown fences."
+                ),
+                temperature=0.1, max_tokens=600,
+            )
+        except Exception as exc:
+            logger.exception("hr_meeting_schedule: LLM call failed")
+            return Response({'status': 'error',
+                             'data': {'reply': f"LLM call failed: {exc}", 'meeting': None}},
+                            status=status.HTTP_502_BAD_GATEWAY)
+
+        s = (raw or '').strip()
+        if s.startswith('```'):
+            s = s.split('```', 2)[1]
+            if s.startswith('json'):
+                s = s[4:]
+            s = s.strip('` \n')
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            return Response({'status': 'success', 'data': {
+                'reply': raw or 'I need a bit more info to schedule that.',
+                'meeting': None, 'parsed': None,
+            }})
+
+        intent = (parsed.get('intent') or 'clarify').lower()
+        meeting_payload = None
+
+        if intent == 'create':
+            sched = _parse_iso_dt(parsed.get('scheduled_at'))
+            if not sched:
+                # No valid time → reply only, don't create.
+                return Response({'status': 'success', 'data': {
+                    'reply': parsed.get('reply') or 'Could you specify the date and time?',
+                    'meeting': None, 'parsed': parsed,
+                }})
+            mtype = (parsed.get('meeting_type') or 'one_on_one')
+            visibility = ('private'
+                          if mtype in ('exit_interview', 'grievance_hearing', 'performance_review')
+                          else 'company')
+            organizer = None
+            if organizer_id:
+                organizer = Employee.objects.filter(pk=organizer_id, company=company).first()
+            m = HRMeeting.objects.create(
+                company=company,
+                title=(parsed.get('title') or 'HR meeting')[:200],
+                description=(parsed.get('description') or '')[:5000],
+                meeting_type=mtype,
+                visibility=visibility,
+                organizer=organizer,
+                scheduled_at=sched,
+                duration_minutes=int(parsed.get('duration_minutes') or 30),
+                timezone_name=parsed.get('timezone_name') or 'UTC',
+                meeting_link=parsed.get('meeting_link') or None,
+                location=parsed.get('location') or '',
+            )
+            pids = parsed.get('participant_ids') or []
+            if isinstance(pids, list) and pids:
+                valid = Employee.objects.filter(pk__in=pids, company=company)
+                m.participants.set(valid)
+            meeting_payload = _serialize_hr_meeting(m)
+
+        return Response({'status': 'success', 'data': {
+            'reply': parsed.get('reply') or 'Done.',
+            'meeting': meeting_payload,
+            'parsed': parsed,
+        }})
+    except Exception:
+        logger.exception("hr_meeting_schedule failed")
+        return Response({'status': 'error', 'message': 'Failed to schedule meeting'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ----- Per-meeting CRUD ---------------------------------------------------
+
+def _hr_meeting_or_404(request, meeting_id):
+    company = request.user.company
+    m = HRMeeting.objects.filter(pk=meeting_id, company=company).first()
+    if not m:
+        return None, Response({'status': 'error', 'message': 'Meeting not found'},
+                              status=status.HTTP_404_NOT_FOUND)
+    return m, None
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def get_hr_meeting(request, meeting_id):
+    m, err = _hr_meeting_or_404(request, meeting_id)
+    if err:
+        return err
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
+
+
+@api_view(['PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_hr_meeting(request, meeting_id):
+    """Update title / description / scheduled_at / duration / participants /
+    notes / location / meeting_link / status."""
+    m, err = _hr_meeting_or_404(request, meeting_id)
+    if err:
+        return err
+    d = request.data or {}
+    dirty = []
+    if 'title' in d:
+        m.title = str(d['title'] or '')[:200]
+        dirty.append('title')
+    if 'description' in d:
+        m.description = str(d['description'] or '')[:5000]
+        dirty.append('description')
+    if 'scheduled_at' in d:
+        sched = _parse_iso_dt(d['scheduled_at'])
+        if sched is None:
+            return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        m.scheduled_at = sched
+        dirty.append('scheduled_at')
+        # Reset reminder flags so updated meetings get fresh reminders.
+        m.reminder_24h_sent_at = None
+        m.reminder_15m_sent_at = None
+        dirty.extend(['reminder_24h_sent_at', 'reminder_15m_sent_at'])
+    if 'duration_minutes' in d:
+        try:
+            m.duration_minutes = max(5, min(480, int(d['duration_minutes'])))
+        except (TypeError, ValueError):
+            pass
+        else:
+            dirty.append('duration_minutes')
+    if 'meeting_link' in d:
+        m.meeting_link = (d['meeting_link'] or None)
+        dirty.append('meeting_link')
+    if 'location' in d:
+        m.location = str(d['location'] or '')[:500]
+        dirty.append('location')
+    if 'notes' in d:
+        m.notes = str(d['notes'] or '')
+        dirty.append('notes')
+    if 'transcript' in d:
+        m.transcript = str(d['transcript'] or '')
+        dirty.append('transcript')
+    if 'status' in d and d['status'] in ('scheduled', 'completed', 'cancelled', 'rescheduled'):
+        m.status = d['status']
+        dirty.append('status')
+    if 'visibility' in d and d['visibility'] in ('company', 'private'):
+        m.visibility = d['visibility']
+        dirty.append('visibility')
+    if dirty:
+        dirty.append('updated_at')
+        m.save(update_fields=list(set(dirty)))
+    if 'participant_ids' in d:
+        ids = d.get('participant_ids') or []
+        if isinstance(ids, list):
+            valid = Employee.objects.filter(pk__in=ids, company=request.user.company)
+            m.participants.set(valid)
+    m.refresh_from_db()
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def cancel_hr_meeting(request, meeting_id):
+    """Cancel a meeting (status='cancelled'). Body may include a `reason`
+    that goes into `notes`."""
+    m, err = _hr_meeting_or_404(request, meeting_id)
+    if err:
+        return err
+    reason = (request.data or {}).get('reason') or ''
+    m.status = 'cancelled'
+    if reason:
+        prefix = '\n\n[Cancelled] ' if m.notes else '[Cancelled] '
+        m.notes = (m.notes or '') + prefix + reason
+    m.save(update_fields=['status', 'notes', 'updated_at'])
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRLLMThrottle])
+def extract_hr_meeting_action_items(request, meeting_id):
+    """LLM-extract structured action items from a meeting's transcript and
+    save them onto `HRMeeting.action_items`. Returns the extracted list."""
+    m, err = _hr_meeting_or_404(request, meeting_id)
+    if err:
+        return err
+    transcript = (m.transcript or '').strip()
+    if not transcript:
+        return Response({'status': 'error', 'message': 'Meeting has no transcript yet'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    agent = HRAgent(company_id=request.user.company.id)
+    prompt = (
+        "From the meeting transcript delimited by <transcript>, extract a list of concrete "
+        "action items. Each must be something someone agreed to do. Return ONLY a JSON array; "
+        "each entry: {\"text\": str, \"owner_name\": str|null, \"due_date\": YYYY-MM-DD|null}. "
+        "At most 15 items.\n\n"
+        f"<transcript>\n{transcript[:12000]}\n</transcript>"
+    )
+    try:
+        raw = agent._call_llm(
+            prompt=prompt,
+            system_prompt="You extract structured action items. Output valid JSON only.",
+            temperature=0.0, max_tokens=900,
+        )
+    except Exception as exc:
+        logger.exception("extract_hr_meeting_action_items LLM failed")
+        return Response({'status': 'error', 'message': f'LLM call failed: {exc}'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    s = (raw or '').strip()
+    if s.startswith('```'):
+        s = s.split('```', 2)[1]
+        if s.startswith('json'):
+            s = s[4:]
+        s = s.strip('` \n')
+    items = []
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, list):
+            items = [{
+                'text': str(it.get('text') or '')[:500],
+                'owner_name': str(it.get('owner_name')) if it.get('owner_name') else None,
+                'due_date': str(it.get('due_date')) if it.get('due_date') else None,
+            } for it in parsed if isinstance(it, dict) and it.get('text')]
+    except Exception:
+        logger.warning("extract_hr_meeting_action_items: LLM JSON unparseable: %r", raw[:200])
+    m.action_items = items
+    m.save(update_fields=['action_items', 'updated_at'])
+    return Response({'status': 'success', 'data': {'action_items': items, 'meeting_id': m.id}})
