@@ -335,6 +335,10 @@ neutral = out of office / asking a question / unclear"""
         """
         Poll IMAP inbox for replies from enrolled leads.
         Returns list of dicts: {enrollment, reply_text, sender_email}
+
+        A message is only accepted as a reply if its Date header is AFTER
+        the timestamp of the outreach email we sent to that specific lead.
+        This prevents old inbox messages from being misidentified as replies.
         """
         if not enrollments:
             return []
@@ -344,27 +348,51 @@ neutral = out of office / asking a question / unclear"""
             logger.warning("No IMAP credentials available for campaign %s", campaign.id)
             return []
 
-        # Map lead email → enrollment (case-insensitive)
+        # Build two maps keyed by lead email (lower-case):
+        #   email_map        → enrollment object
+        #   outreach_sent_map → when the outreach email was actually delivered to this lead
         email_map = {}
+        outreach_sent_map = {}
+
         for enr in enrollments:
-            if enr.lead.email:
-                email_map[enr.lead.email.lower()] = enr
+            if not enr.lead.email:
+                continue
+            key = enr.lead.email.lower()
+            email_map[key] = enr
+
+            # Use the most recent successfully-sent email log entry as the
+            # "outreach sent" timestamp.  Fall back to enrolled_at.
+            last_log = enr.logs.filter(
+                action_type='email', status='sent'
+            ).order_by('-sent_at').first()
+            outreach_sent_map[key] = last_log.sent_at if last_log else enr.enrolled_at
 
         if not email_map:
             return []
 
+        # SINCE date for IMAP: earliest outreach sent time minus 1 day buffer.
+        # This narrows the search window as much as possible.
+        if outreach_sent_map:
+            earliest_sent = min(outreach_sent_map.values())
+            since_date = (earliest_sent - timezone.timedelta(days=1)).strftime('%d-%b-%Y')
+        else:
+            since_date = (timezone.now() - timezone.timedelta(days=7)).strftime('%d-%b-%Y')
+
         found = []
+        seen_message_ids = set()   # deduplicate by Message-ID header
+
         try:
             with imaplib.IMAP4_SSL(imap_host, imap_port) as imap:
                 imap.login(username, password)
                 imap.select('INBOX')
 
-                # Search unseen messages from the last 30 days
-                _, msg_ids = imap.search(None, 'UNSEEN')
+                # Use SINCE (not UNSEEN) so already-read replies aren't missed
+                _, msg_ids = imap.search(None, f'SINCE {since_date}')
                 ids = msg_ids[0].split() if msg_ids[0] else []
-                logger.info("IMAP: checking %d unseen messages for campaign %s", len(ids), campaign.id)
+                logger.info("IMAP: checking %d messages since %s for campaign %s",
+                            len(ids), since_date, campaign.id)
 
-                for mid in ids[-50:]:  # cap at last 50 to avoid timeout
+                for mid in ids[-100:]:  # cap at last 100
                     try:
                         _, msg_data = imap.fetch(mid, '(RFC822)')
                         raw = msg_data[0][1]
@@ -376,6 +404,45 @@ neutral = out of office / asking a question / unclear"""
                         if sender_email not in email_map:
                             continue
 
+                        # Deduplicate by Message-ID
+                        message_id = msg.get('Message-ID', '').strip()
+                        if message_id and message_id in seen_message_ids:
+                            continue
+                        if message_id:
+                            seen_message_ids.add(message_id)
+
+                        # ── Key guard: only accept email received AFTER our outreach ──
+                        # Parse the Date header from the incoming email.
+                        email_date = None
+                        date_str = msg.get('Date', '').strip()
+                        if date_str:
+                            try:
+                                email_date = email.utils.parsedate_to_datetime(date_str)
+                                # Ensure timezone-aware for comparison
+                                if email_date.tzinfo is None:
+                                    import datetime
+                                    email_date = email_date.replace(
+                                        tzinfo=datetime.timezone.utc
+                                    )
+                            except Exception:
+                                pass
+
+                        outreach_time = outreach_sent_map.get(sender_email)
+                        if email_date and outreach_time:
+                            # Convert outreach_time to the same timezone for comparison
+                            from django.utils import timezone as _tz
+                            ot = outreach_time
+                            if hasattr(ot, 'tzinfo') and ot.tzinfo is None:
+                                ot = _tz.make_aware(ot)
+                            # Reject any email that arrived at or before our outreach
+                            if email_date <= ot:
+                                logger.debug(
+                                    "IMAP: skipping pre-outreach email from %s "
+                                    "(email date %s <= outreach sent %s)",
+                                    sender_email, email_date, ot,
+                                )
+                                continue
+
                         body = _extract_email_body(msg)
                         enrollment = email_map[sender_email]
                         found.append({
@@ -384,8 +451,7 @@ neutral = out of office / asking a question / unclear"""
                             'sender_email': sender_email,
                             'subject': msg.get('Subject', ''),
                         })
-                        # Mark as seen so we don't pick it up again
-                        imap.store(mid, '+FLAGS', '\\Seen')
+
                     except Exception as exc:
                         logger.warning("IMAP: error parsing message %s: %s", mid, exc)
 
@@ -433,6 +499,11 @@ neutral = out of office / asking a question / unclear"""
     # ------------------------------------------------------------------
 
     def send_email(self, campaign, to_email: str, subject: str, body: str) -> None:
+        if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
+            raise ValueError(
+                "Campaign SMTP credentials not configured. "
+                "Add SMTP settings in campaign Settings before sending."
+            )
         if campaign.smtp_host and campaign.smtp_username:
             self._send_via_smtp(
                 host=campaign.smtp_host,
@@ -513,6 +584,70 @@ neutral = out of office / asking a question / unclear"""
             return {'status': 'already_completed', 'lead': lead.display_name}
 
         step = steps[idx]
+
+        # Guard 0 — global rate-limit: never send to the same email address twice
+        # within a 10-minute window across ANY campaign. This is the final safety net
+        # that catches multi-campaign duplicates, exception-swallowed failures, and
+        # any scenario where the in-memory sent_emails_this_run set was bypassed.
+        if step.step_type == 'email' and lead.email:
+            recent_send = SDROutreachLog.objects.filter(
+                enrollment__lead__email__iexact=lead.email,
+                status='sent',
+                sent_at__gte=timezone.now() - timezone.timedelta(minutes=10),
+            ).exists()
+            if recent_send:
+                logger.info(
+                    "SDR: suppressing duplicate to %s — already sent within last 10 min",
+                    lead.email,
+                )
+                return {'status': 'rate_limited', 'lead': lead.display_name}
+
+        # Guard 1 — enrollment-level idempotency:
+        # If this enrollment's own log already has a 'sent' record for this step,
+        # the email was already delivered (e.g. server crashed after send but before save).
+        already_sent = SDROutreachLog.objects.filter(
+            enrollment=enrollment,
+            step_order=step.step_order,
+            status='sent',
+        ).exists()
+        if already_sent:
+            enrollment.current_step = idx + 1
+            remaining = steps[idx + 1:]
+            if remaining:
+                next_step = remaining[0]
+                enrolled_at_based = enrollment.enrolled_at + timezone.timedelta(
+                    days=max(0, next_step.delay_days - 1)
+                )
+                gap_days = max(1, next_step.delay_days - step.delay_days)
+                enrollment.next_action_at = max(
+                    enrolled_at_based,
+                    timezone.now() + timezone.timedelta(days=gap_days),
+                )
+            else:
+                enrollment.status = 'completed'
+                enrollment.completed_at = timezone.now()
+            enrollment.save()
+            return {'status': 'already_sent', 'lead': lead.display_name}
+
+        # Guard 2 — cross-enrollment dedup (email-address level):
+        # Within the same campaign, never send the same step to the same email address
+        # even if there are multiple SDRLead records with the same email.
+        if step.step_type == 'email' and lead.email:
+            duplicate_send = SDROutreachLog.objects.filter(
+                enrollment__campaign=campaign,
+                enrollment__lead__email__iexact=lead.email,
+                step_order=step.step_order,
+                status='sent',
+            ).exclude(enrollment=enrollment).exists()
+            if duplicate_send:
+                logger.info(
+                    "SDR: skipping step %s for %s — already sent to %s in this campaign",
+                    step.step_order, lead.display_name, lead.email,
+                )
+                enrollment.status = 'completed'
+                enrollment.completed_at = timezone.now()
+                enrollment.save()
+                return {'status': 'deduplicated', 'lead': lead.display_name}
         log_base = {
             'enrollment': enrollment,
             'step': step,
@@ -564,7 +699,17 @@ neutral = out of office / asking a question / unclear"""
         remaining = steps[idx + 1:]
         if remaining:
             next_step = remaining[0]
-            enrollment.next_action_at = enrollment.enrolled_at + timezone.timedelta(days=next_step.delay_days)
+            # Primary: enrolled_at + (next_step.delay_days - 1) days (Day 1 = immediate)
+            enrolled_at_based = enrollment.enrolled_at + timezone.timedelta(
+                days=max(0, next_step.delay_days - 1)
+            )
+            # Safety: never let next_action_at fall in the past — always wait at least
+            # the gap between this step and the next (prevents cascade for old enrollments)
+            gap_days = max(1, next_step.delay_days - step.delay_days)
+            enrollment.next_action_at = max(
+                enrolled_at_based,
+                timezone.now() + timezone.timedelta(days=gap_days),
+            )
         else:
             enrollment.status = 'completed'
             enrollment.completed_at = timezone.now()

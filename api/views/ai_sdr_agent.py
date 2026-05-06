@@ -563,9 +563,18 @@ def _serialize_campaign(c: SDRCampaign) -> dict:
         'smtp_port': c.smtp_port,
         'smtp_username': c.smtp_username,
         'smtp_use_tls': c.smtp_use_tls,
+        'imap_host': c.imap_host,
+        'imap_port': c.imap_port,
+        'calendar_link': c.calendar_link,
+        'start_date': c.start_date if isinstance(c.start_date, str) else (c.start_date.isoformat() if c.start_date else None),
+        'end_date': c.end_date if isinstance(c.end_date, str) else (c.end_date.isoformat() if c.end_date else None),
+        'auto_check_replies': c.auto_check_replies,
+        'last_replies_checked_at': c.last_replies_checked_at.isoformat() if c.last_replies_checked_at else None,
+        'activated_at': c.activated_at.isoformat() if c.activated_at else None,
         'total_leads': c.total_leads,
         'emails_sent': c.emails_sent,
         'replies_received': c.replies_received,
+        'meetings_booked': c.meetings_booked,
         'created_at': c.created_at.isoformat(),
         'updated_at': c.updated_at.isoformat(),
     }
@@ -661,6 +670,10 @@ def sdr_campaigns_list(request):
     # POST — create campaign
     try:
         d = request.data
+        start_date = d.get('start_date') or None  # ISO date string or None
+        # If start_date provided → status='scheduled' (Celery will auto-activate)
+        initial_status = 'scheduled' if start_date else 'draft'
+
         campaign = SDRCampaign.objects.create(
             company_user=company_user,
             name=d.get('name', 'New Campaign'),
@@ -674,7 +687,10 @@ def sdr_campaigns_list(request):
             smtp_username=d.get('smtp_username', ''),
             smtp_password=d.get('smtp_password', ''),
             smtp_use_tls=bool(d.get('smtp_use_tls', True)),
-            status='draft',
+            calendar_link=d.get('calendar_link', ''),
+            start_date=start_date,
+            auto_check_replies=bool(d.get('auto_check_replies', True)),
+            status=initial_status,
         )
 
         # Auto-generate steps if requested
@@ -691,6 +707,11 @@ def sdr_campaigns_list(request):
                     subject_template=sd.get('subject_template', ''),
                     body_template=sd.get('body_template', ''),
                 )
+
+        # If start_date is today and steps exist, save() will auto-activate
+        if start_date:
+            campaign.end_date = campaign.derive_end_date()
+            campaign.save()  # triggers auto-activation hook
 
         return Response({'status': 'success', 'data': _serialize_campaign(campaign)}, status=201)
     except Exception as exc:
@@ -722,13 +743,19 @@ def sdr_campaign_detail(request, campaign_id):
             d = request.data
             for field in ['name', 'description', 'status', 'sender_name', 'sender_title',
                           'sender_company', 'from_email', 'smtp_host', 'smtp_username',
-                          'smtp_use_tls']:
+                          'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies']:
                 if field in d:
                     setattr(campaign, field, d[field])
             if 'smtp_port' in d:
                 campaign.smtp_port = int(d['smtp_port'])
+            if 'imap_port' in d:
+                campaign.imap_port = int(d['imap_port'])
             if 'smtp_password' in d and d['smtp_password']:
                 campaign.smtp_password = d['smtp_password']
+            if 'start_date' in d:
+                campaign.start_date = d['start_date'] or None
+                if campaign.start_date and campaign.status == 'draft':
+                    campaign.status = 'scheduled'
             campaign.save()
             return Response({'status': 'success', 'data': _serialize_campaign(campaign)})
         except Exception as exc:
@@ -737,6 +764,40 @@ def sdr_campaign_detail(request, campaign_id):
     # DELETE
     campaign.delete()
     return Response({'status': 'success', 'message': 'Campaign deleted.'})
+
+
+# ==========================================================================
+# Clear all enrollments / leads from a campaign
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_clear_campaign_leads(request, campaign_id):
+    """Delete every enrollment (and related logs/meetings) for a campaign and reset counters."""
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        # Cascade: logs and meetings are FK'd to enrollment (on_delete=CASCADE)
+        deleted_count, _ = campaign.enrollments.all().delete()
+        campaign.emails_sent = 0
+        campaign.replies_received = 0
+        campaign.meetings_booked = 0
+        campaign.total_leads = 0
+        campaign.save(update_fields=['emails_sent', 'replies_received', 'meetings_booked', 'total_leads'])
+        logger.info("SDR: cleared %d enrollments from campaign %s", deleted_count, campaign_id)
+        return Response({
+            'status': 'success',
+            'message': f'Cleared {deleted_count} enrollment records.',
+            'data': _serialize_campaign(campaign),
+        })
+    except Exception as exc:
+        logger.error("SDR clear leads error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
 
 
 # ==========================================================================
@@ -872,6 +933,13 @@ def sdr_enroll_leads(request, campaign_id):
         if not lead_ids:
             return Response({'status': 'error', 'message': 'No lead_ids provided.'}, status=400)
 
+        # Require explicit SMTP credentials — never fall back to global Django email settings
+        if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
+            return Response({
+                'status': 'error',
+                'message': 'Campaign SMTP not configured. Open Settings → Email/SMTP and add your email credentials before enrolling leads.',
+            }, status=400)
+
         leads = SDRLead.objects.filter(id__in=lead_ids, company_user=company_user)
         first_step = campaign.steps.filter(is_active=True).order_by('step_order').first()
 
@@ -884,7 +952,8 @@ def sdr_enroll_leads(request, campaign_id):
 
             next_action = None
             if first_step:
-                next_action = timezone.now() + timezone.timedelta(days=first_step.delay_days)
+                # delay_days=1 means "Day 1" = send immediately on enrollment day
+                next_action = timezone.now() + timezone.timedelta(days=max(0, first_step.delay_days - 1))
 
             SDRCampaignEnrollment.objects.create(
                 campaign=campaign,
@@ -1123,12 +1192,12 @@ def sdr_check_replies(request, campaign_id):
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
 
     try:
-        # Check active enrollments that have been contacted (current_step > 0)
         enrollments = list(
             campaign.enrollments
             .filter(status__in=['active', 'completed'])
-            .filter(current_step__gt=0)
+            .exclude(lead__email='')
             .select_related('lead')
+            .prefetch_related('logs')
         )
 
         agent = _get_outreach_agent()
