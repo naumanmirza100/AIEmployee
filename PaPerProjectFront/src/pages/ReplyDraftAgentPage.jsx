@@ -178,14 +178,16 @@ const humanizeAiError = (raw) => {
   return firstLine ? `Generation failed: ${firstLine.slice(0, 200)}` : 'Generation failed. Please try again.';
 };
 
-// Pure view filter for the inbox list — Celery pre-syncs the full 120-day
+// Pure view filter for the inbox list — Celery pre-syncs the rolling
 // window on a cron (see marketing_agent/management/commands/sync_inbox.py),
 // so switching the dropdown just slices already-cached rows and is instant.
+// 120 was retired: the cost of fetching that much mail on a fresh account
+// dwarfed the benefit, and 90 days already covers the longest practical
+// reply window.
 const TIME_WINDOW_OPTIONS = [
-  { value: 30,  label: 'Last 30 days' },
-  { value: 60,  label: 'Last 60 days' },
-  { value: 90,  label: 'Last 90 days' },
-  { value: 120, label: 'Last 120 days' },
+  { value: 30, label: 'Last 30 days' },
+  { value: 60, label: 'Last 60 days' },
+  { value: 90, label: 'Last 90 days' },
 ];
 
 const TONES = [
@@ -480,6 +482,18 @@ const ReplyDraftAgentPage = () => {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [hasAccess, refreshInbox, refreshSent, refreshDrafts, refreshSyncAccounts]);
+
+  // While sync is actively running, poll the sync-accounts endpoint more
+  // aggressively (every 5s) so the staged-progress banner advances
+  // 30 → 60 → 90 promptly and we drop the banner the moment the worker
+  // finishes. The 30s inbox/sent/drafts cadence above is unchanged —
+  // only sync state needs sub-half-minute resolution.
+  const isSyncRunning = (syncAccounts || []).some((a) => a.sync_in_progress);
+  useEffect(() => {
+    if (!hasAccess || !isSyncRunning) return;
+    const id = setInterval(() => { refreshSyncAccounts(); }, 5 * 1000);
+    return () => clearInterval(id);
+  }, [hasAccess, isSyncRunning, refreshSyncAccounts]);
 
   // Re-fetch inbox + sent whenever the user changes the time-window filter
   // — both lists honour the same `days` slice.
@@ -963,7 +977,9 @@ const ReplyDraftAgentPage = () => {
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
-              <span className="text-xs text-gray-400 hidden sm:inline">Auto-refreshes every 30s</span>
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                {isSyncRunning ? 'Polling every 5s while syncing' : 'Auto-refreshes every 30s'}
+              </span>
 
               <AttachedAccountButton
                 syncAccounts={syncAccounts}
@@ -2142,8 +2158,19 @@ const EmailBody = ({ body, bodyHtml, direction = 'in' }) => {
   );
 };
 
-const FIRST_SYNC_WINDOW_MS = 5 * 60 * 1000;  // hard cap so a stuck sync doesn't leave a banner up forever
-const ACTIVE_SYNC_WINDOW_MS = 2 * 60 * 1000; // show "Syncing in progress" chip for up to 2 min after IMAP config change
+// Banner state is driven by the backend's authoritative sync flags
+// (sync_in_progress, last_sync_stage, last_sync_completed_at) rather
+// than wall-clock heuristics, so a slow 90-day backfill keeps the
+// "Syncing…" banner up for as long as the worker is actually working —
+// and drops it the moment the last stage commits. The old time-based
+// caps would hide the banner before the sync finished, leaving the
+// user thinking the inbox was final when more rows were still landing.
+const STAGE_LABEL = {
+  0: 'Connecting…',
+  30: 'last 30 days',
+  60: 'last 60 days',
+  90: 'last 90 days',
+};
 
 const SyncSourceCard = ({ accounts, onConfigure }) => {
   const total = accounts.length;
@@ -2152,36 +2179,78 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
     (a) => a.is_active && a.enable_imap_sync && !a.imap_ready
   );
 
-  // Live-ticking timer — anchored to each account's updated_at (the moment
-  // its IMAP config was last touched, which is when the immediate Celery
-  // sync got dispatched).
+  // Authoritative sync state from the backend. ``sync_in_progress`` is
+  // True only while sync_inbox is actively running for an account, and
+  // is cleared in a finally block — so a crashed or finished worker
+  // never leaves a phantom "Syncing…" banner up. ``last_sync_stage``
+  // advances 0 → 30 → 60 → 90 as each staged-window phase commits.
+  const activeSyncAccounts = syncing.filter((a) => a.sync_in_progress);
+  const isAnySyncRunning = activeSyncAccounts.length > 0;
+
+  // Stage label for the headline. When multiple accounts are syncing
+  // we surface the SMALLEST in-progress stage — that's the next chunk
+  // about to be visible to the user. (Bigger stages happen later in
+  // the same run.)
+  const currentStageDays = (() => {
+    if (!isAnySyncRunning) return 0;
+    const stages = activeSyncAccounts
+      .map((a) => Number(a.last_sync_stage || 0))
+      .filter((n) => n > 0);
+    // last_sync_stage advances AFTER a stage finishes, so the next one
+    // currently running is the smallest stage greater than the latest
+    // committed value. Default to 30 (the first stage) when nothing
+    // has committed yet.
+    const lastCommitted = stages.length > 0 ? Math.max(...stages) : 0;
+    if (lastCommitted === 0) return 30;
+    if (lastCommitted === 30) return 60;
+    if (lastCommitted === 60) return 90;
+    return lastCommitted; // already at 90 — sync is on the last slice
+  })();
+
+  // Live-ticking timer for an "elapsed" pill. Anchored to each
+  // account's updated_at (when sync was kicked off) so it ticks
+  // accurately while sync_in_progress=True; we only render it while
+  // the backend says sync is actually running.
   const [now, setNow] = useState(() => Date.now());
-  const earliestActivity = syncing.length > 0
-    ? Math.max(...syncing.map((a) => new Date(a.updated_at || a.created_at || 0).getTime()))
+  const earliestActivity = activeSyncAccounts.length > 0
+    ? Math.min(...activeSyncAccounts.map((a) =>
+        new Date(a.updated_at || a.created_at || 0).getTime()
+      ))
     : 0;
   const elapsedMs = earliestActivity ? Math.max(0, now - earliestActivity) : 0;
 
-  // "First sync" = will_sync but nothing has landed yet. "Active sync" = just
-  // saved/updated config, rows may still be streaming in even if some have
-  // already landed. Newest-first sync ordering (see sync_inbox.py) means the
-  // 30-day view populates from the start, so we prefer showing the small
-  // progress chip over the big empty banner once inbox_count > 0.
-  const firstSync = syncing.filter((a) => (a.inbox_count || 0) === 0);
-  const firstSyncActive = firstSync.length > 0 && elapsedMs < FIRST_SYNC_WINDOW_MS;
-  const activelySyncing = syncing.length > 0 && elapsedMs < ACTIVE_SYNC_WINDOW_MS;
   const totalInboxCount = syncing.reduce((s, a) => s + (a.inbox_count || 0), 0);
+  const firstSync = activeSyncAccounts.filter((a) => (a.inbox_count || 0) === 0);
+  const firstSyncActive = firstSync.length > 0;
+  const activelySyncing = isAnySyncRunning && !firstSyncActive;
 
-  const showTimer = firstSyncActive || activelySyncing;
   useEffect(() => {
-    if (!showTimer) return;
+    if (!isAnySyncRunning) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [showTimer]);
+  }, [isAnySyncRunning]);
 
   const mmss = (ms) => {
     const s = Math.floor(ms / 1000);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
+
+  // Friendly "Last synced N min ago" label for the steady-state banner.
+  const lastSyncedLabel = (() => {
+    if (isAnySyncRunning) return null;
+    const completedTimestamps = syncing
+      .map((a) => a.last_sync_completed_at ? new Date(a.last_sync_completed_at).getTime() : 0)
+      .filter((t) => t > 0);
+    if (completedTimestamps.length === 0) return null;
+    const mostRecent = Math.max(...completedTimestamps);
+    const ageMs = Date.now() - mostRecent;
+    const mins = Math.floor(ageMs / 60000);
+    if (mins < 1) return 'Synced just now';
+    if (mins < 60) return `Synced ${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Synced ${hours} hr ago`;
+    return `Synced ${Math.floor(hours / 24)} day ago`;
+  })();
 
   // No email accounts at all → hard block, user must add one.
   if (total === 0) {
@@ -2235,7 +2304,8 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
   }
 
   // First-sync in progress — account just saved, IMAP running, nothing in DB yet.
-  // Prominent cyan banner with a live elapsed timer.
+  // Prominent cyan banner with a live elapsed timer. Stays up for as
+  // long as the backend reports sync_in_progress=True; no time cap.
   if (firstSyncActive) {
     return (
       <div className="mb-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
@@ -2245,27 +2315,30 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-cyan-100">
-              Syncing your inbox…
+              Syncing your inbox… ({STAGE_LABEL[currentStageDays] || `${currentStageDays} days`})
             </span>
             <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5">
               {mmss(elapsedMs)}
             </span>
           </div>
           <div className="text-xs text-cyan-200/80 mt-1">
-            Pulling the last 120 days of mail from{' '}
+            Pulling mail from{' '}
             <span className="text-white font-medium">
               {firstSync.map((a) => a.email).join(', ')}
             </span>
-            . Usually takes 30–90 seconds — emails will appear below automatically.
+            . The most recent 30 days arrive first; 60- and 90-day backfill
+            continues in the background. The inbox below updates as each
+            stage commits.
           </div>
         </div>
       </div>
     );
   }
 
-  // Some emails already landed but sync is likely still running (recent config
-  // change). Small cyan "in progress" chip so the user doesn't think the list
-  // below is the final state — more mail may still be streaming in.
+  // Sync is running and rows have already started landing. Small cyan
+  // chip so the user knows the list below isn't final yet — driven by
+  // the backend's sync_in_progress flag, NOT a wall-clock timeout, so
+  // it stays up through the full 90-day staged backfill.
   if (activelySyncing) {
     return (
       <div className="mb-4 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
@@ -2274,13 +2347,13 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-xs text-cyan-200/90">
-            Syncing in progress —{' '}
+            Syncing {STAGE_LABEL[currentStageDays] || `${currentStageDays}-day window`} —{' '}
             <span className="text-white font-medium">{totalInboxCount}</span>{' '}
             email{totalInboxCount === 1 ? '' : 's'} loaded so far from{' '}
             <span className="text-white font-medium">
-              {syncing.map((a) => a.email).join(', ')}
+              {activeSyncAccounts.map((a) => a.email).join(', ')}
             </span>
-            . More may still be landing.
+            . More are still streaming in.
           </div>
         </div>
         <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5 shrink-0">
@@ -2290,9 +2363,9 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
     );
   }
 
-  // Steady-state happy path — sync is configured and settled. Small green chip.
-  // Keep this terse: the header's email-accounts dropdown already lists each
-  // account with its status, so repeating the list here was just noise.
+  // Steady-state happy path — sync is configured AND the backend has
+  // confirmed it's not running right now. We surface "last synced" so
+  // the user can tell at a glance how fresh the inbox is.
   return (
     <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
       <div className="h-8 w-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
@@ -2300,10 +2373,20 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-xs text-emerald-200/90">
-          Inbox sync active ·{' '}
-          <span className="text-white font-medium">
-            {syncing.length} account{syncing.length === 1 ? '' : 's'}
-          </span>
+          {lastSyncedLabel ? (
+            <>
+              <span className="text-white font-medium">{lastSyncedLabel}</span>
+              {' · '}
+              {syncing.length} account{syncing.length === 1 ? '' : 's'} active
+            </>
+          ) : (
+            <>
+              Inbox sync active ·{' '}
+              <span className="text-white font-medium">
+                {syncing.length} account{syncing.length === 1 ? '' : 's'}
+              </span>
+            </>
+          )}
         </div>
       </div>
       {misconfigured.length > 0 && (
@@ -3206,7 +3289,7 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
 // Settings dialog surfaced from the header gear button once an account is
 // attached. Shows account info with edit/disconnect actions and a single
 // window-selectable bar chart of inbox volume (30/60/90/120 days).
-const ANALYTICS_WINDOWS = [30, 60, 90, 120];
+const ANALYTICS_WINDOWS = [30, 60, 90];
 
 const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
   const { toast } = useToast();

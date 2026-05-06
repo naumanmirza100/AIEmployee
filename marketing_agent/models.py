@@ -680,19 +680,73 @@ class EmailAccount(models.Model):
     is_active = models.BooleanField(default=True, help_text='Is this account active and ready to use?')
     is_default = models.BooleanField(default=False, help_text='Use this as default account for sending')
 
-    # Reply Draft Agent isolation flag. When True, this account is the inbox
-    # source for the Reply Draft Agent and is intentionally hidden from the
-    # marketing-campaign account list. Exactly one EmailAccount per owner
-    # should have this set — the save() override enforces that.
+    # Per-role visibility flags. Each flag controls which agent's UI
+    # surfaces this row in its account list. They're independent: a row
+    # can carry both, one, or neither — see delete logic for the
+    # "neither" cleanup. The pair replaces the old "single shared row,
+    # marketing list filters on nothing" model that leaked reply-agent
+    # accounts into the marketing list.
+    #
+    # is_marketing_account: row appears in the Marketing Agent account
+    # list (and is the SMTP sender for campaigns). Set by
+    # marketing_agent.create_email_account; cleared by
+    # marketing_agent.delete_email_account.
+    #
+    # is_reply_agent_account: row is the Reply Draft Agent's inbox
+    # source. Exactly one per owner — the save() override enforces it.
+    # Set by reply_draft_agent.create_reply_account; cleared by
+    # reply_draft_agent.delete_reply_account.
+    #
+    # Dual-use: when both are True, the single row carries both roles
+    # — one IMAP connection serves both the campaign reply-detection
+    # pipeline (writes to Reply) and the reply-draft inbox (writes to
+    # InboxEmail). Tables stay isolated, so there's no data collision;
+    # only the credentials and IMAP session are shared. sync_inbox
+    # gates InboxEmail writes + Sent-folder sync on
+    # is_reply_agent_account; campaign reply detection runs
+    # unconditionally on INBOX as long as enable_imap_sync is on.
+    is_marketing_account = models.BooleanField(
+        default=True,
+        help_text='Visible in the Marketing Agent account list. Marketing '
+                  'campaign sending uses this row when set. Independent of '
+                  'is_reply_agent_account; both can be True for dual-use.',
+    )
     is_reply_agent_account = models.BooleanField(
         default=False,
-        help_text='Designates this account as the Reply Draft Agent inbox source (one per owner).',
+        help_text='Designates this account as the Reply Draft Agent inbox source (one per owner). '
+                  'Independent of is_marketing_account; both can be True for dual-use.',
     )
 
     # Test/Verification
     last_tested_at = models.DateTimeField(null=True, blank=True, help_text='Last time account was tested')
     test_status = models.CharField(max_length=20, choices=[('success', 'Success'), ('failed', 'Failed'), ('not_tested', 'Not Tested')], default='not_tested')
     test_error = models.TextField(blank=True, help_text='Error message from last test')
+
+    # Sync state. The Reply Draft UI reads these to show an honest
+    # "Syncing in progress" banner instead of pretending the inbox is
+    # complete while the IMAP fetcher is still streaming pages in. Both
+    # are set by the sync_inbox management command.
+    #   - sync_in_progress: True while a sync is actively running for
+    #     this account. Cleared in the finally block so a crash can't
+    #     leave the flag stuck on.
+    #   - last_sync_completed_at: timestamp of the most recent
+    #     successful sync end. Drives the "Last synced N min ago"
+    #     label.
+    #   - last_sync_stage: which staged-window phase the latest run
+    #     was on (30 / 60 / 90). Lets the UI say "Syncing 30 days
+    #     window..." rather than a generic spinner.
+    sync_in_progress = models.BooleanField(
+        default=False,
+        help_text='True while a sync is actively running for this account.',
+    )
+    last_sync_completed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Wall-clock time the most recent successful sync finished.',
+    )
+    last_sync_stage = models.PositiveIntegerField(
+        default=0,
+        help_text='Window (in days) of the latest staged-sync phase: 0=idle, 30/60/90 once each phase finishes.',
+    )
 
     # Relationship
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_accounts')

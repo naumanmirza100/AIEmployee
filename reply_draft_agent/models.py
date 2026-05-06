@@ -72,6 +72,20 @@ class InboxEmail(models.Model):
     thread_key = models.CharField(max_length=120, blank=True, default='', db_index=True,
                                   help_text='Stable key shared by every message in the same conversation.')
 
+    # Lazy-attachment flag. The IMAP sync intentionally skips attachment
+    # extraction — pulling RFC822 bodies + writing files inline was the
+    # dominant cost of a fresh sync (a 2000-message backfill spent more
+    # time on attachments than on everything else combined). Sync stamps
+    # this False; the per-email lazy-fetch endpoint flips it True after
+    # downloading the attachments on first open. UI uses the flag to know
+    # whether it must call the lazy endpoint before rendering files.
+    attachments_fetched = models.BooleanField(
+        default=False,
+        help_text='True once attachments have been downloaded from IMAP. '
+                  'False means sync stored only headers/body; call the '
+                  'fetch-attachments endpoint when the user opens the email.',
+    )
+
     synced_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
