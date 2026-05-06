@@ -3062,7 +3062,7 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Inbox className="h-5 w-5 text-primary" />
@@ -3075,8 +3075,9 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="py-4 space-y-4">
+          {/* Account basics — full width on top */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs">Account name</Label>
               <Input
@@ -3098,90 +3099,94 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
                 ))}
               </select>
             </div>
-          </div>
-
-          <div>
-            <Label className="text-xs">Email address</Label>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-              placeholder="you@example.com"
-              className="mt-1 h-9"
-            />
-          </div>
-
-          <div className="pt-2 border-t">
-            <div className="text-xs font-semibold text-muted-foreground mb-2">SMTP (for sending)</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Host</Label>
-                <Input
-                  value={form.smtp_host}
-                  onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
-                  className="mt-1 h-9"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Port</Label>
-                <Input
-                  type="number"
-                  value={form.smtp_port}
-                  onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
-                  className="mt-1 h-9"
-                />
-              </div>
-            </div>
-            <div className="mt-3">
-              <Label className="text-xs">Password</Label>
+            <div>
+              <Label className="text-xs">Email address</Label>
               <Input
-                type="password"
-                value={form.smtp_password}
-                onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
-                placeholder="••••••••"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                placeholder="you@example.com"
                 className="mt-1 h-9"
               />
             </div>
           </div>
 
-          <div className="pt-2 border-t">
-            <div className="text-xs font-semibold text-muted-foreground mb-2">IMAP (for receiving replies)</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Host</Label>
-                <Input
-                  value={form.imap_host}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
-                  className="mt-1 h-9"
-                />
+          {/* SMTP + IMAP side-by-side on lg+ */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2 border-t">
+            {/* SMTP */}
+            <div className="space-y-3 pt-3">
+              <div className="text-xs font-semibold text-muted-foreground">SMTP (for sending)</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Host</Label>
+                  <Input
+                    value={form.smtp_host}
+                    onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Port</Label>
+                  <Input
+                    type="number"
+                    value={form.smtp_port}
+                    onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
               </div>
               <div>
-                <Label className="text-xs">Port</Label>
+                <Label className="text-xs">Password</Label>
                 <Input
-                  type="number"
-                  value={form.imap_port}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
+                  type="password"
+                  value={form.smtp_password}
+                  onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
+                  placeholder="••••••••"
                   className="mt-1 h-9"
                 />
               </div>
             </div>
-            <div className="mt-3">
-              <Label className="text-xs">Password</Label>
-              <Input
-                type="password"
-                value={form.imap_password}
-                onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
-                placeholder="••••••••"
-                className="mt-1 h-9"
-              />
-            </div>
-            <div className="flex items-center gap-2 mt-3">
-              <Switch
-                id="imap-ssl"
-                checked={form.imap_use_ssl}
-                onCheckedChange={(checked) => setForm((p) => ({ ...p, imap_use_ssl: checked }))}
-              />
-              <Label htmlFor="imap-ssl" className="text-xs cursor-pointer">Use SSL</Label>
+
+            {/* IMAP */}
+            <div className="space-y-3 pt-3 lg:border-l lg:pl-6">
+              <div className="text-xs font-semibold text-muted-foreground">IMAP (for receiving replies)</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Host</Label>
+                  <Input
+                    value={form.imap_host}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Port</Label>
+                  <Input
+                    type="number"
+                    value={form.imap_port}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Password</Label>
+                <Input
+                  type="password"
+                  value={form.imap_password}
+                  onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
+                  placeholder="••••••••"
+                  className="mt-1 h-9"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="imap-ssl"
+                  checked={form.imap_use_ssl}
+                  onCheckedChange={(checked) => setForm((p) => ({ ...p, imap_use_ssl: checked }))}
+                />
+                <Label htmlFor="imap-ssl" className="text-xs cursor-pointer">Use SSL</Label>
+              </div>
             </div>
           </div>
         </div>
