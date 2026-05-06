@@ -65,6 +65,7 @@ import {
   rejectDraft,
   sendDraft,
   getReplyItem,
+  fetchInboxAttachments,
   listSyncAccounts,
   createReplyAccount,
   deleteReplyAccount,
@@ -536,6 +537,47 @@ const ReplyDraftAgentPage = () => {
       const full = res?.data;
       if (full) {
         setSelectedReply((current) => (current && current.id === r.id && current.source === r.source ? { ...current, ...full } : current));
+
+        // Lazy attachment fetch. Sync writes InboxEmail rows with
+        // attachments_fetched=false (skipping attachment extraction
+        // kept fresh syncs fast on big mailboxes); when the user
+        // opens the email the first time we pull the actual files
+        // from IMAP and merge them into the selection. Only inbox
+        // rows have this flag — campaign-Reply rows always include
+        // their attachments inline. While this is running the email
+        // pane shows AttachmentLoading (skeleton + "Loading
+        // attachments…" tag) so the user knows files are streaming.
+        if (r.source === 'inbox' && full.attachments_fetched === false) {
+          try {
+            const attRes = await fetchInboxAttachments(r.id);
+            const attData = attRes?.data;
+            if (Array.isArray(attData)) {
+              setSelectedReply((current) => {
+                if (!current || current.id !== r.id || current.source !== r.source) return current;
+                return { ...current, attachments: attData, attachments_fetched: true };
+              });
+            } else {
+              // Server returned something we can't render — flip the
+              // flag locally so the skeleton stops spinning. The DB
+              // flag stays whatever the server set; next open will
+              // retry the IMAP fetch if it's still false there.
+              setSelectedReply((current) => {
+                if (!current || current.id !== r.id || current.source !== r.source) return current;
+                return { ...current, attachments_fetched: true };
+              });
+            }
+          } catch (attErr) {
+            // Non-fatal — body is already shown. Mark fetched=true
+            // locally so the skeleton stops spinning instead of
+            // hanging there forever; user sees "no attachments" until
+            // they reopen the email and the next attempt succeeds.
+            console.error('Failed to fetch attachments lazily', attErr);
+            setSelectedReply((current) => {
+              if (!current || current.id !== r.id || current.source !== r.source) return current;
+              return { ...current, attachments_fetched: true };
+            });
+          }
+        }
       }
     } catch (e) {
       console.error('Failed to load email body', e);
@@ -570,6 +612,34 @@ const ReplyDraftAgentPage = () => {
         setEditedSubject('');
         setUserContext('');
         setComposerOpen(false);
+
+        // Same lazy attachment fetch as handleSelectReply, since the
+        // user can land on this code path without ever clicking a row
+        // (jumping from a Sent-tab "in reply to" chip). Same loading
+        // skeleton + error fallback as the primary path.
+        if (full.attachments_fetched === false) {
+          try {
+            const attRes = await fetchInboxAttachments(parent.id);
+            const attData = attRes?.data;
+            if (Array.isArray(attData)) {
+              setSelectedReply((current) => {
+                if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
+                return { ...current, attachments: attData, attachments_fetched: true };
+              });
+            } else {
+              setSelectedReply((current) => {
+                if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
+                return { ...current, attachments_fetched: true };
+              });
+            }
+          } catch (attErr) {
+            console.error('Failed to fetch attachments lazily (parent)', attErr);
+            setSelectedReply((current) => {
+              if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
+              return { ...current, attachments_fetched: true };
+            });
+          }
+        }
       }
     } catch (e) {
       toast({
@@ -1343,8 +1413,21 @@ const ReplyDraftAgentPage = () => {
                           selectedReply ? (selectedReply.direction || 'in') : 'in'
                         }
                       />
-                      {Array.isArray(originalEmail.attachments) && originalEmail.attachments.length > 0 && (
-                        <AttachmentList attachments={originalEmail.attachments} />
+                      {/* Attachment strip with three states:
+                          1. attachments_fetched=false → still pulling
+                             from IMAP (lazy fetch in progress) →
+                             skeleton + spinner so the user knows it's
+                             loading, not broken or done.
+                          2. attachments_fetched=true + empty list →
+                             email genuinely has no attachments → render
+                             nothing.
+                          3. has attachments → render the list. */}
+                      {originalEmail.attachments_fetched === false ? (
+                        <AttachmentLoading />
+                      ) : (
+                        Array.isArray(originalEmail.attachments)
+                        && originalEmail.attachments.length > 0
+                        && <AttachmentList attachments={originalEmail.attachments} />
                       )}
                       {selectedReply?.analysis && (
                         <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
@@ -1861,6 +1944,36 @@ const fileIconChar = (filename, contentType) => {
   if (ct.startsWith('video/')) return '🎬';
   return '📎';
 };
+
+// Skeleton shown while the lazy-fetch endpoint is still pulling
+// attachments from IMAP for an InboxEmail row that was synced with
+// attachments_fetched=false. Two muted skeleton cards + a small
+// "Loading attachments…" tag so the user understands the email isn't
+// missing files — they're still streaming. Replaced by AttachmentList
+// when fetch resolves, or by nothing when the email genuinely has no
+// attachments.
+const AttachmentLoading = () => (
+  <div className="mt-4 pt-4 border-t border-white/10">
+    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Loading attachments…
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {[0, 1].map((i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 animate-pulse"
+        >
+          <span className="text-xl shrink-0 opacity-40" aria-hidden="true">📎</span>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="h-3 w-3/4 rounded bg-white/10" />
+            <div className="h-2 w-1/3 rounded bg-white/10" />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
 const AttachmentList = ({ attachments }) => {
   const handleDownload = async (att) => {
