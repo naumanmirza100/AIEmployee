@@ -482,6 +482,18 @@ def upload_hr_document(request):
                 return Response({'status': 'error', 'message': 'employee_id not found for this company'},
                                 status=status.HTTP_400_BAD_REQUEST)
 
+        # Optional supersede — when set, the new doc replaces the old one in
+        # retrieval (parent gets `superseded_by` pointed at the new row).
+        parent_document = None
+        parent_document_id = request.POST.get('parent_document_id')
+        if parent_document_id:
+            parent_document = HRDocument.objects.filter(
+                pk=parent_document_id, company=company,
+            ).first()
+            if not parent_document:
+                return Response({'status': 'error', 'message': 'parent_document_id not found for this company'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
         # Validate + read once
         safe_filename = DocumentProcessor.sanitize_filename(uploaded.name)
         file_bytes = uploaded.read()
@@ -539,7 +551,14 @@ def upload_hr_document(request):
             file_hash=file_hash,
             processing_status='pending',
             retention_days=retention_days,
+            parent_document=parent_document,
+            version=(parent_document.version + 1) if parent_document else 1,
         )
+
+        # Point the old revision at the new one so retrieval skips it.
+        if parent_document:
+            parent_document.superseded_by = document
+            parent_document.save(update_fields=['superseded_by', 'updated_at'])
 
         # Dispatch processing — broker probe → fall back to inline if Redis is down,
         # so the request doesn't stall in Celery's ~100s connection retry loop.
@@ -669,6 +688,9 @@ def _serialize_hr_document(d: HRDocument, *, include_content: bool = False) -> d
         'chunks_processed': d.chunks_processed, 'chunks_total': d.chunks_total,
         'extracted_fields': d.extracted_fields or {},
         'retention_days': d.retention_days,
+        'version': d.version,
+        'parent_document_id': d.parent_document_id,
+        'superseded_by_id': d.superseded_by_id,
         'created_at': d.created_at.isoformat() if d.created_at else None,
         'updated_at': d.updated_at.isoformat() if d.updated_at else None,
     }
@@ -1120,9 +1142,9 @@ def hr_meeting_availability(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def submit_leave_request(request):
-    """Create a LeaveRequest. The workflow runner will pick up the
-    `leave_request_submitted` event and run any matching HRWorkflow
-    (manager approval, calendar update, confirmation email)."""
+    """Create a LeaveRequest. Computes working days (skips weekends + company
+    holidays), auto-assigns the manager (or HR fallback) as approver, and
+    fires the `leave_request_submitted` workflow signal."""
     try:
         company = request.user.company
         d = request.data or {}
@@ -1139,7 +1161,19 @@ def submit_leave_request(request):
         if ed < sd:
             return Response({'status': 'error', 'message': 'end_date must be on or after start_date'},
                             status=status.HTTP_400_BAD_REQUEST)
-        days_requested = d.get('days_requested') or ((ed - sd).days + 1)
+
+        from hr_agent.leave_helpers import working_days_between, resolve_approver_for_leave
+        # Caller can override (e.g. half-day requests); otherwise compute.
+        days_requested = d.get('days_requested')
+        if days_requested in (None, ''):
+            days_requested = working_days_between(sd, ed, company)
+        else:
+            try:
+                days_requested = float(days_requested)
+            except (TypeError, ValueError):
+                days_requested = working_days_between(sd, ed, company)
+
+        approver = resolve_approver_for_leave(emp, company)
         lr = LeaveRequest.objects.create(
             employee=emp,
             leave_type=d.get('leave_type') or 'vacation',
@@ -1147,10 +1181,13 @@ def submit_leave_request(request):
             days_requested=days_requested,
             reason=(d.get('reason') or '')[:2000],
             status='pending',
+            approver=approver,
         )
         return Response({'status': 'success', 'data': {
             'id': lr.id, 'employee_id': emp.id, 'status': lr.status,
             'days_requested': float(lr.days_requested),
+            'approver_id': lr.approver_id,
+            'approver_name': lr.approver.full_name if lr.approver_id else None,
         }}, status=status.HTTP_201_CREATED)
     except Exception:
         logger.exception("submit_leave_request failed")
@@ -1163,7 +1200,14 @@ def submit_leave_request(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def decide_leave_request(request, request_id):
-    """Approve or reject a pending leave request. Body: {action: 'approve'|'reject', note?: str}."""
+    """Approve or reject a pending leave request. Permission rules:
+      * The request's `approver` (set at submit time, defaults to manager).
+      * Any HR-roled CompanyUser (role='hr_agent', or company `owner`/`admin`).
+    Body: ``{action: 'approve'|'reject', note?: str}``.
+
+    On approval, deducts ``days_requested`` from the employee's
+    ``LeaveBalance.used_days`` for that leave_type.
+    """
     try:
         company = request.user.company
         lr = LeaveRequest.objects.filter(pk=request_id, employee__company=company).first()
@@ -1177,10 +1221,37 @@ def decide_leave_request(request, request_id):
         if action not in ('approve', 'reject'):
             return Response({'status': 'error', 'message': "action must be 'approve' or 'reject'"},
                             status=status.HTTP_400_BAD_REQUEST)
+
+        # Permission gate
+        cu = request.user
+        is_hr_admin = (cu.role or '').lower() in ('hr_agent', 'owner', 'admin')
+        approver_emp = (Employee.objects.filter(company=company, company_user=cu).first()
+                        or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
+        is_assigned_approver = bool(lr.approver_id and approver_emp and lr.approver_id == approver_emp.id)
+        if not (is_hr_admin or is_assigned_approver):
+            return Response({'status': 'error',
+                             'message': "You aren't authorized to decide this request — "
+                                        "must be the assigned approver or HR admin."},
+                            status=status.HTTP_403_FORBIDDEN)
+
         lr.status = 'approved' if action == 'approve' else 'rejected'
         lr.approval_note = (request.data.get('note') or '')[:2000]
         lr.decided_at = timezone.now()
         lr.save(update_fields=['status', 'approval_note', 'decided_at', 'updated_at'])
+
+        # Bump used_days on approval — keeps the balance honest without
+        # requiring a separate workflow step.
+        if lr.status == 'approved':
+            try:
+                from hr_agent.models import LeaveBalance
+                bal, _ = LeaveBalance.objects.get_or_create(
+                    employee_id=lr.employee_id, leave_type=lr.leave_type,
+                )
+                bal.used_days = (bal.used_days or 0) + (lr.days_requested or 0)
+                bal.save(update_fields=['used_days', 'updated_at'])
+            except Exception:
+                logger.exception("decide_leave_request: failed to bump LeaveBalance for lr %s", lr.id)
+
         return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
     except Exception:
         logger.exception("decide_leave_request failed")
@@ -1706,3 +1777,280 @@ def extract_hr_meeting_action_items(request, meeting_id):
     m.action_items = items
     m.save(update_fields=['action_items', 'updated_at'])
     return Response({'status': 'success', 'data': {'action_items': items, 'meeting_id': m.id}})
+
+
+# ============================================================================
+# Leave requests — list with mine / pending filters
+# ============================================================================
+
+def _serialize_leave_request(lr) -> dict:
+    return {
+        'id': lr.id,
+        'employee_id': lr.employee_id,
+        'employee_name': lr.employee.full_name if lr.employee_id else None,
+        'employee_email': lr.employee.work_email if lr.employee_id else None,
+        'leave_type': lr.leave_type,
+        'start_date': lr.start_date.isoformat() if lr.start_date else None,
+        'end_date': lr.end_date.isoformat() if lr.end_date else None,
+        'days_requested': float(lr.days_requested or 0),
+        'reason': lr.reason or '',
+        'status': lr.status,
+        'approver_id': lr.approver_id,
+        'approver_name': lr.approver.full_name if lr.approver_id else None,
+        'approval_note': lr.approval_note or '',
+        'decided_at': lr.decided_at.isoformat() if lr.decided_at else None,
+        'created_at': lr.created_at.isoformat() if lr.created_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_leave_requests(request):
+    """List leave requests in the caller's company.
+
+    Filters (query params):
+      ``?status=pending|approved|rejected|cancelled``
+      ``?mine=1`` — only requests submitted BY the caller
+      ``?pending_for_me=1`` — only pending requests where the caller is the approver
+    """
+    try:
+        company = request.user.company
+        qs = LeaveRequest.objects.filter(employee__company=company).select_related(
+            'employee', 'approver',
+        ).order_by('-created_at')
+
+        if request.GET.get('status'):
+            qs = qs.filter(status=request.GET['status'])
+
+        if request.GET.get('mine') == '1':
+            asker_emp = (Employee.objects.filter(company=company, company_user=request.user).first()
+                         or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
+            if asker_emp:
+                qs = qs.filter(employee=asker_emp)
+            else:
+                qs = qs.none()
+
+        if request.GET.get('pending_for_me') == '1':
+            asker_emp = (Employee.objects.filter(company=company, company_user=request.user).first()
+                         or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
+            if asker_emp:
+                qs = qs.filter(status='pending', approver=asker_emp)
+            else:
+                qs = qs.none()
+
+        rows = [_serialize_leave_request(lr) for lr in qs[:200]]
+        return Response({'status': 'success', 'data': rows, 'count': len(rows)})
+    except Exception:
+        logger.exception("list_leave_requests failed")
+        return Response({'status': 'error', 'message': 'Failed to list leave requests'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Holidays
+# ============================================================================
+
+def _serialize_holiday(h) -> dict:
+    return {
+        'id': h.id, 'name': h.name, 'date': h.date.isoformat() if h.date else None,
+        'region': h.region or '', 'is_working_day': h.is_working_day,
+        'notes': h.notes or '',
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_holidays(request):
+    from hr_agent.models import Holiday
+    company = request.user.company
+    qs = Holiday.objects.filter(company=company).order_by('date')
+    year = request.GET.get('year')
+    if year:
+        try:
+            qs = qs.filter(date__year=int(year))
+        except ValueError:
+            pass
+    return Response({'status': 'success', 'data': [_serialize_holiday(h) for h in qs[:1000]]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_holiday(request):
+    from hr_agent.models import Holiday
+    company = request.user.company
+    d = request.data or {}
+    name = (d.get('name') or '').strip()
+    if not name or not d.get('date'):
+        return Response({'status': 'error', 'message': 'name and date (YYYY-MM-DD) are required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        date_val = datetime.fromisoformat(d['date']).date()
+    except ValueError:
+        return Response({'status': 'error', 'message': 'date must be YYYY-MM-DD'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    h, created = Holiday.objects.get_or_create(
+        company=company, date=date_val, region=(d.get('region') or '').strip(),
+        defaults={
+            'name': name[:200],
+            'is_working_day': bool(d.get('is_working_day', False)),
+            'notes': d.get('notes') or '',
+        },
+    )
+    if not created:
+        h.name = name[:200]
+        h.is_working_day = bool(d.get('is_working_day', False))
+        h.notes = d.get('notes') or ''
+        h.save()
+    return Response({'status': 'success', 'data': _serialize_holiday(h)},
+                    status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_holiday(request, holiday_id):
+    from hr_agent.models import Holiday
+    deleted, _ = Holiday.objects.filter(pk=holiday_id, company=request.user.company).delete()
+    if not deleted:
+        return Response({'status': 'error', 'message': 'Holiday not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': {'deleted_id': int(holiday_id)}})
+
+
+# ============================================================================
+# Leave accrual policies
+# ============================================================================
+
+def _serialize_accrual_policy(p) -> dict:
+    return {
+        'id': p.id, 'leave_type': p.leave_type, 'period': p.period,
+        'days_per_period': float(p.days_per_period or 0),
+        'max_balance': float(p.max_balance) if p.max_balance is not None else None,
+        'is_active': p.is_active,
+        'last_run_at': p.last_run_at.isoformat() if p.last_run_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_accrual_policies(request):
+    from hr_agent.models import LeaveAccrualPolicy
+    qs = LeaveAccrualPolicy.objects.filter(company=request.user.company).order_by('leave_type')
+    return Response({'status': 'success', 'data': [_serialize_accrual_policy(p) for p in qs]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def upsert_accrual_policy(request):
+    """Create or update an accrual policy for (company, leave_type)."""
+    from hr_agent.models import LeaveAccrualPolicy
+    company = request.user.company
+    d = request.data or {}
+    leave_type = (d.get('leave_type') or '').strip().lower()
+    if leave_type not in {c[0] for c in LeaveBalance.LEAVE_TYPE_CHOICES}:
+        return Response({'status': 'error', 'message': 'invalid leave_type'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    p, _ = LeaveAccrualPolicy.objects.get_or_create(company=company, leave_type=leave_type)
+    p.period = d.get('period') if d.get('period') in ('monthly', 'biweekly', 'annual') else (p.period or 'monthly')
+    if 'days_per_period' in d:
+        try:
+            p.days_per_period = max(0, float(d['days_per_period']))
+        except (TypeError, ValueError):
+            pass
+    if 'max_balance' in d:
+        if d['max_balance'] in (None, ''):
+            p.max_balance = None
+        else:
+            try:
+                p.max_balance = max(0, float(d['max_balance']))
+            except (TypeError, ValueError):
+                pass
+    if 'is_active' in d:
+        p.is_active = bool(d['is_active'])
+    p.save()
+    return Response({'status': 'success', 'data': _serialize_accrual_policy(p)})
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_accrual_policy(request, policy_id):
+    from hr_agent.models import LeaveAccrualPolicy
+    deleted, _ = LeaveAccrualPolicy.objects.filter(pk=policy_id, company=request.user.company).delete()
+    if not deleted:
+        return Response({'status': 'error', 'message': 'Policy not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': {'deleted_id': int(policy_id)}})
+
+
+# ============================================================================
+# Employee detail (for the drawer UI)
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def get_employee_detail(request, employee_id):
+    """Bundle every relevant view of one employee for the drawer:
+    profile, manager chain, leave balances, personal documents, recent
+    leave requests, recent meetings, recent workflow executions."""
+    try:
+        emp, err = _company_employee_or_404(request, employee_id)
+        if err:
+            return err
+        company = request.user.company
+        # Manager chain — walk up to 5 levels then stop.
+        chain = []
+        cur = emp.manager
+        seen = set()
+        while cur and cur.id not in seen and len(chain) < 5:
+            chain.append({'id': cur.id, 'full_name': cur.full_name, 'job_title': cur.job_title})
+            seen.add(cur.id)
+            cur = cur.manager
+
+        balances = list(emp.leave_balances.values('leave_type', 'accrued_days', 'used_days',
+                                                  'carried_over_days', 'period_start', 'period_end'))
+        for b in balances:
+            for k in ('accrued_days', 'used_days', 'carried_over_days'):
+                b[k] = float(b[k] or 0)
+            b['remaining'] = b['accrued_days'] + b['carried_over_days'] - b['used_days']
+            for k in ('period_start', 'period_end'):
+                b[k] = b[k].isoformat() if b.get(k) else None
+
+        personal_docs = HRDocument.objects.filter(
+            company=company, employee=emp,
+        ).order_by('-created_at')[:50]
+        leave_rows = LeaveRequest.objects.filter(employee=emp).order_by('-created_at')[:20]
+        meetings = HRMeeting.objects.filter(
+            company=company, participants=emp,
+        ).order_by('-scheduled_at')[:10]
+
+        return Response({'status': 'success', 'data': {
+            'employee': _serialize_employee(emp),
+            'manager_chain': chain,
+            'leave_balances': balances,
+            'personal_documents': [_serialize_hr_document(d) for d in personal_docs],
+            'leave_requests': [_serialize_leave_request(lr) for lr in leave_rows],
+            'meetings': [{
+                'id': m.id, 'title': m.title, 'meeting_type': m.meeting_type,
+                'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+                'status': m.status,
+            } for m in meetings],
+        }})
+    except Exception:
+        logger.exception("get_employee_detail failed")
+        return Response({'status': 'error', 'message': 'Failed to load employee detail'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)

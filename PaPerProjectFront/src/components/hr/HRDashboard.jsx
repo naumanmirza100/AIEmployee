@@ -40,6 +40,9 @@ import ErrorBoundary from '@/components/common/ErrorBoundary';
 import hrAgentService from '@/services/hrAgentService';
 import HRKnowledgeQAAgent from './HRKnowledgeQAAgent';
 import HRMeetingScheduler from './HRMeetingScheduler';
+import HRNotificationsTab from './HRNotificationsTab';
+import HRLeaveTab from './HRLeaveTab';
+import HREmployeeDetailDrawer from './HREmployeeDetailDrawer';
 
 // ---------- Tab metadata ----------
 const HR_TAB_ITEMS = [
@@ -49,6 +52,8 @@ const HR_TAB_ITEMS = [
   { value: 'documents', label: 'Documents', icon: FileText },
   { value: 'workflows', label: 'Workflows', icon: GitBranch },
   { value: 'meetings', label: 'Meetings', icon: CalendarClock },
+  { value: 'leave', label: 'Leave', icon: ClipboardList },
+  { value: 'notifications', label: 'Notifications', icon: AlertTriangle },
 ];
 
 // ---------- Stat card colour tokens (mirror PM dashboard) ----------
@@ -85,6 +90,9 @@ const HRDashboard = () => {
   const [uploadDocType, setUploadDocType] = useState('policy');
   const [uploadConfidentiality, setUploadConfidentiality] = useState('employee');
   const [uploading, setUploading] = useState(false);
+
+  // Employee detail drawer
+  const [employeeDrawer, setEmployeeDrawer] = useState({ open: false, id: null });
 
   // Document action dialogs (summary / extract / delete confirm)
   const [docResult, setDocResult] = useState({
@@ -631,7 +639,8 @@ const HRDashboard = () => {
                                 return (
                                   <TableRow
                                     key={e.id}
-                                    className="border-white/[0.06] hover:bg-white/[0.04] transition-colors"
+                                    className="border-white/[0.06] hover:bg-white/[0.04] transition-colors cursor-pointer"
+                                    onClick={() => setEmployeeDrawer({ open: true, id: e.id })}
                                   >
                                     <TableCell className="font-medium text-white/95">
                                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1181,9 +1190,26 @@ const HRDashboard = () => {
             <TabsContent value="meetings" className="mt-6">
               <ErrorBoundary><HRMeetingScheduler /></ErrorBoundary>
             </TabsContent>
+
+            {/* LEAVE */}
+            <TabsContent value="leave" className="mt-6">
+              <ErrorBoundary><HRLeaveTab /></ErrorBoundary>
+            </TabsContent>
+
+            {/* NOTIFICATIONS */}
+            <TabsContent value="notifications" className="mt-6">
+              <ErrorBoundary><HRNotificationsTab /></ErrorBoundary>
+            </TabsContent>
           </Tabs>
         </div>
       </div>
+
+      {/* Employee detail drawer (outside Tabs so it overlays from any tab) */}
+      <HREmployeeDetailDrawer
+        open={employeeDrawer.open}
+        employeeId={employeeDrawer.id}
+        onOpenChange={(open) => setEmployeeDrawer((s) => ({ ...s, open }))}
+      />
     </div>
   );
 };

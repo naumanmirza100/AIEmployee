@@ -846,6 +846,13 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 300.0,
         'options': {'expires': 600},
     },
+    # Leave accrual — daily tick is plenty since the task gates by period
+    # internally (monthly / biweekly / annual). Cheap and idempotent.
+    'hr-accrue-leave-balances': {
+        'task': 'hr_agent.tasks.accrue_leave_balances',
+        'schedule': 86400.0,
+        'options': {'expires': 172800},
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)

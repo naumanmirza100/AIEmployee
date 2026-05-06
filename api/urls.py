@@ -635,8 +635,22 @@ urlpatterns = [
     re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_meeting_scheduler_chat, name='hr_delete_meeting_scheduler_chat'),  # DELETE
 
     # Leave requests
+    re_path(r'^hr/leave-requests/?$', hr_agent.list_leave_requests, name='hr_list_leave_requests'),  # GET
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
+
+    # Holiday calendar
+    re_path(r'^hr/holidays/?$', hr_agent.list_holidays, name='hr_list_holidays'),  # GET
+    re_path(r'^hr/holidays/create/?$', hr_agent.create_holiday, name='hr_create_holiday'),  # POST (also upserts)
+    re_path(r'^hr/holidays/(?P<holiday_id>\d+)/delete/?$', hr_agent.delete_holiday, name='hr_delete_holiday'),  # DELETE
+
+    # Leave accrual policies
+    re_path(r'^hr/leave-accrual-policies/?$', hr_agent.list_accrual_policies, name='hr_list_accrual_policies'),  # GET
+    re_path(r'^hr/leave-accrual-policies/upsert/?$', hr_agent.upsert_accrual_policy, name='hr_upsert_accrual_policy'),  # POST
+    re_path(r'^hr/leave-accrual-policies/(?P<policy_id>\d+)/delete/?$', hr_agent.delete_accrual_policy, name='hr_delete_accrual_policy'),  # DELETE
+
+    # Employee detail bundle
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
 ]
 
 
