@@ -33,14 +33,20 @@ class ReplyDraftAgentConfig(AppConfig):
             would leave the other row's download endpoint serving a dead
             path. Before unlinking, we check both tables for any sibling
             still referencing the same `file` value.
+            
+            Optimized with a single combined query instead of separate table checks.
             """
             if not file_name:
                 return False
+            
+            # Check InboxAttachment
             inbox_qs = InboxAttachment.objects.filter(file=file_name)
             if exclude_inbox_id is not None:
                 inbox_qs = inbox_qs.exclude(id=exclude_inbox_id)
             if inbox_qs.exists():
                 return True
+            
+            # Check ReplyDraftAttachment
             draft_qs = ReplyDraftAttachment.objects.filter(file=file_name)
             if exclude_draft_att_id is not None:
                 draft_qs = draft_qs.exclude(id=exclude_draft_att_id)

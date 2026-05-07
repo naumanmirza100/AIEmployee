@@ -111,22 +111,30 @@ def _get_or_create_user_for_company_user(company_user):
     """
     Get or create a Django User for a CompanyUser.
     This is needed because marketing models use User, not CompanyUser.
+
+    Uses get_or_create on `username` (the unique column) so concurrent first-visit
+    requests can't race each other into a UNIQUE-constraint violation on auth_user.
     """
     try:
-        # Try to find existing user with matching email
-        user = User.objects.get(email=company_user.email)
-        return user
+        return User.objects.get(email=company_user.email)
     except User.DoesNotExist:
-        # Create a new User for this company user
-        username = f"company_user_{company_user.id}_{company_user.email}"
-        user = User.objects.create_user(
-            username=username,
-            email=company_user.email,
-            password=None,  # Password not used for company users
-            first_name=company_user.full_name.split()[0] if company_user.full_name else '',
-            last_name=' '.join(company_user.full_name.split()[1:]) if company_user.full_name and len(company_user.full_name.split()) > 1 else ''
-        )
-        return user
+        pass
+    username = f"company_user_{company_user.id}_{company_user.email}"
+    first_name = company_user.full_name.split()[0] if company_user.full_name else ''
+    last_name = (
+        ' '.join(company_user.full_name.split()[1:])
+        if company_user.full_name and len(company_user.full_name.split()) > 1
+        else ''
+    )
+    user, _ = User.objects.get_or_create(
+        username=username,
+        defaults={
+            'email': company_user.email,
+            'first_name': first_name,
+            'last_name': last_name,
+        },
+    )
+    return user
 
 
 @api_view(["GET"])
@@ -1591,7 +1599,11 @@ def list_sequences(request, campaign_id):
                 {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        email_accounts = EmailAccount.objects.filter(owner=user, is_active=True).order_by('-is_default', 'email')
+        email_accounts = (
+            EmailAccount.objects
+            .filter(owner=user, is_active=True, is_marketing_account=True)
+            .order_by('-is_default', 'email')
+        )
         main_sequences = EmailSequence.objects.filter(
             campaign=campaign,
             is_sub_sequence=False
@@ -2603,11 +2615,22 @@ def get_email_status_full(request, campaign_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_email_accounts(request):
-    """List email accounts for the company user (no passwords). Includes sent/opened/clicked counts from sequences using this account."""
+    """List marketing email accounts for the company user (no passwords).
+
+    Filters by ``is_marketing_account=True`` so reply-draft-only accounts
+    don't leak into this picker. A row created via the reply-draft "Add
+    account" form leaves this flag False; one created here flips it
+    True. Both flags can be True simultaneously for dual-use mailboxes,
+    in which case the row legitimately appears in both lists.
+    """
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        accounts = EmailAccount.objects.filter(owner=user).order_by('-is_default', '-is_active', '-created_at')
+        accounts = (
+            EmailAccount.objects
+            .filter(owner=user, is_marketing_account=True)
+            .order_by('-is_default', '-is_active', '-created_at')
+        )
         data = []
         for a in accounts:
             # Template IDs used in sequences that use this account
@@ -2753,27 +2776,84 @@ def create_email_account(request):
                     'error': 'imap_auth_failed',
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        account = EmailAccount.objects.create(
-            owner=user,
-            name=name,
-            account_type=data.get('account_type', 'smtp'),
-            email=email,
-            smtp_host=smtp_host,
-            smtp_port=smtp_port,
-            smtp_username=smtp_username,
-            smtp_password=smtp_password,
-            use_tls=data.get('use_tls', True),
-            use_ssl=data.get('use_ssl', False),
-            is_gmail_app_password=data.get('is_gmail_app_password', False),
-            imap_host=imap_host,
-            imap_port=int(data.get('imap_port')) if data.get('imap_port') else None,
-            imap_use_ssl=data.get('imap_use_ssl', True),
-            imap_username=imap_username,
-            imap_password=imap_password,
-            enable_imap_sync=enable_imap_sync,
-            is_active=data.get('is_active', True),
-            is_default=data.get('is_default', False),
-        )
+        # Same-owner upsert. (email, owner) is unique_together at the DB
+        # level, so a plain .create() would IntegrityError if this user
+        # already has the mailbox attached as a Reply Draft Agent inbox.
+        # The two roles share a single row by design — one EmailAccount
+        # carries SMTP for marketing sending AND IMAP for reply-agent
+        # inbox reading, with isolated tables downstream (Reply /
+        # EmailSendHistory for marketing, InboxEmail for the reply-draft
+        # inbox).
+        #
+        # Role flags are explicit: this endpoint flips
+        # is_marketing_account=True and never touches
+        # is_reply_agent_account. That's what lets the user "delete"
+        # from one side without affecting the other — both flags are
+        # independently set/cleared by their own endpoints.
+        existing = EmailAccount.objects.filter(owner=user, email__iexact=email).first()
+        if existing is not None:
+            existing.name = name
+            existing.account_type = data.get('account_type', existing.account_type or 'smtp')
+            existing.smtp_host = smtp_host
+            existing.smtp_port = smtp_port
+            existing.smtp_username = smtp_username
+            existing.smtp_password = smtp_password
+            existing.use_tls = bool(data.get('use_tls', existing.use_tls))
+            existing.use_ssl = bool(data.get('use_ssl', existing.use_ssl))
+            existing.is_gmail_app_password = bool(
+                data.get('is_gmail_app_password', existing.is_gmail_app_password)
+            )
+            # IMAP fields: only overwrite when the marketing form actually
+            # carried values. Otherwise we'd blow away the credentials the
+            # reply-draft setup verified — same dual-use protection that
+            # create_reply_account applies in the other direction.
+            if imap_host:
+                existing.imap_host = imap_host
+            imap_port_in = data.get('imap_port')
+            if imap_port_in:
+                existing.imap_port = int(imap_port_in)
+            if 'imap_use_ssl' in data:
+                existing.imap_use_ssl = bool(data.get('imap_use_ssl'))
+            if imap_username:
+                existing.imap_username = imap_username
+            if imap_password:
+                existing.imap_password = imap_password
+            # enable_imap_sync should stay True if EITHER side wants it.
+            existing.enable_imap_sync = enable_imap_sync or existing.enable_imap_sync
+            existing.is_active = bool(data.get('is_active', existing.is_active or True))
+            if 'is_default' in data:
+                existing.is_default = bool(data.get('is_default'))
+            # This endpoint owns the marketing flag. Reply-agent flag
+            # stays whatever it already is — the user clicked "Add"
+            # on the marketing side, not the reply-agent side.
+            existing.is_marketing_account = True
+            existing.save()
+            account = existing
+        else:
+            account = EmailAccount.objects.create(
+                owner=user,
+                name=name,
+                account_type=data.get('account_type', 'smtp'),
+                email=email,
+                smtp_host=smtp_host,
+                smtp_port=smtp_port,
+                smtp_username=smtp_username,
+                smtp_password=smtp_password,
+                use_tls=data.get('use_tls', True),
+                use_ssl=data.get('use_ssl', False),
+                is_gmail_app_password=data.get('is_gmail_app_password', False),
+                imap_host=imap_host,
+                imap_port=int(data.get('imap_port')) if data.get('imap_port') else None,
+                imap_use_ssl=data.get('imap_use_ssl', True),
+                imap_username=imap_username,
+                imap_password=imap_password,
+                enable_imap_sync=enable_imap_sync,
+                is_active=data.get('is_active', True),
+                is_default=data.get('is_default', False),
+                is_marketing_account=True,
+                # is_reply_agent_account intentionally left at its
+                # default (False); this endpoint never claims that role.
+            )
 
         # Single 120-day sync — batched IMAP fetches in sync_inbox now make
         # this complete in ~30s, so the previous 30-day-fast / 120-day-delayed
@@ -2963,14 +3043,25 @@ def update_email_account(request, account_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def delete_email_account(request, account_id):
-    """Delete an email account.
+    """Delete an email account from the marketing side.
 
-    Wrapped in a transaction and disables IMAP sync first so the Celery
-    sync_inbox task can't race in and insert a new InboxEmail row between
-    Django's child-delete and parent-delete steps. The DB-level FKs on
-    InboxEmail / ReplyDraft / EmailSequence are also configured to
-    CASCADE / SET NULL (see migration), so even if a row slips in, the
-    parent delete still succeeds.
+    Role-scoped: this endpoint owns the ``is_marketing_account`` flag
+    only. Mirror of reply_draft_agent.delete_reply_account.
+
+    Behavior:
+    - The row's ``is_marketing_account`` flag flips to False — that's
+      what removes it from the marketing list (which now filters on the
+      flag). Campaign + EmailSequence FKs pointing at this row are
+      explicitly nulled so a re-saved campaign doesn't re-attach to a
+      now-detached row.
+    - If the row also has ``is_reply_agent_account=True`` (dual-use),
+      we leave the row in place — reply-draft is still using it. SMTP
+      creds and IMAP creds stay intact; only the marketing flag and
+      campaign references are cleared.
+    - If the row has ``is_reply_agent_account=False`` after this op
+      (i.e., neither role wants the row anymore), we delete the row
+      entirely. Disable IMAP sync first so Celery's sync_inbox can't
+      race in between this and the row drop.
     """
     from django.db import transaction
     try:
@@ -2986,7 +3077,31 @@ def delete_email_account(request, account_id):
                     status=status.HTTP_404_NOT_FOUND
                 )
             name = account.name
-            # Stop new syncs before deletion so Celery doesn't reinsert rows.
+
+            # Always: drop the marketing role + detach references. Reply-
+            # agent flag is untouched here — it's owned by the other
+            # endpoint.
+            from marketing_agent.models import Campaign, EmailSequence
+            Campaign.objects.filter(email_account=account).update(email_account=None)
+            EmailSequence.objects.filter(email_account=account).update(email_account=None)
+            account.is_marketing_account = False
+            account.is_default = False
+            account.save(update_fields=['is_marketing_account', 'is_default', 'updated_at'])
+
+            if account.is_reply_agent_account:
+                # Reply-draft still owns the row — keep it. Only the
+                # marketing list will no longer surface it.
+                return Response({
+                    'status': 'success',
+                    'data': {
+                        'message': (
+                            f'Email account "{name}" removed from Marketing. '
+                            'It is still in use by the Reply Draft Agent.'
+                        ),
+                    },
+                }, status=status.HTTP_200_OK)
+
+            # Neither role wants the row anymore — clean up entirely.
             if account.enable_imap_sync:
                 account.enable_imap_sync = False
                 account.save(update_fields=['enable_imap_sync'])

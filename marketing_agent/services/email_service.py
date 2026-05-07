@@ -306,23 +306,39 @@ class EmailService:
                 email.attach_alternative(html_content, "text/html")
             
             email.send()
-            
+
             if send_history:
                 # Update send history with Message-ID
                 send_history.status = 'sent'
                 send_history.sent_at = timezone.now()
                 send_history.message_id = message_id.strip('<>')  # Store without < >
                 send_history.save()
-            
+
             self.sent_count += 1
-            
+
             # Update spam score if not already set
             if template.spam_score is None:
                 spam_score = self.calculate_spam_score(subject, html_content, text_content)
                 template.spam_score = spam_score
                 template.save(update_fields=['spam_score'])
-            
+
             logger.info(f"Email sent successfully to {recipient_email} (Campaign: {campaign.name}, Template: {template.name})")
+
+            # Mirror the campaign send into the user's IMAP Sent folder.
+            # Without this, a campaign owner looking at Hostinger / custom
+            # IMAP webmail sees nothing in Sent even though the recipient
+            # got the message — SMTP only delivers, it doesn't save a
+            # copy on the sender's mailbox. Same helper the reply-draft
+            # send_raw_email() path uses, so the behavior is consistent
+            # across both agents. Best-effort: any IMAP failure is
+            # logged and swallowed because SMTP already succeeded.
+            try:
+                self._append_to_imap_sent(email, email_account)
+            except Exception as imap_err:
+                logger.warning(
+                    f"IMAP Sent-folder mirror failed for campaign send to "
+                    f"{recipient_email} (SMTP succeeded): {imap_err}"
+                )
             
             result = {'success': True, 'message': 'Email sent successfully'}
             if send_history:
@@ -474,6 +490,22 @@ class EmailService:
 
             self.sent_count += 1
             logger.info(f"Raw email sent to {to_email} (subject: {subject[:60]})")
+
+            # Mirror the message into the user's IMAP Sent folder. SMTP
+            # only delivers to the recipient — most providers (Hostinger,
+            # custom IMAP, Outlook, etc.) do NOT auto-save a copy to the
+            # sender's Sent folder when a third-party app sends via SMTP.
+            # Without this, a user looking at their webmail sees nothing
+            # in Sent even though the recipient got the message. Best-
+            # effort: any IMAP failure is logged and swallowed so a flaky
+            # IMAP server can't block a successful SMTP send.
+            try:
+                self._append_to_imap_sent(email, email_account)
+            except Exception as imap_err:
+                logger.warning(
+                    f"IMAP Sent-folder mirror failed for {to_email} (SMTP succeeded): {imap_err}"
+                )
+
             result = {'success': True, 'message_id': message_id_clean}
             if send_history:
                 result['send_history_id'] = send_history.id
@@ -492,6 +524,96 @@ class EmailService:
                 'message_id': message_id_clean,
                 **({'send_history_id': send_history.id} if send_history else {}),
             }
+
+    def _append_to_imap_sent(self, email_message, email_account) -> None:
+        """Append a just-sent message to the account's IMAP Sent folder.
+
+        SMTP delivers to the recipient but does not put a copy in the
+        sender's mailbox — Hostinger, custom IMAP, and most non-Gmail
+        providers leave that to the client. Without this APPEND, a user
+        looking at their webmail Sent tab sees nothing even though the
+        recipient got the email.
+
+        Best-effort: anything that goes wrong (no IMAP creds, no Sent
+        folder, server rejects APPEND) is raised so the caller can log
+        and swallow it — the SMTP send already succeeded and we don't
+        want IMAP flakiness to flip a successful send into a failure.
+        """
+        import imaplib
+        import time
+
+        if not email_account:
+            return
+        host = (email_account.imap_host or '').strip()
+        username = (email_account.imap_username or '').strip()
+        password = email_account.imap_password or ''
+        if not host or not username or not password:
+            # Account has no IMAP creds (e.g. SMTP-only marketing
+            # account that opted out of inbox sync). Nothing to mirror.
+            return
+
+        # Render the message exactly as it went on the wire. Django's
+        # EmailMultiAlternatives builds a multipart/alternative MIME
+        # tree we can dump to bytes — this preserves headers, body,
+        # attachments, and the threading hints we set above.
+        try:
+            raw_bytes = email_message.message().as_bytes()
+        except Exception:
+            return  # malformed message; nothing useful to APPEND
+
+        port = email_account.imap_port or (993 if email_account.imap_use_ssl else 143)
+        if email_account.imap_use_ssl:
+            mail = imaplib.IMAP4_SSL(host, port)
+        else:
+            mail = imaplib.IMAP4(host, port)
+            if port == 143:
+                mail.starttls()
+        try:
+            mail.login(username, password)
+
+            # Probe the same set of common Sent-folder names sync_inbox
+            # uses. The first one that responds OK to a readonly SELECT
+            # is the one we APPEND to.
+            sent_folder = None
+            for name in (
+                '[Gmail]/Sent Mail',  # Gmail (English UI)
+                'Sent',                # Generic IMAP / Hostinger / cPanel
+                'Sent Items',          # Outlook / Exchange / Office 365
+                'Sent Messages',       # Apple Mail / iCloud
+                'INBOX.Sent',          # Some Courier IMAP servers
+                'Sent Mail',           # Older format
+            ):
+                try:
+                    status_sel, _ = mail.select(f'"{name}"', readonly=True)
+                    if status_sel == 'OK':
+                        sent_folder = name
+                        break
+                except Exception:
+                    continue
+            if sent_folder is None:
+                logger.info(
+                    f"IMAP Sent mirror skipped: no Sent folder found on {host}"
+                )
+                return
+
+            # APPEND requires read-write access; the readonly SELECT
+            # above was just a probe.
+            internal_date = imaplib.Time2Internaldate(time.time())
+            status, _ = mail.append(
+                f'"{sent_folder}"',
+                r'(\Seen)',
+                internal_date,
+                raw_bytes,
+            )
+            if status != 'OK':
+                logger.warning(
+                    f"IMAP APPEND to {sent_folder!r} returned {status} on {host}"
+                )
+        finally:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
     def _add_email_tracking(self, html_content: str, send_history: EmailSendHistory) -> str:
         """

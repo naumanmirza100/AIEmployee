@@ -614,6 +614,28 @@ class ReplyDraftAgent(MarketingBaseAgent):
                     'send_approved: failed to mirror sent message into InboxEmail '
                     '— Sent tab will still pick it up via the next IMAP sync'
                 )
+            
+            # NEW: Also append to IMAP Sent folder so the email appears on the
+            # actual mail server. Some SMTP providers (Hostinger/cPanel) don't
+            # auto-save SMTP submissions to Sent — we fix that here.
+            try:
+                self._append_to_imap_sent(
+                    draft=draft,
+                    recipient_email=recipient_email,
+                    in_reply_to=in_reply_to,
+                    references=references,
+                    message_id=result.get('message_id') or attempted_mid,
+                    outgoing_subject=outgoing_subject,
+                    body_html=body_html,
+                    plain_body=plain_body,
+                    attachments=attachments_payload,
+                )
+            except Exception:
+                logger.exception(
+                    'send_approved: failed to append to IMAP Sent folder — '
+                    'email will not appear in your mail server Sent folder, '
+                    'but is still visible in app Sent tab'
+                )
         else:
             draft.mark_failed(result.get('error', 'unknown error'))
             self.log_action('send_failed', {'draft_id': draft.id, 'error': result.get('error')})
@@ -1014,3 +1036,161 @@ class ReplyDraftAgent(MarketingBaseAgent):
                     'mirror_sent: failed to attach source file %r onto sent inbox row %s',
                     src_att.filename, row.id,
                 )
+
+    def _append_to_imap_sent(self, *, draft, recipient_email, in_reply_to, references,
+                             message_id, outgoing_subject, body_html='', plain_body=None,
+                             attachments=None):
+        """Append the sent email to IMAP Sent folder on the mail server.
+
+        Why: Many SMTP providers (Hostinger, cPanel, generic IMAP+SMTP) don't
+        automatically copy SMTP submissions into the Sent IMAP folder. This
+        means the user won't see their sent email on the actual mail server
+        unless we manually append it.
+
+        This builds an RFC 2822 email message and appends it to the IMAP
+        Sent folder using IMAP APPEND. Idempotent on message_id dedupe.
+
+        Args:
+            draft, recipient_email, in_reply_to, references, message_id,
+            outgoing_subject: Same as _mirror_sent_to_inbox
+            body_html: HTML version of the body
+            plain_body: Plain text version of the body
+            attachments: List of (filename, bytes, content_type) tuples
+        """
+        if not draft.email_account:
+            return
+
+        # Build RFC 2822 message
+        import email
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.mime.base import MIMEBase
+        from email.encoders import encode_base64
+
+        msg = MIMEMultipart('alternative')
+        msg['Message-ID'] = f'<{message_id.strip().strip("<>")}>'
+        msg['From'] = draft.email_account.email or 'noreply@localhost'
+        msg['To'] = recipient_email
+        msg['Subject'] = outgoing_subject or 'No Subject'
+        msg['Date'] = email.utils.formatdate(localtime=True)
+
+        # Thread headers
+        if in_reply_to:
+            msg['In-Reply-To'] = f'<{in_reply_to.strip().strip("<>")}>'
+        if references:
+            msg['References'] = references.strip()
+
+        # Body: text/plain first, then text/html alternative
+        if plain_body:
+            msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+        if body_html:
+            msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+
+        # Attachments
+        if attachments:
+            for filename, raw_bytes, content_type in attachments:
+                if not raw_bytes:
+                    continue
+                try:
+                    maintype, subtype = (content_type or 'application/octet-stream').split('/', 1)
+                except ValueError:
+                    maintype, subtype = 'application', 'octet-stream'
+
+                att = MIMEBase(maintype, subtype)
+                att.set_payload(raw_bytes)
+                encode_base64(att)
+                att.add_header(
+                    'Content-Disposition', 'attachment',
+                    filename=filename if not isinstance(filename, str) else filename.encode('utf-8', errors='ignore').decode('utf-8')
+                )
+                msg.attach(att)
+
+        # Connect to IMAP and append
+        import imaplib
+        try:
+            mail = imaplib.IMAP4_SSL(
+                draft.email_account.imap_host,
+                draft.email_account.imap_port or 993,
+                timeout=10,
+            )
+            mail.login(
+                draft.email_account.imap_username,
+                draft.email_account.imap_password,
+            )
+
+            # Find Sent folder
+            sent_folder = self._find_sent_folder(mail)
+            if not sent_folder:
+                logger.warning(
+                    'append_to_imap_sent: Could not find Sent folder for %s. '
+                    'Email will not appear on mail server.',
+                    draft.email_account.email,
+                )
+                return
+
+            # Append the message
+            mail.append(
+                sent_folder,
+                '\\Seen',  # Mark as seen/read
+                None,
+                msg.as_bytes(),
+            )
+            logger.info(
+                'append_to_imap_sent: Successfully appended email to %s Sent folder '
+                '(message_id=%s, to=%s)',
+                draft.email_account.email, message_id, recipient_email,
+            )
+            mail.close()
+            mail.logout()
+
+        except Exception as e:
+            logger.warning(
+                'append_to_imap_sent: Failed to append to IMAP Sent for %s: %s. '
+                'Email will appear in app Sent tab but not on mail server.',
+                draft.email_account.email, str(e),
+            )
+
+    @staticmethod
+    def _find_sent_folder(mail):
+        """Locate IMAP Sent folder by probing common folder names.
+
+        Each mail server uses a different folder name. This tries common
+        variants and returns the first one that exists.
+        """
+        SENT_FOLDER_NAMES = [
+            '[Gmail]/Sent Mail',      # Gmail English
+            'Sent',                   # Generic IMAP / Hostinger
+            'INBOX.Sent',            # Some servers
+            'Sent Items',             # Outlook
+            'Sent Messages',          # Apple/iCloud
+            'Sent Mail',              # Older format
+            '[Gmail]/Sent',           # Gmail variant
+        ]
+
+        for folder_name in SENT_FOLDER_NAMES:
+            try:
+                status, mailboxes = mail.list(pattern=folder_name)
+                if status == 'OK' and mailboxes:
+                    return folder_name
+            except Exception:
+                continue
+
+        # If probing failed, try getting all folders and look for Sent-like names
+        try:
+            status, all_mailboxes = mail.list()
+            if status == 'OK':
+                for mailbox_line in all_mailboxes:
+                    if mailbox_line and isinstance(mailbox_line, bytes):
+                        mailbox_str = mailbox_line.decode('utf-8', errors='ignore')
+                        for sent_variant in SENT_FOLDER_NAMES:
+                            if sent_variant.lower() in mailbox_str.lower():
+                                # Extract folder name from the mailbox listing
+                                parts = mailbox_str.split('"')
+                                if len(parts) >= 2:
+                                    return parts[-2] or sent_variant
+                                return sent_variant
+        except Exception:
+            pass
+
+        return None
+

@@ -497,6 +497,7 @@ urlpatterns = [
     re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/?$', reply_draft_api.get_inbox_email, name='reply_draft_get_inbox_email'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/?$', reply_draft_api.list_inbox_attachments, name='reply_draft_list_attachments'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/fetch-attachments/?$', reply_draft_api.fetch_inbox_attachments, name='reply_draft_fetch_attachments'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/(?P<attachment_id>\d+)/download/?$', reply_draft_api.download_inbox_attachment, name='reply_draft_download_attachment'),
     re_path(r'^reply-draft/reply/(?P<reply_id>\d+)/?$', reply_draft_api.get_reply, name='reply_draft_get_reply'),
     re_path(r'^reply-draft/campaigns/?$', reply_draft_api.list_campaigns, name='reply_draft_list_campaigns'),
