@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Mail, Linkedin, Plus, Play, RefreshCw, Trash2, Users, ChevronLeft,
-  Zap, Check, X, Loader2, Send, MessageSquare, Calendar, Edit2,
-  Flame, Thermometer, Snowflake, AlertCircle, Clock, Inbox,
+  Mail, Linkedin, Plus, RefreshCw, Trash2, Users, ChevronLeft,
+  Zap, Check, Loader2, Send, MessageSquare, Calendar, Edit2,
+  Flame, Thermometer, Snowflake, Clock, Inbox, Pause, Play,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,8 +12,8 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   listCampaigns, createCampaign, deleteCampaign, updateCampaign,
   getCampaignDetail, getCampaignSteps, generateSequenceSteps,
-  getCampaignContacts, enrollLeads, processOutreach, markReplied,
-  resetEnrollment, checkReplies, updateCampaignStep, listLeads,
+  getCampaignContacts, enrollLeads, updateCampaignStep, listLeads,
+  clearCampaignLeads,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -32,6 +32,7 @@ const labelStyle = { color: '#9ca3af', fontSize: 12, display: 'block', marginBot
 
 const STATUS_COLORS = {
   draft:     { color: '#6b7280', bg: 'rgba(107,114,128,0.12)', border: 'rgba(107,114,128,0.3)', label: 'Draft' },
+  scheduled: { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)',  label: 'Scheduled' },
   active:    { color: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)',  label: 'Active' },
   paused:    { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.3)',  label: 'Paused' },
   completed: { color: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)',  label: 'Completed' },
@@ -52,12 +53,64 @@ const BLANK_CAMPAIGN = {
   sender_name: '', sender_title: '', sender_company: '',
   from_email: '', smtp_host: '', smtp_port: 587,
   smtp_username: '', smtp_password: '', smtp_use_tls: true,
+  start_date: '', calendar_link: '',
+  auto_check_replies: true,
   generate_steps: true,
+};
+
+// SMTP + IMAP provider presets
+const SMTP_PROVIDERS = [
+  { key: 'gmail',     label: 'Gmail',         smtp_host: 'smtp.gmail.com',     smtp_port: 587, smtp_use_tls: true, imap_host: 'imap.gmail.com',     imap_port: 993 },
+  { key: 'hostinger', label: 'Hostinger',      smtp_host: 'smtp.hostinger.com', smtp_port: 587, smtp_use_tls: true, imap_host: 'imap.hostinger.com', imap_port: 993 },
+  { key: 'custom',    label: 'Custom / Other', smtp_host: '',                   smtp_port: 587, smtp_use_tls: true, imap_host: '',                   imap_port: 993 },
+];
+
+const detectProvider = (host) => {
+  if (!host) return '';
+  if (host.includes('gmail'))     return 'gmail';
+  if (host.includes('hostinger')) return 'hostinger';
+  return 'custom';
+};
+
+const applySmtpProvider = (key, setter) => {
+  const p = SMTP_PROVIDERS.find(x => x.key === key);
+  if (!p) return;
+  setter(prev => ({
+    ...prev,
+    smtp_host: p.smtp_host, smtp_port: p.smtp_port, smtp_use_tls: p.smtp_use_tls,
+    imap_host: p.imap_host, imap_port: p.imap_port,
+  }));
+};
+
+// Helper: today in YYYY-MM-DD (for date input min)
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// Helper: add N days to a YYYY-MM-DD string
+const addDays = (iso, days) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const fmtDate = (iso) => {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const fmtCountdown = (iso, now) => {
+  if (!iso) return null;
+  const diff = new Date(iso) - now;
+  if (diff <= 0) return { label: 'sending soon', color: '#10b981' };
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return { label: `in ${d}d ${h % 24}h`, color: '#6b7280' };
+  if (h > 0) return { label: `in ${h}h ${m % 60}m`, color: '#f59e0b' };
+  return { label: `in ${m}m`, color: '#10b981' };
 };
 
 // --------------------------------------------------------------------------
@@ -137,6 +190,176 @@ const StepCard = ({ step, onEdit, onDelete, isLast }) => (
 );
 
 // --------------------------------------------------------------------------
+// Lead variable definitions
+// --------------------------------------------------------------------------
+const LEAD_VARS = [
+  { label: 'First Name',        token: '{first_name}' },
+  { label: 'Last Name',         token: '{last_name}' },
+  { label: 'Full Name',         token: '{full_name}' },
+  { label: 'Job Title',         token: '{job_title}' },
+  { label: 'Seniority',         token: '{seniority_level}' },
+  { label: 'Department',        token: '{department}' },
+  { label: 'Company',           token: '{company_name}' },
+  { label: 'Industry',          token: '{company_industry}' },
+  { label: 'Company Size',      token: '{company_size}' },
+  { label: 'Location',          token: '{company_location}' },
+  { label: 'Website',           token: '{company_website}' },
+  { label: 'LinkedIn',          token: '{linkedin_url}' },
+  { label: 'Company LinkedIn',  token: '{company_linkedin_url}' },
+  { label: 'Email',             token: '{email}' },
+  { label: 'Phone',             token: '{phone}' },
+];
+
+// --------------------------------------------------------------------------
+// EditStepModal — edit a campaign step with an inline variable picker
+// --------------------------------------------------------------------------
+const EditStepModal = ({ step, onChange, onSave, onClose, saving }) => {
+  const subjectRef = useRef(null);
+  const bodyRef    = useRef(null);
+  // track which field was last focused so variable inserts go to the right place
+  const focusedRef = useRef('body');
+
+  const insertToken = (token) => {
+    const field = focusedRef.current;
+    const ref   = field === 'subject' ? subjectRef : bodyRef;
+    const el    = ref.current;
+    if (!el) return;
+
+    const start = el.selectionStart ?? el.value.length;
+    const end   = el.selectionEnd   ?? el.value.length;
+    const cur   = field === 'subject' ? (step.subject_template || '') : (step.body_template || '');
+    const next  = cur.slice(0, start) + token + cur.slice(end);
+
+    if (field === 'subject') {
+      onChange(p => ({ ...p, subject_template: next }));
+    } else {
+      onChange(p => ({ ...p, body_template: next }));
+    }
+
+    // restore focus + move cursor after token
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + token.length, start + token.length);
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent style={{
+        background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)',
+        border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 620, maxHeight: '92vh', overflowY: 'auto',
+      }}>
+        <DialogHeader>
+          <DialogTitle style={{ color: '#e2d9f3' }}>Edit Step {step.step_order}</DialogTitle>
+        </DialogHeader>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Basic fields */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Step Name</label>
+              <input value={step.name} onChange={e => onChange(p => ({ ...p, name: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Type</label>
+              <select value={step.step_type} onChange={e => onChange(p => ({ ...p, step_type: e.target.value }))} style={inputStyle}>
+                <option value="email">Email</option>
+                <option value="linkedin">LinkedIn</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Day (from start)</label>
+              <input type="number" min={1} value={step.delay_days}
+                onChange={e => onChange(p => ({ ...p, delay_days: parseInt(e.target.value) || 1 }))}
+                style={inputStyle} />
+            </div>
+          </div>
+
+          {/* Variable picker */}
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)',
+          }}>
+            <p style={{ color: '#a855f7', fontSize: 11, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Insert Lead Variable — click to insert at cursor
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {LEAD_VARS.map(({ label, token }) => (
+                <button key={token} onClick={() => insertToken(token)} style={{
+                  background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.35)',
+                  borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: '#c084fc',
+                  fontSize: 11, fontWeight: 500, fontFamily: 'monospace',
+                  transition: 'background 0.15s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(168,85,247,0.25)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'rgba(168,85,247,0.12)'}
+                  title={`Inserts ${token}`}
+                >
+                  {token}
+                  <span style={{ color: '#6b7280', fontFamily: 'sans-serif', fontWeight: 400, marginLeft: 4, fontSize: 10 }}>
+                    {label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Subject — only for email */}
+          {step.step_type === 'email' && (
+            <div>
+              <label style={labelStyle}>Subject Template</label>
+              <input
+                ref={subjectRef}
+                value={step.subject_template || ''}
+                onChange={e => onChange(p => ({ ...p, subject_template: e.target.value }))}
+                onFocus={() => { focusedRef.current = 'subject'; }}
+                placeholder="e.g. Quick question for {first_name} at {company_name}"
+                style={inputStyle}
+              />
+            </div>
+          )}
+
+          {/* Body */}
+          <div>
+            <label style={labelStyle}>Body Template</label>
+            <textarea
+              ref={bodyRef}
+              value={step.body_template || ''}
+              onChange={e => onChange(p => ({ ...p, body_template: e.target.value }))}
+              onFocus={() => { focusedRef.current = 'body'; }}
+              placeholder={`Hi {first_name},\n\nI noticed {company_name} is in the {company_industry} space...\n\nBest,\n{sender_name}`}
+              style={{ ...inputStyle, minHeight: 180, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
+            />
+          </div>
+
+          {/* AI personalisation */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.15)' }}>
+            <input type="checkbox" id="ai_p" checked={step.ai_personalize}
+              onChange={e => onChange(p => ({ ...p, ai_personalize: e.target.checked }))} />
+            <label htmlFor="ai_p" style={{ color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}>
+              <Zap size={11} style={{ display: 'inline', marginRight: 4, color: '#c084fc' }} />
+              AI personalises this step using lead signals (buying signals, recent news, etc.)
+            </label>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+          <Button onClick={onSave} disabled={saving} style={{
+            background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff',
+            border: 'none', borderRadius: 8, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            Save Step
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// --------------------------------------------------------------------------
 // Main component
 // --------------------------------------------------------------------------
 const SDROutreachTab = () => {
@@ -168,10 +391,18 @@ const SDROutreachTab = () => {
   const [enrolling, setEnrolling] = useState(false);
   const [editingStep, setEditingStep] = useState(null);
   const [savingStep, setSavingStep] = useState(false);
-  const [checkingReplies, setCheckingReplies] = useState(false);
-  const [replyModal, setReplyModal] = useState(null);  // {enrollment} or null
-  const [replyContent, setReplyContent] = useState('');
-  const [analyzingSentiment, setAnalyzingSentiment] = useState(false);
+  const [viewReplyModal, setViewReplyModal] = useState(null); // view existing reply
+  const [pausingCampaign, setPausingCampaign] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);   // campaign obj to delete
+  const [clearLeadsConfirm, setClearLeadsConfirm] = useState(false);
+  const [clearingLeads, setClearingLeads] = useState(false);
+  const [now, setNow] = useState(new Date());
+
+  // Tick every 30 s so countdown timers stay live
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   // ── Loaders ────────────────────────────────────────────────────────────
   const loadCampaigns = useCallback(async () => {
@@ -206,6 +437,23 @@ const SDROutreachTab = () => {
     init();
   }, []);
 
+  // Silent background refresh when viewing a campaign — picks up scheduler changes without page reload
+  useEffect(() => {
+    if (!selectedCampaign) return;
+    const refresh = async () => {
+      try {
+        const [detailResp, enrollResp] = await Promise.all([
+          getCampaignDetail(selectedCampaign.id),
+          getCampaignContacts(selectedCampaign.id),
+        ]);
+        setSelectedCampaign(detailResp.data);
+        setEnrollments(enrollResp.data || []);
+      } catch (_) {}
+    };
+    const id = setInterval(refresh, 30000);   // every 30 s
+    return () => clearInterval(id);
+  }, [selectedCampaign?.id]);
+
   // ── Create campaign ────────────────────────────────────────────────────
   const handleCreate = async () => {
     if (!newCampaign.name.trim()) {
@@ -226,8 +474,11 @@ const SDROutreachTab = () => {
     } finally { setCreating(false); }
   };
 
-  // ── Delete campaign ────────────────────────────────────────────────────
-  const handleDeleteCampaign = async (id) => {
+  // ── Delete campaign (with confirmation) ───────────────────────────────
+  const handleDeleteCampaign = async () => {
+    if (!deleteConfirm) return;
+    const id = deleteConfirm.id;
+    setDeleteConfirm(null);
     try {
       await deleteCampaign(id);
       toast({ title: 'Campaign deleted' });
@@ -236,6 +487,22 @@ const SDROutreachTab = () => {
     } catch (e) {
       toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
     }
+  };
+
+  // ── Clear all leads from campaign ────────────────────────────────────
+  const handleClearLeads = async () => {
+    if (!selectedCampaign) return;
+    setClearingLeads(true);
+    setClearLeadsConfirm(false);
+    try {
+      const resp = await clearCampaignLeads(selectedCampaign.id);
+      setSelectedCampaign(resp.data.data);
+      setEnrollments([]);
+      await loadCampaigns();
+      toast({ title: 'All leads cleared', description: 'Enrollment data and counters reset.' });
+    } catch (e) {
+      toast({ title: 'Clear failed', description: e.message, variant: 'destructive' });
+    } finally { setClearingLeads(false); }
   };
 
   // ── Regenerate steps ──────────────────────────────────────────────────
@@ -324,49 +591,20 @@ const SDROutreachTab = () => {
     } finally { setProcessing(false); }
   };
 
-  // ── Mark replied (with reply content + AI sentiment) ─────────────────
-  const handleSubmitReply = async () => {
-    if (!replyModal) return;
-    setAnalyzingSentiment(true);
+  // ── Pause / Resume campaign ──────────────────────────────────────────
+  const handlePauseResume = async () => {
+    if (!selectedCampaign) return;
+    const isPaused = selectedCampaign.status === 'paused';
+    const newStatus = isPaused ? 'active' : 'paused';
+    setPausingCampaign(true);
     try {
-      const resp = await markReplied(selectedCampaign.id, replyModal.id, {
-        reply_content: replyContent,
-      });
-      const sentiment = resp.sentiment || 'positive';
-      const isInterested = resp.is_interested;
-      const sentimentLabel = isInterested ? '✓ Interested' : sentiment === 'negative' ? '✗ Not interested' : '~ Neutral';
-      toast({
-        title: `Reply recorded — ${sentimentLabel}`,
-        description: isInterested
-          ? 'Meeting created and scheduling email sent!'
-          : 'Lead marked as replied.',
-      });
-      setReplyModal(null);
-      setReplyContent('');
-      await loadDetail(selectedCampaign);
+      const resp = await updateCampaign(selectedCampaign.id, { status: newStatus });
+      setSelectedCampaign(resp.data);
+      await loadCampaigns();
+      toast({ title: isPaused ? 'Campaign resumed — Celery will process it on next cycle' : 'Campaign paused' });
     } catch (e) {
-      toast({ title: 'Failed to record reply', description: e.message, variant: 'destructive' });
-    } finally { setAnalyzingSentiment(false); }
-  };
-
-  // ── Check inbox for auto-detected replies ────────────────────────────
-  const handleCheckReplies = async () => {
-    setCheckingReplies(true);
-    try {
-      const resp = await checkReplies(selectedCampaign.id);
-      if (resp.new_replies === 0) {
-        toast({ title: 'No new replies found', description: `Checked ${resp.checked} contacts` });
-      } else {
-        const interested = resp.details?.filter(d => d.is_interested).length || 0;
-        toast({
-          title: `${resp.new_replies} new ${resp.new_replies === 1 ? 'reply' : 'replies'} detected!`,
-          description: `${interested} interested${resp.meetings_created > 0 ? ` · ${resp.meetings_created} meeting${resp.meetings_created > 1 ? 's' : ''} created` : ''}`,
-        });
-        await loadDetail(selectedCampaign);
-      }
-    } catch (e) {
-      toast({ title: 'Check replies failed', description: e.message, variant: 'destructive' });
-    } finally { setCheckingReplies(false); }
+      toast({ title: 'Failed to update campaign status', description: e.message, variant: 'destructive' });
+    } finally { setPausingCampaign(false); }
   };
 
   // ── Reset enrollment ─────────────────────────────────────────────────
@@ -440,7 +678,7 @@ const SDROutreachTab = () => {
                         </p>
                       )}
                     </div>
-                    <button onClick={e => { e.stopPropagation(); handleDeleteCampaign(c.id); }} style={{
+                    <button onClick={e => { e.stopPropagation(); setDeleteConfirm(c); }} style={{
                       background: 'none', border: 'none', cursor: 'pointer', color: '#4b5563', padding: 4,
                     }}>
                       <Trash2 size={13} />
@@ -480,6 +718,27 @@ const SDROutreachTab = () => {
             })}
           </div>
         )}
+
+        {/* Delete Campaign Confirmation */}
+        <Dialog open={!!deleteConfirm} onOpenChange={open => { if (!open) setDeleteConfirm(null); }}>
+          <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', borderRadius: 14, maxWidth: 420 }}>
+            <DialogHeader>
+              <DialogTitle style={{ color: '#e2d9f3', fontSize: 16 }}>Delete Campaign?</DialogTitle>
+            </DialogHeader>
+            <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, marginTop: 4 }}>
+              Are you sure you want to delete <b style={{ color: '#e2d9f3' }}>{deleteConfirm?.name}</b>?
+              All enrollments, outreach logs, and meetings will be permanently removed.
+            </p>
+            <DialogFooter style={{ marginTop: 16 }}>
+              <Button variant="outline" onClick={() => setDeleteConfirm(null)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>
+                Cancel
+              </Button>
+              <Button onClick={handleDeleteCampaign} style={{ background: 'linear-gradient(90deg,#f43f5e,#dc2626)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
+                <Trash2 size={13} style={{ marginRight: 6 }} /> Yes, Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Create Campaign Modal */}
         <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
@@ -530,6 +789,44 @@ const SDROutreachTab = () => {
                 </div>
               </div>
 
+              {/* Schedule */}
+              <div style={{ borderTop: '1px solid #1e0f38', paddingTop: 14 }}>
+                <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Schedule (auto-runs via background worker)
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Start Date</label>
+                    <input type="date" min={todayStr()} value={newCampaign.start_date}
+                      onChange={e => setNewCampaign(p => ({ ...p, start_date: e.target.value }))}
+                      style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Estimated End</label>
+                    <div style={{ ...inputStyle, color: '#6b7280', display: 'flex', alignItems: 'center', minHeight: 38 }}>
+                      {newCampaign.start_date ? addDays(newCampaign.start_date, 10) : '— set start date'}
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={labelStyle}>Calendar Link (Calendly etc.) — sent on positive replies</label>
+                    <input value={newCampaign.calendar_link}
+                      onChange={e => setNewCampaign(p => ({ ...p, calendar_link: e.target.value }))}
+                      placeholder="https://calendly.com/your-link" style={inputStyle} />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" id="auto_replies" checked={newCampaign.auto_check_replies}
+                      onChange={e => setNewCampaign(p => ({ ...p, auto_check_replies: e.target.checked }))} />
+                    <label htmlFor="auto_replies" style={{ color: '#9ca3af', fontSize: 13 }}>
+                      Auto-check inbox for replies every 5 min (recommended)
+                    </label>
+                  </div>
+                </div>
+                <p style={{ color: '#6b7280', fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+                  Sequence runs Day 1 (email) → Day 3 (LinkedIn) → Day 5 (follow-up) → Day 10 (last touch).
+                  Background workers send each step automatically — no need to click "Process Now".
+                </p>
+              </div>
+
               {/* SMTP toggle */}
               <div>
                 <button onClick={() => setShowSmtpSection(p => !p)} style={{
@@ -541,6 +838,24 @@ const SDROutreachTab = () => {
                 </button>
                 {showSmtpSection && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+                    {/* Provider picker */}
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={labelStyle}>Email Provider</label>
+                      <select
+                        value={detectProvider(newCampaign.smtp_host)}
+                        onChange={e => applySmtpProvider(e.target.value, setNewCampaign)}
+                        style={{ ...inputStyle, cursor: 'pointer', background: '#1a0a35', color: '#e2d9f3' }}
+                      >
+                        <option value="" disabled style={{ background: '#1a0a35', color: '#6b7280' }}>Select provider to auto-fill…</option>
+                        {SMTP_PROVIDERS.map(p => <option key={p.key} value={p.key} style={{ background: '#1a0a35', color: '#e2d9f3' }}>{p.label}</option>)}
+                      </select>
+                    </div>
+                    {/* Gmail App-Password hint */}
+                    {detectProvider(newCampaign.smtp_host) === 'gmail' && (
+                      <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.25)', color: '#93c5fd', fontSize: 12 }}>
+                        Gmail requires a 16-character <b>App Password</b> (not your regular password). Enable 2-Step Verification → Google Account → Security → App Passwords.
+                      </div>
+                    )}
                     <div style={{ gridColumn: '1 / -1' }}>
                       <label style={labelStyle}>From Email</label>
                       <input value={newCampaign.from_email} onChange={e => setNewCampaign(p => ({ ...p, from_email: e.target.value }))}
@@ -562,7 +877,7 @@ const SDROutreachTab = () => {
                         style={inputStyle} />
                     </div>
                     <div>
-                      <label style={labelStyle}>SMTP Password</label>
+                      <label style={labelStyle}>SMTP Password / App Password</label>
                       <input type="password" value={newCampaign.smtp_password} onChange={e => setNewCampaign(p => ({ ...p, smtp_password: e.target.value }))}
                         style={inputStyle} />
                     </div>
@@ -570,6 +885,22 @@ const SDROutreachTab = () => {
                       <input type="checkbox" id="tls" checked={newCampaign.smtp_use_tls}
                         onChange={e => setNewCampaign(p => ({ ...p, smtp_use_tls: e.target.checked }))} />
                       <label htmlFor="tls" style={{ color: '#9ca3af', fontSize: 13 }}>Use TLS (recommended)</label>
+                    </div>
+                    {/* IMAP — for reply detection */}
+                    <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #1e0f38', paddingTop: 10, marginTop: 4 }}>
+                      <p style={{ color: '#6b7280', fontSize: 11, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                        IMAP Settings — reply detection
+                      </p>
+                    </div>
+                    <div>
+                      <label style={labelStyle}>IMAP Host</label>
+                      <input value={newCampaign.imap_host || ''} onChange={e => setNewCampaign(p => ({ ...p, imap_host: e.target.value }))}
+                        placeholder="imap.hostinger.com" style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>IMAP Port</label>
+                      <input type="number" value={newCampaign.imap_port || 993} onChange={e => setNewCampaign(p => ({ ...p, imap_port: parseInt(e.target.value) }))}
+                        style={inputStyle} />
                     </div>
                   </div>
                 )}
@@ -621,14 +952,27 @@ const SDROutreachTab = () => {
           </button>
           <div>
             <h2 style={{ color: '#e2d9f3', fontSize: 18, fontWeight: 700, margin: 0 }}>{selectedCampaign.name}</h2>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
-              borderRadius: 10, fontSize: 11, fontWeight: 600, marginTop: 4,
-              background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color,
-            }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc.color, display: 'inline-block' }} />
-              {sc.label}
-            </span>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
+                borderRadius: 10, fontSize: 11, fontWeight: 600,
+                background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color,
+              }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc.color, display: 'inline-block' }} />
+                {sc.label}
+              </span>
+              {selectedCampaign.start_date && (
+                <span style={{ color: '#6b7280', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Calendar size={11} />
+                  {selectedCampaign.start_date} → {selectedCampaign.end_date || addDays(selectedCampaign.start_date, 10)}
+                </span>
+              )}
+              {selectedCampaign.auto_check_replies && (
+                <span style={{ color: '#10b981', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Inbox size={11} /> Auto-checking inbox
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -645,21 +989,28 @@ const SDROutreachTab = () => {
           }}>
             <Users size={14} /> Enroll Leads
           </Button>
-          <Button onClick={handleCheckReplies} disabled={checkingReplies} variant="outline" style={{
-            border: '1px solid rgba(16,185,129,0.4)', color: '#10b981', borderRadius: 8,
-            display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
-          }}>
-            {checkingReplies ? <Loader2 size={14} className="animate-spin" /> : <Inbox size={14} />}
-            {checkingReplies ? 'Checking…' : 'Check Replies'}
-          </Button>
-          <Button onClick={handleProcess} disabled={processing} style={{
-            background: 'linear-gradient(90deg,#f43f5e 0%,#a855f7 100%)',
-            color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            {processing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-            {processing ? 'Processing…' : 'Process Now'}
-          </Button>
+          {enrollments.length > 0 && (
+            <Button onClick={() => setClearLeadsConfirm(true)} disabled={clearingLeads} variant="outline" style={{
+              border: '1px solid rgba(244,63,94,0.35)', color: '#f87171', borderRadius: 8,
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+            }}>
+              {clearingLeads ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              Clear Leads
+            </Button>
+          )}
+          {/* Pause / Resume — only for active or paused campaigns */}
+          {(selectedCampaign.status === 'active' || selectedCampaign.status === 'paused') && (
+            <Button onClick={handlePauseResume} disabled={pausingCampaign} variant="outline" style={{
+              border: selectedCampaign.status === 'active' ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(16,185,129,0.4)',
+              color: selectedCampaign.status === 'active' ? '#f59e0b' : '#10b981',
+              borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+            }}>
+              {pausingCampaign
+                ? <Loader2 size={14} className="animate-spin" />
+                : selectedCampaign.status === 'active' ? <Pause size={14} /> : <Play size={14} />}
+              {pausingCampaign ? '…' : selectedCampaign.status === 'active' ? 'Pause' : 'Resume'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -683,8 +1034,46 @@ const SDROutreachTab = () => {
         ))}
       </div>
 
+      {/* SMTP missing warning — shown prominently if credentials not set */}
+      {!(selectedCampaign.smtp_host && selectedCampaign.smtp_username) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+          borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.35)',
+          color: '#f87171', fontSize: 12,
+        }}>
+          <Mail size={13} style={{ flexShrink: 0 }} />
+          <span>
+            <b>SMTP not configured.</b> Emails will NOT be sent and leads cannot be enrolled until you add email credentials.{' '}
+            <button onClick={() => { setSettingsDraft({ ...selectedCampaign, smtp_password: '' }); setShowSettingsModal(true); }}
+              style={{ background: 'none', border: 'none', color: '#f43f5e', cursor: 'pointer', fontWeight: 700, padding: 0, textDecoration: 'underline' }}>
+              Open Settings →
+            </button>
+          </span>
+        </div>
+      )}
+
+      {/* Automation status banner */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+        borderRadius: 8, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)',
+        color: '#93c5fd', fontSize: 12,
+      }}>
+        <Zap size={13} style={{ flexShrink: 0, color: '#a855f7' }} />
+        <span>
+          <b style={{ color: '#c084fc' }}>Automation active</b> —
+          {selectedCampaign.status === 'active'
+            ? ' emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.'
+            : selectedCampaign.status === 'scheduled'
+            ? ` campaign will auto-start on ${selectedCampaign.start_date} when Celery runs the 15-min check.`
+            : selectedCampaign.status === 'paused'
+            ? ' campaign is paused. Resume to let Celery continue sending.'
+            : ' campaign is not active.'}
+          {selectedCampaign.smtp_host && <span style={{ color: '#60a5fa' }}> · Using {selectedCampaign.smtp_host}</span>}
+        </span>
+      </div>
+
       {/* SMTP override note — only shown if campaign has custom SMTP */}
-      {selectedCampaign.smtp_host && (
+      {/* {selectedCampaign.smtp_host && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
           borderRadius: 8, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)',
@@ -693,7 +1082,7 @@ const SDROutreachTab = () => {
           <Mail size={13} style={{ flexShrink: 0 }} />
           Using custom SMTP: <b style={{ marginLeft: 4 }}>{selectedCampaign.smtp_host}</b>
         </div>
-      )}
+      )} */}
 
       {/* Main content: steps + enrollments */}
       <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'flex-start' }}>
@@ -745,11 +1134,17 @@ const SDROutreachTab = () => {
             <h3 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 14, margin: 0 }}>
               Enrolled Leads <span style={{ color: '#4b5563', fontWeight: 400 }}>({enrollments.length})</span>
             </h3>
-            <button onClick={() => loadDetail(selectedCampaign)} style={{
-              background: 'none', border: '1px solid #2d1f4a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#6b7280',
-            }}>
-              <RefreshCw size={12} />
-            </button>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ color: '#4b5563', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', display: 'inline-block', animation: 'pulse 2s infinite' }} />
+                Auto-checking replies every 5 min
+              </span>
+              <button onClick={() => loadDetail(selectedCampaign)} style={{
+                background: 'none', border: '1px solid #2d1f4a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#6b7280',
+              }}>
+                <RefreshCw size={12} />
+              </button>
+            </div>
           </div>
 
           {enrollments.length === 0 ? (
@@ -762,7 +1157,7 @@ const SDROutreachTab = () => {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #1e0f38' }}>
-                  {['Lead', 'Score', 'Progress', 'Status', 'Next Action', 'Actions'].map(h => (
+                  {['Lead', 'Score', 'Progress', 'Status', 'Next Action / Reply', 'Meeting'].map(h => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#4b5563', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                   ))}
                 </tr>
@@ -806,70 +1201,91 @@ const SDROutreachTab = () => {
                           </span>
                         </div>
                       </td>
+                      {/* Status column */}
                       <td style={{ padding: '11px 14px' }}>
                         <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
+                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px',
                           borderRadius: 10, fontSize: 11, fontWeight: 600,
                           background: `${es.color}15`, color: es.color,
                           border: `1px solid ${es.color}30`,
                         }}>
+                          {enr.status === 'replied' && <Mail size={10} />}
                           {es.label}
                         </span>
                       </td>
+
+                      {/* Next Action / Reply column */}
                       <td style={{ padding: '11px 14px' }}>
-                        {enr.next_action_at ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#6b7280', fontSize: 11 }}>
-                            <Clock size={10} /> {fmtDate(enr.next_action_at)}
+                        {enr.status === 'replied' ? (
+                          /* ── Replied lead: show reply preview + view button ── */
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            <div style={{ color: '#9ca3af', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <Clock size={10} />
+                              {enr.replied_at ? fmtDate(enr.replied_at) : 'Date unknown'}
+                            </div>
+                            {enr.reply_content && (
+                              <div style={{
+                                color: '#6b7280', fontSize: 11, fontStyle: 'italic',
+                                maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                              }}>
+                                "{enr.reply_content.slice(0, 60)}{enr.reply_content.length > 60 ? '…' : ''}"
+                              </div>
+                            )}
+                            <button
+                              onClick={() => setViewReplyModal(enr)}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                                background: enr.reply_sentiment === 'positive'
+                                  ? 'rgba(16,185,129,0.15)'
+                                  : enr.reply_sentiment === 'negative'
+                                  ? 'rgba(244,63,94,0.15)'
+                                  : 'rgba(96,165,250,0.15)',
+                                color: enr.reply_sentiment === 'positive' ? '#10b981'
+                                  : enr.reply_sentiment === 'negative' ? '#f43f5e' : '#60a5fa',
+                                border: `1px solid ${enr.reply_sentiment === 'positive'
+                                  ? 'rgba(16,185,129,0.4)'
+                                  : enr.reply_sentiment === 'negative'
+                                  ? 'rgba(244,63,94,0.4)'
+                                  : 'rgba(96,165,250,0.4)'}`,
+                                cursor: 'pointer', alignSelf: 'flex-start',
+                              }}
+                            >
+                              <MessageSquare size={11} />
+                              {enr.reply_sentiment === 'positive' ? '✓ Interested — View Reply'
+                                : enr.reply_sentiment === 'negative' ? '✗ Not Interested — View Reply'
+                                : 'View Reply →'}
+                            </button>
                           </div>
-                        ) : <span style={{ color: '#2d1f4a', fontSize: 11 }}>—</span>}
+                        ) : enr.next_action_at && enr.status === 'active' ? (() => {
+                          const cd = fmtCountdown(enr.next_action_at, now);
+                          return (
+                            <div style={{ fontSize: 11 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#6b7280' }}>
+                                <Clock size={10} /> {fmtDate(enr.next_action_at)}
+                              </div>
+                              {cd && (
+                                <div style={{ marginTop: 3, fontWeight: 600, color: cd.color }}>
+                                  {cd.label}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })() : <span style={{ color: '#2d1f4a', fontSize: 11 }}>—</span>}
                       </td>
+
+                      {/* Meeting column */}
                       <td style={{ padding: '11px 14px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                          {/* Sentiment badge */}
-                          {enr.reply_sentiment && (
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 3,
-                              padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                              background: enr.reply_sentiment === 'positive' ? 'rgba(16,185,129,0.12)' : enr.reply_sentiment === 'negative' ? 'rgba(244,63,94,0.12)' : 'rgba(107,114,128,0.12)',
-                              color: enr.reply_sentiment === 'positive' ? '#10b981' : enr.reply_sentiment === 'negative' ? '#f43f5e' : '#9ca3af',
-                              border: `1px solid ${enr.reply_sentiment === 'positive' ? 'rgba(16,185,129,0.3)' : enr.reply_sentiment === 'negative' ? 'rgba(244,63,94,0.3)' : 'rgba(107,114,128,0.3)'}`,
-                            }}>
-                              {enr.reply_sentiment === 'positive' ? '✓ Interested' : enr.reply_sentiment === 'negative' ? '✗ Not interested' : '~ Neutral'}
-                            </span>
-                          )}
-                          {/* Meeting badge */}
-                          {enr.meeting_id && (
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 3,
-                              padding: '2px 7px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                              background: 'rgba(245,158,11,0.12)', color: '#f59e0b',
-                              border: '1px solid rgba(245,158,11,0.3)',
-                            }}>
-                              <Calendar size={9} /> Meeting pending
-                            </span>
-                          )}
-                          {/* Action buttons */}
-                          <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                            {enr.status === 'active' && (
-                              <button onClick={() => { setReplyModal(enr); setReplyContent(''); }} title="Record a reply" style={{
-                                background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)',
-                                borderRadius: 6, padding: '3px 7px', cursor: 'pointer', color: '#10b981',
-                                fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
-                              }}>
-                                <MessageSquare size={10} /> Reply
-                              </button>
-                            )}
-                            {enr.status !== 'active' && (
-                              <button onClick={() => handleResetEnrollment(enr)} title="Reset to active" style={{
-                                background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)',
-                                borderRadius: 6, padding: '3px 7px', cursor: 'pointer', color: '#a855f7',
-                                fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
-                              }}>
-                                <RefreshCw size={10} /> Reset
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                        {enr.meeting_id ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 3,
+                            padding: '3px 8px', borderRadius: 8, fontSize: 10, fontWeight: 600,
+                            background: 'rgba(245,158,11,0.12)', color: '#f59e0b',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                          }}>
+                            <Calendar size={9} /> Pending
+                          </span>
+                        ) : <span style={{ color: '#2d1f4a', fontSize: 11 }}>—</span>}
                       </td>
                     </tr>
                   );
@@ -966,69 +1382,13 @@ const SDROutreachTab = () => {
 
       {/* Edit Step Modal */}
       {editingStep && (
-        <Dialog open={showEditStepModal} onOpenChange={setShowEditStepModal}>
-          <DialogContent style={{
-            background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)',
-            border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 560,
-          }}>
-            <DialogHeader>
-              <DialogTitle style={{ color: '#e2d9f3' }}>Edit Step {editingStep.step_order}</DialogTitle>
-            </DialogHeader>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div>
-                  <label style={labelStyle}>Step Name</label>
-                  <input value={editingStep.name} onChange={e => setEditingStep(p => ({ ...p, name: e.target.value }))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Type</label>
-                  <select value={editingStep.step_type} onChange={e => setEditingStep(p => ({ ...p, step_type: e.target.value }))} style={{ ...inputStyle }}>
-                    <option value="email">Email</option>
-                    <option value="linkedin">LinkedIn</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Day (from start)</label>
-                  <input type="number" value={editingStep.delay_days} onChange={e => setEditingStep(p => ({ ...p, delay_days: parseInt(e.target.value) || 1 }))} style={inputStyle} />
-                </div>
-              </div>
-              {editingStep.step_type === 'email' && (
-                <div>
-                  <label style={labelStyle}>Subject Template</label>
-                  <input value={editingStep.subject_template} onChange={e => setEditingStep(p => ({ ...p, subject_template: e.target.value }))}
-                    placeholder="Use {first_name}, {company_name} as placeholders" style={inputStyle} />
-                </div>
-              )}
-              <div>
-                <label style={labelStyle}>Body Template</label>
-                <textarea value={editingStep.body_template} onChange={e => setEditingStep(p => ({ ...p, body_template: e.target.value }))}
-                  placeholder="Use {first_name}, {company_name}, {job_title}, {company_industry} as placeholders"
-                  style={{ ...inputStyle, minHeight: 140, resize: 'vertical' }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" id="ai_p" checked={editingStep.ai_personalize}
-                  onChange={e => setEditingStep(p => ({ ...p, ai_personalize: e.target.checked }))} />
-                <label htmlFor="ai_p" style={{ color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}>
-                  <Zap size={11} style={{ display: 'inline', marginRight: 4, color: '#c084fc' }} />
-                  AI personalises this step using lead signals
-                </label>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { setShowEditStepModal(false); setEditingStep(null); }} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
-              <Button onClick={handleSaveStep} disabled={savingStep} style={{
-                background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff',
-                border: 'none', borderRadius: 8, fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                {savingStep ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                Save Step
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <EditStepModal
+          step={editingStep}
+          onChange={setEditingStep}
+          onSave={handleSaveStep}
+          onClose={() => { setShowEditStepModal(false); setEditingStep(null); }}
+          saving={savingStep}
+        />
       )}
 
       {/* Campaign Settings Modal */}
@@ -1062,6 +1422,32 @@ const SDROutreachTab = () => {
                 </div>
               </div>
 
+              {/* Schedule */}
+              <div style={{ borderTop: '1px solid #1e0f38', paddingTop: 14 }}>
+                <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Schedule</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Start Date</label>
+                    <input type="date" value={settingsDraft.start_date || ''}
+                      onChange={e => setSettingsDraft(p => ({ ...p, start_date: e.target.value || null }))}
+                      style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Calendar Link (Calendly etc.)</label>
+                    <input value={settingsDraft.calendar_link || ''}
+                      onChange={e => setSettingsDraft(p => ({ ...p, calendar_link: e.target.value }))}
+                      placeholder="https://calendly.com/your-link" style={inputStyle} />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" id="s_auto_replies" checked={!!settingsDraft.auto_check_replies}
+                      onChange={e => setSettingsDraft(p => ({ ...p, auto_check_replies: e.target.checked }))} />
+                    <label htmlFor="s_auto_replies" style={{ color: '#9ca3af', fontSize: 13 }}>
+                      Auto-check inbox for replies every 5 min
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               {/* SMTP */}
               <div style={{ borderTop: '1px solid #1e0f38', paddingTop: 14 }}>
                 <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -1071,6 +1457,24 @@ const SDROutreachTab = () => {
                   <b>Optional override.</b> Leave blank to use the global email settings from .env (already configured). Fill only if this campaign needs a different sender account.
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {/* Provider picker */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={labelStyle}>Email Provider</label>
+                    <select
+                      value={detectProvider(settingsDraft.smtp_host || '')}
+                      onChange={e => applySmtpProvider(e.target.value, setSettingsDraft)}
+                      style={{ ...inputStyle, cursor: 'pointer', background: '#1a0a35', color: '#e2d9f3' }}
+                    >
+                      <option value="" disabled style={{ background: '#1a0a35', color: '#6b7280' }}>Select provider to auto-fill…</option>
+                      {SMTP_PROVIDERS.map(p => <option key={p.key} value={p.key} style={{ background: '#1a0a35', color: '#e2d9f3' }}>{p.label}</option>)}
+                    </select>
+                  </div>
+                  {/* Gmail App-Password hint */}
+                  {detectProvider(settingsDraft.smtp_host || '') === 'gmail' && (
+                    <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.25)', color: '#93c5fd', fontSize: 12 }}>
+                      Gmail requires a 16-character <b>App Password</b> (not your regular password). Enable 2-Step Verification → Google Account → Security → App Passwords.
+                    </div>
+                  )}
                   <div style={{ gridColumn: '1 / -1' }}>
                     <label style={labelStyle}>From Email</label>
                     <input value={settingsDraft.from_email || ''} onChange={e => setSettingsDraft(p => ({ ...p, from_email: e.target.value }))} placeholder="you@gmail.com" style={inputStyle} />
@@ -1095,6 +1499,20 @@ const SDROutreachTab = () => {
                     <input type="checkbox" id="stls" checked={!!settingsDraft.smtp_use_tls} onChange={e => setSettingsDraft(p => ({ ...p, smtp_use_tls: e.target.checked }))} />
                     <label htmlFor="stls" style={{ color: '#9ca3af', fontSize: 13 }}>Use TLS (recommended)</label>
                   </div>
+                  {/* IMAP — for reply detection */}
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #1e0f38', paddingTop: 10, marginTop: 4 }}>
+                    <p style={{ color: '#6b7280', fontSize: 11, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                      IMAP Settings — reply detection
+                    </p>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>IMAP Host</label>
+                    <input value={settingsDraft.imap_host || ''} onChange={e => setSettingsDraft(p => ({ ...p, imap_host: e.target.value }))} placeholder="imap.hostinger.com" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>IMAP Port</label>
+                    <input type="number" value={settingsDraft.imap_port || 993} onChange={e => setSettingsDraft(p => ({ ...p, imap_port: parseInt(e.target.value) }))} style={inputStyle} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1114,58 +1532,146 @@ const SDROutreachTab = () => {
         </Dialog>
       )}
 
-      {/* ── Reply Modal ────────────────────────────────────────────────── */}
-      {replyModal && (
-        <Dialog open onOpenChange={() => { setReplyModal(null); setReplyContent(''); }}>
-          <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f,#14082c)', border: '1px solid #2d1f4a', maxWidth: 520 }}>
-            <DialogHeader>
-              <DialogTitle style={{ color: '#e2d9f3' }}>
-                Record Reply from {replyModal.lead_name}
-              </DialogTitle>
-            </DialogHeader>
+      {/* ── View Reply Modal ───────────────────────────────────────────── */}
+      {viewReplyModal && (() => {
+        const sentColor = viewReplyModal.reply_sentiment === 'positive' ? '#10b981'
+          : viewReplyModal.reply_sentiment === 'negative' ? '#f43f5e' : '#9ca3af';
+        const sentBg = viewReplyModal.reply_sentiment === 'positive' ? 'rgba(16,185,129,0.1)'
+          : viewReplyModal.reply_sentiment === 'negative' ? 'rgba(244,63,94,0.1)' : 'rgba(107,114,128,0.1)';
+        const sentLabel = viewReplyModal.reply_sentiment === 'positive' ? '✓ Interested — they want to connect!'
+          : viewReplyModal.reply_sentiment === 'negative' ? '✗ Not interested'
+          : '~ Neutral reply';
+        return (
+          <Dialog open onOpenChange={() => setViewReplyModal(null)}>
+            <DialogContent style={{
+              background: 'linear-gradient(135deg,#0f0a1f,#14082c)',
+              border: '1px solid #2d1f4a', maxWidth: 560, color: '#e2d9f3',
+            }}>
+              <DialogHeader>
+                <DialogTitle style={{ color: '#e2d9f3', display: 'flex', alignItems: 'center', gap: 8, fontSize: 16 }}>
+                  <Mail size={17} style={{ color: sentColor }} />
+                  Reply from {viewReplyModal.lead_name}
+                </DialogTitle>
+              </DialogHeader>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 0' }}>
-              <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
-                Paste the reply email content below. AI will automatically analyse the sentiment and determine if this lead is interested.
-              </p>
-              <div>
-                <label style={labelStyle}>Reply Content</label>
-                <textarea
-                  value={replyContent}
-                  onChange={e => setReplyContent(e.target.value)}
-                  placeholder="Paste the reply email here... (e.g. 'Thanks for reaching out, I'd love to learn more!')"
-                  rows={6}
-                  style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
-                />
-              </div>
-              <div style={{
-                padding: '10px 14px', borderRadius: 8,
-                background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)',
-              }}>
-                <p style={{ color: '#a855f7', fontSize: 12, margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Zap size={12} />
-                  AI will classify this as positive / neutral / negative. Positive replies automatically create a meeting and send a scheduling email.
-                </p>
-              </div>
-            </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* AI sentiment result */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '10px 14px', borderRadius: 10,
+                  background: sentBg, border: `1px solid ${sentColor}40`,
+                }}>
+                  <span style={{ fontSize: 18 }}>
+                    {viewReplyModal.reply_sentiment === 'positive' ? '🎉' : viewReplyModal.reply_sentiment === 'negative' ? '❌' : '💬'}
+                  </span>
+                  <div>
+                    <div style={{ color: sentColor, fontWeight: 700, fontSize: 13 }}>{sentLabel}</div>
+                    <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>AI sentiment analysis</div>
+                  </div>
+                </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { setReplyModal(null); setReplyContent(''); }}
-                style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>
-                Cancel
-              </Button>
-              <Button onClick={handleSubmitReply} disabled={analyzingSentiment || !replyContent.trim()} style={{
-                background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff',
-                border: 'none', borderRadius: 8, fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                {analyzingSentiment ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                {analyzingSentiment ? 'Analysing…' : 'Record Reply'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+                {/* Email metadata */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)', border: '1px solid #1e0f38',
+                  borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 5,
+                }}>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
+                    <span style={{ color: '#4b5563', minWidth: 40 }}>From</span>
+                    <span style={{ color: '#e2d9f3', fontWeight: 600 }}>
+                      {viewReplyModal.lead_name}
+                      {viewReplyModal.lead_email && (
+                        <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>
+                          &lt;{viewReplyModal.lead_email}&gt;
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {viewReplyModal.lead_company && (
+                    <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
+                      <span style={{ color: '#4b5563', minWidth: 40 }}>Co.</span>
+                      <span style={{ color: '#9ca3af' }}>{viewReplyModal.lead_company}</span>
+                    </div>
+                  )}
+                  {viewReplyModal.replied_at && (
+                    <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
+                      <span style={{ color: '#4b5563', minWidth: 40 }}>Date</span>
+                      <span style={{ color: '#9ca3af' }}>{fmtDate(viewReplyModal.replied_at)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Reply body */}
+                <div>
+                  <div style={{ color: '#4b5563', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                    Reply Content
+                  </div>
+                  <div style={{
+                    background: 'rgba(255,255,255,0.03)', border: '1px solid #2d1f4a',
+                    borderRadius: 8, padding: '14px 16px',
+                    color: '#e2d9f3', fontSize: 13, lineHeight: 1.8,
+                    whiteSpace: 'pre-wrap', maxHeight: 280, overflowY: 'auto',
+                  }}>
+                    {viewReplyModal.reply_content
+                      ? viewReplyModal.reply_content
+                      : <span style={{ color: '#4b5563', fontStyle: 'italic' }}>Reply content not available.</span>
+                    }
+                  </div>
+                </div>
+
+                {/* Meeting created? */}
+                {viewReplyModal.meeting_id && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', borderRadius: 8,
+                    background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                  }}>
+                    <Calendar size={14} style={{ color: '#f59e0b' }} />
+                    <span style={{ color: '#fcd34d', fontSize: 12, fontWeight: 600 }}>
+                      Meeting request sent — awaiting scheduling
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter>
+                <Button onClick={() => setViewReplyModal(null)} style={{
+                  background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff',
+                  border: 'none', borderRadius: 8, fontWeight: 600,
+                }}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
+      {/* Clear Leads Confirmation — detail view */}
+      <Dialog open={clearLeadsConfirm} onOpenChange={setClearLeadsConfirm}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', borderRadius: 14, maxWidth: 420 }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: '#e2d9f3', fontSize: 16 }}>Clear All Leads?</DialogTitle>
+          </DialogHeader>
+          <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, marginTop: 4 }}>
+            Are you sure you want to clear all <b style={{ color: '#e2d9f3' }}>{enrollments.length} enrolled lead{enrollments.length !== 1 ? 's' : ''}</b> from this campaign?
+            All outreach logs and meetings will also be removed. Counters will reset to zero.
+            <br /><br />
+            <span style={{ color: '#6b7280', fontSize: 12 }}>
+              The leads themselves will NOT be deleted — only their enrollment in this campaign.
+            </span>
+          </p>
+          <DialogFooter style={{ marginTop: 16 }}>
+            <Button variant="outline" onClick={() => setClearLeadsConfirm(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>
+              Cancel
+            </Button>
+            <Button onClick={handleClearLeads} disabled={clearingLeads} style={{ background: 'linear-gradient(90deg,#f43f5e,#dc2626)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {clearingLeads ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Yes, Clear All Leads
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 };

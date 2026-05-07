@@ -183,6 +183,15 @@ export const deleteCampaign = async (id) => {
   }
 };
 
+export const clearCampaignLeads = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/campaigns/${id}/clear-leads/`);
+  } catch (error) {
+    console.error('Clear campaign leads error:', error);
+    throw error;
+  }
+};
+
 export const getCampaignSteps = async (id) => {
   try {
     return await companyApi.get(`/sdr/campaigns/${id}/steps/`);

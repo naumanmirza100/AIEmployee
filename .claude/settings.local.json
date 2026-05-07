@@ -68,8 +68,20 @@
       "Bash(npx --no-install vite build)",
       "Bash(D:/University/work/AI_Employyes/ReplyAgent/AIEmployee/venv/Scripts/python.exe -c ' *)",
       "PowerShell(& \"d:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\pip.exe\" show django)",
+      "Bash(C:\\\\Python313\\\\python.exe manage.py migrate ai_sdr_agent)",
+      "PowerShell(python --version 2>&1)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import django; print\\(django.__version__, django.__file__\\)\" 2>&1)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import sys; print\\('\\\\n'.join\\(sys.path\\)\\)\" 2>&1)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import django; print\\(django.__file__\\)\" 2>&1)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import django; print\\(repr\\(django.__file__\\)\\)\")",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -m pip list 2>&1)",
+      "PowerShell(head -20)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"from django.core.management import execute_from_command_line; print\\('OK'\\)\" 2>&1)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import sys; import importlib; spec = importlib.util.find_spec\\('django'\\); print\\(spec\\)\" 2>&1)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import importlib.util; spec = importlib.util.find_spec\\('django'\\); print\\(spec\\)\" 2>&1)",
+      "Bash(dir \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\ai_sdr_agent\\\\\" /b)",
+      "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import apscheduler; print\\(apscheduler.__version__\\)\" 2>&1)",
       "Bash(C:\\\\Python313\\\\python.exe manage.py migrate ai_sdr_agent)"
-      "Read(//tmp/**)"
     ]
   }
 }

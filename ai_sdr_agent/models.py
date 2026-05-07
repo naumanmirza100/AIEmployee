@@ -1,3 +1,5 @@
+from datetime import date as _date, timedelta as _timedelta
+
 from django.db import models
 from django.utils import timezone
 
@@ -133,6 +135,7 @@ class SDRCampaign(models.Model):
 
     STATUS_CHOICES = [
         ('draft', 'Draft'),
+        ('scheduled', 'Scheduled'),
         ('active', 'Active'),
         ('paused', 'Paused'),
         ('completed', 'Completed'),
@@ -165,6 +168,13 @@ class SDRCampaign(models.Model):
     # Scheduling / handoff
     calendar_link = models.CharField(max_length=500, blank=True)  # Calendly / calendar URL
 
+    # Auto-run scheduling (Celery)
+    start_date = models.DateField(null=True, blank=True)        # auto-activates when reached
+    end_date = models.DateField(null=True, blank=True)          # informational; auto-derived
+    auto_check_replies = models.BooleanField(default=True)       # poll IMAP every 5 min
+    last_replies_checked_at = models.DateTimeField(null=True, blank=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+
     # Stats (denormalised for quick reads)
     total_leads = models.IntegerField(default=0)
     emails_sent = models.IntegerField(default=0)
@@ -180,6 +190,42 @@ class SDRCampaign(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.status})"
+
+    def derive_end_date(self):
+        """End date = start_date + max delay_days across all steps (defaults 10)."""
+        if not self.start_date:
+            return None
+        # start_date may be a raw string when called right after objects.create()
+        # before Django does a DB-fetch roundtrip — coerce it to a date object.
+        start = self.start_date
+        if isinstance(start, str):
+            start = _date.fromisoformat(start)
+        max_delay = self.steps.aggregate(m=models.Max('delay_days'))['m'] or 10
+        return start + _timedelta(days=max_delay)
+
+    def _coerce_start_date(self):
+        """Return start_date as a date object regardless of whether it's a str or date."""
+        if not self.start_date:
+            return None
+        if isinstance(self.start_date, str):
+            return _date.fromisoformat(self.start_date)
+        return self.start_date
+
+    def save(self, *args, **kwargs):
+        # Auto-derive end_date from start_date + longest step delay
+        if self.start_date and self.pk:
+            self.end_date = self.derive_end_date()
+        # Auto-activate scheduled campaigns when start_date arrives
+        start = self._coerce_start_date()
+        if (
+            self.status == 'scheduled'
+            and start
+            and start <= timezone.now().date()
+            and self.steps.filter(is_active=True).exists() if self.pk else False
+        ):
+            self.status = 'active'
+            self.activated_at = timezone.now()
+        super().save(*args, **kwargs)
 
 
 class SDRCampaignStep(models.Model):
