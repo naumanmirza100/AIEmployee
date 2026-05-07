@@ -263,6 +263,133 @@ export const listHRWorkflowExecutions = async (workflowId = null) => {
   }
 };
 
+// ---------- Performance reviews ----------
+export const listHRReviewCycles = async () => {
+  try {
+    const response = await companyApi.get('/hr/review-cycles');
+    return response;
+  } catch (error) {
+    console.error('List HR review cycles error:', error);
+    throw error;
+  }
+};
+
+export const createHRReviewCycle = async (payload) => {
+  try {
+    const response = await companyApi.post('/hr/review-cycles/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create HR review cycle error:', error);
+    throw error;
+  }
+};
+
+export const activateHRReviewCycle = async (cycleId) => {
+  try {
+    const response = await companyApi.post(`/hr/review-cycles/${cycleId}/activate`);
+    return response;
+  } catch (error) {
+    console.error('Activate HR review cycle error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRReviewCycle = async (cycleId) => {
+  try {
+    const response = await companyApi.post(`/hr/review-cycles/${cycleId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR review cycle error:', error);
+    throw error;
+  }
+};
+
+export const listHREmployeeReviews = async (employeeId) => {
+  try {
+    const response = await companyApi.get(`/hr/employees/${employeeId}/reviews`);
+    return response;
+  } catch (error) {
+    console.error('List HR employee reviews error:', error);
+    throw error;
+  }
+};
+
+export const updateHRPerfReview = async (reviewId, payload) => {
+  try {
+    const response = await companyApi.post(`/hr/reviews/${reviewId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR performance review error:', error);
+    throw error;
+  }
+};
+
+// ---------- Departments ----------
+export const listHRDepartments = async ({ activeOnly = false } = {}) => {
+  try {
+    const qs = activeOnly ? '?active_only=1' : '';
+    const response = await companyApi.get(`/hr/departments${qs}`);
+    return response;
+  } catch (error) {
+    console.error('List HR departments error:', error);
+    throw error;
+  }
+};
+
+export const createHRDepartment = async (payload) => {
+  try {
+    const response = await companyApi.post('/hr/departments/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create HR department error:', error);
+    throw error;
+  }
+};
+
+export const updateHRDepartment = async (deptId, payload) => {
+  try {
+    const response = await companyApi.post(`/hr/departments/${deptId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR department error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRDepartment = async (deptId) => {
+  try {
+    const response = await companyApi.post(`/hr/departments/${deptId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR department error:', error);
+    throw error;
+  }
+};
+
+export const approveHRWorkflowExecution = async (executionId, comment = '') => {
+  try {
+    const response = await companyApi.post(
+      `/hr/workflows/executions/${executionId}/approve`, { comment },
+    );
+    return response;
+  } catch (error) {
+    console.error('Approve HR workflow execution error:', error);
+    throw error;
+  }
+};
+
+export const rejectHRWorkflowExecution = async (executionId, reason = '') => {
+  try {
+    const response = await companyApi.post(
+      `/hr/workflows/executions/${executionId}/reject`, { reason },
+    );
+    return response;
+  } catch (error) {
+    console.error('Reject HR workflow execution error:', error);
+    throw error;
+  }
+};
+
 // ---------- Notifications ----------
 export const listHRNotificationTemplates = async () => {
   try {
@@ -421,6 +548,37 @@ export const checkHRMeetingAvailability = async (start, end) => {
   }
 };
 
+// ---------- Compensation history (HR-admin only) ----------
+export const listCompensationHistory = async (employeeId) => {
+  try {
+    const response = await companyApi.get(`/hr/employees/${employeeId}/compensation`);
+    return response;
+  } catch (error) {
+    console.error('List compensation error:', error);
+    throw error;
+  }
+};
+
+export const createCompensation = async (employeeId, payload) => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/compensation/create`, payload);
+    return response;
+  } catch (error) {
+    console.error('Create compensation error:', error);
+    throw error;
+  }
+};
+
+export const deleteCompensation = async (compId) => {
+  try {
+    const response = await companyApi.delete(`/hr/compensation/${compId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete compensation error:', error);
+    throw error;
+  }
+};
+
 // ---------- Employee detail ----------
 export const getHREmployeeDetail = async (employeeId) => {
   try {
@@ -554,6 +712,18 @@ export default {
   deleteHRWorkflow,
   executeHRWorkflow,
   listHRWorkflowExecutions,
+  approveHRWorkflowExecution,
+  rejectHRWorkflowExecution,
+  listHRDepartments,
+  createHRDepartment,
+  updateHRDepartment,
+  deleteHRDepartment,
+  listHRReviewCycles,
+  createHRReviewCycle,
+  activateHRReviewCycle,
+  deleteHRReviewCycle,
+  listHREmployeeReviews,
+  updateHRPerfReview,
   listHRNotificationTemplates,
   createHRNotificationTemplate,
   listHRScheduledNotifications,
@@ -579,4 +749,7 @@ export default {
   listLeaveAccrualPolicies,
   upsertLeaveAccrualPolicy,
   deleteLeaveAccrualPolicy,
+  listCompensationHistory,
+  createCompensation,
+  deleteCompensation,
 };
