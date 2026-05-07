@@ -65,6 +65,7 @@ import {
   rejectDraft,
   sendDraft,
   getReplyItem,
+  fetchInboxAttachments,
   listSyncAccounts,
   createReplyAccount,
   deleteReplyAccount,
@@ -90,14 +91,104 @@ const DRAFT_ATTACHMENT_MAX_COUNT = 20;
 // the SPA index.html for these requests and producing "corrupt" downloads.
 const ATTACHMENT_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
 
-// Pure view filter for the inbox list — Celery pre-syncs the full 120-day
+// Map raw SMTP / send-pipeline failures to a short user-facing message.
+// Backends bubble the provider's error string back ("(552, b'5.7.0 This
+// message was blocked because…')"); rendering that verbatim is noisy and
+// confuses non-technical users. We pick the message off the SMTP code +
+// well-known phrases, falling back to a generic "send failed" if nothing
+// matches. The original text is logged via console.error in the caller so
+// we don't lose diagnostic info.
+const humanizeSendError = (raw) => {
+  const text = (raw || '').toString();
+  const lower = text.toLowerCase();
+  // Gmail security block — the most common reason an attached file can't
+  // go through (executable, suspected phishing, etc.). 552 + 5.7.0 is the
+  // canonical signature; "blocked" + "security" catches provider variants.
+  if (/\b552\b/.test(text) || /5\.7\.0/.test(text) || (lower.includes('blocked') && lower.includes('security'))) {
+    return 'Message blocked by the recipient mail provider for security reasons. This usually means an attachment type or message content triggered their malware/phishing filter. Try removing attachments or rewording, then resend.';
+  }
+  if (/\b554\b/.test(text) || lower.includes('spam')) {
+    return 'Rejected as spam by the recipient mail provider. Try simpler wording or fewer links and resend.';
+  }
+  if (/\b550\b/.test(text) || /5\.1\.1/.test(text) || lower.includes('no such user') || lower.includes('mailbox unavailable')) {
+    return "The recipient address doesn't exist or can't accept mail. Double-check the address and try again.";
+  }
+  if (/\b535\b/.test(text) || lower.includes('authentication failed')) {
+    return 'Email account authentication failed. Reconnect the account in Settings and try again.';
+  }
+  if (/\b421\b/.test(text) || lower.includes('service unavailable') || lower.includes('try again later')) {
+    return 'The mail provider is temporarily unavailable or rate-limiting. Wait a minute and resend.';
+  }
+  // Fallback — keep the original first line so power users still see what
+  // happened, but trimmed so it fits in the inline banner.
+  const firstLine = text.split('\n')[0].trim();
+  return firstLine ? `Send failed: ${firstLine.slice(0, 200)}` : 'Send failed. Please try again.';
+};
+
+// AI-pipeline error humanizer. The reply-draft endpoint surfaces raw
+// errors from the LLM provider (rate-limit JSON, HTTP status codes, JSON
+// schema parse errors, etc.) and rendering those verbatim in a toast just
+// confuses users. Maps the common cases to short, actionable messages.
+// Original text is preserved via console.error in the caller.
+const humanizeAiError = (raw) => {
+  const text = (raw || '').toString();
+  const lower = text.toLowerCase();
+
+  // Quota / rate limit — the by far most common failure when the user
+  // generates several drafts in a row, or when the workspace's monthly
+  // credit allowance is exhausted. 429 covers the HTTP-level rate limit;
+  // "insufficient_quota" / "billing" / "credits" catch provider-specific
+  // wording (OpenAI, Anthropic, etc.).
+  if (
+    /\b429\b/.test(text)
+    || lower.includes('rate limit')
+    || lower.includes('rate_limit')
+    || lower.includes('too many requests')
+    || lower.includes('insufficient_quota')
+    || lower.includes('insufficient quota')
+    || lower.includes('quota')
+    || lower.includes('credits')
+    || lower.includes('billing')
+  ) {
+    return 'AI request limit reached. Please try again in a few minutes — or contact support if this keeps happening.';
+  }
+
+  // Auth — usually a missing / expired API key on the server side. The
+  // user can't fix this themselves; nudge them to support.
+  if (/\b401\b/.test(text) || /\b403\b/.test(text) || lower.includes('unauthorized') || lower.includes('api key') || lower.includes('forbidden')) {
+    return 'AI service authentication failed. This needs admin attention — please contact support.';
+  }
+
+  // Provider outage / 5xx. Worth a retry rather than a support ticket.
+  if (/\b5\d\d\b/.test(text) || lower.includes('service unavailable') || lower.includes('bad gateway') || lower.includes('overloaded')) {
+    return 'AI service is temporarily unavailable. Please try again in a moment.';
+  }
+
+  // Timeouts — happens when the prompt is huge (long thread context) or
+  // when the provider is slow. Suggest shortening or retrying.
+  if (/\b408\b/.test(text) || /\b504\b/.test(text) || lower.includes('timeout') || lower.includes('timed out')) {
+    return 'AI request timed out. Try again, or shorten any custom instructions you provided.';
+  }
+
+  // Content policy refusal — model returned a safety block instead of a draft.
+  if (lower.includes('content policy') || lower.includes('content_policy') || lower.includes('safety') || lower.includes('refused')) {
+    return 'The AI declined to draft this reply (content policy). Try editing the source message excerpt or your instructions and retry.';
+  }
+
+  const firstLine = text.split('\n')[0].trim();
+  return firstLine ? `Generation failed: ${firstLine.slice(0, 200)}` : 'Generation failed. Please try again.';
+};
+
+// Pure view filter for the inbox list — Celery pre-syncs the rolling
 // window on a cron (see marketing_agent/management/commands/sync_inbox.py),
 // so switching the dropdown just slices already-cached rows and is instant.
+// 120 was retired: the cost of fetching that much mail on a fresh account
+// dwarfed the benefit, and 90 days already covers the longest practical
+// reply window.
 const TIME_WINDOW_OPTIONS = [
-  { value: 30,  label: 'Last 30 days' },
-  { value: 60,  label: 'Last 60 days' },
-  { value: 90,  label: 'Last 90 days' },
-  { value: 120, label: 'Last 120 days' },
+  { value: 30, label: 'Last 30 days' },
+  { value: 60, label: 'Last 60 days' },
+  { value: 90, label: 'Last 90 days' },
 ];
 
 const TONES = [
@@ -393,6 +484,18 @@ const ReplyDraftAgentPage = () => {
     return () => clearInterval(interval);
   }, [hasAccess, refreshInbox, refreshSent, refreshDrafts, refreshSyncAccounts]);
 
+  // While sync is actively running, poll the sync-accounts endpoint more
+  // aggressively (every 5s) so the staged-progress banner advances
+  // 30 → 60 → 90 promptly and we drop the banner the moment the worker
+  // finishes. The 30s inbox/sent/drafts cadence above is unchanged —
+  // only sync state needs sub-half-minute resolution.
+  const isSyncRunning = (syncAccounts || []).some((a) => a.sync_in_progress);
+  useEffect(() => {
+    if (!hasAccess || !isSyncRunning) return;
+    const id = setInterval(() => { refreshSyncAccounts(); }, 5 * 1000);
+    return () => clearInterval(id);
+  }, [hasAccess, isSyncRunning, refreshSyncAccounts]);
+
   // Re-fetch inbox + sent whenever the user changes the time-window filter
   // — both lists honour the same `days` slice.
   useEffect(() => {
@@ -434,6 +537,47 @@ const ReplyDraftAgentPage = () => {
       const full = res?.data;
       if (full) {
         setSelectedReply((current) => (current && current.id === r.id && current.source === r.source ? { ...current, ...full } : current));
+
+        // Lazy attachment fetch. Sync writes InboxEmail rows with
+        // attachments_fetched=false (skipping attachment extraction
+        // kept fresh syncs fast on big mailboxes); when the user
+        // opens the email the first time we pull the actual files
+        // from IMAP and merge them into the selection. Only inbox
+        // rows have this flag — campaign-Reply rows always include
+        // their attachments inline. While this is running the email
+        // pane shows AttachmentLoading (skeleton + "Loading
+        // attachments…" tag) so the user knows files are streaming.
+        if (r.source === 'inbox' && full.attachments_fetched === false) {
+          try {
+            const attRes = await fetchInboxAttachments(r.id);
+            const attData = attRes?.data;
+            if (Array.isArray(attData)) {
+              setSelectedReply((current) => {
+                if (!current || current.id !== r.id || current.source !== r.source) return current;
+                return { ...current, attachments: attData, attachments_fetched: true };
+              });
+            } else {
+              // Server returned something we can't render — flip the
+              // flag locally so the skeleton stops spinning. The DB
+              // flag stays whatever the server set; next open will
+              // retry the IMAP fetch if it's still false there.
+              setSelectedReply((current) => {
+                if (!current || current.id !== r.id || current.source !== r.source) return current;
+                return { ...current, attachments_fetched: true };
+              });
+            }
+          } catch (attErr) {
+            // Non-fatal — body is already shown. Mark fetched=true
+            // locally so the skeleton stops spinning instead of
+            // hanging there forever; user sees "no attachments" until
+            // they reopen the email and the next attempt succeeds.
+            console.error('Failed to fetch attachments lazily', attErr);
+            setSelectedReply((current) => {
+              if (!current || current.id !== r.id || current.source !== r.source) return current;
+              return { ...current, attachments_fetched: true };
+            });
+          }
+        }
       }
     } catch (e) {
       console.error('Failed to load email body', e);
@@ -468,6 +612,34 @@ const ReplyDraftAgentPage = () => {
         setEditedSubject('');
         setUserContext('');
         setComposerOpen(false);
+
+        // Same lazy attachment fetch as handleSelectReply, since the
+        // user can land on this code path without ever clicking a row
+        // (jumping from a Sent-tab "in reply to" chip). Same loading
+        // skeleton + error fallback as the primary path.
+        if (full.attachments_fetched === false) {
+          try {
+            const attRes = await fetchInboxAttachments(parent.id);
+            const attData = attRes?.data;
+            if (Array.isArray(attData)) {
+              setSelectedReply((current) => {
+                if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
+                return { ...current, attachments: attData, attachments_fetched: true };
+              });
+            } else {
+              setSelectedReply((current) => {
+                if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
+                return { ...current, attachments_fetched: true };
+              });
+            }
+          } catch (attErr) {
+            console.error('Failed to fetch attachments lazily (parent)', attErr);
+            setSelectedReply((current) => {
+              if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
+              return { ...current, attachments_fetched: true };
+            });
+          }
+        }
       }
     } catch (e) {
       toast({
@@ -525,7 +697,12 @@ const ReplyDraftAgentPage = () => {
         refreshAll();
       }
     } catch (e) {
-      toast({ title: 'Generation failed', description: e.message, variant: 'destructive' });
+      console.error('Generate draft failed', e);
+      toast({
+        title: 'Could not generate draft',
+        description: humanizeAiError(e?.message),
+        variant: 'destructive',
+      });
     } finally {
       setBusy(false);
     }
@@ -565,7 +742,12 @@ const ReplyDraftAgentPage = () => {
         refreshDrafts();
       }
     } catch (e) {
-      toast({ title: 'Regeneration failed', description: e.message, variant: 'destructive' });
+      console.error('Regenerate draft failed', e);
+      toast({
+        title: 'Could not regenerate draft',
+        description: humanizeAiError(e?.message),
+        variant: 'destructive',
+      });
     } finally {
       setBusy(false);
     }
@@ -593,7 +775,23 @@ const ReplyDraftAgentPage = () => {
         throw new Error(sent.message || 'Send failed');
       }
     } catch (e) {
-      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      // No toast on failure — the inline "Send failed" banner inside the
+      // draft pane (gated on selectedDraft.status === 'failed' &&
+      // selectedDraft.send_error) renders the same humanized message and
+      // persists until the user fixes the issue or discards. Toasts pop
+      // out of the modal and dismiss themselves; for SMTP rejections we
+      // want the error visible while the user edits attachments / body.
+      // Backend already called mark_failed; mirror that state locally so
+      // the banner renders immediately instead of after a refresh.
+      console.error('Approve+send failed', e);
+      setSelectedDraft((curr) => (
+        curr && curr.id === selectedDraft.id
+          ? { ...curr, status: 'failed', send_error: e?.message || 'Send failed' }
+          : curr
+      ));
+      // Keep the Drafts list in sync with the new 'failed' status so the
+      // status pill on the row matches what the pane shows.
+      refreshDrafts();
     } finally {
       setBusy(false);
     }
@@ -788,15 +986,33 @@ const ReplyDraftAgentPage = () => {
       : null;
 
   // `body_html` is forwarded so EmailBody can render the original markup
-  // for synced messages. ReplyDraft thread context only has plain
-  // `original_body` — drafts don't store the source HTML.
+  // for synced messages. The draft serializer now ships `original_body_html`
+  // for inbox-sourced drafts (IMAP-synced HTML mail), so newsletter /
+  // marketing emails render the same way they do in the Inbox tab. Falls
+  // back to empty when the source had no HTML (e.g. campaign-Reply rows).
   const originalEmail = selectedReply
     ? { ...selectedReply }
     : (selectedDraft
-        ? { subject: selectedDraft.original_subject, body: selectedDraft.original_body, body_html: '', replied_at: selectedDraft.created_at }
+        ? {
+            subject: selectedDraft.original_subject,
+            body: selectedDraft.original_body,
+            body_html: selectedDraft.original_body_html || '',
+            replied_at: selectedDraft.created_at,
+          }
         : null);
 
   const isReadOnly = selectedDraft?.status === 'sent' || selectedDraft?.status === 'rejected';
+  // Fresh-compose drafts have no source email — `original_subject` and
+  // `original_body` come back empty from the serializer. Without this
+  // flag we'd render the big "Original Email Viewer" card with nothing
+  // inside it sitting above the composer, which looks broken. Detected
+  // by the backend's `source` field (set to 'compose' when the draft
+  // was created via the New Message modal) with a content-empty
+  // fallback for older drafts that predate the field.
+  const isComposeDraft = !selectedReply && !!selectedDraft && (
+    selectedDraft.source === 'compose'
+    || (!selectedDraft.original_subject && !selectedDraft.original_body)
+  );
 
   return (
     <>
@@ -831,7 +1047,9 @@ const ReplyDraftAgentPage = () => {
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
-              <span className="text-xs text-gray-400 hidden sm:inline">Auto-refreshes every 30s</span>
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                {isSyncRunning ? 'Polling every 5s while syncing' : 'Auto-refreshes every 30s'}
+              </span>
 
               <AttachedAccountButton
                 syncAccounts={syncAccounts}
@@ -898,7 +1116,7 @@ const ReplyDraftAgentPage = () => {
               <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)]">
                 {/* Tabs */}
                 <div className="p-2 border-b border-white/10 flex items-center gap-2">
-                  <div className="flex-1 flex gap-1">
+                  <div className="flex-1 flex">
                     <button
                       onClick={() => setActiveTab('inbox')}
                       className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -1090,8 +1308,17 @@ const ReplyDraftAgentPage = () => {
                   right pane scrolls, so the viewer keeps its full
                   height instead of shrinking. */}
               {(selectedReply || selectedDraft) && originalEmail && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)] lg:flex-shrink-0">
-                  <div className="p-5 border-b border-white/10">
+                // Compose drafts get a compact "To: <recipient>" header
+                // instead of the full email viewer — there's no source
+                // message to show, so the body / attachments / AI-analysis
+                // section below would just render as empty whitespace.
+                // Fixed-height layout (`lg:h-[calc(...)]`) is also dropped
+                // for compose so the composer underneath rises up to the
+                // top of the pane like a Gmail compose window.
+                <div className={`rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:flex-shrink-0 ${
+                  isComposeDraft ? '' : 'lg:h-[calc(100vh-220px)]'
+                }`}>
+                  <div className={isComposeDraft ? 'p-4' : 'p-5 border-b border-white/10'}>
                     <div className="flex items-start justify-between gap-4 mb-4">
                       <div className="flex items-start gap-3 min-w-0 flex-1">
                         <Avatar name={selectedContact?.name} email={selectedContact?.email} size="lg" />
@@ -1134,9 +1361,19 @@ const ReplyDraftAgentPage = () => {
                         </div>
                       )}
                     </div>
-                    <h2 className="text-lg font-bold text-white leading-snug">
-                      {originalEmail.subject || '(no subject)'}
-                    </h2>
+                    {!isComposeDraft && (
+                      <h2 className="text-lg font-bold text-white leading-snug">
+                        {originalEmail.subject || '(no subject)'}
+                      </h2>
+                    )}
+
+                    {isComposeDraft && (
+                      <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/30 text-xs text-fuchsia-200">
+                        <PenSquare className="h-3 w-3 shrink-0" />
+                        <span className="font-semibold">New message</span>
+                        <span className="text-fuchsia-300/70">— edit and send below</span>
+                      </div>
+                    )}
 
                     {/* "In reply to" chip — only on Sent-tab rows whose
                         backend payload included a `replies_to` lookup.
@@ -1163,21 +1400,46 @@ const ReplyDraftAgentPage = () => {
                     )}
                   </div>
 
-                  <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
-                    <EmailBody body={originalEmail.body} bodyHtml={originalEmail.body_html} isIncomingReply={!!selectedReply} />
-                    {Array.isArray(originalEmail.attachments) && originalEmail.attachments.length > 0 && (
-                      <AttachmentList attachments={originalEmail.attachments} />
-                    )}
-                    {selectedReply?.analysis && (
-                      <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
-                        <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-semibold text-cyan-200 mb-0.5">AI Analysis</div>
-                          <div className="text-xs text-gray-300 leading-relaxed">{selectedReply.analysis}</div>
+                  {!isComposeDraft && (
+                    <div className="p-5 flex-1 overflow-y-auto custom-scrollbar">
+                      <EmailBody
+                        body={originalEmail.body}
+                        bodyHtml={originalEmail.body_html}
+                        direction={
+                          // For inbox/sent rows, trust the row's own direction.
+                          // For draft-context views (selectedDraft path), the
+                          // pane shows the *source* incoming email being
+                          // replied to, so it's always 'in'.
+                          selectedReply ? (selectedReply.direction || 'in') : 'in'
+                        }
+                      />
+                      {/* Attachment strip with three states:
+                          1. attachments_fetched=false → still pulling
+                             from IMAP (lazy fetch in progress) →
+                             skeleton + spinner so the user knows it's
+                             loading, not broken or done.
+                          2. attachments_fetched=true + empty list →
+                             email genuinely has no attachments → render
+                             nothing.
+                          3. has attachments → render the list. */}
+                      {originalEmail.attachments_fetched === false ? (
+                        <AttachmentLoading />
+                      ) : (
+                        Array.isArray(originalEmail.attachments)
+                        && originalEmail.attachments.length > 0
+                        && <AttachmentList attachments={originalEmail.attachments} />
+                      )}
+                      {selectedReply?.analysis && (
+                        <div className="mt-4 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex gap-2.5">
+                          <Sparkles className="h-4 w-4 text-cyan-300 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="text-xs font-semibold text-cyan-200 mb-0.5">AI Analysis</div>
+                            <div className="text-xs text-gray-300 leading-relaxed">{selectedReply.analysis}</div>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Reply CTA — sticks to the bottom of the viewer card
                       and reveals the AI-draft composer below on click.
@@ -1260,8 +1522,13 @@ const ReplyDraftAgentPage = () => {
                   </div>
 
                   <div className="p-5 space-y-4">
-                    {/* Tone + Length + Instructions */}
-                    {!isReadOnly && (
+                    {/* Tone + Length + Instructions — only meaningful for
+                        AI-drafted replies. Compose drafts are user-typed
+                        from scratch with no source email; the AI doesn't
+                        regenerate them, so these controls just confuse
+                        the user (and Regenerate would 400 with
+                        "original_email_id or inbox_email_id is required"). */}
+                    {!isReadOnly && !isComposeDraft && (
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div>
                           <label className="text-xs font-medium text-gray-300 mb-1.5 block">Tone</label>
@@ -1373,7 +1640,13 @@ const ReplyDraftAgentPage = () => {
                             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                             <div>
                               <div className="font-semibold mb-0.5">Send failed</div>
-                              <div className="text-red-300/80">{selectedDraft.send_error}</div>
+                              {/* Run the stored backend error through the
+                                  same humanizer the Compose modal uses, so
+                                  the user reads "blocked for security
+                                  reasons" instead of a raw 552 / 5.7.0
+                                  SMTP response dump. The original string
+                                  is still logged on the server side. */}
+                              <div className="text-red-300/80">{humanizeSendError(selectedDraft.send_error)}</div>
                             </div>
                           </div>
                         )}
@@ -1390,15 +1663,24 @@ const ReplyDraftAgentPage = () => {
                               Discard
                             </Button>
                             <div className="flex items-center gap-2">
-                              <Button
-                                onClick={handleRegenerate}
-                                disabled={busy}
-                                variant="outline"
-                                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                              >
-                                {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                                Regenerate
-                              </Button>
+                              {/* Regenerate is an AI flow that needs a
+                                  source message (Reply or InboxEmail) to
+                                  riff off. Compose drafts have neither —
+                                  hiding the button avoids the confusing
+                                  "original_email_id or inbox_email_id is
+                                  required" error and matches user intent
+                                  (compose = manual writing, not AI). */}
+                              {!isComposeDraft && (
+                                <Button
+                                  onClick={handleRegenerate}
+                                  disabled={busy}
+                                  variant="outline"
+                                  className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+                                >
+                                  {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                                  Regenerate
+                                </Button>
+                              )}
                               <Button
                                 onClick={handleApproveAndSend}
                                 disabled={busy || !editedBody.trim() || !editedSubject.trim()}
@@ -1450,7 +1732,14 @@ const ReplyDraftAgentPage = () => {
 
       <ComposeModal
         open={composeOpen}
-        onClose={() => setComposeOpen(false)}
+        onClose={() => {
+          setComposeOpen(false);
+          // ComposeModal autosaves on close so a half-finished compose
+          // lands in the Drafts tab. Refresh the drafts list immediately
+          // so the new/updated row appears without waiting for the next
+          // tab switch or manual refresh.
+          refreshDrafts();
+        }}
         onSent={() => {
           setComposeOpen(false);
           // refreshAll picks up the sent-mirror row + drafts list change
@@ -1656,6 +1945,36 @@ const fileIconChar = (filename, contentType) => {
   return '📎';
 };
 
+// Skeleton shown while the lazy-fetch endpoint is still pulling
+// attachments from IMAP for an InboxEmail row that was synced with
+// attachments_fetched=false. Two muted skeleton cards + a small
+// "Loading attachments…" tag so the user understands the email isn't
+// missing files — they're still streaming. Replaced by AttachmentList
+// when fetch resolves, or by nothing when the email genuinely has no
+// attachments.
+const AttachmentLoading = () => (
+  <div className="mt-4 pt-4 border-t border-white/10">
+    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Loading attachments…
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {[0, 1].map((i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 animate-pulse"
+        >
+          <span className="text-xl shrink-0 opacity-40" aria-hidden="true">📎</span>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="h-3 w-3/4 rounded bg-white/10" />
+            <div className="h-2 w-1/3 rounded bg-white/10" />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 const AttachmentList = ({ attachments }) => {
   const handleDownload = async (att) => {
     // Token-authenticated download: fetch with the auth header, turn the
@@ -1855,7 +2174,18 @@ const DraftAttachmentsSection = ({ draft, uploading, isReadOnly, onPickFiles, on
   );
 };
 
-const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
+const EmailBody = ({ body, bodyHtml, direction = 'in' }) => {
+  // Header label semantics:
+  //   - "Their reply" / "Your reply" — only when the body genuinely looks
+  //     like a reply (plain-text quote-folding finds a quoted thread).
+  //     Marketing emails, fresh incoming mail, and HTML mail without a
+  //     visible quoted section are NOT replies, so we used to mislabel
+  //     every opened email as "Their reply" — fixed below.
+  //   - "Their message" / "Your message" — for everything else, picked by
+  //     direction so an outbound (Sent-tab) row never says "Their".
+  const isOutgoing = direction === 'out';
+  const messageLabel = isOutgoing ? 'Your message' : 'Their message';
+  const replyLabelForQuote = isOutgoing ? 'Your reply' : 'Their reply';
   const [showQuoted, setShowQuoted] = useState(false);
   // `body === undefined` means the list endpoint returned just a preview and
   // the detail fetch is still in flight. Show a gentle loading state instead
@@ -1873,12 +2203,11 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
   // visual fidelity. Quote-folding only applies to plain text (parseReplyBody
   // is regex-based and would mangle markup), so HTML mail is shown whole.
   if (bodyHtml && bodyHtml.trim()) {
-    const replyLabel = isIncomingReply ? "Their reply" : "Message";
     return (
       <div>
         <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
-          {replyLabel}
+          {messageLabel}
         </div>
         <HtmlBody html={bodyHtml} />
       </div>
@@ -1889,7 +2218,6 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
     return <div className="text-sm text-gray-500 italic">No content.</div>;
   }
   const { reply, quoted } = parseReplyBody(body);
-  const replyLabel = isIncomingReply ? "Their reply" : "Message";
 
   // Nothing was detected as a quote — render the whole body as the message.
   if (!quoted) {
@@ -1897,7 +2225,7 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
       <div>
         <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
           <CornerUpLeft className="h-3 w-3" />
-          {replyLabel}
+          {messageLabel}
         </div>
         <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed">
           {reply}
@@ -1914,7 +2242,7 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
         <div>
           <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-2">
             <CornerUpLeft className="h-3 w-3" />
-            {replyLabel}
+            {replyLabelForQuote}
           </div>
           <div className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed bg-cyan-500/5 border border-cyan-500/15 rounded-lg p-3">
             {reply}
@@ -1943,8 +2271,19 @@ const EmailBody = ({ body, bodyHtml, isIncomingReply }) => {
   );
 };
 
-const FIRST_SYNC_WINDOW_MS = 5 * 60 * 1000;  // hard cap so a stuck sync doesn't leave a banner up forever
-const ACTIVE_SYNC_WINDOW_MS = 2 * 60 * 1000; // show "Syncing in progress" chip for up to 2 min after IMAP config change
+// Banner state is driven by the backend's authoritative sync flags
+// (sync_in_progress, last_sync_stage, last_sync_completed_at) rather
+// than wall-clock heuristics, so a slow 90-day backfill keeps the
+// "Syncing…" banner up for as long as the worker is actually working —
+// and drops it the moment the last stage commits. The old time-based
+// caps would hide the banner before the sync finished, leaving the
+// user thinking the inbox was final when more rows were still landing.
+const STAGE_LABEL = {
+  0: 'Connecting…',
+  30: 'last 30 days',
+  60: 'last 60 days',
+  90: 'last 90 days',
+};
 
 const SyncSourceCard = ({ accounts, onConfigure }) => {
   const total = accounts.length;
@@ -1953,36 +2292,78 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
     (a) => a.is_active && a.enable_imap_sync && !a.imap_ready
   );
 
-  // Live-ticking timer — anchored to each account's updated_at (the moment
-  // its IMAP config was last touched, which is when the immediate Celery
-  // sync got dispatched).
+  // Authoritative sync state from the backend. ``sync_in_progress`` is
+  // True only while sync_inbox is actively running for an account, and
+  // is cleared in a finally block — so a crashed or finished worker
+  // never leaves a phantom "Syncing…" banner up. ``last_sync_stage``
+  // advances 0 → 30 → 60 → 90 as each staged-window phase commits.
+  const activeSyncAccounts = syncing.filter((a) => a.sync_in_progress);
+  const isAnySyncRunning = activeSyncAccounts.length > 0;
+
+  // Stage label for the headline. When multiple accounts are syncing
+  // we surface the SMALLEST in-progress stage — that's the next chunk
+  // about to be visible to the user. (Bigger stages happen later in
+  // the same run.)
+  const currentStageDays = (() => {
+    if (!isAnySyncRunning) return 0;
+    const stages = activeSyncAccounts
+      .map((a) => Number(a.last_sync_stage || 0))
+      .filter((n) => n > 0);
+    // last_sync_stage advances AFTER a stage finishes, so the next one
+    // currently running is the smallest stage greater than the latest
+    // committed value. Default to 30 (the first stage) when nothing
+    // has committed yet.
+    const lastCommitted = stages.length > 0 ? Math.max(...stages) : 0;
+    if (lastCommitted === 0) return 30;
+    if (lastCommitted === 30) return 60;
+    if (lastCommitted === 60) return 90;
+    return lastCommitted; // already at 90 — sync is on the last slice
+  })();
+
+  // Live-ticking timer for an "elapsed" pill. Anchored to each
+  // account's updated_at (when sync was kicked off) so it ticks
+  // accurately while sync_in_progress=True; we only render it while
+  // the backend says sync is actually running.
   const [now, setNow] = useState(() => Date.now());
-  const earliestActivity = syncing.length > 0
-    ? Math.max(...syncing.map((a) => new Date(a.updated_at || a.created_at || 0).getTime()))
+  const earliestActivity = activeSyncAccounts.length > 0
+    ? Math.min(...activeSyncAccounts.map((a) =>
+        new Date(a.updated_at || a.created_at || 0).getTime()
+      ))
     : 0;
   const elapsedMs = earliestActivity ? Math.max(0, now - earliestActivity) : 0;
 
-  // "First sync" = will_sync but nothing has landed yet. "Active sync" = just
-  // saved/updated config, rows may still be streaming in even if some have
-  // already landed. Newest-first sync ordering (see sync_inbox.py) means the
-  // 30-day view populates from the start, so we prefer showing the small
-  // progress chip over the big empty banner once inbox_count > 0.
-  const firstSync = syncing.filter((a) => (a.inbox_count || 0) === 0);
-  const firstSyncActive = firstSync.length > 0 && elapsedMs < FIRST_SYNC_WINDOW_MS;
-  const activelySyncing = syncing.length > 0 && elapsedMs < ACTIVE_SYNC_WINDOW_MS;
   const totalInboxCount = syncing.reduce((s, a) => s + (a.inbox_count || 0), 0);
+  const firstSync = activeSyncAccounts.filter((a) => (a.inbox_count || 0) === 0);
+  const firstSyncActive = firstSync.length > 0;
+  const activelySyncing = isAnySyncRunning && !firstSyncActive;
 
-  const showTimer = firstSyncActive || activelySyncing;
   useEffect(() => {
-    if (!showTimer) return;
+    if (!isAnySyncRunning) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [showTimer]);
+  }, [isAnySyncRunning]);
 
   const mmss = (ms) => {
     const s = Math.floor(ms / 1000);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
+
+  // Friendly "Last synced N min ago" label for the steady-state banner.
+  const lastSyncedLabel = (() => {
+    if (isAnySyncRunning) return null;
+    const completedTimestamps = syncing
+      .map((a) => a.last_sync_completed_at ? new Date(a.last_sync_completed_at).getTime() : 0)
+      .filter((t) => t > 0);
+    if (completedTimestamps.length === 0) return null;
+    const mostRecent = Math.max(...completedTimestamps);
+    const ageMs = Date.now() - mostRecent;
+    const mins = Math.floor(ageMs / 60000);
+    if (mins < 1) return 'Synced just now';
+    if (mins < 60) return `Synced ${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Synced ${hours} hr ago`;
+    return `Synced ${Math.floor(hours / 24)} day ago`;
+  })();
 
   // No email accounts at all → hard block, user must add one.
   if (total === 0) {
@@ -2036,7 +2417,8 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
   }
 
   // First-sync in progress — account just saved, IMAP running, nothing in DB yet.
-  // Prominent cyan banner with a live elapsed timer.
+  // Prominent cyan banner with a live elapsed timer. Stays up for as
+  // long as the backend reports sync_in_progress=True; no time cap.
   if (firstSyncActive) {
     return (
       <div className="mb-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-5 py-4 flex items-start gap-4 flex-wrap">
@@ -2046,27 +2428,30 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-cyan-100">
-              Syncing your inbox…
+              Syncing your inbox… ({STAGE_LABEL[currentStageDays] || `${currentStageDays} days`})
             </span>
             <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5">
               {mmss(elapsedMs)}
             </span>
           </div>
           <div className="text-xs text-cyan-200/80 mt-1">
-            Pulling the last 120 days of mail from{' '}
+            Pulling mail from{' '}
             <span className="text-white font-medium">
               {firstSync.map((a) => a.email).join(', ')}
             </span>
-            . Usually takes 30–90 seconds — emails will appear below automatically.
+            . The most recent 30 days arrive first; 60- and 90-day backfill
+            continues in the background. The inbox below updates as each
+            stage commits.
           </div>
         </div>
       </div>
     );
   }
 
-  // Some emails already landed but sync is likely still running (recent config
-  // change). Small cyan "in progress" chip so the user doesn't think the list
-  // below is the final state — more mail may still be streaming in.
+  // Sync is running and rows have already started landing. Small cyan
+  // chip so the user knows the list below isn't final yet — driven by
+  // the backend's sync_in_progress flag, NOT a wall-clock timeout, so
+  // it stays up through the full 90-day staged backfill.
   if (activelySyncing) {
     return (
       <div className="mb-4 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
@@ -2075,13 +2460,13 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-xs text-cyan-200/90">
-            Syncing in progress —{' '}
+            Syncing {STAGE_LABEL[currentStageDays] || `${currentStageDays}-day window`} —{' '}
             <span className="text-white font-medium">{totalInboxCount}</span>{' '}
             email{totalInboxCount === 1 ? '' : 's'} loaded so far from{' '}
             <span className="text-white font-medium">
-              {syncing.map((a) => a.email).join(', ')}
+              {activeSyncAccounts.map((a) => a.email).join(', ')}
             </span>
-            . More may still be landing.
+            . More are still streaming in.
           </div>
         </div>
         <span className="text-xs font-mono text-cyan-200/80 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5 shrink-0">
@@ -2091,9 +2476,9 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
     );
   }
 
-  // Steady-state happy path — sync is configured and settled. Small green chip.
-  // Keep this terse: the header's email-accounts dropdown already lists each
-  // account with its status, so repeating the list here was just noise.
+  // Steady-state happy path — sync is configured AND the backend has
+  // confirmed it's not running right now. We surface "last synced" so
+  // the user can tell at a glance how fresh the inbox is.
   return (
     <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 flex items-center gap-3 flex-wrap">
       <div className="h-8 w-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
@@ -2101,10 +2486,20 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-xs text-emerald-200/90">
-          Inbox sync active ·{' '}
-          <span className="text-white font-medium">
-            {syncing.length} account{syncing.length === 1 ? '' : 's'}
-          </span>
+          {lastSyncedLabel ? (
+            <>
+              <span className="text-white font-medium">{lastSyncedLabel}</span>
+              {' · '}
+              {syncing.length} account{syncing.length === 1 ? '' : 's'} active
+            </>
+          ) : (
+            <>
+              Inbox sync active ·{' '}
+              <span className="text-white font-medium">
+                {syncing.length} account{syncing.length === 1 ? '' : 's'}
+              </span>
+            </>
+          )}
         </div>
       </div>
       {misconfigured.length > 0 && (
@@ -2312,6 +2707,17 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   const [attachments, setAttachments] = useState([]);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Inline send error — displayed in a banner inside the modal so the user
+  // doesn't dismiss it without reading (a toast pops out of the modal and
+  // disappears on its own; for SMTP rejections we want it to persist until
+  // the user takes action).
+  const [sendError, setSendError] = useState('');
+  // True once the user has attempted Send (regardless of outcome). Used to
+  // decide whether closing the modal should auto-reject the draft. Without
+  // this, a failed send followed by an accidental Esc / outside click would
+  // discard the draft on the server, surprising the user — they couldn't
+  // even reopen it from the Drafts tab to fix and retry.
+  const [sendAttempted, setSendAttempted] = useState(false);
   const fileInputRef = React.useRef(null);
 
   // Reset the form whenever the modal closes — without this, opening it
@@ -2327,6 +2733,8 @@ const ComposeModal = ({ open, onClose, onSent }) => {
       setAttachments([]);
       setBusy(false);
       setUploading(false);
+      setSendError('');
+      setSendAttempted(false);
     }
   }, [open]);
 
@@ -2415,6 +2823,8 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   const handleSend = async () => {
     if (!canSend) return;
     setBusy(true);
+    setSendError('');
+    setSendAttempted(true);
     try {
       // Either create the draft (no attachments path) or sync the latest
       // form state to an existing one (attachments path may have made the
@@ -2437,22 +2847,69 @@ const ComposeModal = ({ open, onClose, onSent }) => {
       toast({ title: 'Email sent', description: `Delivered to ${toEmail.trim()}.` });
       onSent?.();
     } catch (e) {
-      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      // Render inside the modal instead of a toast so SMTP rejections (e.g.
+      // Gmail's 552 security block) stay visible while the user edits.
+      // Preserve the raw error in the console for diagnostics.
+      console.error('Compose send failed', e);
+      setSendError(humanizeSendError(e?.message));
     } finally {
       setBusy(false);
     }
   };
 
   const handleDiscard = async () => {
-    // If we already created a draft on the server, mark it rejected so
-    // it doesn't linger in the Drafts tab. Without a draft yet, just
-    // close the modal — there's nothing to clean up.
+    // Explicit Discard button — the user wants the draft gone.
     if (draftId) {
       try {
         await rejectDraft(draftId);
       } catch (e) {
         // Non-fatal; user is closing anyway.
         console.error('Discard compose failed', e);
+      }
+    }
+    onClose?.();
+  };
+
+  // Closing via the dialog's top-right X / Esc / outside click. Distinct
+  // from Discard: a soft close should AUTOSAVE the message so it shows up
+  // in the Drafts tab — Gmail-style. The user can come back later, edit,
+  // and send. Discard (explicit) is the only path that destroys the draft.
+  //
+  // Three branches:
+  //   1. Draft already exists on the server (created via attach or a
+  //      prior Send attempt) → push the latest typed content so what's
+  //      saved matches what the user just had on screen.
+  //   2. No draft yet, but user has the minimum (valid email + subject)
+  //      → create one so it lands in Drafts.
+  //   3. Empty / partial compose (no email or no subject) → nothing to
+  //      save; just close. The backend's compose_create_draft requires
+  //      both fields; respecting that here keeps Drafts tab tidy and
+  //      avoids 400-on-close noise.
+  const handleClose = async () => {
+    const trimmedTo = toEmail.trim();
+    const trimmedSubject = subject.trim();
+    const hasMinimum = validEmail && !!trimmedSubject;
+    if (draftId) {
+      try {
+        await composeUpdateDraft(draftId, {
+          toEmail: trimmedTo,
+          subject: trimmedSubject,
+          body,
+          bodyFormat,
+        });
+      } catch (e) {
+        console.error('Compose autosave on close (update) failed', e);
+      }
+    } else if (hasMinimum) {
+      try {
+        await composeCreateDraft({
+          toEmail: trimmedTo,
+          subject: trimmedSubject,
+          body,
+          bodyFormat,
+        });
+      } catch (e) {
+        console.error('Compose autosave on close (create) failed', e);
       }
     }
     onClose?.();
@@ -2482,7 +2939,7 @@ const ComposeModal = ({ open, onClose, onSent }) => {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v && !busy) handleDiscard(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !busy) handleClose(); }}>
       {/* Compact Gmail-style composer. Inline-prefixed To/Subject rows
           collapse the per-field label space; textarea stays modest in
           height (auto-grows on resize). DialogContent is capped at 85vh
@@ -2640,6 +3097,27 @@ const ComposeModal = ({ open, onClose, onSent }) => {
           </div>
         </div>
 
+        {sendError && (
+          <div
+            className="mt-1 mb-1 flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100"
+            role="alert"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-300" />
+            <div className="flex-1 leading-snug">
+              <div className="font-semibold text-rose-200 mb-0.5">Send failed</div>
+              <div className="text-rose-100/90">{sendError}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSendError('')}
+              className="shrink-0 text-rose-300/70 hover:text-rose-100 transition"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         <DialogFooter className="flex justify-between gap-2 pt-2 border-t border-white/10">
           <Button
             type="button"
@@ -2780,7 +3258,7 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Inbox className="h-5 w-5 text-primary" />
@@ -2793,8 +3271,9 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="py-4 space-y-4">
+          {/* Account basics — full width on top */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs">Account name</Label>
               <Input
@@ -2816,90 +3295,94 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
                 ))}
               </select>
             </div>
-          </div>
-
-          <div>
-            <Label className="text-xs">Email address</Label>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-              placeholder="you@example.com"
-              className="mt-1 h-9"
-            />
-          </div>
-
-          <div className="pt-2 border-t">
-            <div className="text-xs font-semibold text-muted-foreground mb-2">SMTP (for sending)</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Host</Label>
-                <Input
-                  value={form.smtp_host}
-                  onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
-                  className="mt-1 h-9"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Port</Label>
-                <Input
-                  type="number"
-                  value={form.smtp_port}
-                  onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
-                  className="mt-1 h-9"
-                />
-              </div>
-            </div>
-            <div className="mt-3">
-              <Label className="text-xs">Password</Label>
+            <div>
+              <Label className="text-xs">Email address</Label>
               <Input
-                type="password"
-                value={form.smtp_password}
-                onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
-                placeholder="••••••••"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                placeholder="you@example.com"
                 className="mt-1 h-9"
               />
             </div>
           </div>
 
-          <div className="pt-2 border-t">
-            <div className="text-xs font-semibold text-muted-foreground mb-2">IMAP (for receiving replies)</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Host</Label>
-                <Input
-                  value={form.imap_host}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
-                  className="mt-1 h-9"
-                />
+          {/* SMTP + IMAP side-by-side on lg+ */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2 border-t">
+            {/* SMTP */}
+            <div className="space-y-3 pt-3">
+              <div className="text-xs font-semibold text-muted-foreground">SMTP (for sending)</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Host</Label>
+                  <Input
+                    value={form.smtp_host}
+                    onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Port</Label>
+                  <Input
+                    type="number"
+                    value={form.smtp_port}
+                    onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
               </div>
               <div>
-                <Label className="text-xs">Port</Label>
+                <Label className="text-xs">Password</Label>
                 <Input
-                  type="number"
-                  value={form.imap_port}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
+                  type="password"
+                  value={form.smtp_password}
+                  onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
+                  placeholder="••••••••"
                   className="mt-1 h-9"
                 />
               </div>
             </div>
-            <div className="mt-3">
-              <Label className="text-xs">Password</Label>
-              <Input
-                type="password"
-                value={form.imap_password}
-                onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
-                placeholder="••••••••"
-                className="mt-1 h-9"
-              />
-            </div>
-            <div className="flex items-center gap-2 mt-3">
-              <Switch
-                id="imap-ssl"
-                checked={form.imap_use_ssl}
-                onCheckedChange={(checked) => setForm((p) => ({ ...p, imap_use_ssl: checked }))}
-              />
-              <Label htmlFor="imap-ssl" className="text-xs cursor-pointer">Use SSL</Label>
+
+            {/* IMAP */}
+            <div className="space-y-3 pt-3 lg:border-l lg:pl-6">
+              <div className="text-xs font-semibold text-muted-foreground">IMAP (for receiving replies)</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Host</Label>
+                  <Input
+                    value={form.imap_host}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Port</Label>
+                  <Input
+                    type="number"
+                    value={form.imap_port}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
+                    className="mt-1 h-9"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Password</Label>
+                <Input
+                  type="password"
+                  value={form.imap_password}
+                  onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
+                  placeholder="••••••••"
+                  className="mt-1 h-9"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="imap-ssl"
+                  checked={form.imap_use_ssl}
+                  onCheckedChange={(checked) => setForm((p) => ({ ...p, imap_use_ssl: checked }))}
+                />
+                <Label htmlFor="imap-ssl" className="text-xs cursor-pointer">Use SSL</Label>
+              </div>
             </div>
           </div>
         </div>
@@ -2919,7 +3402,7 @@ const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAcc
 // Settings dialog surfaced from the header gear button once an account is
 // attached. Shows account info with edit/disconnect actions and a single
 // window-selectable bar chart of inbox volume (30/60/90/120 days).
-const ANALYTICS_WINDOWS = [30, 60, 90, 120];
+const ANALYTICS_WINDOWS = [30, 60, 90];
 
 const SettingsModal = ({ open, account, onClose, onEdit, onDeleted }) => {
   const { toast } = useToast();

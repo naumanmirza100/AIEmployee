@@ -171,6 +171,7 @@ const Documents = () => {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [downloading, setDownloading] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [deleteConfirmDocId, setDeleteConfirmDocId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
@@ -242,14 +243,20 @@ const Documents = () => {
     }
   };
 
-  const handleDelete = async (docId, e) => {
+  const requestDelete = (docId, e) => {
     if (e) e.stopPropagation();
-    if (!window.confirm('Delete this document? This cannot be undone.')) return;
+    setDeleteConfirmDocId(docId);
+  };
+
+  const handleDelete = async () => {
+    const docId = deleteConfirmDocId;
+    if (!docId) return;
+    setDeleteConfirmDocId(null);
     setDeletingId(docId);
     try {
       const response = await marketingAgentService.deleteDocument(docId);
       if (response?.status === 'success') {
-        toast({ 
+        toast({
           title: 'Document deleted',
           description: 'The document has been removed successfully.'
         });
@@ -843,8 +850,8 @@ const Documents = () => {
                                       <Eye className="h-4 w-4 mr-2" />
                                       View
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem 
-                                      onClick={(e) => handleDelete(doc.id, e)}
+                                    <DropdownMenuItem
+                                      onClick={(e) => requestDelete(doc.id, e)}
                                       className="text-destructive focus:text-destructive"
                                     >
                                       <Trash2 className="h-4 w-4 mr-2" />
@@ -1009,7 +1016,7 @@ const Documents = () => {
                     size="sm"
                     className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
                     disabled={deletingId === detailDoc.id}
-                    onClick={() => handleDelete(detailDoc.id)}
+                    onClick={() => requestDelete(detailDoc.id)}
                   >
                     {deletingId === detailDoc.id ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1056,6 +1063,27 @@ const Documents = () => {
               ) : null}
             </div>
           </motion.div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete document confirmation */}
+      <Dialog open={!!deleteConfirmDocId} onOpenChange={(open) => !open && setDeleteConfirmDocId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete document?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the document. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="outline" onClick={() => setDeleteConfirmDocId(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </motion.div>

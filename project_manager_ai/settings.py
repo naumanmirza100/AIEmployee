@@ -773,6 +773,32 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 600}
     },
 
+    # ----- AI SDR Agent automated outreach -----
+    # Send next-due step (email/LinkedIn) for every active enrollment
+    'sdr-send-due-steps': {
+        'task': 'ai_sdr_agent.tasks.sdr_send_due_steps_task',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600},
+    },
+    # Poll IMAP inbox for replies, classify, hand off positives to scheduling agent
+    'sdr-check-inbox-replies': {
+        'task': 'ai_sdr_agent.tasks.sdr_check_inbox_replies_task',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600},
+    },
+    # Auto-activate scheduled SDR campaigns when start_date arrives
+    'sdr-auto-start-campaigns': {
+        'task': 'ai_sdr_agent.tasks.sdr_auto_start_campaigns_task',
+        'schedule': 900.0,  # Every 15 minutes
+        'options': {'expires': 1800},
+    },
+    # Auto-complete SDR campaigns when end_date passes or all enrollments are done
+    'sdr-auto-complete-campaigns': {
+        'task': 'ai_sdr_agent.tasks.sdr_auto_complete_campaigns_task',
+        'schedule': 86400.0,  # Daily
+        'options': {'expires': 172800},
+    },
+
     # Stale meeting checker - runs daily
     # Sends reminders after 48h, auto-withdraws after 7 days
     'check-stale-meetings': {

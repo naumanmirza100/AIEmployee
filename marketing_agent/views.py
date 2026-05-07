@@ -692,8 +692,12 @@ def campaign_detail(request, campaign_id):
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     leads = campaign.leads.all().order_by('-created_at')
     
-    # Get all email send history for this campaign (for real analytics)
-    all_email_sends = EmailSendHistory.objects.filter(campaign=campaign)
+    # Get all email send history for this campaign (for real analytics).
+    # Exclude reply-draft agent's one-off sends (template_id=None from send_raw_email);
+    # they belong to the reply agent, not the marketing campaign.
+    all_email_sends = EmailSendHistory.objects.filter(
+        campaign=campaign, email_template__isnull=False
+    )
     
     # Open/click rate: total_sent = sent+delivered+opened+clicked; total_opened = opened+clicked (pixel or reply→opened); total_clicked = clicked (tracked link)
     total_sent = all_email_sends.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
@@ -867,10 +871,13 @@ def campaign_detail(request, campaign_id):
     # Check if campaign has email templates (required for launch)
     has_email_templates = email_templates.filter(is_active=True).exists()
     
-    # Get email send history (recent sends)
-    # Order by sent_at for sent emails (newest first), then by created_at for pending emails
-    # For campaign detail page: Show only recent emails (last 10) for summary view
-    recent_email_sends = EmailSendHistory.objects.filter(campaign=campaign).order_by(
+    # Get email send history (recent sends).
+    # Order by sent_at for sent emails (newest first), then by created_at for pending emails.
+    # For campaign detail page: Show only recent emails (last 10) for summary view.
+    # Excludes reply-draft agent's template-less sends.
+    recent_email_sends = EmailSendHistory.objects.filter(
+        campaign=campaign, email_template__isnull=False
+    ).order_by(
         '-sent_at',
         '-created_at'
     )[:10]  # Only last 10 for summary

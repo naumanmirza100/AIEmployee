@@ -205,6 +205,21 @@ export const getReplyItem = async (source, id) => {
   }
 };
 
+// Lazy-load attachments for one InboxEmail. Sync intentionally writes
+// rows with attachments_fetched=False (skipping attachment extraction
+// kept the fresh-sync window manageable on multi-thousand-message
+// mailboxes); this endpoint pulls the actual files from IMAP on first
+// open. Idempotent — calling it on an already-fetched email returns the
+// stored list without touching IMAP.
+export const fetchInboxAttachments = async (id) => {
+  try {
+    return await companyApi.post(`/reply-draft/inbox/${id}/fetch-attachments`);
+  } catch (error) {
+    console.error('Fetch inbox attachments error:', error);
+    throw error;
+  }
+};
+
 // Create a fresh-compose draft (Gmail-style "+ Compose"). Returns a
 // serialized ReplyDraft so the UI can attach files (uploads need a
 // draft FK), edit further via composeUpdateDraft, and finally send via

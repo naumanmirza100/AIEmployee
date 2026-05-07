@@ -23,7 +23,11 @@ def sync_campaign_performance(campaign: Campaign):
       click_through_rate = (clicked / opened) * 100
     """
     today = date.today()
-    email_sends = EmailSendHistory.objects.filter(campaign=campaign)
+    # Exclude reply-draft agent's one-off sends (template_id=None from send_raw_email);
+    # they belong to the reply agent, not the marketing campaign's metrics.
+    email_sends = EmailSendHistory.objects.filter(
+        campaign=campaign, email_template__isnull=False
+    )
 
     total_sent = email_sends.filter(
         status__in=['sent', 'delivered', 'opened', 'clicked']
@@ -98,15 +102,18 @@ def sync_campaign_performance(campaign: Campaign):
     }
 
     for metric_name, data in metrics.items():
+        # date is part of unique_together — must be in lookup, not defaults,
+        # otherwise relaunching after rows from a prior day exist raises
+        # MultipleObjectsReturned.
         obj, created = CampaignPerformance.objects.update_or_create(
             campaign=campaign,
             metric_name=metric_name,
             channel='all',
+            date=today,
             defaults={
                 'metric_value': data['value'],
                 'target_value': data['target'],
                 'actual_value': data['actual'],
-                'date': today,
             },
         )
 

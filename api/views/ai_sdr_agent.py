@@ -18,9 +18,13 @@ from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from ai_sdr_agent.models import SDRIcpProfile, SDRLead, SDRLeadResearchJob
+from ai_sdr_agent.models import (
+    SDRIcpProfile, SDRLead, SDRLeadResearchJob,
+    SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
+)
 from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
+from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 _research_agent: LeadResearchAgent | None = None
 _qualification_agent: LeadQualificationAgent | None = None
+_outreach_agent: OutreachAgent | None = None
 
 
 def _get_research_agent() -> LeadResearchAgent:
@@ -43,6 +48,13 @@ def _get_qualification_agent() -> LeadQualificationAgent:
     if _qualification_agent is None:
         _qualification_agent = LeadQualificationAgent()
     return _qualification_agent
+
+
+def _get_outreach_agent() -> OutreachAgent:
+    global _outreach_agent
+    if _outreach_agent is None:
+        _outreach_agent = OutreachAgent()
+    return _outreach_agent
 
 
 # --------------------------------------------------------------------------
@@ -531,3 +543,806 @@ def sdr_dashboard(request):
     except Exception as exc:
         logger.error("SDR dashboard error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Campaign serialiser helpers
+# ==========================================================================
+
+def _serialize_campaign(c: SDRCampaign) -> dict:
+    return {
+        'id': c.id,
+        'name': c.name,
+        'description': c.description,
+        'status': c.status,
+        'sender_name': c.sender_name,
+        'sender_title': c.sender_title,
+        'sender_company': c.sender_company,
+        'from_email': c.from_email,
+        'smtp_host': c.smtp_host,
+        'smtp_port': c.smtp_port,
+        'smtp_username': c.smtp_username,
+        'smtp_use_tls': c.smtp_use_tls,
+        'imap_host': c.imap_host,
+        'imap_port': c.imap_port,
+        'calendar_link': c.calendar_link,
+        'start_date': c.start_date if isinstance(c.start_date, str) else (c.start_date.isoformat() if c.start_date else None),
+        'end_date': c.end_date if isinstance(c.end_date, str) else (c.end_date.isoformat() if c.end_date else None),
+        'auto_check_replies': c.auto_check_replies,
+        'last_replies_checked_at': c.last_replies_checked_at.isoformat() if c.last_replies_checked_at else None,
+        'activated_at': c.activated_at.isoformat() if c.activated_at else None,
+        'total_leads': c.total_leads,
+        'emails_sent': c.emails_sent,
+        'replies_received': c.replies_received,
+        'meetings_booked': c.meetings_booked,
+        'created_at': c.created_at.isoformat(),
+        'updated_at': c.updated_at.isoformat(),
+    }
+
+
+def _serialize_step(s: SDRCampaignStep) -> dict:
+    return {
+        'id': s.id,
+        'campaign_id': s.campaign_id,
+        'step_order': s.step_order,
+        'step_type': s.step_type,
+        'delay_days': s.delay_days,
+        'name': s.name,
+        'subject_template': s.subject_template,
+        'body_template': s.body_template,
+        'ai_personalize': s.ai_personalize,
+        'is_active': s.is_active,
+    }
+
+
+def _serialize_enrollment(e: SDRCampaignEnrollment) -> dict:
+    lead = e.lead
+    total_steps = e.campaign.steps.filter(is_active=True).count()
+    logs = list(e.logs.order_by('-created_at').values(
+        'id', 'step_order', 'action_type', 'status', 'subject_sent', 'body_sent', 'error_message', 'sent_at'
+    )[:20])
+    meeting = e.meetings.order_by('-created_at').first() if hasattr(e, 'meetings') else None
+    return {
+        'id': e.id,
+        'campaign_id': e.campaign_id,
+        'lead_id': lead.id,
+        'lead_name': lead.display_name,
+        'lead_email': lead.email,
+        'lead_company': lead.company_name,
+        'lead_job_title': lead.job_title,
+        'lead_temperature': lead.temperature,
+        'lead_score': lead.score,
+        'status': e.status,
+        'current_step': e.current_step,
+        'total_steps': total_steps,
+        'next_action_at': e.next_action_at.isoformat() if e.next_action_at else None,
+        'replied_at': e.replied_at.isoformat() if e.replied_at else None,
+        'reply_content': e.reply_content or '',
+        'reply_sentiment': e.reply_sentiment or '',
+        'meeting_id': meeting.id if meeting else None,
+        'meeting_status': meeting.status if meeting else None,
+        'enrolled_at': e.enrolled_at.isoformat(),
+        'completed_at': e.completed_at.isoformat() if e.completed_at else None,
+        'logs': logs,
+    }
+
+
+def _serialize_meeting(m: SDRMeeting) -> dict:
+    return {
+        'id': m.id,
+        'lead_id': m.lead_id,
+        'lead_name': m.lead.display_name,
+        'lead_email': m.lead.email,
+        'lead_company': m.lead.company_name,
+        'enrollment_id': m.enrollment_id,
+        'title': m.title,
+        'notes': m.notes,
+        'reply_snippet': m.reply_snippet,
+        'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+        'duration_minutes': m.duration_minutes,
+        'status': m.status,
+        'calendar_link': m.calendar_link,
+        'created_at': m.created_at.isoformat(),
+    }
+
+
+# ==========================================================================
+# Campaigns list / create
+# ==========================================================================
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_campaigns_list(request):
+    company_user = request.user
+
+    if request.method == 'GET':
+        try:
+            campaigns = SDRCampaign.objects.filter(company_user=company_user)
+            return Response({
+                'status': 'success',
+                'data': [_serialize_campaign(c) for c in campaigns],
+            })
+        except Exception as exc:
+            logger.error("List campaigns error: %s", exc)
+            return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+    # POST — create campaign
+    try:
+        d = request.data
+        start_date = d.get('start_date') or None  # ISO date string or None
+        # If start_date provided → status='scheduled' (Celery will auto-activate)
+        initial_status = 'scheduled' if start_date else 'draft'
+
+        campaign = SDRCampaign.objects.create(
+            company_user=company_user,
+            name=d.get('name', 'New Campaign'),
+            description=d.get('description', ''),
+            sender_name=d.get('sender_name', ''),
+            sender_title=d.get('sender_title', ''),
+            sender_company=d.get('sender_company', ''),
+            from_email=d.get('from_email', ''),
+            smtp_host=d.get('smtp_host', ''),
+            smtp_port=int(d.get('smtp_port', 587)),
+            smtp_username=d.get('smtp_username', ''),
+            smtp_password=d.get('smtp_password', ''),
+            smtp_use_tls=bool(d.get('smtp_use_tls', True)),
+            calendar_link=d.get('calendar_link', ''),
+            start_date=start_date,
+            auto_check_replies=bool(d.get('auto_check_replies', True)),
+            status=initial_status,
+        )
+
+        # Auto-generate steps if requested
+        if d.get('generate_steps', True):
+            icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+            steps_data = _get_outreach_agent().generate_campaign_steps(campaign, icp)
+            for sd in steps_data:
+                SDRCampaignStep.objects.create(
+                    campaign=campaign,
+                    step_order=sd.get('step_order', 1),
+                    step_type=sd.get('step_type', 'email'),
+                    delay_days=sd.get('delay_days', 1),
+                    name=sd.get('name', ''),
+                    subject_template=sd.get('subject_template', ''),
+                    body_template=sd.get('body_template', ''),
+                )
+
+        # If start_date is today and steps exist, save() will auto-activate
+        if start_date:
+            campaign.end_date = campaign.derive_end_date()
+            campaign.save()  # triggers auto-activation hook
+
+        return Response({'status': 'success', 'data': _serialize_campaign(campaign)}, status=201)
+    except Exception as exc:
+        logger.error("Create campaign error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Campaign detail — get / update / delete
+# ==========================================================================
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_campaign_detail(request, campaign_id):
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    if request.method == 'GET':
+        data = _serialize_campaign(campaign)
+        data['steps'] = [_serialize_step(s) for s in campaign.steps.filter(is_active=True)]
+        return Response({'status': 'success', 'data': data})
+
+    if request.method == 'PUT':
+        try:
+            d = request.data
+            for field in ['name', 'description', 'status', 'sender_name', 'sender_title',
+                          'sender_company', 'from_email', 'smtp_host', 'smtp_username',
+                          'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies']:
+                if field in d:
+                    setattr(campaign, field, d[field])
+            if 'smtp_port' in d:
+                campaign.smtp_port = int(d['smtp_port'])
+            if 'imap_port' in d:
+                campaign.imap_port = int(d['imap_port'])
+            if 'smtp_password' in d and d['smtp_password']:
+                campaign.smtp_password = d['smtp_password']
+            if 'start_date' in d:
+                campaign.start_date = d['start_date'] or None
+                if campaign.start_date and campaign.status == 'draft':
+                    campaign.status = 'scheduled'
+            campaign.save()
+            return Response({'status': 'success', 'data': _serialize_campaign(campaign)})
+        except Exception as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+    # DELETE
+    campaign.delete()
+    return Response({'status': 'success', 'message': 'Campaign deleted.'})
+
+
+# ==========================================================================
+# Clear all enrollments / leads from a campaign
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_clear_campaign_leads(request, campaign_id):
+    """Delete every enrollment (and related logs/meetings) for a campaign and reset counters."""
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        # Cascade: logs and meetings are FK'd to enrollment (on_delete=CASCADE)
+        deleted_count, _ = campaign.enrollments.all().delete()
+        campaign.emails_sent = 0
+        campaign.replies_received = 0
+        campaign.meetings_booked = 0
+        campaign.total_leads = 0
+        campaign.save(update_fields=['emails_sent', 'replies_received', 'meetings_booked', 'total_leads'])
+        logger.info("SDR: cleared %d enrollments from campaign %s", deleted_count, campaign_id)
+        return Response({
+            'status': 'success',
+            'message': f'Cleared {deleted_count} enrollment records.',
+            'data': _serialize_campaign(campaign),
+        })
+    except Exception as exc:
+        logger.error("SDR clear leads error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Campaign steps — list / add
+# ==========================================================================
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_campaign_steps(request, campaign_id):
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    if request.method == 'GET':
+        steps = [_serialize_step(s) for s in campaign.steps.all()]
+        return Response({'status': 'success', 'data': steps})
+
+    # POST — add a step
+    try:
+        d = request.data
+        step = SDRCampaignStep.objects.create(
+            campaign=campaign,
+            step_order=d.get('step_order', campaign.steps.count() + 1),
+            step_type=d.get('step_type', 'email'),
+            delay_days=int(d.get('delay_days', 1)),
+            name=d.get('name', ''),
+            subject_template=d.get('subject_template', ''),
+            body_template=d.get('body_template', ''),
+            ai_personalize=bool(d.get('ai_personalize', True)),
+        )
+        return Response({'status': 'success', 'data': _serialize_step(step)}, status=201)
+    except Exception as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Campaign step detail — update / delete
+# ==========================================================================
+
+@api_view(['PUT', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_campaign_step_detail(request, campaign_id, step_id):
+    company_user = request.user
+    try:
+        step = SDRCampaignStep.objects.get(
+            id=step_id, campaign__id=campaign_id, campaign__company_user=company_user
+        )
+    except SDRCampaignStep.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Step not found.'}, status=404)
+
+    if request.method == 'DELETE':
+        step.delete()
+        return Response({'status': 'success', 'message': 'Step deleted.'})
+
+    # PUT
+    try:
+        d = request.data
+        for field in ['step_type', 'name', 'subject_template', 'body_template']:
+            if field in d:
+                setattr(step, field, d[field])
+        if 'step_order' in d:
+            step.step_order = int(d['step_order'])
+        if 'delay_days' in d:
+            step.delay_days = int(d['delay_days'])
+        if 'ai_personalize' in d:
+            step.ai_personalize = bool(d['ai_personalize'])
+        step.save()
+        return Response({'status': 'success', 'data': _serialize_step(step)})
+    except Exception as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Generate steps with AI
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_generate_steps(request, campaign_id):
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        # Delete existing steps first
+        campaign.steps.all().delete()
+
+        icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+        steps_data = _get_outreach_agent().generate_campaign_steps(campaign, icp)
+
+        created_steps = []
+        for sd in steps_data:
+            step = SDRCampaignStep.objects.create(
+                campaign=campaign,
+                step_order=sd.get('step_order', 1),
+                step_type=sd.get('step_type', 'email'),
+                delay_days=sd.get('delay_days', 1),
+                name=sd.get('name', ''),
+                subject_template=sd.get('subject_template', ''),
+                body_template=sd.get('body_template', ''),
+            )
+            created_steps.append(_serialize_step(step))
+
+        return Response({'status': 'success', 'data': created_steps})
+    except Exception as exc:
+        logger.error("Generate steps error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Enroll leads into campaign
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_enroll_leads(request, campaign_id):
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        lead_ids = request.data.get('lead_ids', [])
+        if not lead_ids:
+            return Response({'status': 'error', 'message': 'No lead_ids provided.'}, status=400)
+
+        # Require explicit SMTP credentials — never fall back to global Django email settings
+        if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
+            return Response({
+                'status': 'error',
+                'message': 'Campaign SMTP not configured. Open Settings → Email/SMTP and add your email credentials before enrolling leads.',
+            }, status=400)
+
+        leads = SDRLead.objects.filter(id__in=lead_ids, company_user=company_user)
+        first_step = campaign.steps.filter(is_active=True).order_by('step_order').first()
+
+        enrolled = skipped = 0
+        for lead in leads:
+            already = SDRCampaignEnrollment.objects.filter(campaign=campaign, lead=lead).exists()
+            if already:
+                skipped += 1
+                continue
+
+            next_action = None
+            if first_step:
+                # delay_days=1 means "Day 1" = send immediately on enrollment day
+                next_action = timezone.now() + timezone.timedelta(days=max(0, first_step.delay_days - 1))
+
+            SDRCampaignEnrollment.objects.create(
+                campaign=campaign,
+                lead=lead,
+                status='active',
+                current_step=0,
+                next_action_at=next_action,
+            )
+            enrolled += 1
+
+        campaign.total_leads = campaign.enrollments.count()
+        campaign.status = 'active'
+        campaign.save(update_fields=['total_leads', 'status'])
+
+        return Response({
+            'status': 'success',
+            'enrolled': enrolled,
+            'skipped': skipped,
+            'total_leads': campaign.total_leads,
+        })
+    except Exception as exc:
+        logger.error("Enroll leads error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Campaign enrollments list
+# ==========================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_campaign_enrollments(request, campaign_id):
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        enrollments = campaign.enrollments.select_related('lead').order_by('-enrolled_at')
+        return Response({
+            'status': 'success',
+            'data': [_serialize_enrollment(e) for e in enrollments],
+        })
+    except Exception as exc:
+        logger.error("List enrollments error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Mark enrollment as replied
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_mark_replied(request, campaign_id, enrollment_id):
+    company_user = request.user
+    try:
+        enrollment = SDRCampaignEnrollment.objects.get(
+            id=enrollment_id, campaign__id=campaign_id, campaign__company_user=company_user
+        )
+    except SDRCampaignEnrollment.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Enrollment not found.'}, status=404)
+
+    try:
+        d = request.data
+        reply_content = d.get('reply_content', '')
+
+        # AI sentiment analysis
+        agent = _get_outreach_agent()
+        if reply_content:
+            sentiment_result = agent.analyze_reply_sentiment(reply_content)
+            sentiment = sentiment_result['sentiment']
+            is_interested = sentiment_result['is_interested']
+        else:
+            # Manual override — trust the frontend value
+            sentiment = d.get('reply_sentiment', 'positive')
+            is_interested = sentiment == 'positive'
+
+        enrollment.status = 'replied'
+        enrollment.replied_at = timezone.now()
+        enrollment.reply_content = reply_content
+        enrollment.reply_sentiment = sentiment
+        enrollment.save()
+
+        campaign = enrollment.campaign
+        lead = enrollment.lead
+
+        if is_interested:
+            lead.status = 'replied'
+            lead.save(update_fields=['status'])
+            campaign.replies_received = (campaign.replies_received or 0) + 1
+            campaign.save(update_fields=['replies_received'])
+
+            # Create meeting record (scheduling agent handoff)
+            meeting, created = SDRMeeting.objects.get_or_create(
+                enrollment=enrollment,
+                defaults={
+                    'company_user': company_user,
+                    'lead': lead,
+                    'title': f'Discovery Call with {lead.display_name}',
+                    'reply_snippet': reply_content[:500],
+                    'calendar_link': campaign.calendar_link or '',
+                    'status': 'pending',
+                }
+            )
+            if created:
+                campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
+                campaign.save(update_fields=['meetings_booked'])
+                # Send scheduling email
+                try:
+                    agent.send_scheduling_email(campaign, lead, campaign.calendar_link or '')
+                except Exception as exc:
+                    logger.warning("Scheduling email failed for lead %s: %s", lead.id, exc)
+
+        return Response({
+            'status': 'success',
+            'sentiment': sentiment,
+            'is_interested': is_interested,
+            'meeting_created': is_interested,
+            'data': _serialize_enrollment(enrollment),
+        })
+    except Exception as exc:
+        logger.error("Mark replied error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Process outreach — send due steps for campaign
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_process_outreach(request, campaign_id):
+    """Send the next due outreach step for all active enrollments in the campaign."""
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        now = timezone.now()
+        force = request.data.get('force', True)  # default: force-send regardless of timing
+
+        qs = campaign.enrollments.filter(status='active')
+        if not force:
+            qs = qs.filter(
+                Q(next_action_at__lte=now) | Q(next_action_at__isnull=True)
+            )
+        due = qs.select_related('lead')
+
+        if not due.exists():
+            return Response({
+                'status': 'success',
+                'message': 'No active enrollments to process.',
+                'processed': 0,
+                'sent': 0,
+                'failed': 0,
+                'skipped': 0,
+                'results': [],
+            })
+
+        agent = _get_outreach_agent()
+        results = []
+        for enrollment in due:
+            result = agent.process_enrollment(enrollment)
+            results.append(result)
+
+        sent = sum(1 for r in results if r['status'] == 'sent')
+        failed = sum(1 for r in results if r['status'] == 'failed')
+        skipped = sum(1 for r in results if r['status'] == 'skipped')
+        errors = [r['error'] for r in results if r.get('error')]
+
+        return Response({
+            'status': 'success',
+            'processed': len(results),
+            'sent': sent,
+            'failed': failed,
+            'skipped': skipped,
+            'errors': errors,
+            'results': results,
+        })
+    except Exception as exc:
+        logger.error("Process outreach error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_reset_enrollment(request, campaign_id, enrollment_id):
+    """Reset an enrollment back to active so it can be re-processed."""
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        enrollment = SDRCampaignEnrollment.objects.get(id=enrollment_id, campaign=campaign)
+    except SDRCampaignEnrollment.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Enrollment not found.'}, status=404)
+
+    enrollment.status = 'active'
+    enrollment.current_step = 0
+    enrollment.next_action_at = None
+    enrollment.replied_at = None
+    enrollment.reply_content = ''
+    enrollment.reply_sentiment = ''
+    enrollment.completed_at = None
+    enrollment.save()
+
+    return Response({'status': 'success', 'message': f'Enrollment for {enrollment.lead.display_name} reset to active.'})
+
+
+# ==========================================================================
+# Check inbox for replies — IMAP polling
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_check_replies(request, campaign_id):
+    """
+    Poll IMAP inbox for replies from enrolled leads.
+    For each reply found: runs AI sentiment, marks enrollment replied, creates meeting if positive.
+    """
+    company_user = request.user
+    try:
+        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
+    except SDRCampaign.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+
+    try:
+        enrollments = list(
+            campaign.enrollments
+            .filter(status__in=['active', 'completed'])
+            .exclude(lead__email='')
+            .select_related('lead')
+            .prefetch_related('logs')
+        )
+
+        agent = _get_outreach_agent()
+        replies_found = agent.check_inbox_for_replies(campaign, enrollments)
+
+        new_replies = 0
+        meetings_created = 0
+        details = []
+
+        for r in replies_found:
+            enrollment = r['enrollment']
+            reply_text = r['reply_text']
+
+            # Skip if already marked replied
+            if enrollment.status == 'replied':
+                continue
+
+            sentiment_result = agent.analyze_reply_sentiment(reply_text)
+            sentiment = sentiment_result['sentiment']
+            is_interested = sentiment_result['is_interested']
+
+            enrollment.status = 'replied'
+            enrollment.replied_at = timezone.now()
+            enrollment.reply_content = reply_text[:2000]
+            enrollment.reply_sentiment = sentiment
+            enrollment.save()
+
+            campaign.replies_received = (campaign.replies_received or 0) + 1
+            new_replies += 1
+
+            if is_interested:
+                enrollment.lead.status = 'replied'
+                enrollment.lead.save(update_fields=['status'])
+
+                meeting, created = SDRMeeting.objects.get_or_create(
+                    enrollment=enrollment,
+                    defaults={
+                        'company_user': company_user,
+                        'lead': enrollment.lead,
+                        'title': f'Discovery Call with {enrollment.lead.display_name}',
+                        'reply_snippet': reply_text[:500],
+                        'calendar_link': campaign.calendar_link or '',
+                        'status': 'pending',
+                    }
+                )
+                if created:
+                    meetings_created += 1
+                    campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
+                    try:
+                        agent.send_scheduling_email(campaign, enrollment.lead, campaign.calendar_link or '')
+                    except Exception as exc:
+                        logger.warning("Scheduling email failed: %s", exc)
+
+            details.append({
+                'lead': enrollment.lead.display_name,
+                'email': r['sender_email'],
+                'sentiment': sentiment,
+                'is_interested': is_interested,
+                'subject': r.get('subject', ''),
+            })
+
+        campaign.save(update_fields=['replies_received', 'meetings_booked'])
+
+        return Response({
+            'status': 'success',
+            'checked': len(enrollments),
+            'new_replies': new_replies,
+            'meetings_created': meetings_created,
+            'details': details,
+        })
+    except Exception as exc:
+        logger.error("Check replies error for campaign %s: %s", campaign_id, exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Meetings — scheduling agent output
+# ==========================================================================
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_meetings_list(request):
+    company_user = request.user
+
+    if request.method == 'GET':
+        try:
+            status_filter = request.GET.get('status', '')
+            qs = SDRMeeting.objects.filter(company_user=company_user).select_related('lead', 'enrollment')
+            if status_filter:
+                qs = qs.filter(status=status_filter)
+            return Response([_serialize_meeting(m) for m in qs])
+        except Exception as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+    # POST — create manual meeting
+    try:
+        d = request.data
+        lead_id = d.get('lead_id')
+        if not lead_id:
+            return Response({'status': 'error', 'message': 'lead_id required'}, status=400)
+        lead = SDRLead.objects.get(id=lead_id, company_user=company_user)
+        meeting = SDRMeeting.objects.create(
+            company_user=company_user,
+            lead=lead,
+            title=d.get('title', f'Discovery Call with {lead.display_name}'),
+            notes=d.get('notes', ''),
+            scheduled_at=d.get('scheduled_at') or None,
+            duration_minutes=d.get('duration_minutes', 30),
+            calendar_link=d.get('calendar_link', ''),
+            status=d.get('status', 'pending'),
+        )
+        return Response({'status': 'success', 'data': _serialize_meeting(meeting)}, status=201)
+    except SDRLead.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Lead not found.'}, status=404)
+    except Exception as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_meeting_detail(request, meeting_id):
+    company_user = request.user
+    try:
+        meeting = SDRMeeting.objects.get(id=meeting_id, company_user=company_user)
+    except SDRMeeting.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Meeting not found.'}, status=404)
+
+    if request.method == 'GET':
+        return Response(_serialize_meeting(meeting))
+
+    if request.method == 'PUT':
+        try:
+            d = request.data
+            for field in ('title', 'notes', 'status', 'calendar_link', 'duration_minutes'):
+                if field in d:
+                    setattr(meeting, field, d[field])
+            if 'scheduled_at' in d:
+                meeting.scheduled_at = d['scheduled_at'] or None
+            meeting.save()
+            return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
+        except Exception as exc:
+            return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+    # DELETE
+    meeting.delete()
+    return Response({'status': 'success'})

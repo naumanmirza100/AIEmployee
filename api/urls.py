@@ -497,6 +497,7 @@ urlpatterns = [
     re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/?$', reply_draft_api.get_inbox_email, name='reply_draft_get_inbox_email'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/?$', reply_draft_api.list_inbox_attachments, name='reply_draft_list_attachments'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/fetch-attachments/?$', reply_draft_api.fetch_inbox_attachments, name='reply_draft_fetch_attachments'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/(?P<attachment_id>\d+)/download/?$', reply_draft_api.download_inbox_attachment, name='reply_draft_download_attachment'),
     re_path(r'^reply-draft/reply/(?P<reply_id>\d+)/?$', reply_draft_api.get_reply, name='reply_draft_get_reply'),
     re_path(r'^reply-draft/campaigns/?$', reply_draft_api.list_campaigns, name='reply_draft_list_campaigns'),
@@ -579,6 +580,21 @@ urlpatterns = [
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/qualify/?$', sdr_api.qualify_lead, name='sdr_qualify_lead'),  # POST
+    # Campaigns
+    re_path(r'^sdr/campaigns/?$', sdr_api.sdr_campaigns_list, name='sdr_campaigns_list'),  # GET, POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/?$', sdr_api.sdr_campaign_detail, name='sdr_campaign_detail'),  # GET, PUT, DELETE
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/?$', sdr_api.sdr_campaign_steps, name='sdr_campaign_steps'),  # GET, POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/(?P<step_id>\d+)/?$', sdr_api.sdr_campaign_step_detail, name='sdr_campaign_step_detail'),  # PUT, DELETE
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/generate-steps/?$', sdr_api.sdr_generate_steps, name='sdr_generate_steps'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enroll/?$', sdr_api.sdr_enroll_leads, name='sdr_enroll_leads'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/contacts/?$', sdr_api.sdr_campaign_enrollments, name='sdr_campaign_enrollments'),  # GET
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/process/?$', sdr_api.sdr_process_outreach, name='sdr_process_outreach'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reply/?$', sdr_api.sdr_mark_replied, name='sdr_mark_replied'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reset/?$', sdr_api.sdr_reset_enrollment, name='sdr_reset_enrollment'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/check-replies/?$', sdr_api.sdr_check_replies, name='sdr_check_replies'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
+    re_path(r'^sdr/meetings/?$', sdr_api.sdr_meetings_list, name='sdr_meetings_list'),  # GET, POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/?$', sdr_api.sdr_meeting_detail, name='sdr_meeting_detail'),  # GET, PUT, DELETE
     # ---------------------------------------------------------------------
     # HR Support Agent
     # ---------------------------------------------------------------------

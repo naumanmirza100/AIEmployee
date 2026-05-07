@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from django.db.models import Count, Max, Prefetch, Q
 from django.utils import timezone
 
@@ -23,25 +24,38 @@ from core.models import CompanyUser
 from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail, InboxAttachment, ReplyDraftAttachment
+from reply_draft_agent.tasks import delete_reply_draft_account_data
 from reply_draft_agent.permissions import company_has_module
 
 logger = logging.getLogger(__name__)
 
 
 def _get_or_create_user_for_company_user(company_user):
-    """Bridge CompanyUser → Django User. Copied from api/views/marketing_agent.py."""
+    """Bridge CompanyUser → Django User. Copied from api/views/marketing_agent.py.
+
+    Uses get_or_create on `username` (the unique column) so concurrent first-visit
+    requests can't race each other into a UNIQUE-constraint violation on auth_user.
+    """
     try:
         return User.objects.get(email=company_user.email)
     except User.DoesNotExist:
-        username = f"company_user_{company_user.id}_{company_user.email}"
-        return User.objects.create_user(
-            username=username,
-            email=company_user.email,
-            password=None,
-            first_name=company_user.full_name.split()[0] if company_user.full_name else '',
-            last_name=' '.join(company_user.full_name.split()[1:])
-                if company_user.full_name and len(company_user.full_name.split()) > 1 else '',
-        )
+        pass
+    username = f"company_user_{company_user.id}_{company_user.email}"
+    first_name = company_user.full_name.split()[0] if company_user.full_name else ''
+    last_name = (
+        ' '.join(company_user.full_name.split()[1:])
+        if company_user.full_name and len(company_user.full_name.split()) > 1
+        else ''
+    )
+    user, _ = User.objects.get_or_create(
+        username=username,
+        defaults={
+            'email': company_user.email,
+            'first_name': first_name,
+            'last_name': last_name,
+        },
+    )
+    return user
 
 
 def _enforce_module(company_user):
@@ -301,6 +315,12 @@ def _serialize_inbox_email(m, *, include_body=False):
     if include_body:
         out['body'] = m.body or ''
         body_html = getattr(m, 'body_html', '') or ''
+        # Frontend uses this to decide whether to call the lazy-fetch
+        # endpoint before rendering the attachment strip. Old rows from
+        # before the lazy-attachment refactor were backfilled True in the
+        # 0013 migration, so they continue to render straight from
+        # m.attachments without an extra round-trip.
+        out['attachments_fetched'] = bool(getattr(m, 'attachments_fetched', True))
 
         # Pull attachments once — used both for the downloadable list and
         # for cid: rewrite below. Inline parts are filtered out of the user-
@@ -453,6 +473,11 @@ def _serialize_draft(d):
         'inbox_email_id': d.inbox_email_id,
         'original_subject': d.get_original_subject(),
         'original_body': d.get_original_body(),
+        # HTML source of the original message when available (e.g. for
+        # IMAP-synced HTML mail). The frontend prefers this over the plain
+        # `original_body` when rendering the thread-context pane so the
+        # original email looks the same as it does in the Inbox tab.
+        'original_body_html': d.get_original_body_html(),
         'regeneration_count': d.regeneration_count,
         'created_at': d.created_at.isoformat(),
         'updated_at': d.updated_at.isoformat() if d.updated_at else None,
@@ -471,8 +496,9 @@ def _parse_days_filter(value):
     """Return a timezone-aware cutoff datetime, or None for 'all time'.
 
     Missing / blank / 'all' means no cutoff — the natural cap is whatever is
-    already stored (Celery always pre-syncs the full 120-day window on a cron,
-    so the dropdown is a pure view filter). Specific integers narrow the view.
+    already stored (Celery pre-syncs the per-account rolling window on a
+    cron, default 60 days; see sync_inbox.DEFAULT_SINCE_DAYS), so the
+    dropdown is a pure view filter. Specific integers narrow the view.
     """
     if value is None or value == '' or str(value).lower() == 'all':
         return None
@@ -603,7 +629,7 @@ def list_pending_replies(request):
     list is empty by design.
 
     Query params:
-      - days: 1 / 7 / 30 / 60 / 90 / 120 / 'all' (default: all stored rows;
+      - days: 1 / 7 / 30 / 60 / 90 / 'all' (default: all stored rows;
               the underlying storage window is set per-account via Sync depth)
       - direction: 'in' (Inbox tab — default, backwards-compat)
                    'out' (Sent tab — populated by the IMAP Sent-folder sync)
@@ -659,6 +685,37 @@ def list_pending_replies(request):
     )
     if days_cutoff is not None:
         inbox_qs = inbox_qs.filter(received_at__gte=days_cutoff)
+
+    # Sent tab: hide IMAP-synced copies of messages we tried to send but
+    # the SMTP provider rejected. Gmail in particular retains a Sent-folder
+    # copy of each 552-rejected ("dangerous content") attempt with that
+    # attempt's own Message-ID. Without this filter the user sees those
+    # in our Sent tab as if the send had succeeded.
+    #
+    # We read from `attempted_message_ids` (newline-separated, every retry
+    # appended) so a draft that was retried multiple times suppresses ALL
+    # of its prior IDs, not just the latest. Falls back to the legacy
+    # `attempted_message_id` for any rows the data migration missed.
+    if direction == 'out':
+        failed_drafts = (
+            ReplyDraft.objects
+            .filter(
+                owner_id__in=user_ids,
+                status__in=('failed', 'rejected'),
+            )
+            .values_list('attempted_message_ids', 'attempted_message_id')
+        )
+        failed_attempted_ids = set()
+        for ids_text, legacy_id in failed_drafts:
+            for tok in (ids_text or '').replace(',', '\n').split('\n'):
+                tok = tok.strip()
+                if tok:
+                    failed_attempted_ids.add(tok)
+            legacy = (legacy_id or '').strip()
+            if legacy:
+                failed_attempted_ids.add(legacy)
+        if failed_attempted_ids:
+            inbox_qs = inbox_qs.exclude(message_id__in=failed_attempted_ids)
     # Cap at 500 — the previous 2000 was a worst-case safety net but with
     # body deferred + paged list, the user only ever scrolls through the
     # most recent few hundred. A smaller cap also keeps the JSON payload
@@ -846,6 +903,205 @@ def download_inbox_attachment(request, email_id, attachment_id):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def fetch_inbox_attachments(request, email_id):
+    """Lazily download attachments for one InboxEmail from IMAP.
+
+    Sync deliberately stores rows with ``attachments_fetched=False`` and no
+    InboxAttachment children — extracting attachments inline was the
+    dominant cost of a fresh sync. The frontend calls this endpoint when
+    the user opens an email; we connect to IMAP, find the message by its
+    Message-ID, parse it, persist any attachments, flip the flag, and
+    return the populated list.
+
+    Idempotent: if the row is already flagged ``attachments_fetched=True``
+    we just return whatever rows are already in InboxAttachment for that
+    email. That handles the common case of an email being opened twice
+    without doing a useless IMAP round-trip.
+    """
+    import imaplib
+    import email as email_lib
+    import hashlib
+
+    from django.core.files.base import ContentFile
+
+    gate = _enforce_module(request.user)
+    if gate is not None:
+        return gate
+
+    user_ids = _company_bridge_user_ids(request.user)
+    reply_account = _get_reply_account(user_ids)
+    if reply_account is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    inbox = (
+        InboxEmail.objects
+        .filter(id=email_id, owner_id__in=user_ids, email_account_id=reply_account.id)
+        .first()
+    )
+    if inbox is None:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    def _serialize_atts(qs):
+        out = []
+        for att in qs:
+            if att.is_inline:
+                continue
+            out.append({
+                'id': att.id,
+                'filename': att.filename,
+                'content_type': att.content_type,
+                'size_bytes': att.size_bytes,
+                'download_url': f'/api/reply-draft/inbox/{inbox.id}/attachments/{att.id}/download',
+            })
+        return out
+
+    # Fast-path: already fetched. Return what we have without touching IMAP.
+    if inbox.attachments_fetched:
+        existing = InboxAttachment.objects.filter(inbox_email_id=inbox.id).only(
+            'id', 'filename', 'content_type', 'size_bytes', 'is_inline',
+        )
+        return Response({
+            'status': 'success',
+            'data': _serialize_atts(existing),
+            'fetched': True,
+        })
+
+    # Need to fetch from IMAP. Verify the account still has IMAP credentials —
+    # if a user wiped them after sync, surface a clear error instead of a
+    # cryptic IMAP timeout.
+    if not (reply_account.imap_host and reply_account.imap_username and reply_account.imap_password):
+        return Response({
+            'status': 'error',
+            'message': 'IMAP credentials missing on the Reply Draft account; cannot fetch attachments.',
+            'error': 'imap_not_configured',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if not inbox.message_id:
+        # No Message-ID = can't locate the email on IMAP. Mark as fetched
+        # (with no attachments) so we don't keep trying.
+        InboxEmail.objects.filter(pk=inbox.pk).update(attachments_fetched=True)
+        return Response({'status': 'success', 'data': [], 'fetched': True})
+
+    mail = None
+    try:
+        if reply_account.imap_use_ssl:
+            mail = imaplib.IMAP4_SSL(reply_account.imap_host, reply_account.imap_port or 993)
+        else:
+            mail = imaplib.IMAP4(reply_account.imap_host, reply_account.imap_port or 143)
+            if reply_account.imap_port == 143:
+                mail.starttls()
+        mail.login(reply_account.imap_username, reply_account.imap_password)
+
+        # Search both INBOX and (if direction == 'out') Sent for the message.
+        # Most rows are direction='in' so INBOX-first hits the cache fast;
+        # 'out' rows came from the Sent folder during sync.
+        folders_to_try = ['INBOX']
+        if inbox.direction == 'out':
+            # Reuse the same Sent-folder probing the sync command does.
+            from marketing_agent.management.commands.sync_inbox import Command as SyncCmd
+            sent_folder = SyncCmd()._find_sent_folder(mail)
+            if sent_folder:
+                folders_to_try = [sent_folder, 'INBOX']
+
+        msg_obj = None
+        # IMAP HEADER search expects the header value WITHOUT angle brackets;
+        # adding them produces zero matches on Gmail. Quote so Message-IDs
+        # with special characters don't break the SEARCH command.
+        mid_for_search = inbox.message_id.strip().lstrip('<').rstrip('>')
+        for folder in folders_to_try:
+            try:
+                folder_arg = f'"{folder}"' if folder != 'INBOX' else 'INBOX'
+                status_sel, _ = mail.select(folder_arg, readonly=True)
+                if status_sel != 'OK':
+                    continue
+                status_search, search_data = mail.search(
+                    None, 'HEADER', 'Message-ID', f'"{mid_for_search}"'
+                )
+                if status_search != 'OK' or not search_data or not search_data[0]:
+                    continue
+                eid = search_data[0].split()[0]
+                status_fetch, msg_data = mail.fetch(eid, '(RFC822)')
+                if status_fetch != 'OK':
+                    continue
+                # imaplib returns a list mixing tuples and parens — the
+                # second element of the first tuple is the body bytes.
+                for entry in msg_data:
+                    if isinstance(entry, tuple) and len(entry) >= 2:
+                        msg_obj = email_lib.message_from_bytes(entry[1])
+                        break
+                if msg_obj is not None:
+                    break
+            except Exception as inner_e:
+                logger.warning(
+                    'fetch_inbox_attachments: probe failed in %r for email %s: %s',
+                    folder, inbox.id, inner_e,
+                )
+                continue
+
+        if msg_obj is None:
+            # Email is no longer on the IMAP server (deleted/expunged) —
+            # mark as fetched so we don't retry on every open.
+            InboxEmail.objects.filter(pk=inbox.pk).update(attachments_fetched=True)
+            return Response({'status': 'success', 'data': [], 'fetched': True})
+
+        # Reuse the sync command's attachment walker so behavior stays
+        # identical to what an inline-extracted email would have produced.
+        from marketing_agent.management.commands.sync_inbox import Command as SyncCmd
+        atts = SyncCmd().get_email_attachments(msg_obj)
+
+        created = []
+        for att in atts:
+            try:
+                obj = InboxAttachment(
+                    inbox_email_id=inbox.id,
+                    filename=att['filename'],
+                    content_type=att.get('content_type', ''),
+                    size_bytes=att.get('size_bytes', 0),
+                    sha256=att.get('sha256', ''),
+                    content_id=att.get('content_id', ''),
+                    is_inline=att.get('is_inline', False),
+                )
+                obj.file.save(att['filename'], ContentFile(att['data']), save=False)
+                obj.save()
+                created.append(obj)
+            except Exception as e:
+                logger.warning(
+                    'fetch_inbox_attachments: failed to persist %r on email %s: %s',
+                    att.get('filename', ''), inbox.id, e,
+                )
+
+        InboxEmail.objects.filter(pk=inbox.pk).update(attachments_fetched=True)
+        return Response({
+            'status': 'success',
+            'data': _serialize_atts(created),
+            'fetched': True,
+        })
+    except imaplib.IMAP4.error as e:
+        logger.exception('fetch_inbox_attachments: IMAP error for email %s', email_id)
+        return Response({
+            'status': 'error',
+            'message': f'IMAP error: {str(e)}',
+            'error': 'imap_error',
+        }, status=status.HTTP_502_BAD_GATEWAY)
+    except Exception as e:
+        logger.exception('fetch_inbox_attachments failed for email %s', email_id)
+        return Response({'status': 'error', 'message': str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        if mail is not None:
+            try:
+                mail.close()
+            except Exception:
+                pass
+            try:
+                mail.logout()
+            except Exception:
+                pass
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -925,6 +1181,15 @@ def list_sync_accounts(request):
             # inbox_count lets the frontend show a "Syncing your inbox…" card
             # when the account is configured but no rows have landed yet.
             'inbox_count': inbox_count,
+            # Live sync state — set by sync_inbox while it's actively
+            # running. Lets the UI render an honest "Syncing 30-day
+            # window…" banner instead of pretending the inbox is final.
+            'sync_in_progress': bool(getattr(a, 'sync_in_progress', False)),
+            'last_sync_completed_at': (
+                a.last_sync_completed_at.isoformat()
+                if getattr(a, 'last_sync_completed_at', None) else None
+            ),
+            'last_sync_stage': int(getattr(a, 'last_sync_stage', 0) or 0),
             'created_at': a.created_at.isoformat() if a.created_at else None,
             'updated_at': a.updated_at.isoformat() if a.updated_at else None,
         })
@@ -1397,17 +1662,42 @@ def create_reply_account(request):
         data = request.data or {}
 
         name = (data.get('name') or '').strip() or 'Reply Draft Inbox'
-        email = (data.get('email') or '').strip()
+        # Normalize to lowercase so two requests with mixed casing
+        # ("Foo@Gmail.com" vs "foo@gmail.com") can't bypass the
+        # cross-tenant uniqueness check below by claiming the same
+        # mailbox under different DB casings.
+        email = (data.get('email') or '').strip().lower()
         if not email:
             return Response(
                 {'status': 'error', 'message': 'Email is required.', 'error': 'validation'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Look up an existing same-owner row early. Marketing campaigns and
+        # the Reply Draft Agent share a single EmailAccount per (email,
+        # owner) by design — one row, two roles. If the user already
+        # added this mailbox on the marketing side, SMTP creds are
+        # already on the row; the reply-draft form can leave them blank
+        # and we'll preserve what marketing populated. Same protection
+        # the marketing-side create_email_account applies in the other
+        # direction.
+        existing = EmailAccount.objects.filter(owner=user, email__iexact=email).first()
+
         smtp_host = (data.get('smtp_host') or '').strip()
-        smtp_port = int(data.get('smtp_port') or 587)
-        smtp_username = (data.get('smtp_username') or '').strip() or email
+        smtp_port_raw = data.get('smtp_port')
+        smtp_port = int(smtp_port_raw) if smtp_port_raw else (existing.smtp_port if existing else 587)
+        smtp_username = (data.get('smtp_username') or '').strip()
         smtp_password = data.get('smtp_password') or ''
+
+        # SMTP requirement: needed only when the row doesn't already carry
+        # working creds. When dual-using a marketing account, leaving the
+        # form fields blank tells us "keep what's already there."
+        if not smtp_host:
+            smtp_host = (existing.smtp_host if existing else '') or ''
+        if not smtp_username:
+            smtp_username = (existing.smtp_username if existing else '') or email
+        if not smtp_password:
+            smtp_password = (existing.smtp_password if existing else '') or ''
         if not smtp_host or not smtp_password:
             return Response(
                 {'status': 'error', 'message': 'SMTP host and password are required.', 'error': 'validation'},
@@ -1441,10 +1731,39 @@ def create_reply_account(request):
                 'error': 'imap_auth_failed',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Duplicate check — create_unique is per (owner, email). If the user is
-        # re-attaching an existing account by the same email, just promote it
-        # instead of erroring out.
-        existing = EmailAccount.objects.filter(owner=user, email__iexact=email).first()
+        # Cross-tenant uniqueness: a mailbox should only be attached to
+        # ONE company at a time, regardless of role (marketing-sender or
+        # reply-agent inbox). Two companies sharing an email split SPF/
+        # DKIM/DMARC alignment, mix campaign analytics, race on IMAP
+        # sessions, and confuse the audit trail. Same rule the marketing
+        # create_email_account endpoint enforces.
+        # Runs AFTER the IMAP verify so an attacker can't probe whether
+        # some email is registered without proving they hold its
+        # credentials, and BEFORE any DB write.
+        cross_tenant = (
+            EmailAccount.objects
+            .filter(email__iexact=email)
+            .exclude(owner=user)
+            .first()
+        )
+        if cross_tenant is not None:
+            return Response({
+                'status': 'error',
+                'message': f'{email} is not available — please use a different mailbox.',
+                'error': 'email_already_used_by_another_company',
+            }, status=status.HTTP_409_CONFLICT)
+
+        # Upsert path. ``existing`` was looked up earlier so SMTP credential
+        # preservation could happen during validation; reuse the same row
+        # here. Fields the user explicitly set in the form overwrite; blank
+        # form fields fall back to what's already on the row (dual-use
+        # protection — re-attaching as reply-agent must not nuke the
+        # marketing-side creds and vice versa).
+        #
+        # Role flag ownership: this endpoint owns is_reply_agent_account
+        # only — flips it True and never touches is_marketing_account.
+        # That mirrors marketing_agent.create_email_account, which owns
+        # the marketing flag in the other direction.
         if existing:
             existing.name = name
             existing.account_type = data.get('account_type', existing.account_type or 'smtp')
@@ -1462,6 +1781,9 @@ def create_reply_account(request):
             existing.imap_use_ssl = bool(data.get('imap_use_ssl', True))
             existing.enable_imap_sync = True
             existing.is_reply_agent_account = True
+            # is_marketing_account left untouched — if the row was added
+            # to marketing first, it stays True (dual-use). If it wasn't,
+            # it stays False (reply-agent only).
             existing.is_active = True
             existing.save()
             account = existing
@@ -1486,6 +1808,12 @@ def create_reply_account(request):
                 enable_imap_sync=True,
                 is_active=True,
                 is_reply_agent_account=True,
+                # Reply-agent-only by default. The user clicked "Add" on
+                # the reply-draft side, not marketing. If they want this
+                # mailbox on the marketing list too, they'll add it
+                # separately there — that flips is_marketing_account
+                # True without disturbing the reply-agent role.
+                is_marketing_account=False,
             )
 
         # Single 120-day sync — batched IMAP fetches in sync_inbox bring
@@ -1509,6 +1837,18 @@ def create_reply_account(request):
                 'immediate_sync_queued': sync_queued,
             },
         }, status=status.HTTP_201_CREATED)
+    except IntegrityError:
+        # Race against a simultaneous create_reply_account from another
+        # company for the same email — the partial-unique constraint
+        # (unique_reply_agent_email) is the backstop for the app-level
+        # cross-tenant check above. Surface the same 409 message so the
+        # user sees a coherent story regardless of which layer caught it.
+        logger.info('create_reply_account: cross-tenant uniqueness race for %s', email)
+        return Response({
+            'status': 'error',
+            'message': f'{email} is not available — please use a different mailbox.',
+            'error': 'email_already_used_by_another_company',
+        }, status=status.HTTP_409_CONFLICT)
     except Exception as e:
         logger.exception('create_reply_account failed')
         return Response(
@@ -1521,13 +1861,34 @@ def create_reply_account(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def delete_reply_account(request):
-    """Detach and delete the Reply Draft Agent's EmailAccount.
+    """Detach the Reply Draft Agent's EmailAccount.
 
-    Cascades InboxEmail + ReplyDraft rows tied to this account (per the FK
-    on_delete behavior in the models). The UI gates this behind a confirm
-    dialog — there's no separate soft-detach mode because leaving orphaned
-    InboxEmail rows around after the user clicks "Delete" is more confusing
-    than cleaning them up.
+    Role-scoped: this endpoint owns ``is_reply_agent_account`` only and
+    never touches ``is_marketing_account``. Mirror of
+    marketing_agent.delete_email_account, which owns the marketing flag
+    in the other direction.
+
+    Behavior:
+    - All Reply-Draft data tied to this company is deleted regardless of
+      which side keeps the row. That includes:
+        * Inbox emails (InboxEmail rows with direction='in') AND
+          Sent emails (direction='out'). Same table; the delete catches
+          both. Cascades to InboxAttachment.
+        * Drafts of every flavor — compose drafts, drafts tied to an
+          InboxEmail, drafts tied to a campaign Reply. ReplyDraft is
+          owned by user_ids, so a single delete by owner wipes the lot.
+          Cascades to ReplyDraftAttachment.
+      The user clicked "Delete" to wipe the workspace clean, so we
+      remove the data even when the EmailAccount row itself stays for
+      marketing.
+    - The row's ``is_reply_agent_account`` flag flips to False — that
+      removes it from the reply-draft picker.
+    - If the row also has ``is_marketing_account=True``, we keep the
+      row in place. Marketing list still surfaces it, SMTP creds for
+      campaign sending stay intact, IMAP sync turns off (reply-draft
+      was the IMAP consumer; marketing campaigns mostly don't need it,
+      and a fresh marketing edit can re-enable it explicitly).
+    - Otherwise the row is fully deleted.
     """
     gate = _enforce_module(request.user)
     if gate is not None:
@@ -1541,10 +1902,50 @@ def delete_reply_account(request):
                 status=status.HTTP_404_NOT_FOUND,
             )
         account_email = account.email
-        account.delete()
+
+        # Synchronous part — fast. Just flip the role flags so the UI
+        # picker stops surfacing this account immediately, and decide
+        # whether the row itself can be dropped (no other role wants
+        # it). The expensive parts — InboxEmail + ReplyDraft +
+        # attachment cascades, plus optionally the EmailAccount row
+        # itself — happen in the Celery task below so the user's
+        # request returns in milliseconds even on large mailboxes.
+        keep_for_marketing = bool(account.is_marketing_account)
+        account.is_reply_agent_account = False
+        account.enable_imap_sync = False
+        account.save(update_fields=[
+            'is_reply_agent_account', 'enable_imap_sync', 'updated_at',
+        ])
+
+        # Queue the heavy work. ``drop_account_row=True`` only when
+        # there's no marketing claim left — dual-use rows stay in
+        # place after the task finishes.
+        delete_reply_draft_account_data.delay(
+            user_ids,
+            account.id,
+            drop_account_row=not keep_for_marketing,
+        )
+
+        if keep_for_marketing:
+            return Response({
+                'status': 'success',
+                'data': {
+                    'message': (
+                        f'{account_email} disconnected from Reply Draft Agent. '
+                        'All inbox mail, drafts, and attachments are being deleted in the background. '
+                        'The account is still in your Marketing accounts list.'
+                    ),
+                },
+            })
+
         return Response({
             'status': 'success',
-            'data': {'message': f'{account_email} disconnected and inbox cleared.'},
+            'data': {
+                'message': (
+                    f'{account_email} disconnected from Reply Draft Agent. '
+                    'All inbox mail, drafts, and attachments are being deleted in the background.'
+                ),
+            },
         })
     except Exception as e:
         logger.exception('delete_reply_account failed')
@@ -1561,9 +1962,9 @@ def reply_analytics(request):
     """Time-series of inbox mail for the attached Reply Draft Agent account.
 
     Query params:
-      - days: 30 | 60 | 90 | 120 (default 30). Anything out-of-range is clamped.
+      - days: 30 | 60 | 90 (default 30). Anything out-of-range is clamped.
 
-    Buckets are daily for the 30-day window and weekly for 60/90/120-day
+    Buckets are daily for the 30-day window and weekly for the 60/90-day
     windows — aggregating longer spans into weeks keeps the line chart from
     looking like a flat line with one spike when mail volume is sparse.
     Scoped to the attached EmailAccount — nothing bleeds in from marketing.
@@ -1573,8 +1974,9 @@ def reply_analytics(request):
         return gate
 
     # Clamp the window to supported values so a bad query string can't cause
-    # a 10,000-bucket payload.
-    ALLOWED_WINDOWS = (30, 60, 90, 120)
+    # a 10,000-bucket payload. 120 was retired alongside the lazy-attachment
+    # refactor — see TIME_WINDOW_OPTIONS in ReplyDraftAgentPage.jsx.
+    ALLOWED_WINDOWS = (30, 60, 90)
     try:
         days = int(request.GET.get('days') or 30)
     except (TypeError, ValueError):
@@ -1659,6 +2061,117 @@ _DRAFT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 _DRAFT_ATTACHMENT_MAX_PER_DRAFT = 20
 
 
+# File-format magic bytes. Browsers set Content-Type from the file extension,
+# so a "Save Page As..." HTML document renamed to .pdf still arrives labelled
+# application/pdf — we'd happily attach it, the recipient's PDF viewer would
+# fail to parse it, and the sender would have no idea why. Sniffing the first
+# few bytes catches the mismatch at upload time. Only formats with a stable,
+# well-known signature are listed; text-ish types (txt, csv, html, json, xml)
+# have no reliable magic so they're skipped.
+#
+# WebP is special-cased below because its magic spans non-contiguous offsets
+# (RIFF at 0..4, WEBP at 8..12). Old Office formats (.doc/.xls/.ppt) all share
+# the OLE2 compound-file header so they map to the same prefix.
+_MAGIC_BYTE_SIGNATURES = {
+    'application/pdf': [b'%PDF-'],
+    'image/png': [b'\x89PNG\r\n\x1a\n'],
+    'image/jpeg': [b'\xff\xd8\xff'],
+    'image/jpg': [b'\xff\xd8\xff'],
+    'image/gif': [b'GIF87a', b'GIF89a'],
+    'image/bmp': [b'BM'],
+    # ZIP-family. xlsx/docx/pptx are zips under the hood, so the same prefix
+    # validates all of them.
+    'application/zip': [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'],
+    'application/x-zip-compressed': [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [b'PK\x03\x04'],
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [b'PK\x03\x04'],
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': [b'PK\x03\x04'],
+    # OLE2 — old Office.
+    'application/msword': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+    'application/vnd.ms-excel': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+    'application/vnd.ms-powerpoint': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+    'application/x-7z-compressed': [b'7z\xbc\xaf\x27\x1c'],
+    'application/vnd.rar': [b'Rar!\x1a\x07'],
+    'application/x-rar-compressed': [b'Rar!\x1a\x07'],
+    'application/gzip': [b'\x1f\x8b'],
+    'application/x-gzip': [b'\x1f\x8b'],
+}
+
+
+def _validate_upload_magic_bytes(upload, content_type):
+    """Return None if the upload's first bytes match its declared content_type,
+    or a user-facing error string if they don't.
+
+    Permissive by design — unknown content_types and text-ish formats pass
+    through unchecked. We only reject when we have a reliable signature for
+    the declared type AND the file's actual prefix doesn't match it. This
+    keeps false positives near zero while still catching the realistic
+    failure mode (saved-as-HTML masquerading as a real PDF/image/etc.).
+
+    Always seeks the upload back to position 0 before returning so downstream
+    hashing + storage save read the full content.
+    """
+    ct = (content_type or '').lower().strip()
+    # Generic / unknown / text-ish — nothing reliable to check.
+    if not ct or ct == 'application/octet-stream':
+        return None
+
+    try:
+        head = upload.read(16)
+    finally:
+        try:
+            upload.seek(0)
+        except Exception:
+            # If seek fails the caller will hit an empty body during save —
+            # that's a worse error than a false-positive validation skip,
+            # so just bail without rejecting.
+            return None
+    if not head:
+        return None
+
+    # WebP's magic isn't a simple prefix: bytes 0..4 are 'RIFF', 8..12 are 'WEBP'.
+    if ct == 'image/webp':
+        if len(head) >= 12 and head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+            return None
+        return (
+            "This file is labelled image/webp but doesn't look like a real WebP "
+            "image. The recipient's image viewer won't be able to open it."
+        )
+
+    sigs = _MAGIC_BYTE_SIGNATURES.get(ct)
+    if sigs is None:
+        # Type we don't have a signature for — let it through.
+        return None
+    if any(head.startswith(s) for s in sigs):
+        return None
+
+    # Pretty-print the type the user sees on the picker (xlsx, pdf, etc.) when
+    # we can; fall back to the raw mime when it's an obscure one.
+    pretty = {
+        'application/pdf': 'PDF',
+        'image/png': 'PNG',
+        'image/jpeg': 'JPEG', 'image/jpg': 'JPEG',
+        'image/gif': 'GIF',
+        'image/bmp': 'BMP',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel (.xlsx)',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word (.docx)',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint (.pptx)',
+        'application/msword': 'Word (.doc)',
+        'application/vnd.ms-excel': 'Excel (.xls)',
+        'application/vnd.ms-powerpoint': 'PowerPoint (.ppt)',
+        'application/zip': 'ZIP', 'application/x-zip-compressed': 'ZIP',
+        'application/x-7z-compressed': '7-Zip',
+        'application/vnd.rar': 'RAR', 'application/x-rar-compressed': 'RAR',
+        'application/gzip': 'gzip', 'application/x-gzip': 'gzip',
+    }.get(ct, ct)
+    return (
+        f"This file is labelled as {pretty} but its contents don't match — "
+        "it looks like a different format (often a saved webpage with the "
+        "wrong extension). The recipient won't be able to open it. Please "
+        "re-attach the original file."
+    )
+
+
 def _resolve_user_draft(request, draft_id):
     """Look up a ReplyDraft owned by the calling company user.
 
@@ -1722,6 +2235,13 @@ def upload_draft_attachment(request, draft_id):
     if size > _DRAFT_ATTACHMENT_MAX_BYTES:
         return Response(
             {'status': 'error', 'message': f'File exceeds {_DRAFT_ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB limit.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    magic_err = _validate_upload_magic_bytes(upload, upload.content_type)
+    if magic_err:
+        return Response(
+            {'status': 'error', 'message': magic_err},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
