@@ -594,6 +594,11 @@ urlpatterns = [
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
     re_path(r'^sdr/meetings/?$', sdr_api.sdr_meetings_list, name='sdr_meetings_list'),  # GET, POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/?$', sdr_api.sdr_meeting_detail, name='sdr_meeting_detail'),  # GET, PUT, DELETE
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/confirm/?$', sdr_api.sdr_confirm_meeting, name='sdr_confirm_meeting'),  # POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/send-reminder/?$', sdr_api.sdr_send_meeting_reminder, name='sdr_send_meeting_reminder'),  # POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/generate-prep/?$', sdr_api.sdr_generate_meeting_prep, name='sdr_generate_meeting_prep'),  # POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/resend-scheduling/?$', sdr_api.sdr_resend_scheduling_email, name='sdr_resend_scheduling_email'),  # POST
+    re_path(r'^sdr/check-all-replies/?$', sdr_api.sdr_check_all_replies, name='sdr_check_all_replies'),  # POST
     # ---------------------------------------------------------------------
     # HR Support Agent
     # ---------------------------------------------------------------------

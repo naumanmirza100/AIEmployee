@@ -347,6 +347,12 @@ class SDRMeeting(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     calendar_link = models.CharField(max_length=500, blank=True)
 
+    # Scheduling agent fields
+    prep_notes = models.JSONField(default=dict, blank=True)          # AI-generated prep notes
+    scheduling_email_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

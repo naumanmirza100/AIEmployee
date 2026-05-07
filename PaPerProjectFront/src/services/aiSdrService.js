@@ -301,10 +301,19 @@ export const checkReplies = async (campaignId) => {
 };
 
 // Meetings
-export const listMeetings = async ({ status = '' } = {}) => {
+export const listMeetings = async ({
+  status = '', campaign_id = '', search = '',
+  active_only = true, page = 1, page_size = 20,
+} = {}) => {
   try {
-    const qs = status ? `?status=${status}` : '';
-    return await companyApi.get(`/sdr/meetings/${qs}`);
+    const params = new URLSearchParams();
+    if (status)      params.set('status', status);
+    if (campaign_id) params.set('campaign_id', campaign_id);
+    if (search)      params.set('search', search);
+    params.set('active_only', active_only ? 'true' : 'false');
+    params.set('page', page);
+    params.set('page_size', page_size);
+    return await companyApi.get(`/sdr/meetings/?${params.toString()}`);
   } catch (error) {
     console.error('List meetings error:', error);
     throw error;
@@ -334,6 +343,51 @@ export const deleteMeeting = async (id) => {
     return await companyApi.delete(`/sdr/meetings/${id}/`);
   } catch (error) {
     console.error('Delete meeting error:', error);
+    throw error;
+  }
+};
+
+export const confirmMeeting = async (id, data) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/confirm/`, data);
+  } catch (error) {
+    console.error('Confirm meeting error:', error);
+    throw error;
+  }
+};
+
+export const sendMeetingReminder = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/send-reminder/`, {});
+  } catch (error) {
+    console.error('Send reminder error:', error);
+    throw error;
+  }
+};
+
+export const generateMeetingPrep = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/generate-prep/`, {});
+  } catch (error) {
+    console.error('Generate prep error:', error);
+    throw error;
+  }
+};
+
+export const resendSchedulingEmail = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/resend-scheduling/`, {});
+  } catch (error) {
+    console.error('Resend scheduling email error:', error);
+    throw error;
+  }
+};
+
+export const checkAllReplies = async () => {
+  try {
+    return await companyApi.post('/sdr/check-all-replies/', {});
+  } catch (error) {
+    console.error('Check all replies error:', error);
     throw error;
   }
 };

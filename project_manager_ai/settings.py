@@ -551,6 +551,13 @@ LOGGING = {
     # doesn't silently drop SQL debug output in prod.
     'loggers': {
         'django.db.backends': {'level': 'WARNING'},
+        # Full debug output for SDR email sending — helps diagnose duplicate emails.
+        # Set to WARNING to reduce noise once the issue is resolved.
+        'ai_sdr_agent': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
     },
 }
 
@@ -773,31 +780,11 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 600}
     },
 
-    # ----- AI SDR Agent automated outreach -----
-    # Send next-due step (email/LinkedIn) for every active enrollment
-    'sdr-send-due-steps': {
-        'task': 'ai_sdr_agent.tasks.sdr_send_due_steps_task',
-        'schedule': 300.0,  # Every 5 minutes
-        'options': {'expires': 600},
-    },
-    # Poll IMAP inbox for replies, classify, hand off positives to scheduling agent
-    'sdr-check-inbox-replies': {
-        'task': 'ai_sdr_agent.tasks.sdr_check_inbox_replies_task',
-        'schedule': 300.0,  # Every 5 minutes
-        'options': {'expires': 600},
-    },
-    # Auto-activate scheduled SDR campaigns when start_date arrives
-    'sdr-auto-start-campaigns': {
-        'task': 'ai_sdr_agent.tasks.sdr_auto_start_campaigns_task',
-        'schedule': 900.0,  # Every 15 minutes
-        'options': {'expires': 1800},
-    },
-    # Auto-complete SDR campaigns when end_date passes or all enrollments are done
-    'sdr-auto-complete-campaigns': {
-        'task': 'ai_sdr_agent.tasks.sdr_auto_complete_campaigns_task',
-        'schedule': 86400.0,  # Daily
-        'options': {'expires': 172800},
-    },
+    # AI SDR Agent tasks are handled by the embedded threading.Timer scheduler
+    # (ai_sdr_agent/scheduler.py) which runs inside the Django process without
+    # requiring Redis or a Celery worker. Defining them here AND in the embedded
+    # scheduler would cause every job to fire TWICE, sending duplicate emails.
+    # Do NOT re-add these entries unless you disable the embedded scheduler first.
 
     # Stale meeting checker - runs daily
     # Sends reminders after 48h, auto-withdraws after 7 days
@@ -888,7 +875,8 @@ print(f"  Using Redis: {USE_REDIS}")
 if not USE_REDIS:
     print("  WARNING: Using SQLite broker (slower, for development only)")
     print("  TIP: For production, install Redis and set USE_REDIS=True in .env")
-print(f"  Scheduled Tasks: {len(CELERY_BEAT_SCHEDULE)}")
+print(f"  Scheduled Tasks: {len(CELERY_BEAT_SCHEDULE)} (Celery Beat)")
+print("  NOTE: AI SDR Agent jobs run via embedded scheduler (no Redis needed)")
 print("  - Sequence emails: Every 5 minutes")
 print("  - Inbox sync: Every 5 minutes")
 print("  - Retry failed: Every 15 minutes")

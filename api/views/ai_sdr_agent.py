@@ -628,13 +628,20 @@ def _serialize_enrollment(e: SDRCampaignEnrollment) -> dict:
 
 
 def _serialize_meeting(m: SDRMeeting) -> dict:
+    campaign = m.enrollment.campaign if m.enrollment_id and m.enrollment else None
     return {
         'id': m.id,
         'lead_id': m.lead_id,
         'lead_name': m.lead.display_name,
         'lead_email': m.lead.email,
         'lead_company': m.lead.company_name,
+        'lead_job_title': m.lead.job_title,
+        'lead_temperature': m.lead.temperature,
+        'lead_score': m.lead.score,
         'enrollment_id': m.enrollment_id,
+        'campaign_id': campaign.id if campaign else None,
+        'campaign_name': campaign.name if campaign else None,
+        'campaign_status': campaign.status if campaign else None,   # active/completed/paused
         'title': m.title,
         'notes': m.notes,
         'reply_snippet': m.reply_snippet,
@@ -642,6 +649,10 @@ def _serialize_meeting(m: SDRMeeting) -> dict:
         'duration_minutes': m.duration_minutes,
         'status': m.status,
         'calendar_link': m.calendar_link,
+        'prep_notes': m.prep_notes or {},
+        'scheduling_email_sent_at': m.scheduling_email_sent_at.isoformat() if m.scheduling_email_sent_at else None,
+        'reminder_sent_at': m.reminder_sent_at.isoformat() if m.reminder_sent_at else None,
+        'confirmed_at': m.confirmed_at.isoformat() if m.confirmed_at else None,
         'created_at': m.created_at.isoformat(),
     }
 
@@ -944,10 +955,29 @@ def sdr_enroll_leads(request, campaign_id):
         first_step = campaign.steps.filter(is_active=True).order_by('step_order').first()
 
         enrolled = skipped = 0
+        skipped_reasons = []
         for lead in leads:
-            already = SDRCampaignEnrollment.objects.filter(campaign=campaign, lead=lead).exists()
-            if already:
+            # Dedup by lead ID (same object re-enrolled)
+            if SDRCampaignEnrollment.objects.filter(campaign=campaign, lead=lead).exists():
                 skipped += 1
+                skipped_reasons.append(f"{lead.display_name}: already enrolled")
+                continue
+
+            # Dedup by email address — prevents two different lead records with the
+            # same email from both receiving outreach in the same campaign.
+            lead_email = (lead.email or '').strip().lower()
+            if lead_email and SDRCampaignEnrollment.objects.filter(
+                campaign=campaign,
+                lead__email__iexact=lead_email,
+                status__in=['active', 'replied'],
+            ).exclude(lead=lead).exists():
+                skipped += 1
+                skipped_reasons.append(f"{lead.display_name}: email {lead_email} already enrolled in this campaign")
+                logger.warning(
+                    "SDR [ENROLL-DEDUP] skipping lead=%d (%s) email=%s — "
+                    "another lead with the same email is already active in campaign=%d",
+                    lead.id, lead.display_name, lead_email, campaign.id,
+                )
                 continue
 
             next_action = None
@@ -968,12 +998,15 @@ def sdr_enroll_leads(request, campaign_id):
         campaign.status = 'active'
         campaign.save(update_fields=['total_leads', 'status'])
 
-        return Response({
+        resp = {
             'status': 'success',
             'enrolled': enrolled,
             'skipped': skipped,
             'total_leads': campaign.total_leads,
-        })
+        }
+        if skipped_reasons:
+            resp['skipped_reasons'] = skipped_reasons
+        return Response(resp)
     except Exception as exc:
         logger.error("Enroll leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1065,9 +1098,15 @@ def sdr_mark_replied(request, campaign_id, enrollment_id):
             if created:
                 campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
                 campaign.save(update_fields=['meetings_booked'])
-                # Send scheduling email
+                # Generate prep notes + send scheduling email (atomic — no duplicate sends)
                 try:
-                    agent.send_scheduling_email(campaign, lead, campaign.calendar_link or '')
+                    from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                    sched_agent = MeetingSchedulingAgent()
+                    prep_notes = sched_agent.generate_prep_notes(lead, enrollment, reply_content)
+                    sent = sched_agent.send_scheduling_email_once(campaign, lead, meeting, prep_notes)
+                    if sent:
+                        meeting.prep_notes = prep_notes
+                        meeting.save(update_fields=['prep_notes'])
                 except Exception as exc:
                     logger.warning("Scheduling email failed for lead %s: %s", lead.id, exc)
 
@@ -1246,10 +1285,23 @@ def sdr_check_replies(request, campaign_id):
                 if created:
                     meetings_created += 1
                     campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
-                    try:
-                        agent.send_scheduling_email(campaign, enrollment.lead, campaign.calendar_link or '')
-                    except Exception as exc:
-                        logger.warning("Scheduling email failed: %s", exc)
+
+                # Always attempt send_scheduling_email_once — it's atomic so the
+                # second caller (scheduler vs button race) is silently skipped.
+                try:
+                    from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                    sched_agent = MeetingSchedulingAgent()
+                    prep_notes = sched_agent.generate_prep_notes(
+                        enrollment.lead, enrollment, reply_text
+                    )
+                    sent = sched_agent.send_scheduling_email_once(
+                        campaign, enrollment.lead, meeting, prep_notes
+                    )
+                    if sent:
+                        meeting.prep_notes = prep_notes
+                        meeting.save(update_fields=['prep_notes'])
+                except Exception as exc:
+                    logger.warning("Scheduling email failed: %s", exc)
 
             details.append({
                 'lead': enrollment.lead.display_name,
@@ -1285,11 +1337,53 @@ def sdr_meetings_list(request):
 
     if request.method == 'GET':
         try:
-            status_filter = request.GET.get('status', '')
-            qs = SDRMeeting.objects.filter(company_user=company_user).select_related('lead', 'enrollment')
+            status_filter  = request.GET.get('status', '')
+            campaign_id    = request.GET.get('campaign_id', '')
+            search         = request.GET.get('search', '').strip()
+            # active_only=true (default) → strictly active campaigns only
+            # active_only=false          → all campaigns including ended ones
+            active_only    = request.GET.get('active_only', 'true').lower() != 'false'
+            page           = max(1, int(request.GET.get('page', 1)))
+            page_size      = min(50, max(1, int(request.GET.get('page_size', 20))))
+
+            qs = SDRMeeting.objects.filter(company_user=company_user).select_related(
+                'lead', 'enrollment', 'enrollment__campaign'
+            ).order_by('-created_at')
+
+            # Always exclude orphaned meetings (campaign or enrollment was deleted)
+            qs = qs.filter(enrollment__isnull=False, enrollment__campaign__isnull=False)
+
+            # active_only → strictly active campaigns; False → all existing campaigns
+            if active_only:
+                qs = qs.filter(enrollment__campaign__status='active')
+            # else: show all, but deleted-campaign meetings are still excluded above
+
             if status_filter:
                 qs = qs.filter(status=status_filter)
-            return Response([_serialize_meeting(m) for m in qs])
+
+            if campaign_id:
+                qs = qs.filter(enrollment__campaign_id=campaign_id)
+
+            if search:
+                qs = qs.filter(
+                    Q(lead__full_name__icontains=search)
+                    | Q(lead__first_name__icontains=search)
+                    | Q(lead__last_name__icontains=search)
+                    | Q(lead__email__icontains=search)
+                    | Q(lead__company_name__icontains=search)
+                )
+
+            total = qs.count()
+            offset = (page - 1) * page_size
+            meetings_page = qs[offset: offset + page_size]
+
+            return Response({
+                'results': [_serialize_meeting(m) for m in meetings_page],
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': max(1, (total + page_size - 1) // page_size),
+            })
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -1323,7 +1417,9 @@ def sdr_meetings_list(request):
 def sdr_meeting_detail(request, meeting_id):
     company_user = request.user
     try:
-        meeting = SDRMeeting.objects.get(id=meeting_id, company_user=company_user)
+        meeting = SDRMeeting.objects.select_related(
+            'lead', 'enrollment', 'enrollment__campaign'
+        ).get(id=meeting_id, company_user=company_user)
     except SDRMeeting.DoesNotExist:
         return Response({'status': 'error', 'message': 'Meeting not found.'}, status=404)
 
@@ -1346,3 +1442,265 @@ def sdr_meeting_detail(request, meeting_id):
     # DELETE
     meeting.delete()
     return Response({'status': 'success'})
+
+
+# ==========================================================================
+# Meeting — confirm (set scheduled_at + send confirmation email)
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_confirm_meeting(request, meeting_id):
+    """
+    Confirm a meeting at a specific time.
+    Sends confirmation email to lead and updates lead status to meeting_scheduled.
+    """
+    company_user = request.user
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            id=meeting_id, company_user=company_user
+        )
+    except SDRMeeting.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Meeting not found.'}, status=404)
+
+    try:
+        d = request.data
+        scheduled_at = d.get('scheduled_at')
+        if not scheduled_at:
+            return Response({'status': 'error', 'message': 'scheduled_at is required.'}, status=400)
+
+        meeting.scheduled_at = scheduled_at
+        meeting.status = 'scheduled'
+        meeting.confirmed_at = timezone.now()
+        if d.get('duration_minutes'):
+            meeting.duration_minutes = int(d['duration_minutes'])
+        if d.get('notes'):
+            meeting.notes = d['notes']
+        meeting.save()
+
+        # Update lead status
+        lead = meeting.lead
+        lead.status = 'meeting_scheduled'
+        lead.save(update_fields=['status'])
+
+        # Send confirmation email if campaign SMTP configured
+        if meeting.enrollment and meeting.enrollment.campaign:
+            campaign = meeting.enrollment.campaign
+            try:
+                from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                MeetingSchedulingAgent().send_confirmation_email(campaign, lead, meeting)
+            except Exception as exc:
+                logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+
+        return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
+    except Exception as exc:
+        logger.error("Confirm meeting error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Meeting — send reminder email
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_send_meeting_reminder(request, meeting_id):
+    """Manually send (or resend) a 24-hour reminder email to the lead."""
+    company_user = request.user
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            id=meeting_id, company_user=company_user
+        )
+    except SDRMeeting.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Meeting not found.'}, status=404)
+
+    if not meeting.enrollment or not meeting.enrollment.campaign:
+        return Response({'status': 'error', 'message': 'Meeting has no associated campaign/SMTP.'}, status=400)
+
+    campaign = meeting.enrollment.campaign
+    try:
+        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+        MeetingSchedulingAgent().send_reminder_email(campaign, meeting.lead, meeting)
+        meeting.reminder_sent_at = timezone.now()
+        meeting.save(update_fields=['reminder_sent_at'])
+        return Response({'status': 'success', 'message': 'Reminder sent.', 'data': _serialize_meeting(meeting)})
+    except Exception as exc:
+        logger.error("Send reminder error for meeting %s: %s", meeting.id, exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Meeting — generate / refresh AI prep notes
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_generate_meeting_prep(request, meeting_id):
+    """Generate (or regenerate) AI prep notes for a meeting."""
+    company_user = request.user
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            id=meeting_id, company_user=company_user
+        )
+    except SDRMeeting.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Meeting not found.'}, status=404)
+
+    try:
+        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+        prep_notes = MeetingSchedulingAgent().generate_prep_notes(
+            meeting.lead,
+            meeting.enrollment,
+            meeting.reply_snippet or '',
+        )
+        meeting.prep_notes = prep_notes
+        meeting.save(update_fields=['prep_notes'])
+        return Response({'status': 'success', 'prep_notes': prep_notes, 'data': _serialize_meeting(meeting)})
+    except Exception as exc:
+        logger.error("Generate prep notes error for meeting %s: %s", meeting.id, exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Meeting — resend scheduling email
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_resend_scheduling_email(request, meeting_id):
+    """Resend the initial scheduling email (with calendar link) to the lead."""
+    company_user = request.user
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            id=meeting_id, company_user=company_user
+        )
+    except SDRMeeting.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Meeting not found.'}, status=404)
+
+    if not meeting.enrollment or not meeting.enrollment.campaign:
+        return Response({'status': 'error', 'message': 'Meeting has no associated campaign/SMTP.'}, status=400)
+
+    campaign = meeting.enrollment.campaign
+    try:
+        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+        MeetingSchedulingAgent().send_scheduling_email(
+            campaign, meeting.lead, meeting, meeting.prep_notes or None
+        )
+        meeting.scheduling_email_sent_at = timezone.now()
+        meeting.save(update_fields=['scheduling_email_sent_at'])
+        return Response({'status': 'success', 'message': 'Scheduling email resent.', 'data': _serialize_meeting(meeting)})
+    except Exception as exc:
+        logger.error("Resend scheduling email error for meeting %s: %s", meeting.id, exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Check all active campaigns for replies — triggered on Meetings tab load
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_check_all_replies(request):
+    """
+    Poll IMAP for replies across ALL active campaigns for this user.
+    Called automatically when the Meetings tab opens — gives real-time reply detection
+    without waiting for the background scheduler.
+    """
+    company_user = request.user
+    campaigns = SDRCampaign.objects.filter(
+        company_user=company_user, status='active', auto_check_replies=True
+    )
+
+    from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+
+    agent = OutreachAgent()
+    total_new_replies = 0
+    total_new_meetings = 0
+    errors = []
+
+    for campaign in campaigns:
+        try:
+            enrollments = list(
+                campaign.enrollments
+                .filter(status__in=['active', 'completed'])
+                .exclude(lead__email='')
+                .select_related('lead')
+                .prefetch_related('logs')
+            )
+            if not enrollments:
+                continue
+
+            replies = agent.check_inbox_for_replies(campaign, enrollments)
+
+            for r in replies:
+                enrollment = r['enrollment']
+                if enrollment.status == 'replied':
+                    continue
+
+                reply_text = r['reply_text']
+                sentiment_result = agent.analyze_reply_sentiment(reply_text)
+                sentiment = sentiment_result['sentiment']
+                is_interested = sentiment_result['is_interested']
+
+                enrollment.status = 'replied'
+                enrollment.replied_at = timezone.now()
+                enrollment.reply_content = reply_text[:2000]
+                enrollment.reply_sentiment = sentiment
+                enrollment.save()
+
+                campaign.replies_received = (campaign.replies_received or 0) + 1
+                total_new_replies += 1
+
+                if is_interested:
+                    enrollment.lead.status = 'replied'
+                    enrollment.lead.save(update_fields=['status'])
+
+                    meeting, created = SDRMeeting.objects.get_or_create(
+                        enrollment=enrollment,
+                        defaults={
+                            'company_user': company_user,
+                            'lead': enrollment.lead,
+                            'title': f'Discovery Call with {enrollment.lead.display_name}',
+                            'reply_snippet': reply_text[:500],
+                            'calendar_link': campaign.calendar_link or '',
+                            'status': 'pending',
+                        }
+                    )
+                    if created:
+                        total_new_meetings += 1
+                        campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
+
+                    # Atomic guard: only one caller sends regardless of race condition
+                    try:
+                        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                        sched_agent = MeetingSchedulingAgent()
+                        prep_notes = sched_agent.generate_prep_notes(
+                            enrollment.lead, enrollment, reply_text
+                        )
+                        sent = sched_agent.send_scheduling_email_once(
+                            campaign, enrollment.lead, meeting, prep_notes
+                        )
+                        if sent:
+                            meeting.prep_notes = prep_notes
+                            meeting.save(update_fields=['prep_notes'])
+                    except Exception as exc:
+                        logger.warning("Scheduling email failed: %s", exc)
+
+            campaign.last_replies_checked_at = timezone.now()
+            campaign.save(update_fields=['replies_received', 'meetings_booked', 'last_replies_checked_at'])
+
+        except Exception as exc:
+            logger.error("check-all-replies failed for campaign %s: %s", campaign.id, exc)
+            errors.append(str(exc))
+
+    return Response({
+        'status': 'success',
+        'campaigns_checked': campaigns.count(),
+        'new_replies': total_new_replies,
+        'new_meetings': total_new_meetings,
+        'errors': errors,
+    })
