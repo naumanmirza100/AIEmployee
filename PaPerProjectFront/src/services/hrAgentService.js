@@ -421,7 +421,97 @@ export const checkHRMeetingAvailability = async (start, end) => {
   }
 };
 
+// ---------- Employee detail ----------
+export const getHREmployeeDetail = async (employeeId) => {
+  try {
+    const response = await companyApi.get(`/hr/employees/${employeeId}`);
+    return response;
+  } catch (error) {
+    console.error('Get HR employee detail error:', error);
+    throw error;
+  }
+};
+
 // ---------- Leave requests ----------
+export const listLeaveRequests = async (params = {}) => {
+  try {
+    const q = new URLSearchParams();
+    if (params.status) q.set('status', params.status);
+    if (params.mine) q.set('mine', '1');
+    if (params.pending_for_me) q.set('pending_for_me', '1');
+    const qs = q.toString();
+    const response = await companyApi.get(`/hr/leave-requests${qs ? `?${qs}` : ''}`);
+    return response;
+  } catch (error) {
+    console.error('List leave requests error:', error);
+    throw error;
+  }
+};
+
+// ---------- Holidays ----------
+export const listHolidays = async (year = null) => {
+  try {
+    const qs = year ? `?year=${year}` : '';
+    const response = await companyApi.get(`/hr/holidays${qs}`);
+    return response;
+  } catch (error) {
+    console.error('List holidays error:', error);
+    throw error;
+  }
+};
+
+export const createHoliday = async (payload) => {
+  try {
+    const response = await companyApi.post('/hr/holidays/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create holiday error:', error);
+    throw error;
+  }
+};
+
+export const deleteHoliday = async (holidayId) => {
+  try {
+    const response = await companyApi.delete(`/hr/holidays/${holidayId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete holiday error:', error);
+    throw error;
+  }
+};
+
+// ---------- Leave accrual policies ----------
+export const listLeaveAccrualPolicies = async () => {
+  try {
+    const response = await companyApi.get('/hr/leave-accrual-policies');
+    return response;
+  } catch (error) {
+    console.error('List accrual policies error:', error);
+    throw error;
+  }
+};
+
+export const upsertLeaveAccrualPolicy = async (payload) => {
+  try {
+    const response = await companyApi.post('/hr/leave-accrual-policies/upsert', payload);
+    return response;
+  } catch (error) {
+    console.error('Upsert accrual policy error:', error);
+    throw error;
+  }
+};
+
+export const deleteLeaveAccrualPolicy = async (policyId) => {
+  try {
+    const response = await companyApi.delete(`/hr/leave-accrual-policies/${policyId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete accrual policy error:', error);
+    throw error;
+  }
+};
+
+
 export const submitLeaveRequest = async (payload) => {
   try {
     const response = await companyApi.post('/hr/leave-requests/submit', payload);
@@ -481,4 +571,12 @@ export default {
   checkHRMeetingAvailability,
   submitLeaveRequest,
   decideLeaveRequest,
+  listLeaveRequests,
+  getHREmployeeDetail,
+  listHolidays,
+  createHoliday,
+  deleteHoliday,
+  listLeaveAccrualPolicies,
+  upsertLeaveAccrualPolicy,
+  deleteLeaveAccrualPolicy,
 };

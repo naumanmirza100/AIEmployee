@@ -116,6 +116,7 @@ class HRKnowledgeService:
             company_id=self.company_id,
             is_indexed=True,
             processing_status='ready',
+            superseded_by__isnull=True,  # never retrieve old revisions
         )
         # Confidentiality gate
         allowed_levels = _allowed_confidentialities(asker_role)

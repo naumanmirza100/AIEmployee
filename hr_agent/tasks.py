@@ -16,6 +16,33 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+# Document types that get LLM auto-extraction immediately after embedding.
+# We pick the per-type schema so the LLM extracts only the fields we'll use
+# downstream (drawer UI, expiry-date walker, etc.).
+_AUTO_EXTRACT_TYPES = {'offer_letter', 'contract', 'payslip', 'id_proof'}
+_EXTRACT_SCHEMAS = {
+    'offer_letter': [
+        'employee_name', 'job_title', 'department', 'start_date',
+        'compensation', 'currency', 'reporting_manager',
+        'work_location', 'probation_period_months',
+    ],
+    'contract': [
+        'employee_name', 'job_title', 'department', 'start_date', 'end_date',
+        'compensation', 'currency', 'reporting_manager', 'work_location',
+        'probation_period_months', 'notice_period_days',
+    ],
+    'payslip': [
+        'employee_name', 'pay_period_start', 'pay_period_end',
+        'gross_salary', 'net_salary', 'currency',
+        'tax_deductions', 'other_deductions',
+    ],
+    'id_proof': [
+        'employee_name', 'document_number', 'issuing_country',
+        'issued_date', 'expiry_date',
+    ],
+}
+
+
 # Default retention windows (days) by HR document type.
 # Numbers tuned to common compliance minimums — tenants override per-doc.
 RETENTION_DEFAULTS_DAYS = {
@@ -136,6 +163,27 @@ def process_hr_document(self, document_id):
         document.save(update_fields=['processing_status', 'is_indexed',
                                      'embedding_model', 'updated_at'])
         logger.info("process_hr_document: doc %s ready (%d chunks)", document_id, document.chunks_total)
+
+        # Auto-extract for structured doc types — populates `extracted_fields`
+        # so the document-expiry walker, the employee detail drawer, and the
+        # offer-letter cards have data without a manual "Extract" click.
+        # Best-effort: errors here log + move on, the doc is still 'ready'.
+        if document.document_type in _AUTO_EXTRACT_TYPES and (extracted_text or '').strip():
+            try:
+                from core.HR_agent.hr_agent import HRAgent
+                schema = _EXTRACT_SCHEMAS.get(document.document_type)
+                agent = HRAgent(company_id=document.company_id)
+                result = agent.extract_from_document(extracted_text, schema=schema)
+                if result.get('success') and isinstance(result.get('data'), dict):
+                    document.extracted_fields = {
+                        **(document.extracted_fields or {}), **result['data'],
+                    }
+                    document.save(update_fields=['extracted_fields', 'updated_at'])
+                    logger.info("process_hr_document: doc %s auto-extracted %d fields",
+                                document_id, len(result['data']))
+            except Exception:
+                logger.exception("process_hr_document: auto-extract failed for doc %s",
+                                 document_id)
         return {'status': 'ready', 'document_id': document_id, 'chunks': document.chunks_total}
 
     except Exception as exc:
@@ -160,6 +208,76 @@ def process_hr_document(self, document_id):
             return {'status': 'failed', 'document_id': document_id}
         except Exception:
             return {'status': 'retrying', 'document_id': document_id}
+
+
+# --------------------------------------------------------------------------
+# Leave accrual — credits employees per their LeaveAccrualPolicy
+# --------------------------------------------------------------------------
+
+@shared_task(name='hr_agent.tasks.accrue_leave_balances')
+def accrue_leave_balances():
+    """Run every active `LeaveAccrualPolicy` and credit each active Employee
+    in the policy's company. Idempotent within a period via `last_run_at`:
+      * monthly  → at most once per calendar month
+      * biweekly → at most once per 14 days
+      * annual   → at most once per calendar year
+
+    Per active employee in the company, top up `LeaveBalance.accrued_days`
+    by `policy.days_per_period`, capped at `policy.max_balance` if set.
+    """
+    from decimal import Decimal
+    from hr_agent.models import LeaveAccrualPolicy, LeaveBalance, Employee
+
+    now = timezone.now()
+    today = now.date()
+    results = {'policies_run': 0, 'rows_credited': 0, 'skipped': 0}
+
+    for pol in LeaveAccrualPolicy.objects.filter(is_active=True).select_related('company'):
+        # Period gate
+        if pol.last_run_at:
+            last = pol.last_run_at
+            if pol.period == 'monthly' and (last.year, last.month) == (now.year, now.month):
+                results['skipped'] += 1; continue
+            if pol.period == 'biweekly' and (now - last).days < 14:
+                results['skipped'] += 1; continue
+            if pol.period == 'annual' and last.year == now.year:
+                results['skipped'] += 1; continue
+
+        emp_qs = Employee.objects.filter(
+            company=pol.company,
+            employment_status__in=['active', 'probation', 'on_leave'],
+        )
+        delta = Decimal(str(pol.days_per_period))
+        cap = pol.max_balance  # may be None
+
+        credited = 0
+        for emp in emp_qs.only('id'):
+            bal, _ = LeaveBalance.objects.get_or_create(
+                employee_id=emp.id, leave_type=pol.leave_type,
+            )
+            new_accrued = (bal.accrued_days or 0) + delta
+            if cap is not None:
+                # Cap on accrued + carryover, leaving used as-is.
+                projected_total = new_accrued + (bal.carried_over_days or 0)
+                if projected_total > cap:
+                    new_accrued = cap - (bal.carried_over_days or 0)
+                    if new_accrued < (bal.accrued_days or 0):
+                        # Already over the cap — don't change.
+                        continue
+            bal.accrued_days = new_accrued
+            bal.save(update_fields=['accrued_days', 'updated_at'])
+            credited += 1
+
+        pol.last_run_at = now
+        pol.save(update_fields=['last_run_at', 'updated_at'])
+        results['policies_run'] += 1
+        results['rows_credited'] += credited
+        logger.info("accrue_leave_balances: policy %s (%s/%s) credited %d employees",
+                    pol.id, pol.leave_type, pol.period, credited)
+
+    if results['policies_run'] or results['skipped']:
+        logger.info("accrue_leave_balances: %s", results)
+    return results
 
 
 # --------------------------------------------------------------------------
