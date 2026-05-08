@@ -57,13 +57,32 @@ const QuotaBar = ({ quota }) => {
     pct >= 100 ? 'from-red-500 to-rose-500'
     : pct >= 80 ? 'from-amber-400 to-orange-500'
     : 'from-emerald-400 to-teal-500';
+
+  const PROVIDER_META = {
+    openai:  { label: 'OpenAI',         accent: 'bg-green-500/15 text-green-300 border-green-500/20'     },
+    groq:    { label: 'Groq (Llama)',    accent: 'bg-violet-500/15 text-violet-300 border-violet-500/20'  },
+    claude:  { label: 'Claude',          accent: 'bg-orange-500/15 text-orange-300 border-orange-500/20'  },
+    gemini:  { label: 'Google Gemini',   accent: 'bg-blue-500/15 text-blue-300 border-blue-500/20'        },
+    grok:    { label: 'xAI Grok',        accent: 'bg-red-500/15 text-red-300 border-red-500/20'           },
+  };
+  const breakdown = quota.provider_breakdown ?? {};
+  const providerRows = Object.entries(breakdown)
+    .filter(([, tokens]) => tokens > 0)
+    .map(([key, tokens]) => ({
+      key,
+      tokens,
+      label:  PROVIDER_META[key]?.label  ?? key.toUpperCase(),
+      accent: PROVIDER_META[key]?.accent ?? 'bg-white/10 text-white/60 border-white/20',
+    }));
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {/* Overall */}
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-baseline gap-2">
           <span className="text-white font-semibold text-base">{formatTokens(quota.used_tokens)}</span>
           <span className="text-white/40">/ {formatTokens(quota.included_tokens)}</span>
-          <span className="text-white/30 text-xs">managed tokens</span>
+          <span className="text-white/30 text-xs">total tokens</span>
         </div>
         <span className="text-white/50 text-xs">{pct.toFixed(1)}% used</span>
       </div>
@@ -73,11 +92,26 @@ const QuotaBar = ({ quota }) => {
           style={{ width: `${pct}%`, boxShadow: '0 0 8px rgba(139,92,246,0.25)' }}
         />
       </div>
+
+      {/* Per-model breakdown — only show providers that have been used */}
+      {providerRows.length > 0 && (
+        <div className={`grid gap-2 ${providerRows.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {providerRows.map(p => (
+            <div key={p.key} className={`rounded-lg border px-3 py-2 ${p.accent}`}>
+              <p className="text-[10px] uppercase font-semibold tracking-wider opacity-80">{p.label}</p>
+              <p className="text-sm font-bold mt-0.5">{formatTokens(p.tokens)}</p>
+              <p className="text-[10px] opacity-60 mt-0.5">tokens used</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {quota.byok_tokens_info > 0 && (
         <p className="text-xs text-white/40 flex items-center gap-1">
-          <Info className="w-3 h-3" /> BYOK spent (info only): {formatTokens(quota.byok_tokens_info)}
+          <Info className="w-3 h-3" /> BYOK (your own key): {formatTokens(quota.byok_tokens_info)} tokens — info only
         </p>
       )}
+
       {quota.is_exhausted && (
         <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
           <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />

@@ -29,6 +29,7 @@ from core.models import (
     AGENT_CHOICES,
     AGENT_DEFAULT_PROVIDER,
     AdminPricingConfig,
+    AgentProviderUsage,
     AgentTokenQuota,
     CompanyAPIKey,
     DEFAULT_FREE_TOKENS,
@@ -189,6 +190,19 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
         AgentTokenQuota.objects.filter(pk=ctx.quota_id).update(
             used_tokens=F('used_tokens') + total_tokens
         )
+        # Per-provider breakdown — atomic upsert
+        updated = AgentProviderUsage.objects.filter(
+            quota_id=ctx.quota_id, provider=ctx.provider
+        ).update(used_tokens=F('used_tokens') + total_tokens)
+        if not updated:
+            try:
+                AgentProviderUsage.objects.create(
+                    quota_id=ctx.quota_id, provider=ctx.provider, used_tokens=total_tokens
+                )
+            except Exception:
+                AgentProviderUsage.objects.filter(
+                    quota_id=ctx.quota_id, provider=ctx.provider
+                ).update(used_tokens=F('used_tokens') + total_tokens)
     elif ctx.mode == 'byok':
         AgentTokenQuota.objects.filter(
             company_id=ctx.company_id, agent_name=ctx.agent_name

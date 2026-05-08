@@ -48,12 +48,17 @@ def _serialize_key(key: CompanyAPIKey):
 def _serialize_quota(quota: AgentTokenQuota):
     if not quota:
         return None
+    provider_breakdown = {
+        row.provider: row.used_tokens
+        for row in quota.provider_usage.all()
+    }
     return {
         'included_tokens': quota.included_tokens,
         'used_tokens': quota.used_tokens,
         'remaining': quota.remaining,
         'is_exhausted': quota.is_exhausted,
         'byok_tokens_info': quota.byok_tokens_info,
+        'provider_breakdown': provider_breakdown,
     }
 
 
@@ -81,7 +86,8 @@ def list_agent_keys(request):
         keys_by_agent.setdefault(k.agent_name, {})[k.mode] = k
 
     quotas_by_agent = {
-        q.agent_name: q for q in AgentTokenQuota.objects.filter(company=company)
+        q.agent_name: q
+        for q in AgentTokenQuota.objects.filter(company=company).prefetch_related('provider_usage')
     }
 
     rows = []

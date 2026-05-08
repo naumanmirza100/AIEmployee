@@ -1906,6 +1906,26 @@ class AgentTokenQuota(models.Model):
         return self.used_tokens >= self.included_tokens
 
 
+class AgentProviderUsage(models.Model):
+    """Per-provider token usage for one (company, agent) quota row.
+
+    One row per provider that has ever been called — created on first use.
+    Works for any provider in PROVIDER_CHOICES without schema changes.
+    """
+    quota = models.ForeignKey(
+        AgentTokenQuota, on_delete=models.CASCADE, related_name='provider_usage'
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
+    used_tokens = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['quota', 'provider']
+
+    def __str__(self):
+        return f"{self.quota} / {self.provider}: {self.used_tokens}"
+
+
 class KeyRequest(models.Model):
     """User → superadmin request to be assigned a managed key for an agent."""
     STATUS_CHOICES = [
