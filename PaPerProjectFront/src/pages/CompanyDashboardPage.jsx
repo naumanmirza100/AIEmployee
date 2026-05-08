@@ -28,7 +28,7 @@ import {
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw
+  Ticket, RotateCcw, KeyRound
 } from 'lucide-react';
 import { createCheckoutSession } from '@/services/modulePurchaseService';
 
@@ -958,10 +958,12 @@ const CompanyDashboardPage = () => {
                   { value: 'all-tasks', icon: ListTodo, label: 'All Users Tasks' },
                   ...(purchasedModules.includes('frontline_agent') ? [{ value: 'ticket-tasks', icon: Ticket, label: 'Ticket Tasks' }] : []),
                   { value: 'ai-agents', icon: BrainCircuit, label: 'AI Agents' },
+                  { value: 'api-keys', icon: KeyRound, label: 'API Keys' },
                 ].map(({ value, icon: TabIcon, label }) => (
                   <TabsTrigger
                     key={value}
                     value={value}
+                    onClick={value === 'api-keys' ? (e) => { e.preventDefault(); navigate('/company/settings/api-keys'); } : undefined}
                     className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all border"
                     style={activeTab === value
                       ? { background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', color: '#fff', border: '1.5px solid #a259ff', boxShadow: '0 0 8px 0 #a259ff55' }

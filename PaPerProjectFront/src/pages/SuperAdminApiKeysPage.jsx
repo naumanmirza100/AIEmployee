@@ -26,6 +26,7 @@ const ROW_CLASS = 'bg-[#0f0a20] border border-[#2d2342] hover:border-violet-500/
 
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'groq', label: 'Groq (Llama)' },
   { value: 'claude', label: 'Claude / Anthropic' },
   { value: 'gemini', label: 'Google Gemini' },
   { value: 'grok', label: 'xAI Grok' },

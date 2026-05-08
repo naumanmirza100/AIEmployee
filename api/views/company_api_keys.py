@@ -19,6 +19,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import (
     AGENT_CHOICES,
+    AGENT_DEFAULT_PROVIDER,
     PROVIDER_CHOICES,
     AgentTokenQuota,
     CompanyAPIKey,
@@ -94,6 +95,7 @@ def list_agent_keys(request):
             'byok': _serialize_key(agent_keys['byok']) if 'byok' in agent_keys else None,
             'managed': _serialize_key(agent_keys['managed']) if 'managed' in agent_keys else None,
             'quota': _serialize_quota(quotas_by_agent.get(agent_name)),
+            'default_provider': AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai'),
         })
 
     return Response({

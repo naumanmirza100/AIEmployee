@@ -151,6 +151,19 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
           </div>
         )}
 
+        {!agent.byok && !agent.managed && agent.default_provider && (
+          <div className="flex items-center gap-3 p-3 bg-white/[0.03] border border-white/10 rounded-lg">
+            <Activity className="w-4 h-4 text-violet-300/70 shrink-0" />
+            <div>
+              <p className="text-sm text-white/70 font-medium">Platform key (free tier)</p>
+              <p className="text-xs text-white/40 mt-0.5">
+                Provider: <span className="uppercase text-white/60">{agent.default_provider}</span>
+                {' · '}1M free tokens included with your purchase
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 pt-1">
           <Button
             size="sm"
