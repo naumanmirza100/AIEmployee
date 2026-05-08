@@ -27,6 +27,7 @@ from core.models import (
     KeyRequest,
 )
 
+
 logger = logging.getLogger(__name__)
 
 VALID_AGENTS = {name for name, _ in AGENT_CHOICES}
@@ -45,13 +46,16 @@ def _serialize_key(key: CompanyAPIKey):
     }
 
 
-def _serialize_quota(quota: AgentTokenQuota):
+def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
     if not quota:
         return None
     provider_breakdown = {
         row.provider: row.used_tokens
         for row in quota.provider_usage.all()
     }
+    default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name or quota.agent_name, 'openai')
+    if not provider_breakdown and quota.used_tokens > 0:
+        provider_breakdown = {default_provider: quota.used_tokens}
     return {
         'included_tokens': quota.included_tokens,
         'used_tokens': quota.used_tokens,
@@ -59,6 +63,7 @@ def _serialize_quota(quota: AgentTokenQuota):
         'is_exhausted': quota.is_exhausted,
         'byok_tokens_info': quota.byok_tokens_info,
         'provider_breakdown': provider_breakdown,
+        'default_provider': default_provider,
     }
 
 
@@ -100,7 +105,7 @@ def list_agent_keys(request):
             'agent_label': agent_label,
             'byok': _serialize_key(agent_keys['byok']) if 'byok' in agent_keys else None,
             'managed': _serialize_key(agent_keys['managed']) if 'managed' in agent_keys else None,
-            'quota': _serialize_quota(quotas_by_agent.get(agent_name)),
+            'quota': _serialize_quota(quotas_by_agent.get(agent_name), agent_name),
             'default_provider': AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai'),
         })
 

@@ -15,8 +15,10 @@ from rest_framework.response import Response
 from api.permissions import IsAdmin
 from core.models import (
     AGENT_CHOICES,
+    AGENT_DEFAULT_PROVIDER,
     PROVIDER_CHOICES,
     AdminPricingConfig,
+    AgentProviderUsage,
     AgentTokenQuota,
     Company,
     CompanyAPIKey,
@@ -222,6 +224,15 @@ def update_pricing(request, agent_name):
 # ----------------------------------------------------------------------------
 
 def _serialize_quota_admin(q: AgentTokenQuota):
+    provider_breakdown = {
+        row.provider: row.used_tokens
+        for row in q.provider_usage.all()
+    }
+    # For historical usage before AgentProviderUsage existed, fall back to
+    # default_provider so admin can still see which model this agent uses.
+    default_provider = AGENT_DEFAULT_PROVIDER.get(q.agent_name, 'openai')
+    if not provider_breakdown and q.used_tokens > 0:
+        provider_breakdown = {default_provider: q.used_tokens}
     return {
         'id': q.id,
         'company_id': q.company_id,
@@ -233,6 +244,8 @@ def _serialize_quota_admin(q: AgentTokenQuota):
         'remaining': q.remaining,
         'is_exhausted': q.is_exhausted,
         'byok_tokens_info': q.byok_tokens_info,
+        'provider_breakdown': provider_breakdown,
+        'default_provider': default_provider,
         'updated_at': q.updated_at.isoformat(),
     }
 
@@ -240,7 +253,7 @@ def _serialize_quota_admin(q: AgentTokenQuota):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_quotas(request):
-    qs = AgentTokenQuota.objects.select_related('company').order_by('-updated_at')
+    qs = AgentTokenQuota.objects.select_related('company').prefetch_related('provider_usage').order_by('-updated_at')
     search = request.GET.get('search')
     if search:
         qs = qs.filter(company__name__icontains=search)
@@ -471,6 +484,11 @@ def admin_overview(request):
         total_used=Sum('used_tokens'),
         total_byok_info=Sum('byok_tokens_info'),
     )
+    # Per-provider aggregate across all companies
+    provider_totals = {
+        row['provider']: row['total']
+        for row in AgentProviderUsage.objects.values('provider').annotate(total=Sum('used_tokens'))
+    }
     stats = {
         'total_companies': Company.objects.count(),
         'total_purchases': CompanyModulePurchase.objects.filter(status='active').count(),
@@ -483,5 +501,6 @@ def admin_overview(request):
         'total_included_tokens': agg['total_included'] or 0,
         'total_used_tokens': agg['total_used'] or 0,
         'total_byok_info_tokens': agg['total_byok_info'] or 0,
+        'provider_totals': provider_totals,
     }
     return Response({'status': 'success', 'stats': stats})
