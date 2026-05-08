@@ -1131,8 +1131,15 @@ def market_research(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("market_research")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         data = request.data
-        
+
         research_type = data.get('research_type', 'market_trend')
         topic = data.get('topic', '')
         additional_context = data.get('context', {})
@@ -1174,8 +1181,15 @@ def outreach_campaign(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("outreach_campaign")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         data = request.data
-        
+
         action = data.get('action', 'design')
         campaign_data = data.get('campaign_data', {})
         campaign_id = data.get('campaign_id')
@@ -1408,8 +1422,15 @@ def document_authoring(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("document_authoring")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         data = request.data
-        
+
         action = data.get('action', 'create')
         document_type = data.get('document_type', 'strategy')
         document_data = data.get('document_data', {})
@@ -3220,6 +3241,13 @@ def api_marketing_generate_graph(request):
         from marketing_agent.agents.graph_generator_agent import GraphGeneratorAgent
 
         graph_agent = GraphGeneratorAgent(user=user)
+        try:
+            graph_agent.last_token_usage = None
+            graph_agent.last_llm_used = False
+            graph_agent.company_id = company_user.company_id
+            graph_agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         result = graph_agent.generate_graph(prompt)
 
         return Response({
