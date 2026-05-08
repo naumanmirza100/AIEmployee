@@ -1704,3 +1704,119 @@ def sdr_check_all_replies(request):
         'new_meetings': total_new_meetings,
         'errors': errors,
     })
+
+
+# ==========================================================================
+# Public booking endpoints — no auth required (token in URL acts as auth)
+# ==========================================================================
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([])
+def sdr_booking_info(request, token):
+    """Return public meeting info for the lead's booking page (no auth)."""
+    from ai_sdr_agent.models import SDRMeeting
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            booking_token=token
+        )
+    except SDRMeeting.DoesNotExist:
+        return Response({'error': 'Booking link not found.'}, status=404)
+
+    if meeting.status not in ('pending',):
+        return Response({
+            'error': 'already_booked',
+            'message': 'This meeting has already been scheduled.',
+            'status': meeting.status,
+            'scheduled_at': meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
+        }, status=400)
+
+    campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
+    return Response({
+        'title': meeting.title,
+        'duration_minutes': meeting.duration_minutes or 30,
+        'lead_name': meeting.lead.display_name,
+        'lead_first_name': meeting.lead.first_name or (meeting.lead.display_name.split()[0] if meeting.lead.display_name else ''),
+        'sender_name': campaign.sender_name if campaign else '',
+        'sender_title': campaign.sender_title if campaign else '',
+        'sender_company': campaign.sender_company if campaign else '',
+        'status': meeting.status,
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([])
+def sdr_booking_confirm(request, token):
+    """Lead submits their chosen time. Sets scheduled_at, marks meeting scheduled."""
+    from ai_sdr_agent.models import SDRMeeting
+    try:
+        meeting = SDRMeeting.objects.select_related(
+            'lead', 'enrollment__campaign'
+        ).get(booking_token=token)
+    except SDRMeeting.DoesNotExist:
+        return Response({'error': 'Booking link not found.'}, status=404)
+
+    if meeting.status != 'pending':
+        return Response({
+            'error': 'already_booked',
+            'message': 'This time slot has already been booked.',
+            'scheduled_at': meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
+        }, status=400)
+
+    scheduled_at_raw = request.data.get('scheduled_at')
+    if not scheduled_at_raw:
+        return Response({'error': 'scheduled_at is required.'}, status=400)
+
+    from django.utils.dateparse import parse_datetime
+    import dateutil.parser
+    try:
+        scheduled_at = dateutil.parser.isoparse(scheduled_at_raw)
+        # Ensure timezone-aware
+        from django.utils import timezone as _tz
+        if scheduled_at.tzinfo is None:
+            scheduled_at = _tz.make_aware(scheduled_at)
+    except Exception:
+        return Response({'error': 'Invalid date format. Use ISO 8601.'}, status=400)
+
+    if scheduled_at <= timezone.now():
+        return Response({'error': 'Please select a future date and time.'}, status=400)
+
+    # Claim the slot atomically — prevent double-booking if the page is submitted twice
+    rows = SDRMeeting.objects.filter(id=meeting.id, status='pending').update(
+        status='scheduled',
+        scheduled_at=scheduled_at,
+        confirmed_at=timezone.now(),
+    )
+    if rows == 0:
+        return Response({
+            'error': 'already_booked',
+            'message': 'This meeting was just booked by another request.',
+        }, status=400)
+
+    meeting.status = 'scheduled'
+    meeting.scheduled_at = scheduled_at
+    meeting.confirmed_at = timezone.now()
+
+    # Send confirmation email
+    campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
+    if campaign:
+        try:
+            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+            MeetingSchedulingAgent().send_confirmation_email(campaign, meeting.lead, meeting)
+        except Exception as exc:
+            logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+
+    logger.info(
+        "SDR [booking] meeting=%d lead=%s scheduled_at=%s — CONFIRMED via booking page",
+        meeting.id, meeting.lead.display_name, scheduled_at.isoformat(),
+    )
+
+    return Response({
+        'status': 'confirmed',
+        'title': meeting.title,
+        'scheduled_at': scheduled_at.isoformat(),
+        'duration_minutes': meeting.duration_minutes or 30,
+        'lead_name': meeting.lead.display_name,
+        'sender_name': campaign.sender_name if campaign else '',
+    })

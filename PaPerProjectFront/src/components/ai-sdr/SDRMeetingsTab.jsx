@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar, CheckCircle2, XCircle, AlertCircle, RefreshCw, Send,
   Sparkles, Bell, Loader2, CalendarCheck, ChevronLeft, ChevronRight,
-  Search, ChevronDown, ChevronUp, ExternalLink, Clock, PhoneCall,
+  Search, ChevronDown, ChevronUp, ExternalLink, Clock, PhoneCall, Eye, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -135,6 +135,54 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
 }
 
 // ---------------------------------------------------------------------------
+// PrepNotesModal  (full-screen overlay — triggered by Eye icon in table row)
+// ---------------------------------------------------------------------------
+
+function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
+  const [notes, setNotes]   = useState(meeting.prep_notes || {});
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    try {
+      const resp = await generateMeetingPrep(meeting.id);
+      const fresh = resp.prep_notes || {};
+      setNotes(fresh);
+      onNotesUpdated(fresh);
+      toast({ title: 'Prep notes generated!' });
+    } catch (e) {
+      toast({ title: 'Failed', description: e.message, variant: 'destructive' });
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#0e0820', border: '1px solid #2d1f4a', borderRadius: 16, padding: '28px 32px', maxWidth: 700, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div>
+            <div style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 16 }}>AI Prep Notes</div>
+            <div style={{ color: '#4b5563', fontSize: 12, marginTop: 2 }}>{meeting.lead_name} · {meeting.lead_company || 'Unknown company'}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <PrepNotesPanel notes={notes} loading={loading} onRegenerate={handleGenerate} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ConfirmModal
 // ---------------------------------------------------------------------------
 
@@ -200,7 +248,6 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
 
 function ExpandedRow({ meeting, colSpan, onUpdated }) {
   const [local, setLocal] = useState(meeting);
-  const [prepLoading, setPrepLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const { toast } = useToast();
@@ -216,17 +263,6 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
     } catch (e) {
       toast({ title: `${label} failed`, description: e.message, variant: 'destructive' });
     } finally { setActionLoading(null); }
-  };
-
-  const handlePrep = async () => {
-    setPrepLoading(true);
-    try {
-      const resp = await generateMeetingPrep(local.id);
-      setLocal(m => ({ ...m, prep_notes: resp.prep_notes }));
-      toast({ title: 'Prep notes generated!' });
-    } catch (e) {
-      toast({ title: 'Failed', description: e.message, variant: 'destructive' });
-    } finally { setPrepLoading(false); }
   };
 
   const handleStatus = async (s) => {
@@ -315,8 +351,6 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             </div>
           )}
 
-          {/* Prep notes */}
-          <PrepNotesPanel notes={local.prep_notes} loading={prepLoading} onRegenerate={handlePrep} />
         </div>
       </td>
     </tr>
@@ -333,6 +367,8 @@ const SDRMeetingsTab = () => {
   const [loading, setLoading]       = useState(true);
   const [checkingReplies, setCheckingReplies] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
+  const [prepModal, setPrepModal]   = useState(null);   // meeting object shown in modal
+  const [prepGenIds, setPrepGenIds] = useState(new Set()); // meeting IDs currently generating
   const mountCheckDone = useRef(false);
 
   // Filters (all server-side)
@@ -405,6 +441,27 @@ const SDRMeetingsTab = () => {
     }));
   }, []);
 
+  const handleGeneratePrep = useCallback(async (meeting, e) => {
+    e.stopPropagation();
+    if (prepGenIds.has(meeting.id)) return;
+    setPrepGenIds(s => new Set(s).add(meeting.id));
+    try {
+      const resp = await generateMeetingPrep(meeting.id);
+      const fresh = resp.prep_notes || {};
+      setData(d => ({
+        ...d,
+        results: d.results.map(m => m.id === meeting.id ? { ...m, prep_notes: fresh } : m),
+      }));
+      // If modal is open for this meeting, update it too
+      setPrepModal(pm => pm && pm.id === meeting.id ? { ...pm, prep_notes: fresh } : pm);
+      toast({ title: 'Prep notes generated!' });
+    } catch (err) {
+      toast({ title: 'Prep generation failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setPrepGenIds(s => { const n = new Set(s); n.delete(meeting.id); return n; });
+    }
+  }, [prepGenIds, toast]);
+
   const { results: meetings, total, total_pages } = data;
 
   // Stats from current full dataset (approximate from page data)
@@ -424,6 +481,20 @@ const SDRMeetingsTab = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0616' }}>
+
+      {/* ── Prep Notes Modal ── */}
+      {prepModal && (
+        <PrepNotesModal
+          meeting={prepModal}
+          onClose={() => setPrepModal(null)}
+          onNotesUpdated={(fresh) => {
+            setData(d => ({
+              ...d,
+              results: d.results.map(m => m.id === prepModal.id ? { ...m, prep_notes: fresh } : m),
+            }));
+          }}
+        />
+      )}
 
       {/* ── Header ── */}
       <div style={{ padding: '20px 24px 0', borderBottom: '1px solid #1e1535' }}>
@@ -623,9 +694,37 @@ const SDRMeetingsTab = () => {
                         )}
                       </td>
 
-                      {/* Expand toggle */}
-                      <td style={{ ...td, textAlign: 'right', color: '#4b5563' }}>
-                        {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                      {/* Actions + expand toggle */}
+                      <td style={{ ...td, textAlign: 'right' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                          {/* Generate Prep Notes */}
+                          <button
+                            title="Generate AI prep notes"
+                            onClick={e => handleGeneratePrep(m, e)}
+                            disabled={prepGenIds.has(m.id)}
+                            style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 6, padding: '4px 7px', cursor: prepGenIds.has(m.id) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', color: '#a855f7' }}
+                          >
+                            {prepGenIds.has(m.id)
+                              ? <Loader2 size={12} className="animate-spin" />
+                              : <Sparkles size={12} />}
+                          </button>
+
+                          {/* View Prep Notes (eye) — only when notes exist */}
+                          {m.prep_notes && Object.keys(m.prep_notes).length > 0 && (
+                            <button
+                              title="View prep notes"
+                              onClick={e => { e.stopPropagation(); setPrepModal(m); }}
+                              style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 6, padding: '4px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#818cf8' }}
+                            >
+                              <Eye size={12} />
+                            </button>
+                          )}
+
+                          {/* Expand chevron */}
+                          <span style={{ color: '#4b5563' }}>
+                            {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                          </span>
+                        </div>
                       </td>
                     </tr>
 

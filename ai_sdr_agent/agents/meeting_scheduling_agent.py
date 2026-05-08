@@ -195,12 +195,11 @@ Return exactly this JSON:
             raise
 
     def send_scheduling_email(self, campaign, lead, meeting, prep_notes: dict = None) -> None:
-        """Send a professional scheduling email with calendar link."""
+        """Send a professional scheduling email with a self-serve booking link."""
         first_name = lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there')
         sender = campaign.sender_name or campaign.sender_company or 'the team'
         sender_title = campaign.sender_title or ''
         sender_company = campaign.sender_company or ''
-        calendar_link = campaign.calendar_link or ''
 
         duration = '30 minutes'
         if prep_notes and prep_notes.get('recommended_duration'):
@@ -208,8 +207,22 @@ Return exactly this JSON:
 
         subject = f"Let's find a time to connect, {first_name}!"
 
-        if calendar_link:
-            booking_block = f"You can pick a time that works for you here:\n{calendar_link}"
+        # Use our internal self-scheduling page so the lead's chosen time
+        # automatically updates the meeting record. Fall back to an external
+        # calendar link (e.g. Calendly) if one is configured on the campaign.
+        if meeting and getattr(meeting, 'booking_token', None):
+            frontend_url = (
+                getattr(settings, 'FRONTEND_URL', None)
+                or os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+            ).rstrip('/')
+            booking_url = f"{frontend_url}/book/{meeting.booking_token}"
+            booking_block = (
+                f"You can pick a time that works for you here:\n{booking_url}\n\n"
+                "It only takes a few seconds — just choose a slot that's convenient for you "
+                "and it'll be added straight to our calendars."
+            )
+        elif campaign.calendar_link:
+            booking_block = f"You can pick a time that works for you here:\n{campaign.calendar_link}"
         else:
             booking_block = (
                 "Please reply with a few times that work for you "

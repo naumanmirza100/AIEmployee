@@ -410,3 +410,26 @@ export const generatePersonalizedEmail = async (data) => {
     throw error;
   }
 };
+
+// --------------------------------------------------------------------------
+// Public booking (no auth — token from URL)
+// --------------------------------------------------------------------------
+const _bookingBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+
+export const getBookingInfo = async (token) => {
+  const resp = await fetch(`${_bookingBase}/sdr/book/${token}/`);
+  const data = await resp.json();
+  if (!resp.ok) throw data;
+  return data;
+};
+
+export const confirmBooking = async (token, scheduledAt) => {
+  const resp = await fetch(`${_bookingBase}/sdr/book/${token}/confirm/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scheduled_at: scheduledAt }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw data;
+  return data;
+};

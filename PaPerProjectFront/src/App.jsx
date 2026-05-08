@@ -60,6 +60,7 @@ import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
+import MeetingBookingPage from '@/pages/MeetingBookingPage';
 import ProtectedRoute from '@/components/common/ProtectedRoute';
 import PublicLayout from '@/components/layout/PublicLayout';
 import ScrollToTop from '@/components/layout/ScrollToTop';
@@ -190,6 +191,9 @@ import { useTranslation } from 'react-i18next';
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />
             <Route path="/embed/form" element={<FrontlineEmbedFormPage />} />
+
+            {/* Meeting self-scheduling page (public, no auth) */}
+            <Route path="/book/:token" element={<MeetingBookingPage />} />
             
             {/* Module purchase Stripe success (public) */}
             <Route path="/module-purchase-success" element={<PublicLayout><ModulePurchaseSuccessPage /></PublicLayout>} />

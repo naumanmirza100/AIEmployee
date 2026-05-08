@@ -1,3 +1,4 @@
+import uuid
 from datetime import date as _date, timedelta as _timedelta
 
 from django.db import models
@@ -352,6 +353,9 @@ class SDRMeeting(models.Model):
     scheduling_email_sent_at = models.DateTimeField(null=True, blank=True)
     reminder_sent_at = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # Public booking link — shared with the lead so they can self-schedule
+    booking_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
