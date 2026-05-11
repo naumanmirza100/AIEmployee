@@ -49,8 +49,14 @@ def email_accounts_list(request):
                 'error': str(e)
             }, status=400)
     
-    # GET request - render HTML template
-    accounts = EmailAccount.objects.filter(owner=request.user).order_by('-is_default', '-is_active', '-created_at')
+    # GET request - render HTML template. Same is_marketing_account filter
+    # the DRF endpoint applies, so the legacy template view doesn't show
+    # rows that belong only to the Reply Draft Agent.
+    accounts = (
+        EmailAccount.objects
+        .filter(owner=request.user, is_marketing_account=True)
+        .order_by('-is_default', '-is_active', '-created_at')
+    )
     return render(request, 'marketing/email_accounts.html', {
         'accounts': accounts
     })

@@ -739,6 +739,26 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
                     'error': 'No email templates found. Please create at least one email template before launching the campaign.'
                 }
 
+            # Require an email account on the campaign (or every sequence overriding
+            # one). Otherwise sends would silently fall back to whichever active
+            # account the owner happens to have first — surprising behavior at best.
+            campaign_has_account = bool(campaign.email_account_id)
+            if not campaign_has_account:
+                seqs_without_account = list(
+                    EmailSequence.objects.filter(campaign=campaign, email_account__isnull=True)
+                    .values_list('id', flat=True)
+                )
+                if seqs_without_account:
+                    return {
+                        'success': False,
+                        'error': (
+                            'No sending account is set for this campaign. Click '
+                            '"Set sending account" on the campaign and pick the email '
+                            'account you want to send from before launching.'
+                        ),
+                        'error_code': 'no_email_account',
+                    }
+
             # Update campaign status and reactivate sequences (and templates) so launch works after a pause
             campaign.status = 'active'
             if not campaign.start_date:

@@ -1328,101 +1328,121 @@ const MarketingDashboard = () => {
 
           {/* Add/Edit email account modal */}
           <Dialog open={addOrEditModalOpen} onOpenChange={setAddOrEditModalOpen}>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingAccountId ? 'Edit email account' : 'Add email account'}</DialogTitle>
                 <DialogDescription>SMTP settings for sending campaign emails. Leave password blank when editing to keep existing.</DialogDescription>
               </DialogHeader>
               <form onSubmit={handleEmailSubmit}>
-                <div className="space-y-4 py-4">
-                  <div>
-                    <Label>Account name *</Label>
-                    <Input
-                      value={emailForm.name}
-                      onChange={(e) => setEmailForm((p) => ({ ...p, name: e.target.value }))}
-                      placeholder="e.g. Main Gmail"
-                    />
-                  </div>
-                  <div>
-                    <Label>Account type</Label>
-                    <Select value={emailForm.account_type} onValueChange={applyEmailTypeDefaults}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {EMAIL_ACCOUNT_TYPES.map((t) => (
-                          <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Email *</Label>
-                    <Input
-                      type="email"
-                      value={emailForm.email}
-                      onChange={(e) => setEmailForm((p) => ({ ...p, email: e.target.value }))}
-                      placeholder="your@email.com"
-                    />
-                  </div>
-                  <div>
-                    <Label>SMTP host *</Label>
-                    <Input
-                      value={emailForm.smtp_host}
-                      onChange={(e) => setEmailForm((p) => ({ ...p, smtp_host: e.target.value }))}
-                      placeholder="smtp.gmail.com"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label>SMTP port</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={emailForm.smtp_port}
-                        onChange={(e) => setEmailForm((p) => ({ ...p, smtp_port: e.target.value }))}
-                      />
+                <div className="py-4">
+                  {/* Two columns side-by-side: account info on the left, SMTP on the right */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left: account basics + flags */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground">Account</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>Account name *</Label>
+                          <Input
+                            value={emailForm.name}
+                            onChange={(e) => setEmailForm((p) => ({ ...p, name: e.target.value }))}
+                            placeholder="e.g. Main Gmail"
+                          />
+                        </div>
+                        <div>
+                          <Label>Account type</Label>
+                          <Select value={emailForm.account_type} onValueChange={applyEmailTypeDefaults}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {EMAIL_ACCOUNT_TYPES.map((t) => (
+                                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div>
+                        <Label>Email *</Label>
+                        <Input
+                          type="email"
+                          value={emailForm.email}
+                          onChange={(e) => setEmailForm((p) => ({ ...p, email: e.target.value }))}
+                          placeholder="your@email.com"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-4 pt-1">
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={emailForm.is_active} onChange={(e) => setEmailForm((p) => ({ ...p, is_active: e.target.checked }))} />
+                          <span className="text-sm">Active</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={emailForm.is_default} onChange={(e) => setEmailForm((p) => ({ ...p, is_default: e.target.checked }))} />
+                          <span className="text-sm">Default account</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={emailForm.is_gmail_app_password} onChange={(e) => setEmailForm((p) => ({ ...p, is_gmail_app_password: e.target.checked }))} />
+                          <span className="text-sm">Gmail App Password</span>
+                        </label>
+                      </div>
                     </div>
-                    <div>
-                      <Label>SMTP username *</Label>
-                      <Input
-                        value={emailForm.smtp_username}
-                        onChange={(e) => setEmailForm((p) => ({ ...p, smtp_username: e.target.value }))}
-                        placeholder="Usually same as email"
-                      />
+
+                    {/* Right: SMTP */}
+                    <div className="space-y-4 lg:border-l lg:pl-6">
+                      <h3 className="text-sm font-semibold text-muted-foreground">SMTP settings</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>SMTP host *</Label>
+                          <Input
+                            value={emailForm.smtp_host}
+                            onChange={(e) => setEmailForm((p) => ({ ...p, smtp_host: e.target.value }))}
+                            placeholder="smtp.gmail.com"
+                          />
+                        </div>
+                        <div>
+                          <Label>SMTP port</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={emailForm.smtp_port}
+                            onChange={(e) => setEmailForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>SMTP username *</Label>
+                          <Input
+                            value={emailForm.smtp_username}
+                            onChange={(e) => setEmailForm((p) => ({ ...p, smtp_username: e.target.value }))}
+                            placeholder="Usually same as email"
+                          />
+                        </div>
+                        <div>
+                          <Label>SMTP / App password * {editingAccountId && '(leave blank to keep)'}</Label>
+                          <Input
+                            type="password"
+                            value={emailForm.smtp_password}
+                            onChange={(e) => setEmailForm((p) => ({ ...p, smtp_password: e.target.value }))}
+                            placeholder="App password for Gmail"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-4 pt-1">
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={emailForm.use_tls} onChange={(e) => setEmailForm((p) => ({ ...p, use_tls: e.target.checked }))} />
+                          <span className="text-sm">Use TLS</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={emailForm.use_ssl} onChange={(e) => setEmailForm((p) => ({ ...p, use_ssl: e.target.checked }))} />
+                          <span className="text-sm">Use SSL</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <Label>SMTP password / App password * {editingAccountId && '(leave blank to keep)'}</Label>
-                    <Input
-                      type="password"
-                      value={emailForm.smtp_password}
-                      onChange={(e) => setEmailForm((p) => ({ ...p, smtp_password: e.target.value }))}
-                      placeholder="App password for Gmail"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={emailForm.use_tls} onChange={(e) => setEmailForm((p) => ({ ...p, use_tls: e.target.checked }))} />
-                      <span className="text-sm">Use TLS</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={emailForm.use_ssl} onChange={(e) => setEmailForm((p) => ({ ...p, use_ssl: e.target.checked }))} />
-                      <span className="text-sm">Use SSL</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={emailForm.is_gmail_app_password} onChange={(e) => setEmailForm((p) => ({ ...p, is_gmail_app_password: e.target.checked }))} />
-                      <span className="text-sm">Gmail App Password</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={emailForm.is_active} onChange={(e) => setEmailForm((p) => ({ ...p, is_active: e.target.checked }))} />
-                      <span className="text-sm">Active</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={emailForm.is_default} onChange={(e) => setEmailForm((p) => ({ ...p, is_default: e.target.checked }))} />
-                      <span className="text-sm">Default account</span>
-                    </label>
-                  </div>
-                  <div>
+
+                  {/* IMAP — full width below the two columns */}
+                  <div className="mt-6 pt-4 border-t">
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -1432,24 +1452,24 @@ const MarketingDashboard = () => {
                           setShowImap(e.target.checked);
                         }}
                       />
-                      <span className="text-sm">Enable IMAP sync (reply detection)</span>
+                      <span className="text-sm font-medium">Enable IMAP sync (reply detection)</span>
                     </label>
-                  </div>
-                  {showImap && (
-                    <div className="space-y-3 pt-2 border-t">
-                      <Label>IMAP (optional)</Label>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Input placeholder="IMAP host" value={emailForm.imap_host} onChange={(e) => setEmailForm((p) => ({ ...p, imap_host: e.target.value }))} />
-                        <Input type="number" placeholder="Port" value={emailForm.imap_port} onChange={(e) => setEmailForm((p) => ({ ...p, imap_port: e.target.value }))} />
+                    {showImap && (
+                      <div className="mt-3 space-y-3">
+                        <Label>IMAP (optional)</Label>
+                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                          <Input placeholder="IMAP host" value={emailForm.imap_host} onChange={(e) => setEmailForm((p) => ({ ...p, imap_host: e.target.value }))} />
+                          <Input type="number" placeholder="Port" value={emailForm.imap_port} onChange={(e) => setEmailForm((p) => ({ ...p, imap_port: e.target.value }))} />
+                          <Input placeholder="IMAP username" value={emailForm.imap_username} onChange={(e) => setEmailForm((p) => ({ ...p, imap_username: e.target.value }))} />
+                          <Input type="password" placeholder="IMAP password" value={emailForm.imap_password} onChange={(e) => setEmailForm((p) => ({ ...p, imap_password: e.target.value }))} />
+                        </div>
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={emailForm.imap_use_ssl} onChange={(e) => setEmailForm((p) => ({ ...p, imap_use_ssl: e.target.checked }))} />
+                          <span className="text-sm">IMAP use SSL</span>
+                        </label>
                       </div>
-                      <Input placeholder="IMAP username" value={emailForm.imap_username} onChange={(e) => setEmailForm((p) => ({ ...p, imap_username: e.target.value }))} />
-                      <Input type="password" placeholder="IMAP password" value={emailForm.imap_password} onChange={(e) => setEmailForm((p) => ({ ...p, imap_password: e.target.value }))} />
-                      <label className="flex items-center gap-2">
-                        <input type="checkbox" checked={emailForm.imap_use_ssl} onChange={(e) => setEmailForm((p) => ({ ...p, imap_use_ssl: e.target.checked }))} />
-                        <span className="text-sm">IMAP use SSL</span>
-                      </label>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setAddOrEditModalOpen(false)}>Cancel</Button>

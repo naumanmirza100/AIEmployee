@@ -154,6 +154,17 @@
       .custom-sidebar-scroll::-webkit-scrollbar-thumb:hover {
         background: rgba(139,92,246,0.55);
       }
+
+      /* Utility to hide scrollbars but keep scroll functionality */
+      .no-scrollbar {
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* IE and Edge */
+      }
+      .no-scrollbar::-webkit-scrollbar {
+        display: none; /* Chrome, Safari, Opera */
+        width: 0;
+        height: 0;
+      }
     }
     
     .my-masonry-grid {

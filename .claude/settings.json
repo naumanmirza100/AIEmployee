@@ -8,7 +8,9 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\(''api/views/pm_agent.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''pm_agent.py OK''\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''api/urls.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''urls.py OK''\\)\")",
       "Bash(python manage.py makemigrations project_manager_agent)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/meeting_scheduler_agent.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''project_manager_agent/ai_agents/meeting_scheduler_agent.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Read(//d/University/form/AI_Employyes/ReplyAgent/AIEmployee/marketing_agent/**)",
+      "Bash(npx --no-install eslint src/components/marketing/EmailSendingStatusPage.jsx)"
     ]
   }
 }

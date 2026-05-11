@@ -42,7 +42,14 @@ logger = logging.getLogger(__name__)
 # a previous run that's still working through 200+ messages, causing
 # `(email_account, message_id)` unique-constraint violations and noisy
 # IntegrityError fallbacks.
-_LOCK_TTL_SECONDS = 30 * 60  # 30 min — longer than any realistic single-account sync
+#
+# Lock TTL: 10 minutes. With the staged-sync refactor a fresh 90-day
+# backfill on a multi-thousand-message mailbox completes well under
+# this, and the tighter ceiling means a crashed-worker lock self-heals
+# in 10 min instead of 30. handle() also has a watchdog that proactively
+# clears stale ``sync_in_progress`` flags when the corresponding Redis
+# lock is gone — that stops the UI from advertising a phantom sync.
+_LOCK_TTL_SECONDS = 10 * 60
 _LOCK_KEY_PREFIX = 'sync_inbox_lock:account:'
 
 
@@ -96,10 +103,13 @@ def _account_sync_lock(account_id):
 class Command(BaseCommand):
     help = 'Sync inbox via IMAP and detect email replies automatically'
 
-    # Fixed 120-day rolling window. The Reply Draft Agent's dropdown is a
-    # pure view filter over already-cached rows, so we always pull the max
-    # range here and let the UI slice it client-side.
-    DEFAULT_SINCE_DAYS = 120
+    # 90-day rolling window — has to match the LONGEST option in the
+    # Reply Draft Agent dropdown (30/60/90), otherwise switching to
+    # "Last 90 days" silently shows the same rows as "Last 30 days"
+    # because the dropdown is a pure view filter over already-cached
+    # rows. Anything older than 90 days simply isn't visible in the UI,
+    # so caching beyond it is wasted IMAP bandwidth.
+    DEFAULT_SINCE_DAYS = 90
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -136,7 +146,10 @@ class Command(BaseCommand):
         if cli_since_days:
             self.stdout.write(f'IMAP window (CLI override): last {cli_since_days} day(s) for every account')
         else:
-            self.stdout.write(f'IMAP window: last {self.DEFAULT_SINCE_DAYS} day(s) (fixed)')
+            self.stdout.write(
+                f'IMAP window: per-account imap_sync_days when set, else default '
+                f'{self.DEFAULT_SINCE_DAYS} day(s)'
+            )
         
         if dry_run:
             self.stdout.write(self.style.WARNING('[DRY RUN] DRY RUN MODE - No replies will be processed\n'))
@@ -159,6 +172,37 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('[WARNING] Please enable IMAP sync in Email Accounts settings.'))
             return
         
+        # Stale-flag watchdog. ``sync_in_progress=True`` stays set in DB
+        # only because a previous worker died mid-sync (OOM, crash, host
+        # restart) before the finally block in sync_account_inbox could
+        # clear it. The Redis lock self-heals via TTL, but the flag has
+        # no TTL — without this, the UI advertises a phantom "Syncing…"
+        # banner forever. Sweep stale flags here: if the flag is True
+        # but no Redis lock is held for the same account, the previous
+        # run is gone and the flag is safe to clear.
+        stuck_account_ids = list(
+            EmailAccount.objects.filter(sync_in_progress=True).values_list('id', flat=True)
+        )
+        if stuck_account_ids:
+            redis_client = _get_redis_client()
+            cleared = []
+            for aid in stuck_account_ids:
+                if redis_client is None:
+                    cleared.append(aid)
+                    continue
+                lock_key = f'{_LOCK_KEY_PREFIX}{aid}'
+                try:
+                    if not redis_client.exists(lock_key):
+                        cleared.append(aid)
+                except Exception:
+                    cleared.append(aid)
+            if cleared:
+                EmailAccount.objects.filter(id__in=cleared).update(sync_in_progress=False)
+                self.stdout.write(self.style.WARNING(
+                    f'[WATCHDOG] Cleared stale sync_in_progress for {len(cleared)} account(s) '
+                    f'with no live Redis lock: {cleared}'
+                ))
+
         total_replies_found = 0
         total_replies_processed = 0
         total_inbox_stored = 0
@@ -173,10 +217,25 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f'  [WARNING] IMAP settings incomplete for {account.email}. Skipping.'))
                 continue
 
-            # `imap_sync_days` on EmailAccount is retained for rollback safety
-            # but no longer consulted — the rolling window is fixed at
-            # DEFAULT_SINCE_DAYS. `--since-days` still works as a one-shot override.
-            account_since_days = cli_since_days or self.DEFAULT_SINCE_DAYS
+            # Window precedence:
+            #   --since-days CLI override   (one-shot, e.g. for backfills)
+            #   max(account.imap_sync_days, DEFAULT_SINCE_DAYS)
+            #
+            # The per-account value acts as a FLOOR, never a ceiling: it
+            # can extend the window beyond the system default but cannot
+            # narrow it. This guarantee matters because the UI dropdown
+            # (30/60/90) is a pure view filter over already-cached rows
+            # — if we let a per-account "30" win, switching to "Last 60
+            # days" would silently show the same data as 30 because
+            # nothing older than 30 was ever fetched. The model default
+            # for imap_sync_days is 30 (set before this rule shipped),
+            # so honoring it as-is would have introduced exactly that
+            # regression for every existing account.
+            account_window = getattr(account, 'imap_sync_days', None) or 0
+            if cli_since_days:
+                account_since_days = cli_since_days
+            else:
+                account_since_days = max(account_window, self.DEFAULT_SINCE_DAYS)
             self.stdout.write(f'  IMAP window for this account: last {account_since_days} day(s)')
             with _account_sync_lock(account.id) as got_lock:
                 if not got_lock:
@@ -190,8 +249,18 @@ class Command(BaseCommand):
                     )
                     continue
                 try:
+                    # Pass cli_since_days through SEPARATELY from the
+                    # legacy `since_days` kwarg. The staged-sweep logic
+                    # in sync_account_inbox keys off cli_since_days to
+                    # decide between "single-window CLI backfill" and
+                    # "staged 30→60→90 default run". Sending the
+                    # already-resolved account_since_days as since_days
+                    # would collapse every default run into a single
+                    # stage — that was the bug just fixed.
                     replies_found, replies_processed, inbox_stored = self.sync_account_inbox(
-                        account, dry_run, since_days=account_since_days,
+                        account, dry_run,
+                        since_days=account_since_days,
+                        cli_since_days=cli_since_days,
                     )
                     total_replies_found += replies_found
                     total_replies_processed += replies_processed
@@ -207,19 +276,28 @@ class Command(BaseCommand):
         self.stdout.write(f'Total generic inbox emails stored: {total_inbox_stored}')
         self.stdout.write(f'{"="*60}\n')
 
-    def sync_account_inbox(self, account, dry_run=False, since_days=None):
-        """
-        Sync mail for a single email account — INBOX (incoming) and Sent
-        (outgoing) folders both land in the InboxEmail table, distinguished
-        by the `direction` field ('in' / 'out').
+    def sync_account_inbox(self, account, dry_run=False, since_days=None, cli_since_days=None):
+        """Sync mail for a single account in staged 30 → 60 → 90-day windows.
 
-        Campaign reply detection runs only for INBOX. Sent mail is stored
-        as InboxEmail with direction='out' and is independent of campaign
-        replies / EmailSendHistory by design.
-        """
-        if since_days is None or since_days < 1:
-            since_days = self.DEFAULT_SINCE_DAYS
+        Each stage processes a slice of mail (newer slice first) and pushes
+        BOTH the INBOX and Sent folder for that slice before moving to the
+        next slice. The user-visible effect is that the most recent ~30
+        days of mail (incoming + outgoing) appears in the UI within the
+        first phase, instead of waiting for the entire 90-day backlog of
+        INBOX to drain before any Sent mail shows up.
 
+        Sync state: ``EmailAccount.sync_in_progress`` flips True at start
+        and is cleared in the finally block; ``last_sync_stage`` advances
+        as each phase finishes; ``last_sync_completed_at`` is set only on
+        full success. The Reply Draft UI reads these to render an honest
+        progress banner.
+
+        Window precedence:
+          - When the caller passes ``since_days`` (CLI override): a single
+            non-staged fetch over that exact window. One-shot backfills
+            stay predictable.
+          - Otherwise: stages = (30, 60, 90), capped at DEFAULT_SINCE_DAYS.
+        """
         # Re-verify the account still exists in DB. The instance we were
         # handed may be stale if a concurrent sync task / user-deletion
         # removed it between handle()'s queryset and this call. Without
@@ -233,15 +311,41 @@ class Command(BaseCommand):
             return 0, 0, 0
         account = fresh_account
 
-        # Strict separation: only the dedicated reply-agent account writes
-        # to the InboxEmail table. Marketing-campaign accounts still need
-        # IMAP for campaign reply detection (writes to Reply, not InboxEmail)
-        # but their generic mail must not pollute the reply-draft inbox.
+        # Decide stages. ``cli_since_days`` is set ONLY when the user
+        # passed --since-days explicitly; in that case run a single-stage
+        # one-shot fetch. Otherwise, run the default staged sync so the
+        # most recent 30 days arrive first and the 60/90-day backfill
+        # streams in behind it.
+        #
+        # Note: ``since_days`` (the legacy positional kwarg) is no longer
+        # used as the staging trigger — handle() used to pass the
+        # already-resolved 90 here, which made every default run look
+        # like a CLI override and collapsed the staged sweep into a
+        # single 90-day fetch (the bug we're fixing).
+        if cli_since_days and cli_since_days > 0:
+            stages = [int(cli_since_days)]
+        else:
+            # Default rolling sync — staged so the user sees recent mail
+            # first. Stages cap at DEFAULT_SINCE_DAYS so a future bump
+            # of that constant doesn't accidentally skip a stage.
+            stages = [w for w in (30, 60, 90) if w <= self.DEFAULT_SINCE_DAYS]
+            if not stages:
+                stages = [self.DEFAULT_SINCE_DAYS]
+
         is_reply_agent = bool(getattr(account, 'is_reply_agent_account', False))
 
         total_replies_found = 0
         total_replies_processed = 0
         total_inbox_stored = 0
+
+        # Mark sync as running BEFORE any IMAP work. A crash anywhere
+        # below lands in the finally block, which always clears this so
+        # the UI doesn't get stuck on a phantom "Syncing..." banner.
+        EmailAccount.objects.filter(pk=account.pk).update(
+            sync_in_progress=True, last_sync_stage=0,
+        )
+        completed_cleanly = False
+        mail = None
 
         try:
             # Connect to IMAP server
@@ -256,10 +360,11 @@ class Command(BaseCommand):
             self.stdout.write(f'  Connected to IMAP server: {account.imap_host}:{account.imap_port}')
 
             # Preload existing Message-IDs ONCE for the whole account, shared
-            # across INBOX + Sent. The unique (email_account, message_id)
-            # constraint means a self-CC (same Message-ID in both folders)
-            # is stored exactly once — first folder processed wins the
-            # direction, and we process INBOX first.
+            # across INBOX + Sent and across all stages. The unique
+            # (email_account, message_id) constraint means a self-CC (same
+            # Message-ID in both folders) is stored exactly once — first
+            # folder processed wins the direction, and we process INBOX
+            # first within each stage.
             known_message_ids = set(
                 InboxEmail.objects
                 .filter(email_account=account)
@@ -272,44 +377,56 @@ class Command(BaseCommand):
                     'on INBOX, but no InboxEmail rows are written and Sent is skipped.'
                 )
 
-            # 1) INBOX — incoming mail + campaign reply detection
-            in_replies_found, in_replies_processed, in_inbox_stored = self._process_folder(
-                mail, account, 'INBOX', 'in', dry_run, since_days, known_message_ids,
-                store_inbox_rows=is_reply_agent,
-            )
-            total_replies_found += in_replies_found
-            total_replies_processed += in_replies_processed
-            total_inbox_stored += in_inbox_stored
-
-            # 2) Sent folder — only synced for the reply-agent account.
-            # Marketing accounts have no use for Sent storage (campaigns
-            # already track outgoing mail via EmailSendHistory) and must
-            # stay out of the InboxEmail table per the reply/marketing
-            # separation rule.
+            # Resolve the Sent folder ONCE per account — folder probing
+            # is a SELECT round-trip, no need to repeat it per stage.
+            sent_folder = self._find_sent_folder(mail) if is_reply_agent else None
             if is_reply_agent:
-                sent_folder = self._find_sent_folder(mail)
                 if sent_folder:
                     self.stdout.write(f'  Sent folder detected: {sent_folder!r}')
-                    _, _, out_inbox_stored = self._process_folder(
-                        mail, account, sent_folder, 'out', dry_run, since_days, known_message_ids,
-                        store_inbox_rows=True,
-                    )
-                    total_inbox_stored += out_inbox_stored
                 else:
                     self.stdout.write('  [INFO] Sent folder not found via common names; skipping sent sync')
-            else:
-                self.stdout.write('  [INFO] Skipping Sent sync (marketing account)')
 
-            try:
-                mail.close()
-            except Exception:
-                pass
-            mail.logout()
+            # Staged sweep. Each stage covers (prev_stage, stage] days
+            # back. After every stage we update last_sync_stage so the
+            # frontend can advance its progress label without waiting for
+            # the entire 90-day backlog.
+            prev_stage = 0
+            for stage in stages:
+                self.stdout.write(f'\n  === Stage: window {stage} day(s), slice ({prev_stage}, {stage}] ===')
+
+                # INBOX slice for this stage.
+                in_replies_found, in_replies_processed, in_inbox_stored = self._process_folder(
+                    mail, account, 'INBOX', 'in', dry_run,
+                    since_days=stage, known_message_ids=known_message_ids,
+                    store_inbox_rows=is_reply_agent,
+                    until_days=prev_stage,
+                )
+                total_replies_found += in_replies_found
+                total_replies_processed += in_replies_processed
+                total_inbox_stored += in_inbox_stored
+
+                # Sent slice for this stage. Only reply-agent accounts
+                # store Sent mail; marketing accounts skip it (campaigns
+                # already track outgoing mail via EmailSendHistory).
+                if is_reply_agent and sent_folder:
+                    _, _, out_inbox_stored = self._process_folder(
+                        mail, account, sent_folder, 'out', dry_run,
+                        since_days=stage, known_message_ids=known_message_ids,
+                        store_inbox_rows=True,
+                        until_days=prev_stage,
+                    )
+                    total_inbox_stored += out_inbox_stored
+
+                # Stage finished — surface progress to the UI.
+                EmailAccount.objects.filter(pk=account.pk).update(last_sync_stage=stage)
+                prev_stage = stage
+
             self.stdout.write(f'\n  [OK] Finished processing account: {account.email}')
             self.stdout.write(
                 f'     Campaign replies: {total_replies_found} '
                 f'(processed {total_replies_processed}) · Inbox stored: {total_inbox_stored}'
             )
+            completed_cleanly = True
 
         except imaplib.IMAP4.error as e:
             self.stdout.write(self.style.ERROR(f'  [ERROR] IMAP error: {str(e)}'))
@@ -317,6 +434,26 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'  [ERROR] Error: {str(e)}'))
             logger.error(f'Error syncing account {account.id}: {str(e)}', exc_info=True)
+        finally:
+            # IMAP cleanup. Best-effort — logout failures shouldn't
+            # corrupt the sync-state flag write that follows.
+            if mail is not None:
+                try:
+                    mail.close()
+                except Exception:
+                    pass
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+
+            # Clear the in-progress flag no matter what. Only stamp
+            # last_sync_completed_at on a clean run so the UI doesn't
+            # advertise a half-finished sync as "complete".
+            update_fields = {'sync_in_progress': False}
+            if completed_cleanly:
+                update_fields['last_sync_completed_at'] = timezone.now()
+            EmailAccount.objects.filter(pk=account.pk).update(**update_fields)
 
         return total_replies_found, total_replies_processed, total_inbox_stored
 
@@ -348,7 +485,7 @@ class Command(BaseCommand):
                 continue
         return None
 
-    def _process_folder(self, mail, account, folder_label, direction, dry_run, since_days, known_message_ids, store_inbox_rows=True):
+    def _process_folder(self, mail, account, folder_label, direction, dry_run, since_days, known_message_ids, store_inbox_rows=True, until_days=0):
         """Pull mail from one IMAP folder and store as InboxEmail rows.
 
         direction='in'  → INBOX flow. Each message runs through detect_reply;
@@ -364,6 +501,15 @@ class Command(BaseCommand):
         InboxEmail row is built — the reply-draft inbox stays exclusive to
         the dedicated reply-agent account.
 
+        Date range:
+          - since_days: maximum age (older boundary). Required.
+          - until_days: minimum age (newer boundary), default 0 = today.
+            When > 0 the search becomes SINCE since_date BEFORE until_date,
+            i.e. only mail strictly inside the (until_days, since_days]
+            window. The staged-sync caller uses this so each phase fetches
+            only the slice of mail it owns instead of re-walking the
+            already-cached newer window.
+
         known_message_ids is shared with the caller and updated in-place so
         cross-folder dedupe spans the whole account.
         """
@@ -375,7 +521,15 @@ class Command(BaseCommand):
             return 0, 0, 0
 
         since_date = (timezone.now() - timedelta(days=since_days)).strftime('%d-%b-%Y')
-        status, messages = mail.search(None, f'(SINCE {since_date})')
+        if until_days and until_days > 0:
+            # IMAP BEFORE is strict (< date) and operates on internal date,
+            # so passing today's date for until_days=0 would drop today's
+            # mail. We only add BEFORE when the caller actually wants a
+            # slice that ends earlier than now.
+            until_date = (timezone.now() - timedelta(days=until_days)).strftime('%d-%b-%Y')
+            status, messages = mail.search(None, f'(SINCE {since_date} BEFORE {until_date})')
+        else:
+            status, messages = mail.search(None, f'(SINCE {since_date})')
         if status != 'OK':
             self.stdout.write(self.style.WARNING(f'   Failed to search folder {folder_label!r}'))
             return 0, 0, 0
@@ -402,8 +556,12 @@ class Command(BaseCommand):
         BULK_FLUSH_SIZE = 50
 
         # IMAP fetch batching — one round-trip handles many messages.
+        # RFC_BATCH_SIZE was 20 historically; bumped to 50 once attachments
+        # were moved to lazy-fetch (the per-message payload dropped from
+        # full-body+attachments to body-only, so larger batches no longer
+        # blow up worker memory or hit Gmail's response-size cap).
         HEADER_BATCH_SIZE = 100
-        RFC_BATCH_SIZE = 20
+        RFC_BATCH_SIZE = 50
 
         own_address = (account.email or '').lower()
         total_to_process = len(email_ids)
@@ -475,6 +633,24 @@ class Command(BaseCommand):
                         emails_checked += 1
 
                         # Campaign reply detection only on incoming mail.
+                        # Two-track behavior, decided by store_inbox_rows
+                        # (which mirrors is_reply_agent_account):
+                        #
+                        #   - Marketing-only account: reply lands in the
+                        #     Reply table for analytics, then we skip the
+                        #     InboxEmail write so non-reply-agent
+                        #     mailboxes never accumulate inbox rows.
+                        #
+                        #   - Reply-agent account: reply lands in BOTH
+                        #     the Reply table (marketing analytics keep
+                        #     working unchanged) AND the InboxEmail
+                        #     table (so the reply-draft inbox surfaces
+                        #     every incoming message — campaign-related
+                        #     or not — and the AI draft generator can
+                        #     work on it). Dedupe is per
+                        #     (email_account, message_id), so even though
+                        #     two write paths touch the row, only one
+                        #     row ends up in InboxEmail per message.
                         if direction == 'in':
                             is_reply, sent_email = self.detect_reply(msg, account)
                             if is_reply and sent_email:
@@ -493,7 +669,13 @@ class Command(BaseCommand):
                                         self.stdout.write(f'     [ERROR] Failed to process reply')
                                 else:
                                     self.stdout.write(f'     [SKIP] Skipped (dry run)')
-                                continue
+                                # Marketing-only accounts stop here. Reply-
+                                # agent accounts fall through so the same
+                                # message also lands in InboxEmail and the
+                                # reply-draft inbox shows it alongside
+                                # non-campaign mail.
+                                if not store_inbox_rows:
+                                    continue
 
                         if dry_run:
                             continue
@@ -511,12 +693,15 @@ class Command(BaseCommand):
                             direction=direction,
                         )
                         if row and row.message_id not in known_message_ids:
-                            # Extract attachments now while we have the parsed
-                            # message bytes in hand. They're persisted in
-                            # _flush_inbox_rows once the parent InboxEmail
-                            # row has a PK.
-                            attachments = self.get_email_attachments(msg)
-                            pending_inbox_rows.append((row, attachments))
+                            # Attachments are NOT extracted here — that work
+                            # was the dominant cost of a fresh sync (a 2000-
+                            # message backfill spent more time hashing and
+                            # writing files than on everything else combined).
+                            # The row is stamped attachments_fetched=False (the
+                            # field's default); the per-email lazy-fetch
+                            # endpoint pulls attachments from IMAP the first
+                            # time the user opens the email.
+                            pending_inbox_rows.append((row, []))
                             known_message_ids.add(row.message_id)
                             if len(pending_inbox_rows) >= BULK_FLUSH_SIZE:
                                 inbox_stored += self._flush_inbox_rows(pending_inbox_rows)

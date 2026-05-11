@@ -72,6 +72,20 @@ class InboxEmail(models.Model):
     thread_key = models.CharField(max_length=120, blank=True, default='', db_index=True,
                                   help_text='Stable key shared by every message in the same conversation.')
 
+    # Lazy-attachment flag. The IMAP sync intentionally skips attachment
+    # extraction — pulling RFC822 bodies + writing files inline was the
+    # dominant cost of a fresh sync (a 2000-message backfill spent more
+    # time on attachments than on everything else combined). Sync stamps
+    # this False; the per-email lazy-fetch endpoint flips it True after
+    # downloading the attachments on first open. UI uses the flag to know
+    # whether it must call the lazy endpoint before rendering files.
+    attachments_fetched = models.BooleanField(
+        default=False,
+        help_text='True once attachments have been downloaded from IMAP. '
+                  'False means sync stored only headers/body; call the '
+                  'fetch-attachments endpoint when the user opens the email.',
+    )
+
     synced_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -269,6 +283,27 @@ class ReplyDraft(models.Model):
     )
     send_error = models.TextField(blank=True)
 
+    # Newline-separated list of every RFC Message-ID this draft has used
+    # in an SMTP attempt. Saved BEFORE each email.send() so we have a
+    # record even when the provider rejects the message (e.g. Gmail's 552
+    # security block). The Sent tab uses this to suppress IMAP-synced
+    # Sent-folder copies of failed sends — Gmail retains a copy of a
+    # 552-rejected message in the user's Sent folder, which would
+    # otherwise look like a successful send in our app.
+    #
+    # APPENDED, never overwritten — a draft retried 3 times has 3 IDs to
+    # filter, not 1. The earlier singular `attempted_message_id` (kept
+    # below for back-compat with rows the data migration ran on) only
+    # tracked the latest, so prior failed attempts leaked into Sent.
+    attempted_message_ids = models.TextField(blank=True, default='')
+
+    # Legacy singular field — retained on the model so existing migrations
+    # that referenced it (and the dual-read in list_pending_replies)
+    # continue to resolve. Always mirrors the LATEST entry written to
+    # `attempted_message_ids`. Removed from primary write paths but kept
+    # readable; do not rely on this field alone for new logic.
+    attempted_message_id = models.CharField(max_length=500, blank=True, default='', db_index=True)
+
     regeneration_count = models.IntegerField(default=0)
     parent_draft = models.ForeignKey(
         'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='regenerations',
@@ -335,6 +370,21 @@ class ReplyDraft(models.Model):
             return self.original_email.reply_content or ''
         if self.inbox_email_id and self.inbox_email:
             return self.inbox_email.body or ''
+        return ''
+
+    def get_original_body_html(self):
+        """HTML version of the source message body, when the source carried one.
+
+        Used by the draft view's "thread context" pane so an HTML email
+        (e.g. transactional / newsletter style messages with `body_html`
+        populated by the IMAP sync) renders the same as it does in the
+        Inbox tab. Without this the pane falls back to plain `body`,
+        which for many marketing emails is the raw HTML source dumped as
+        text — not what the user expects.
+        """
+        if self.inbox_email_id and self.inbox_email:
+            return self.inbox_email.body_html or ''
+        # Reply (campaign-thread) sources don't store HTML separately.
         return ''
 
     def get_original_analysis(self):

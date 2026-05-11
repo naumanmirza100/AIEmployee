@@ -497,6 +497,7 @@ urlpatterns = [
     re_path(r'^reply-draft/pending-replies/?$', reply_draft_api.list_pending_replies, name='reply_draft_list_pending'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/?$', reply_draft_api.get_inbox_email, name='reply_draft_get_inbox_email'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/?$', reply_draft_api.list_inbox_attachments, name='reply_draft_list_attachments'),
+    re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/fetch-attachments/?$', reply_draft_api.fetch_inbox_attachments, name='reply_draft_fetch_attachments'),
     re_path(r'^reply-draft/inbox/(?P<email_id>\d+)/attachments/(?P<attachment_id>\d+)/download/?$', reply_draft_api.download_inbox_attachment, name='reply_draft_download_attachment'),
     re_path(r'^reply-draft/reply/(?P<reply_id>\d+)/?$', reply_draft_api.get_reply, name='reply_draft_get_reply'),
     re_path(r'^reply-draft/campaigns/?$', reply_draft_api.list_campaigns, name='reply_draft_list_campaigns'),
@@ -623,13 +624,19 @@ urlpatterns = [
     # Documents
     re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
     re_path(r'^hr/documents/upload/?$', hr_agent.upload_hr_document, name='hr_upload_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/?$', hr_agent.get_hr_document, name='hr_get_document'),  # GET
     re_path(r'^hr/documents/(?P<document_id>\d+)/summarize/?$', hr_agent.summarize_hr_document, name='hr_summarize_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/extract/?$', hr_agent.extract_hr_document, name='hr_extract_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/delete/?$', hr_agent.delete_hr_document, name='hr_delete_document'),  # DELETE/POST
 
     # Workflows / SOPs
     re_path(r'^hr/workflows/?$', hr_agent.list_hr_workflows, name='hr_list_workflows'),  # GET
     re_path(r'^hr/workflows/create/?$', hr_agent.create_hr_workflow, name='hr_create_workflow'),  # POST
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/?$', hr_agent.get_hr_workflow, name='hr_get_workflow'),  # GET
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/update/?$', hr_agent.update_hr_workflow, name='hr_update_workflow'),  # PATCH
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/delete/?$', hr_agent.delete_hr_workflow, name='hr_delete_workflow'),  # DELETE/POST
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/execute/?$', hr_agent.execute_hr_workflow, name='hr_execute_workflow'),  # POST
+    re_path(r'^hr/workflows/executions/?$', hr_agent.list_hr_workflow_executions, name='hr_list_workflow_executions'),  # GET
 
     # Notifications
     re_path(r'^hr/notifications/templates/?$', hr_agent.list_hr_notification_templates, name='hr_list_notification_templates'),  # GET
@@ -652,8 +659,22 @@ urlpatterns = [
     re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_meeting_scheduler_chat, name='hr_delete_meeting_scheduler_chat'),  # DELETE
 
     # Leave requests
+    re_path(r'^hr/leave-requests/?$', hr_agent.list_leave_requests, name='hr_list_leave_requests'),  # GET
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
+
+    # Holiday calendar
+    re_path(r'^hr/holidays/?$', hr_agent.list_holidays, name='hr_list_holidays'),  # GET
+    re_path(r'^hr/holidays/create/?$', hr_agent.create_holiday, name='hr_create_holiday'),  # POST (also upserts)
+    re_path(r'^hr/holidays/(?P<holiday_id>\d+)/delete/?$', hr_agent.delete_holiday, name='hr_delete_holiday'),  # DELETE
+
+    # Leave accrual policies
+    re_path(r'^hr/leave-accrual-policies/?$', hr_agent.list_accrual_policies, name='hr_list_accrual_policies'),  # GET
+    re_path(r'^hr/leave-accrual-policies/upsert/?$', hr_agent.upsert_accrual_policy, name='hr_upsert_accrual_policy'),  # POST
+    re_path(r'^hr/leave-accrual-policies/(?P<policy_id>\d+)/delete/?$', hr_agent.delete_accrual_policy, name='hr_delete_accrual_policy'),  # DELETE
+
+    # Employee detail bundle
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
 ]
 
 

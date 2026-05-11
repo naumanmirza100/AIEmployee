@@ -142,6 +142,65 @@ class LeaveBalance(models.Model):
         return f"{self.employee_id}/{self.leave_type}: {self.remaining}"
 
 
+class Holiday(models.Model):
+    """A non-working day for the company (or a region within it). Counted out
+    by ``working_days_between`` so a leave request that overlaps a holiday
+    doesn't deduct from the employee's balance for that day."""
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='hr_holidays')
+    name = models.CharField(max_length=200)
+    date = models.DateField()
+    region = models.CharField(max_length=64, blank=True, default='',
+                              help_text='Optional region/locale code (e.g. "US-CA"). Blank = company-wide.')
+    is_working_day = models.BooleanField(default=False,
+                                         help_text='False = day off (default). True lets you mark working bridges around official holidays.')
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['date']
+        unique_together = [('company', 'date', 'region')]
+        indexes = [models.Index(fields=['company', 'date'])]
+
+    def __str__(self):
+        return f"{self.date} · {self.name} ({self.company_id})"
+
+
+class LeaveAccrualPolicy(models.Model):
+    """Per-(company, leave_type) policy that drives the monthly accrual job.
+
+    A simple model: every period (monthly / biweekly / annual) bump the
+    employee's `LeaveBalance.accrued_days` by `days_per_period`, capped at
+    `max_balance` (None = uncapped). Existing implementation deliberately
+    ignores tenure tiers / pro-rata first-month math — keep it simple.
+    """
+    PERIOD_CHOICES = [
+        ('monthly', 'Monthly'),
+        ('biweekly', 'Biweekly'),
+        ('annual', 'Annual'),
+    ]
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='hr_accrual_policies')
+    leave_type = models.CharField(max_length=20, choices=LeaveBalance.LEAVE_TYPE_CHOICES)
+    period = models.CharField(max_length=12, choices=PERIOD_CHOICES, default='monthly')
+    days_per_period = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    max_balance = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True,
+                                      help_text='Cap for accrued+carryover; null = uncapped.')
+    last_run_at = models.DateTimeField(null=True, blank=True,
+                                       help_text='Most recent successful accrual tick. Used to skip duplicate periods.')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['leave_type']
+        unique_together = [('company', 'leave_type')]
+        indexes = [models.Index(fields=['company', 'is_active'])]
+
+    def __str__(self):
+        return f"{self.leave_type}: +{self.days_per_period}/{self.period} ({self.company_id})"
+
+
 class LeaveRequest(models.Model):
     """Employee-initiated leave request. Lifecycle: pending → approved /
     rejected / cancelled. The workflow runner reacts to status changes."""
@@ -256,9 +315,23 @@ class HRDocument(models.Model):
     is_indexed = models.BooleanField(default=False)
     embedding_model = models.CharField(max_length=100, blank=True, default='')
 
-    # Auto-extracted structured fields (populated by the document agent)
+    # Auto-extracted structured fields (populated by the document agent on upload).
+    # Filled automatically for offer_letter / contract / payslip / id_proof — see
+    # `process_hr_document` Celery task. Authors can also re-trigger via the
+    # extract endpoint.
     extracted_fields = models.JSONField(default=dict, blank=True,
                                         help_text='Auto-extracted key fields, e.g. {"salary": ..., "start_date": ...}.')
+
+    # Versioning — same shape as Frontline's Document. When a newer revision
+    # is uploaded with `parent_document_id=<old.id>`, the old row's
+    # `superseded_by` is pointed at the new one and retrieval skips it.
+    version = models.IntegerField(default=1)
+    parent_document = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                                        related_name='revisions',
+                                        help_text='Original document this is a revision of.')
+    superseded_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name='superseded_revisions', db_index=True,
+                                      help_text='Points to the newer revision; non-null = excluded from retrieval.')
 
     # Retention — defaults vary by document_type at upload time
     # (e.g. payroll → 7 years).
