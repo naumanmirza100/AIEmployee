@@ -3286,6 +3286,7 @@ def api_marketing_generate_graph(request):
             'data': {
                 'chart': result['chart'],
                 'insights': result.get('insights', ''),
+                'source': 'llm' if bool(getattr(graph_agent, 'last_llm_used', False)) else 'database',
             }
         })
     except Exception as e:

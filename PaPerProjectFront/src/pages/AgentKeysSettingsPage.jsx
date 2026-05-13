@@ -70,7 +70,7 @@ const QuotaBar = ({ quota }) => {
     .filter(([, tokens]) => tokens > 0)
     .map(([key, tokens]) => ({
       key,
-      tokens,
+      tokens: Math.min(tokens, quota.included_tokens),
       label:  PROVIDER_META[key]?.label  ?? key.toUpperCase(),
       accent: PROVIDER_META[key]?.accent ?? 'bg-white/10 text-white/60 border-white/20',
     }));
@@ -80,7 +80,7 @@ const QuotaBar = ({ quota }) => {
       {/* Overall */}
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-baseline gap-2">
-          <span className="text-white font-semibold text-base">{formatTokens(quota.used_tokens)}</span>
+          <span className="text-white font-semibold text-base">{formatTokens(Math.min(quota.used_tokens, quota.included_tokens))}</span>
           <span className="text-white/40">/ {formatTokens(quota.included_tokens)}</span>
           <span className="text-white/30 text-xs">total tokens</span>
         </div>

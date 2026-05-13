@@ -233,6 +233,10 @@ def _serialize_quota_admin(q: AgentTokenQuota):
     default_provider = AGENT_DEFAULT_PROVIDER.get(q.agent_name, 'openai')
     if not provider_breakdown and q.used_tokens > 0:
         provider_breakdown = {default_provider: q.used_tokens}
+    else:
+        untracked = q.used_tokens - sum(provider_breakdown.values())
+        if untracked > 0:
+            provider_breakdown[default_provider] = provider_breakdown.get(default_provider, 0) + untracked
     return {
         'id': q.id,
         'company_id': q.company_id,

@@ -56,6 +56,12 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
     default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name or quota.agent_name, 'openai')
     if not provider_breakdown and quota.used_tokens > 0:
         provider_breakdown = {default_provider: quota.used_tokens}
+    else:
+        # Attribute any untracked tokens (usage before per-provider logging existed)
+        # to the default provider so the breakdown sum matches the total.
+        untracked = quota.used_tokens - sum(provider_breakdown.values())
+        if untracked > 0:
+            provider_breakdown[default_provider] = provider_breakdown.get(default_provider, 0) + untracked
     return {
         'included_tokens': quota.included_tokens,
         'used_tokens': quota.used_tokens,

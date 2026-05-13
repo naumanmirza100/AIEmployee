@@ -1948,6 +1948,12 @@ class KeyRequest(models.Model):
     agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     note = models.TextField(blank=True)
+    key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    linked_key_id = models.BigIntegerField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    stripe_session_id = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     resolved_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,

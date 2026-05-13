@@ -2788,7 +2788,8 @@ const MarketingQA = () => {
               chart: response.chart,
               chartTitle: response.chart?.title || response.title || 'Chart',
               chartType: response.chart?.type || 'bar',
-              insights: response.insights || []
+              insights: response.insights || [],
+              source: response.source,
             }
           };
           handleResponse(q, userMsg, assistantMsg, response);
