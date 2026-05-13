@@ -38,7 +38,7 @@ from hr_agent.models import (
     HRNotificationTemplate, HRScheduledNotification,
     HRKnowledgeChat, HRKnowledgeChatMessage,
     HRMeetingSchedulerChat, HRMeetingSchedulerChatMessage,
-    Department,
+    Department, HRAuditLog,
 )
 from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
@@ -337,6 +337,17 @@ def update_department(request, dept_id):
             if not parent or parent.pk == dept.pk:
                 return Response({'status': 'error', 'message': 'Invalid parent_id'},
                                 status=status.HTTP_400_BAD_REQUEST)
+            # Walk up the candidate parent's ancestors to detect A→B→C→A cycles.
+            cursor = parent
+            depth = 0
+            while cursor is not None and depth < 50:
+                if cursor.parent_id == dept.pk:
+                    return Response({
+                        'status': 'error',
+                        'message': 'Setting this parent would create a circular department hierarchy.',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                cursor = cursor.parent
+                depth += 1
             dept.parent = parent
         fields_changed.append('parent')
     if 'head_id' in d:
@@ -481,10 +492,15 @@ def create_hr_knowledge_chat(request):
     try:
         d = request.data or {}
         title = (d.get('title') or 'HR chat')[:255]
+        _MAX_MESSAGES = 500
+        incoming = [m for m in (d.get('messages') or []) if isinstance(m, dict)]
+        if len(incoming) > _MAX_MESSAGES:
+            return Response({
+                'status': 'error',
+                'message': f'Message count exceeds limit of {_MAX_MESSAGES}.',
+            }, status=status.HTTP_400_BAD_REQUEST)
         chat = HRKnowledgeChat.objects.create(company_user=request.user, title=title)
-        for m in (d.get('messages') or []):
-            if not isinstance(m, dict):
-                continue
+        for m in incoming:
             role = (m.get('role') or '').lower()
             if role not in ('user', 'assistant'):
                 continue
@@ -519,11 +535,16 @@ def update_hr_knowledge_chat(request, chat_id):
         if 'title' in d:
             chat.title = (d['title'] or 'HR chat')[:255]
         chat.save()
+        _MAX_MESSAGES = 500
         if 'messages' in d:
+            incoming = [m for m in (d.get('messages') or []) if isinstance(m, dict)]
+            if len(incoming) > _MAX_MESSAGES:
+                return Response({
+                    'status': 'error',
+                    'message': f'Message count exceeds limit of {_MAX_MESSAGES}.',
+                }, status=status.HTTP_400_BAD_REQUEST)
             HRKnowledgeChatMessage.objects.filter(chat=chat).delete()
-            for m in d.get('messages') or []:
-                if not isinstance(m, dict):
-                    continue
+            for m in incoming:
                 role = (m.get('role') or '').lower()
                 if role not in ('user', 'assistant'):
                     continue
@@ -568,7 +589,15 @@ def delete_hr_knowledge_chat(request, chat_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def list_hr_documents(request):
-    """List HR documents visible to the caller (gated by confidentiality)."""
+    """List HR documents visible to the caller (gated by confidentiality).
+
+    Supports:
+      ?document_type=   filter by type
+      ?q=               substring search on title
+      ?limit=           page size (default 50, max 200)
+      ?offset=          page start (default 0)
+    Returns ``pagination.total`` for the frontend to render page controls.
+    """
     try:
         company = request.user.company
         cu = request.user
@@ -582,6 +611,15 @@ def list_hr_documents(request):
         doc_type = request.GET.get('document_type')
         if doc_type:
             qs = qs.filter(document_type=doc_type)
+        q = (request.GET.get('q') or '').strip()
+        if q:
+            qs = qs.filter(title__icontains=q)
+        try:
+            limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+            offset = max(0, int(request.GET.get('offset') or 0))
+        except ValueError:
+            limit, offset = 50, 0
+        total = qs.count()
         rows = [{
             'id': d.id, 'title': d.title, 'document_type': d.document_type,
             'confidentiality': d.confidentiality,
@@ -590,8 +628,9 @@ def list_hr_documents(request):
             'processing_status': d.processing_status, 'is_indexed': d.is_indexed,
             'chunks_processed': d.chunks_processed, 'chunks_total': d.chunks_total,
             'created_at': d.created_at.isoformat(),
-        } for d in qs.order_by('-created_at')[:200]]
-        return Response({'status': 'success', 'data': rows, 'count': len(rows)})
+        } for d in qs.order_by('-created_at')[offset:offset + limit]]
+        return Response({'status': 'success', 'data': rows,
+                         'pagination': {'total': total, 'limit': limit, 'offset': offset}})
     except Exception:
         logger.exception("list_hr_documents failed")
         return Response({'status': 'error', 'message': 'Failed to list documents'},
@@ -723,6 +762,23 @@ def upload_hr_document(request):
         if parent_document:
             parent_document.superseded_by = document
             parent_document.save(update_fields=['superseded_by', 'updated_at'])
+
+        # Audit — document uploads are sensitive (offer letters, payslips, contracts).
+        _write_audit_log(
+            request.user, company,
+            'document.upload',
+            'document', document.id,
+            created={
+                'title': document.title,
+                'document_type': document.document_type,
+                'confidentiality': document.confidentiality,
+                'employee_id': document.employee_id,
+                'file_format': document.file_format,
+                'file_size': document.file_size,
+                'version': document.version,
+                'parent_document_id': document.parent_document_id,
+            },
+        )
 
         # Dispatch processing — broker probe → fall back to inline if Redis is down,
         # so the request doesn't stall in Celery's ~100s connection retry loop.
@@ -1297,12 +1353,29 @@ def create_hr_notification_template(request):
     if not name or not body:
         return Response({'status': 'error', 'message': 'name and body are required'},
                         status=status.HTTP_400_BAD_REQUEST)
+    trigger_config = d.get('trigger_config') or {}
+    if trigger_config:
+        _KNOWN_EVENTS = {'probation_ending', 'birthday', 'work_anniversary', 'document_expiring'}
+        event_on = trigger_config.get('on')
+        if not event_on:
+            return Response({
+                'status': 'error',
+                'message': "trigger_config must include an 'on' key specifying the event name.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if event_on not in _KNOWN_EVENTS:
+            return Response({
+                'status': 'error',
+                'message': (
+                    f"Unknown trigger event '{event_on}'. "
+                    f"Recognised events: {', '.join(sorted(_KNOWN_EVENTS))}."
+                ),
+            }, status=status.HTTP_400_BAD_REQUEST)
     t = HRNotificationTemplate.objects.create(
         company=company, name=name, body=body,
         subject=d.get('subject') or '',
         channel=d.get('channel') or 'email',
         notification_type=d.get('notification_type') or 'system',
-        trigger_config=d.get('trigger_config') or {},
+        trigger_config=trigger_config,
         use_llm_personalization=bool(d.get('use_llm_personalization', False)),
     )
     return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name}},
@@ -1495,6 +1568,80 @@ def submit_leave_request(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_leave_request(request, request_id):
+    """Edit a still-pending leave request.
+    Only the original submitting employee (or HR-admin) may do this.
+    Once the request is approved / rejected it is locked."""
+    try:
+        company = request.user.company
+        lr = LeaveRequest.objects.filter(pk=request_id, employee__company=company).first()
+        if not lr:
+            return Response({'status': 'error', 'message': 'Leave request not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        is_admin = _is_hr_admin(request.user)
+        caller_user_id = getattr(request.user, 'user_id', None)
+        is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
+        if not (is_admin or is_owner):
+            return Response({'status': 'error', 'message': 'Not authorized to edit this leave request'},
+                            status=status.HTTP_403_FORBIDDEN)
+        if lr.status != 'pending':
+            return Response({
+                'status': 'error',
+                'message': f'Leave request is already {lr.status} and cannot be edited.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        d = request.data or {}
+        fields = []
+        if 'leave_type' in d:
+            lr.leave_type = d['leave_type'] or lr.leave_type
+            fields.append('leave_type')
+        if 'reason' in d:
+            lr.reason = (d['reason'] or '')[:2000]
+            fields.append('reason')
+        if 'start_date' in d or 'end_date' in d:
+            try:
+                sd = datetime.fromisoformat(d['start_date']).date() if 'start_date' in d else lr.start_date
+                ed = datetime.fromisoformat(d['end_date']).date() if 'end_date' in d else lr.end_date
+            except (TypeError, ValueError):
+                return Response({'status': 'error', 'message': 'Dates must be YYYY-MM-DD'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if ed < sd:
+                return Response({'status': 'error', 'message': 'end_date must be on or after start_date'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            lr.start_date, lr.end_date = sd, ed
+            fields += ['start_date', 'end_date']
+            # Recompute working days unless the caller overrides explicitly.
+            days = d.get('days_requested')
+            if days in (None, ''):
+                from hr_agent.leave_helpers import working_days_between
+                lr.days_requested = working_days_between(sd, ed, company)
+            else:
+                try:
+                    lr.days_requested = float(days)
+                except (TypeError, ValueError):
+                    from hr_agent.leave_helpers import working_days_between
+                    lr.days_requested = working_days_between(sd, ed, company)
+            fields.append('days_requested')
+        if fields:
+            fields.append('updated_at')
+            lr.save(update_fields=fields)
+        return Response({'status': 'success', 'data': {
+            'id': lr.id, 'status': lr.status,
+            'start_date': lr.start_date.isoformat(), 'end_date': lr.end_date.isoformat(),
+            'leave_type': lr.leave_type, 'days_requested': float(lr.days_requested),
+            'reason': lr.reason,
+        }})
+    except Exception:
+        logger.exception("update_leave_request failed")
+        return Response({'status': 'error', 'message': 'Failed to update leave request'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1534,18 +1681,41 @@ def decide_leave_request(request, request_id):
                                         "must be the assigned approver or HR admin."},
                             status=status.HTTP_403_FORBIDDEN)
 
+        prev_status = lr.status
         lr.status = 'approved' if action == 'approve' else 'rejected'
         lr.approval_note = (request.data.get('note') or '')[:2000]
         lr.decided_at = timezone.now()
         lr.save(update_fields=['status', 'approval_note', 'decided_at', 'updated_at'])
+
+        # Audit — leave decisions are the most compliance-sensitive HR action.
+        _write_audit_log(
+            cu, company,
+            f'leave_request.{action}',
+            'leave_request', lr.id,
+            before={'status': prev_status},
+            after={
+                'status': lr.status,
+                'approval_note': lr.approval_note,
+                'decided_at': lr.decided_at.isoformat(),
+                'employee_id': lr.employee_id,
+                'leave_type': lr.leave_type,
+                'days_requested': float(lr.days_requested or 0),
+            },
+        )
 
         # Bump used_days on approval — keeps the balance honest without
         # requiring a separate workflow step.
         if lr.status == 'approved':
             try:
                 from hr_agent.models import LeaveBalance
+                from datetime import date as _date
+                # Scope the balance to the leave year so used_days doesn't
+                # bleed across annual accrual cycles.
+                year_start = _date(lr.start_date.year, 1, 1)
                 bal, _ = LeaveBalance.objects.get_or_create(
-                    employee_id=lr.employee_id, leave_type=lr.leave_type,
+                    employee_id=lr.employee_id,
+                    leave_type=lr.leave_type,
+                    period_start=year_start,
                 )
                 bal.used_days = (bal.used_days or 0) + (lr.days_requested or 0)
                 bal.save(update_fields=['used_days', 'updated_at'])
@@ -2365,6 +2535,202 @@ def _is_hr_admin(company_user) -> bool:
     return (company_user.role or '').lower() in ('hr_agent', 'owner', 'admin')
 
 
+def _write_audit_log(actor_cu, company, action: str, target_type: str, target_id: int,
+                     *, before: dict | None = None, after: dict | None = None,
+                     created: dict | None = None, deleted: dict | None = None) -> None:
+    """Fire-and-forget audit log writer. Never raises — a logging failure
+    must not roll back the main operation."""
+    try:
+        if created is not None:
+            diff = {'created': created}
+        elif deleted is not None:
+            diff = {'deleted': deleted}
+        else:
+            diff = {}
+            if before is not None:
+                diff['before'] = before
+            if after is not None:
+                diff['after'] = after
+        HRAuditLog.objects.create(
+            company=company,
+            actor=actor_cu,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            diff=diff,
+        )
+    except Exception:
+        logger.exception("_write_audit_log failed: %s on %s:%s", action, target_type, target_id)
+
+
+# ============================================================================
+# Employee — update (PATCH/POST)
+# ============================================================================
+
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_employee(request, employee_id):
+    """Update mutable fields on an existing employee.
+
+    HR-admins can edit all fields. An employee can update their own ``phone``
+    and ``timezone_name`` only (self-service). All HR-admin changes are written
+    to ``HRAuditLog`` for the diff trail.
+    """
+    try:
+        emp, err = _company_employee_or_404(request, employee_id)
+        if err:
+            return err
+
+        company = request.user.company
+        is_admin = _is_hr_admin(request.user)
+        caller_user_id = getattr(request.user, 'user_id', None)
+        is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
+
+        if not (is_admin or is_self):
+            return Response({'status': 'error', 'message': 'HR-admin access required'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        d = request.data or {}
+        fields = []
+        before = _serialize_employee(emp)
+
+        # Self-service fields (any authenticated caller, for themselves).
+        if 'phone' in d:
+            emp.phone = (d['phone'] or '')[:40]
+            fields.append('phone')
+        if 'timezone_name' in d:
+            emp.timezone_name = (d['timezone_name'] or 'UTC')[:64]
+            fields.append('timezone_name')
+
+        # HR-admin-only fields.
+        if is_admin:
+            if 'full_name' in d:
+                name = (d['full_name'] or '').strip()[:255]
+                if name:
+                    emp.full_name = name
+                    fields.append('full_name')
+            if 'job_title' in d:
+                emp.job_title = (d['job_title'] or '')[:160]
+                fields.append('job_title')
+            if 'personal_email' in d:
+                emp.personal_email = (d['personal_email'] or '')[:254]
+                fields.append('personal_email')
+            if 'employment_status' in d:
+                val = d['employment_status']
+                if val in dict(Employee.EMPLOYMENT_STATUS_CHOICES):
+                    emp.employment_status = val
+                    fields.append('employment_status')
+            if 'employment_type' in d:
+                val = d['employment_type']
+                if val in dict(Employee.EMPLOYMENT_TYPE_CHOICES):
+                    emp.employment_type = val
+                    fields.append('employment_type')
+            if 'start_date' in d:
+                emp.start_date = _parse_iso_date(d['start_date'])
+                fields.append('start_date')
+            if 'probation_end_date' in d:
+                emp.probation_end_date = _parse_iso_date(d['probation_end_date'])
+                fields.append('probation_end_date')
+            if 'manager_id' in d:
+                mid = d['manager_id']
+                if mid in (None, '', 0, '0'):
+                    emp.manager = None
+                else:
+                    mgr = Employee.objects.filter(company=company, pk=mid).first()
+                    if mgr and mgr.pk != emp.pk:
+                        emp.manager = mgr
+                fields.append('manager')
+            # Department — prefer FK, fall back to string, auto-create if needed.
+            dept_id = d.get('department_id')
+            dept_str = (d.get('department') or '').strip()[:120]
+            if dept_id is not None or dept_str:
+                if dept_id:
+                    dept = Department.objects.filter(company=company, pk=dept_id).first()
+                    if dept:
+                        emp.department_obj = dept
+                        emp.department = dept_str or dept.name
+                        if 'department_obj' not in fields:
+                            fields.extend(['department_obj', 'department'])
+                elif dept_str:
+                    dept = (Department.objects.filter(company=company, name__iexact=dept_str).first()
+                            or Department.objects.create(company=company, name=dept_str))
+                    emp.department_obj = dept
+                    emp.department = dept_str
+                    if 'department_obj' not in fields:
+                        fields.extend(['department_obj', 'department'])
+
+        if not fields:
+            return Response({'status': 'success', 'data': _serialize_employee(emp),
+                             'message': 'No recognised fields to update'})
+
+        fields_to_save = list(set(fields)) + ['updated_at']
+        emp.save(update_fields=fields_to_save)
+
+        after = _serialize_employee(emp)
+        _write_audit_log(request.user, company, 'employee.update', 'employee', emp.id,
+                         before=before, after=after)
+
+        return Response({'status': 'success', 'data': _serialize_employee(emp)})
+    except Exception:
+        logger.exception("update_employee failed")
+        return Response({'status': 'error', 'message': 'Failed to update employee'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Audit log — HR-admin read-only view
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_audit_log(request):
+    """Recent HR audit events for the company. HR-admin only.
+
+    Optional query params:
+      ``?target_type=employee|compensation|review``
+      ``?target_id=<pk>``  (scope to a single row)
+      ``?limit=`` / ``?offset=`` (default 50/0, max 200)
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.company
+        qs = HRAuditLog.objects.filter(company=company).order_by('-created_at')
+        if request.GET.get('target_type'):
+            qs = qs.filter(target_type=request.GET['target_type'])
+        if request.GET.get('target_id'):
+            qs = qs.filter(target_id=request.GET['target_id'])
+        try:
+            limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+            offset = max(0, int(request.GET.get('offset') or 0))
+        except ValueError:
+            limit, offset = 50, 0
+        total = qs.count()
+        rows = []
+        for log in qs.select_related('actor')[offset:offset + limit]:
+            rows.append({
+                'id': log.id,
+                'action': log.action,
+                'target_type': log.target_type,
+                'target_id': log.target_id,
+                'actor_id': log.actor_id,
+                'actor_name': log.actor.full_name if log.actor_id else None,
+                'diff': log.diff,
+                'created_at': log.created_at.isoformat(),
+            })
+        return Response({'status': 'success', 'data': rows,
+                         'pagination': {'total': total, 'limit': limit, 'offset': offset}})
+    except Exception:
+        logger.exception("list_hr_audit_log failed")
+        return Response({'status': 'error', 'message': 'Failed to load audit log'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 def _serialize_compensation(c) -> dict:
     return {
         'id': c.id,
@@ -2430,6 +2796,20 @@ def create_compensation(request, employee_id):
         return Response({'status': 'error', 'message': 'effective_date must be YYYY-MM-DD'},
                         status=status.HTTP_400_BAD_REQUEST)
 
+    # Guard against out-of-order history — "current salary" queries rely on
+    # ordering by effective_date desc, so a backdated row silently becomes
+    # the new "current" if we allow it.
+    latest = Compensation.objects.filter(employee=emp).order_by('-effective_date').first()
+    if latest and eff < latest.effective_date:
+        return Response({
+            'status': 'error',
+            'message': (
+                f'effective_date {eff} is earlier than the most recent compensation '
+                f'record ({latest.effective_date}). Backdating is not allowed. '
+                f'If you need to correct a past record, delete the later entry first.'
+            ),
+        }, status=status.HTTP_400_BAD_REQUEST)
+
     user = _hr_get_or_create_user_for_company_user(request.user)
     c = Compensation.objects.create(
         employee=emp,
@@ -2444,7 +2824,10 @@ def create_compensation(request, employee_id):
         notes=(d.get('notes') or '')[:5000],
         recorded_by=user,
     )
-    return Response({'status': 'success', 'data': _serialize_compensation(c)},
+    serialized = _serialize_compensation(c)
+    _write_audit_log(request.user, request.user.company, 'compensation.create',
+                     'compensation', c.id, created=serialized)
+    return Response({'status': 'success', 'data': serialized},
                     status=status.HTTP_201_CREATED)
 
 
@@ -2458,12 +2841,15 @@ def delete_compensation(request, comp_id):
         return Response({'status': 'error', 'message': 'HR-admin access required'},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import Compensation
-    deleted, _ = Compensation.objects.filter(
-        pk=comp_id, employee__company=request.user.company,
-    ).delete()
-    if not deleted:
+    comp_qs = Compensation.objects.filter(pk=comp_id, employee__company=request.user.company)
+    comp_obj = comp_qs.first()
+    if not comp_obj:
         return Response({'status': 'error', 'message': 'Compensation row not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    snap = _serialize_compensation(comp_obj)
+    comp_obj.delete()
+    _write_audit_log(request.user, request.user.company, 'compensation.delete',
+                     'compensation', int(comp_id), deleted=snap)
     return Response({'status': 'success', 'data': {'deleted_id': int(comp_id)}})
 
 
@@ -2667,6 +3053,7 @@ def update_perf_review(request, review_id):
 
     d = request.data or {}
     fields = []
+    before_review = _serialize_perf_review(r)
     # Self-review fields
     if 'self_summary' in d and (is_reviewee or is_admin):
         if r.self_submitted_at and not is_admin:
@@ -2708,12 +3095,16 @@ def update_perf_review(request, review_id):
             r.status = 'awaiting_calibration'
             fields.append('status')
 
-    # Final release
+    # Final release / retract
     if 'release' in d and is_admin and d['release']:
         r.visible_to_employee = True
         r.finalized_at = timezone.now()
         r.status = 'closed'
         fields.extend(['visible_to_employee', 'finalized_at', 'status'])
+    elif 'unrelease' in d and is_admin and d['unrelease']:
+        r.visible_to_employee = False
+        r.status = 'awaiting_calibration'
+        fields.extend(['visible_to_employee', 'status'])
 
     if 'status' in d and is_admin and d['status'] in dict(r.STATUS_CHOICES):
         r.status = d['status']
@@ -2723,4 +3114,6 @@ def update_perf_review(request, review_id):
     if fields:
         fields.append('updated_at')
         r.save(update_fields=fields)
+        _write_audit_log(request.user, company, 'review.update', 'review', r.id,
+                         before=before_review, after=_serialize_perf_review(r))
     return Response({'status': 'success', 'data': _serialize_perf_review(r)})
