@@ -54,6 +54,14 @@ class QuotaExhausted(KeyServiceError):
     )
 
 
+class ManagedQuotaExhausted(KeyServiceError):
+    reason = "managed_quota_exhausted"
+    user_message = (
+        "Your managed key token limit has been reached. "
+        "Contact your admin to increase the limit or add your own API key (BYOK)."
+    )
+
+
 class NoKeyAvailable(KeyServiceError):
     reason = "no_key"
     user_message = (
@@ -103,18 +111,18 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
 
     Preference order:
       1. Active BYOK key (no quota — info-only metering)
-      2. Quota exhausted? → hard block (blocks BOTH managed + platform paths)
-      3. Active per-company managed key (admin override)
+      2. Active per-company managed key (admin override) — bypasses platform quota
+      3. Quota exhausted? → hard block (platform path only)
       4. Platform key for the agent's default provider (the "free tokens" path)
       5. Hard block: no key available anywhere
 
-    Step 1 is BEFORE the quota check because BYOK users don't consume quota,
-    so an exhausted quota shouldn't stop them if they have their own key.
+    BYOK and managed keys both bypass the platform quota gate because they
+    bring their own API keys.  Platform quota only gates the free-tier path.
     """
     if agent_name not in VALID_AGENTS:
         raise InvalidAgent()
 
-    # Step 1 — BYOK wins, always
+    # Step 1 — BYOK wins, always (no quota consumed)
     byok = (
         CompanyAPIKey.objects
         .filter(company=company, agent_name=agent_name, mode='byok', status='active')
@@ -132,12 +140,7 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
                 key_id=byok.id,
             )
 
-    # Step 2 — quota gate (applies to managed + platform paths)
-    quota = _ensure_quota(company, agent_name)
-    if quota.is_exhausted:
-        raise QuotaExhausted()
-
-    # Step 3 — per-company managed override, if admin assigned one
+    # Step 2 — per-company managed key (admin-assigned) bypasses platform quota
     managed = (
         CompanyAPIKey.objects
         .filter(company=company, agent_name=agent_name, mode='managed', status='active')
@@ -146,6 +149,10 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     if managed:
         plaintext = managed.get_plaintext_key()
         if plaintext:
+            quota = _ensure_quota(company, agent_name)
+            # Enforce managed token limit when admin set one (>0)
+            if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
+                raise ManagedQuotaExhausted()
             return CallContext(
                 company_id=company.id,
                 agent_name=agent_name,
@@ -155,6 +162,11 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
                 key_id=managed.id,
                 quota_id=quota.id,
             )
+
+    # Step 3 — quota gate (platform-key path only)
+    quota = _ensure_quota(company, agent_name)
+    if quota.is_exhausted:
+        raise QuotaExhausted()
 
     # Step 4 — platform default key (the "free tokens" path)
     default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai')
@@ -210,7 +222,7 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
     if total_tokens <= 0:
         return
 
-    if ctx.mode in ('managed', 'platform') and ctx.quota_id:
+    if ctx.mode == 'platform' and ctx.quota_id:
         AgentTokenQuota.objects.filter(pk=ctx.quota_id).update(
             used_tokens=F('used_tokens') + total_tokens
         )
@@ -230,6 +242,12 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
 
         # Quota threshold notifications (fire once per threshold)
         _check_quota_notifications(ctx.quota_id)
+
+    elif ctx.mode == 'managed' and ctx.quota_id:
+        # Managed key has its own counter so it never pollutes the platform quota
+        AgentTokenQuota.objects.filter(pk=ctx.quota_id).update(
+            managed_used_tokens=F('managed_used_tokens') + total_tokens
+        )
 
     elif ctx.mode == 'byok':
         AgentTokenQuota.objects.filter(

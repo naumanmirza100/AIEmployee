@@ -103,6 +103,7 @@ def assign_managed_key(request):
     provider = (request.data.get('provider') or 'openai').strip()
     api_key = (request.data.get('api_key') or '').strip()
     request_id = request.data.get('request_id')
+    managed_token_limit = request.data.get('managed_token_limit')
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
@@ -116,6 +117,13 @@ def assign_managed_key(request):
         return Response({'status': 'error', 'message': 'Company not found'},
                         status=status.HTTP_404_NOT_FOUND)
 
+    try:
+        token_limit = int(managed_token_limit) if managed_token_limit not in (None, '') else 0
+        if token_limit < 0:
+            token_limit = 0
+    except (ValueError, TypeError):
+        token_limit = 0
+
     with transaction.atomic():
         key, _ = CompanyAPIKey.objects.get_or_create(
             company=company, agent_name=agent_name, mode='managed',
@@ -126,6 +134,14 @@ def assign_managed_key(request):
         key.set_plaintext_key(api_key)
         key.assigned_by = request.user
         key.save()
+
+        # Set managed token quota on the AgentTokenQuota row
+        from core.api_key_service import _ensure_quota
+        quota = _ensure_quota(company, agent_name)
+        AgentTokenQuota.objects.filter(pk=quota.pk).update(
+            managed_included_tokens=token_limit,
+            managed_used_tokens=0,
+        )
 
         approved_req = None
         if request_id:
@@ -248,6 +264,9 @@ def _serialize_quota_admin(q: AgentTokenQuota):
         'remaining': q.remaining,
         'is_exhausted': q.is_exhausted,
         'byok_tokens_info': q.byok_tokens_info,
+        'managed_included_tokens': q.managed_included_tokens,
+        'managed_used_tokens': q.managed_used_tokens,
+        'managed_is_exhausted': q.managed_included_tokens > 0 and q.managed_used_tokens >= q.managed_included_tokens,
         'provider_breakdown': provider_breakdown,
         'default_provider': default_provider,
         'updated_at': q.updated_at.isoformat(),

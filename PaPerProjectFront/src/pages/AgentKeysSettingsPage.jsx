@@ -112,7 +112,7 @@ const QuotaBar = ({ quota }) => {
         </p>
       )}
 
-      {quota.is_exhausted && (
+      {quota.is_exhausted && !quota.managed_included_tokens && (
         <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
           <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
           <div className="text-xs text-red-200">
@@ -121,6 +121,37 @@ const QuotaBar = ({ quota }) => {
           </div>
         </div>
       )}
+
+      {/* Managed key quota bar — only shown when admin set a token limit */}
+      {quota.managed_included_tokens > 0 && (() => {
+        const mPct = Math.min(100, (quota.managed_used_tokens / quota.managed_included_tokens) * 100);
+        const mGrad = mPct >= 100 ? 'from-red-500 to-rose-500' : mPct >= 80 ? 'from-amber-400 to-orange-500' : 'from-violet-500 to-purple-500';
+        return (
+          <div className="space-y-2 pt-1 border-t border-[#2d2342]">
+            <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Managed key quota</p>
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-baseline gap-2">
+                <span className="text-white font-semibold text-base">{formatTokens(Math.min(quota.managed_used_tokens, quota.managed_included_tokens))}</span>
+                <span className="text-white/40">/ {formatTokens(quota.managed_included_tokens)}</span>
+                <span className="text-white/30 text-xs">tokens</span>
+              </div>
+              <span className="text-white/50 text-xs">{mPct.toFixed(1)}% used</span>
+            </div>
+            <div className="w-full h-2 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+              <div className={`h-full bg-gradient-to-r ${mGrad} transition-all`} style={{ width: `${mPct}%` }} />
+            </div>
+            {quota.managed_is_exhausted && (
+              <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                <div className="text-xs text-red-200">
+                  <p className="font-semibold">Managed key token limit reached.</p>
+                  <p className="text-red-300/80">Contact your admin to increase the limit or add your own API key (BYOK).</p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

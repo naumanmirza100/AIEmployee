@@ -68,6 +68,9 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
         'remaining': quota.remaining,
         'is_exhausted': quota.is_exhausted,
         'byok_tokens_info': quota.byok_tokens_info,
+        'managed_included_tokens': quota.managed_included_tokens,
+        'managed_used_tokens': quota.managed_used_tokens,
+        'managed_is_exhausted': quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens,
         'provider_breakdown': provider_breakdown,
         'default_provider': default_provider,
     }

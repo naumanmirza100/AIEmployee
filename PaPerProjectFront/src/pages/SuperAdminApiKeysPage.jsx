@@ -572,7 +572,7 @@ const SuperAdminApiKeysPage = () => {
   const [requestFilter, setRequestFilter] = useState({});
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
-  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '' });
+  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', managed_token_limit: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
 
@@ -649,6 +649,7 @@ const SuperAdminApiKeysPage = () => {
         agent_name: prefill.agent_name,
         provider: prefill.provider || 'openai',
         api_key: '',
+        managed_token_limit: '',
       });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: prefill });
     } else if (existingOrRequest) {
@@ -657,10 +658,11 @@ const SuperAdminApiKeysPage = () => {
         agent_name: existingOrRequest.agent_name,
         provider: existingOrRequest.provider || 'openai',
         api_key: '',
+        managed_token_limit: '',
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', managed_token_limit: '' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -677,6 +679,7 @@ const SuperAdminApiKeysPage = () => {
         agent_name: assignForm.agent_name,
         provider: assignForm.provider,
         api_key: assignForm.api_key,
+        managed_token_limit: assignForm.managed_token_limit ? Number(assignForm.managed_token_limit) : 0,
       };
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
@@ -873,6 +876,15 @@ const SuperAdminApiKeysPage = () => {
                 className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
                 value={assignForm.api_key}
                 onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-sm">Token Limit <span className="text-white/40 font-normal">(0 = unlimited)</span></Label>
+              <Input
+                type="number" min="0" placeholder="e.g. 50000"
+                className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                value={assignForm.managed_token_limit}
+                onChange={(e) => setAssignForm({ ...assignForm, managed_token_limit: e.target.value })}
               />
             </div>
           </div>
