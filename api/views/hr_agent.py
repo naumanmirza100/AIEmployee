@@ -38,6 +38,7 @@ from hr_agent.models import (
     HRNotificationTemplate, HRScheduledNotification,
     HRKnowledgeChat, HRKnowledgeChatMessage,
     HRMeetingSchedulerChat, HRMeetingSchedulerChatMessage,
+    Department,
 )
 from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
@@ -121,6 +122,8 @@ def _serialize_employee(e: Employee) -> dict:
         'work_email': e.work_email,
         'job_title': e.job_title,
         'department': e.department,
+        'department_id': e.department_obj_id,
+        'department_name': e.department_obj.name if e.department_obj_id else None,
         'manager_id': e.manager_id,
         'employment_status': e.employment_status,
         'employment_type': e.employment_type,
@@ -128,6 +131,17 @@ def _serialize_employee(e: Employee) -> dict:
         'probation_end_date': e.probation_end_date.isoformat() if e.probation_end_date else None,
         'date_of_birth': e.date_of_birth.isoformat() if e.date_of_birth else None,
         'timezone_name': e.timezone_name,
+    }
+
+
+def _serialize_department(d) -> dict:
+    return {
+        'id': d.id, 'name': d.name, 'code': d.code,
+        'parent_id': d.parent_id,
+        'head_id': d.head_id,
+        'description': d.description,
+        'is_active': d.is_active,
+        'employee_count': getattr(d, '_employee_count', None),
     }
 
 
@@ -160,7 +174,9 @@ def list_employees(request):
         q = (request.GET.get('q') or '').strip()
         if q:
             qs = qs.filter(Q(full_name__icontains=q) | Q(work_email__icontains=q))
-        if request.GET.get('department'):
+        if request.GET.get('department_id'):
+            qs = qs.filter(department_obj_id=request.GET['department_id'])
+        elif request.GET.get('department'):
             qs = qs.filter(department__iexact=request.GET['department'])
         if request.GET.get('status'):
             qs = qs.filter(employment_status=request.GET['status'])
@@ -194,6 +210,19 @@ def create_employee(request):
         if Employee.objects.filter(company=company, work_email__iexact=email).exists():
             return Response({'status': 'error', 'message': 'Employee with this email already exists'},
                             status=status.HTTP_400_BAD_REQUEST)
+        # Resolve department: prefer FK (department_id), fall back to string lookup,
+        # else create a Department row from the string so we never lose the input.
+        department_string = (d.get('department') or '').strip()[:120]
+        department_obj = None
+        dept_id = d.get('department_id')
+        if dept_id:
+            department_obj = Department.objects.filter(company=company, pk=dept_id).first()
+            if department_obj:
+                department_string = department_string or department_obj.name
+        elif department_string:
+            department_obj = Department.objects.filter(
+                company=company, name__iexact=department_string,
+            ).first() or Department.objects.create(company=company, name=department_string)
         e = Employee.objects.create(
             company=company,
             full_name=(d.get('full_name') or '').strip()[:255],
@@ -201,7 +230,8 @@ def create_employee(request):
             personal_email=(d.get('personal_email') or '')[:254],
             phone=(d.get('phone') or '')[:40],
             job_title=(d.get('job_title') or '')[:160],
-            department=(d.get('department') or '')[:120],
+            department=department_string,
+            department_obj=department_obj,
             employment_status=d.get('employment_status') or 'active',
             employment_type=d.get('employment_type') or 'full_time',
         )
@@ -211,6 +241,140 @@ def create_employee(request):
         logger.exception("create_employee failed")
         return Response({'status': 'error', 'message': 'Failed to create employee'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Departments — first-class hierarchy + dropdown source
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_departments(request):
+    company = request.user.company
+    qs = (Department.objects.filter(company=company)
+          .annotate(_employee_count=Count('employees'))
+          .order_by('name'))
+    if request.GET.get('active_only'):
+        qs = qs.filter(is_active=True)
+    return Response({'status': 'success',
+                     'data': [_serialize_department(d) for d in qs]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_department(request):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    d = request.data or {}
+    name = (d.get('name') or '').strip()
+    if not name:
+        return Response({'status': 'error', 'message': 'name is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if Department.objects.filter(company=company, name__iexact=name).exists():
+        return Response({'status': 'error', 'message': 'Department with this name already exists'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    parent_id = d.get('parent_id')
+    parent = (Department.objects.filter(company=company, pk=parent_id).first()
+              if parent_id else None)
+    head_id = d.get('head_id')
+    head = (Employee.objects.filter(company=company, pk=head_id).first()
+            if head_id else None)
+    dept = Department.objects.create(
+        company=company, name=name[:120],
+        code=(d.get('code') or '')[:32],
+        description=d.get('description') or '',
+        parent=parent, head=head,
+        is_active=bool(d.get('is_active', True)),
+    )
+    return Response({'status': 'success', 'data': _serialize_department(dept)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_department(request, dept_id):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    dept = Department.objects.filter(company=company, pk=dept_id).first()
+    if not dept:
+        return Response({'status': 'error', 'message': 'Department not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    d = request.data or {}
+    fields_changed = []
+    if 'name' in d:
+        new_name = (d['name'] or '').strip()[:120]
+        if new_name and new_name.lower() != dept.name.lower():
+            if Department.objects.filter(company=company, name__iexact=new_name).exclude(pk=dept.pk).exists():
+                return Response({'status': 'error', 'message': 'Another department already has that name'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            dept.name = new_name
+            fields_changed.append('name')
+    if 'code' in d:
+        dept.code = (d['code'] or '')[:32]
+        fields_changed.append('code')
+    if 'description' in d:
+        dept.description = d['description'] or ''
+        fields_changed.append('description')
+    if 'is_active' in d:
+        dept.is_active = bool(d['is_active'])
+        fields_changed.append('is_active')
+    if 'parent_id' in d:
+        pid = d['parent_id']
+        if pid in (None, '', 0):
+            dept.parent = None
+        else:
+            parent = Department.objects.filter(company=company, pk=pid).first()
+            if not parent or parent.pk == dept.pk:
+                return Response({'status': 'error', 'message': 'Invalid parent_id'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            dept.parent = parent
+        fields_changed.append('parent')
+    if 'head_id' in d:
+        hid = d['head_id']
+        if hid in (None, '', 0):
+            dept.head = None
+        else:
+            head = Employee.objects.filter(company=company, pk=hid).first()
+            if not head:
+                return Response({'status': 'error', 'message': 'Invalid head_id'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            dept.head = head
+        fields_changed.append('head')
+    if fields_changed:
+        fields_changed.append('updated_at')
+        dept.save(update_fields=fields_changed)
+    return Response({'status': 'success', 'data': _serialize_department(dept)})
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_department(request, dept_id):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    dept = Department.objects.filter(company=company, pk=dept_id).first()
+    if not dept:
+        return Response({'status': 'error', 'message': 'Department not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    # Detach employees rather than cascading: keep them in the table but
+    # null the FK + clear the legacy string. Children become roots.
+    Employee.objects.filter(department_obj=dept).update(department_obj=None, department='')
+    Department.objects.filter(parent=dept).update(parent=None)
+    dept.delete()
+    return Response({'status': 'success', 'data': {'deleted_id': int(dept_id)}})
 
 
 # ============================================================================
@@ -861,16 +1025,21 @@ def list_hr_workflow_executions(request):
     wf_id = request.GET.get('workflow_id')
     if wf_id:
         qs = qs.filter(workflow_id=wf_id)
-    rows = [{
-        'id': e.id, 'workflow_id': e.workflow_id, 'workflow_name': e.workflow_name,
-        'status': e.status,
-        'employee_id': e.employee_id,
-        'started_at': e.started_at.isoformat() if e.started_at else None,
-        'completed_at': e.completed_at.isoformat() if e.completed_at else None,
-        'resume_at': e.resume_at.isoformat() if e.resume_at else None,
-        'error_message': e.error_message,
-        'steps_completed': (e.result_data or {}).get('steps_completed') if isinstance(e.result_data, dict) else None,
-    } for e in qs[:100]]
+    rows = []
+    for e in qs[:100]:
+        rd = e.result_data if isinstance(e.result_data, dict) else {}
+        rows.append({
+            'id': e.id, 'workflow_id': e.workflow_id, 'workflow_name': e.workflow_name,
+            'status': e.status,
+            'employee_id': e.employee_id,
+            'started_at': e.started_at.isoformat() if e.started_at else None,
+            'completed_at': e.completed_at.isoformat() if e.completed_at else None,
+            'resume_at': e.resume_at.isoformat() if e.resume_at else None,
+            'error_message': e.error_message,
+            'steps_completed': rd.get('steps_completed'),
+            'awaiting_approval': bool(rd.get('awaiting_approval')) or e.status == 'awaiting_approval',
+            'approval_request': rd.get('approval_request'),
+        })
     return Response({'status': 'success', 'data': rows})
 
 
@@ -962,6 +1131,137 @@ def execute_hr_workflow(request, workflow_id):
         logger.exception("execute_hr_workflow failed")
         return Response({'status': 'error', 'message': 'Failed to execute workflow'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _serialize_execution_brief(e):
+    """Compact view of one HRWorkflowExecution — used in detail / approve responses."""
+    rd = e.result_data if isinstance(e.result_data, dict) else {}
+    return {
+        'id': e.id,
+        'workflow_id': e.workflow_id,
+        'workflow_name': e.workflow_name,
+        'status': e.status,
+        'employee_id': e.employee_id,
+        'started_at': e.started_at.isoformat() if e.started_at else None,
+        'completed_at': e.completed_at.isoformat() if e.completed_at else None,
+        'resume_at': e.resume_at.isoformat() if e.resume_at else None,
+        'awaiting_approval': bool(rd.get('awaiting_approval')),
+        'approval_request': rd.get('approval_request'),
+        'steps_completed': rd.get('steps_completed'),
+        'error_message': e.error_message,
+    }
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def approve_hr_workflow_execution(request, execution_id):
+    """Approve a workflow that has paused on a ``wait_for_approval`` step and
+    let it resume. Only HR-admins (or the named approver) may call this.
+
+    The pause state is already on disk; we flip status to ``paused`` so the
+    existing resume task picks up unchanged, then run it inline for an
+    immediate response."""
+    company = request.user.company
+    company_user = request.user
+    e = HRWorkflowExecution.objects.filter(workflow__company=company, pk=execution_id).first()
+    if not e:
+        return Response({'status': 'error', 'message': 'Execution not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if e.status != 'awaiting_approval':
+        return Response({'status': 'error',
+                         'message': f'Execution is {e.status}, not awaiting_approval'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # Permission: approver_user_id from the pause snapshot (if set) wins; else HR-admin.
+    snap = e.pause_state or {}
+    req = snap.get('approval_request') or {}
+    approver_user_id = req.get('approver_user_id')
+    if approver_user_id:
+        # Caller's CompanyUser.user FK must match the named approver.
+        caller_user_id = getattr(company_user, 'user_id', None)
+        if str(caller_user_id) != str(approver_user_id) and not _is_hr_admin(company_user):
+            return Response({'status': 'error', 'message': 'Not authorized to approve this execution'},
+                            status=status.HTTP_403_FORBIDDEN)
+    elif not _is_hr_admin(company_user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    # Record who approved + comment, then flip status so the resume task accepts it.
+    comment = (request.data or {}).get('comment') or ''
+    rd = e.result_data if isinstance(e.result_data, dict) else {}
+    approval_log = list(rd.get('approval_log') or [])
+    approval_log.append({
+        'action': 'approved', 'by_company_user_id': company_user.id,
+        'at': timezone.now().isoformat(), 'comment': comment[:1000],
+    })
+    rd['approval_log'] = approval_log
+    e.result_data = rd
+    e.status = 'paused'  # contract: resume_hr_workflow_execution only resumes 'paused'
+    e.save(update_fields=['status', 'result_data'])
+
+    try:
+        from hr_agent.tasks import resume_hr_workflow_execution as _resume
+        # Run inline so the caller gets the post-approval state immediately.
+        _resume(e.id)
+    except Exception:
+        logger.exception("approve_hr_workflow_execution: resume failed (exec=%s)", e.id)
+        return Response({'status': 'error', 'message': 'Approve recorded but resume failed'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    e.refresh_from_db()
+    return Response({'status': 'success', 'data': _serialize_execution_brief(e)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def reject_hr_workflow_execution(request, execution_id):
+    """Reject a workflow paused on ``wait_for_approval``. Marks the execution
+    as ``rejected`` and records the reason. Remaining steps are NOT run."""
+    company = request.user.company
+    company_user = request.user
+    e = HRWorkflowExecution.objects.filter(workflow__company=company, pk=execution_id).first()
+    if not e:
+        return Response({'status': 'error', 'message': 'Execution not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if e.status != 'awaiting_approval':
+        return Response({'status': 'error',
+                         'message': f'Execution is {e.status}, not awaiting_approval'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    snap = e.pause_state or {}
+    req = snap.get('approval_request') or {}
+    approver_user_id = req.get('approver_user_id')
+    if approver_user_id:
+        caller_user_id = getattr(company_user, 'user_id', None)
+        if str(caller_user_id) != str(approver_user_id) and not _is_hr_admin(company_user):
+            return Response({'status': 'error', 'message': 'Not authorized to reject this execution'},
+                            status=status.HTTP_403_FORBIDDEN)
+    elif not _is_hr_admin(company_user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    reason = ((request.data or {}).get('reason') or '').strip()
+    rd = e.result_data if isinstance(e.result_data, dict) else {}
+    approval_log = list(rd.get('approval_log') or [])
+    approval_log.append({
+        'action': 'rejected', 'by_company_user_id': company_user.id,
+        'at': timezone.now().isoformat(), 'reason': reason[:1000],
+    })
+    rd['approval_log'] = approval_log
+
+    e.result_data = rd
+    e.status = 'rejected'
+    e.error_message = (f'Rejected by company_user={company_user.id}'
+                       + (f': {reason}' if reason else ''))[:4000]
+    e.completed_at = timezone.now()
+    e.resume_at = None
+    e.save(update_fields=['status', 'result_data', 'error_message',
+                          'completed_at', 'resume_at'])
+    return Response({'status': 'success', 'data': _serialize_execution_brief(e)})
 
 
 # ============================================================================
@@ -2054,3 +2354,373 @@ def get_employee_detail(request, employee_id):
         logger.exception("get_employee_detail failed")
         return Response({'status': 'error', 'message': 'Failed to load employee detail'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# Compensation history (HR-only)
+# ============================================================================
+
+def _is_hr_admin(company_user) -> bool:
+    """`hr_only` reads are restricted to roles in this set."""
+    return (company_user.role or '').lower() in ('hr_agent', 'owner', 'admin')
+
+
+def _serialize_compensation(c) -> dict:
+    return {
+        'id': c.id,
+        'employee_id': c.employee_id,
+        'effective_date': c.effective_date.isoformat() if c.effective_date else None,
+        'base_salary': float(c.base_salary) if c.base_salary is not None else None,
+        'currency': c.currency,
+        'pay_frequency': c.pay_frequency,
+        'bonus_target_pct': float(c.bonus_target_pct) if c.bonus_target_pct is not None else None,
+        'equity_grant_value': float(c.equity_grant_value) if c.equity_grant_value is not None else None,
+        'grade': c.grade or '',
+        'reason': c.reason,
+        'notes': c.notes or '',
+        'created_at': c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_compensation_history(request, employee_id):
+    """Compensation history for a single employee. HR-admins only — anyone
+    else gets 403 even if they happen to be the same employee."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    from hr_agent.models import Compensation
+    rows = Compensation.objects.filter(employee=emp).order_by('-effective_date', '-id')
+    return Response({'status': 'success', 'data': [_serialize_compensation(c) for c in rows]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_compensation(request, employee_id):
+    """Record a new compensation change (e.g. annual raise, promotion). The
+    new row becomes the employee's "current" pay — older rows are kept."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    from hr_agent.models import Compensation
+    d = request.data or {}
+    if 'base_salary' not in d or 'effective_date' not in d:
+        return Response({'status': 'error', 'message': 'effective_date and base_salary are required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        from decimal import Decimal
+        base_salary = Decimal(str(d['base_salary']))
+    except Exception:
+        return Response({'status': 'error', 'message': 'base_salary must be numeric'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        eff = datetime.fromisoformat(d['effective_date']).date()
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'effective_date must be YYYY-MM-DD'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    user = _hr_get_or_create_user_for_company_user(request.user)
+    c = Compensation.objects.create(
+        employee=emp,
+        effective_date=eff,
+        base_salary=base_salary,
+        currency=(d.get('currency') or 'USD').upper()[:3],
+        pay_frequency=d.get('pay_frequency') or 'annual',
+        bonus_target_pct=d.get('bonus_target_pct') or None,
+        equity_grant_value=d.get('equity_grant_value') or None,
+        grade=(d.get('grade') or '')[:40],
+        reason=d.get('reason') or 'other',
+        notes=(d.get('notes') or '')[:5000],
+        recorded_by=user,
+    )
+    return Response({'status': 'success', 'data': _serialize_compensation(c)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_compensation(request, comp_id):
+    """Remove a single compensation row (corrections / typos). HR-admin only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.models import Compensation
+    deleted, _ = Compensation.objects.filter(
+        pk=comp_id, employee__company=request.user.company,
+    ).delete()
+    if not deleted:
+        return Response({'status': 'error', 'message': 'Compensation row not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': {'deleted_id': int(comp_id)}})
+
+
+# ============================================================================
+# Performance reviews — cycles + per-employee reviews
+# ============================================================================
+
+def _serialize_review_cycle(c) -> dict:
+    return {
+        'id': c.id, 'name': c.name, 'description': c.description,
+        'period_start': c.period_start.isoformat() if c.period_start else None,
+        'period_end': c.period_end.isoformat() if c.period_end else None,
+        'self_review_due': c.self_review_due.isoformat() if c.self_review_due else None,
+        'manager_review_due': c.manager_review_due.isoformat() if c.manager_review_due else None,
+        'calibration_due': c.calibration_due.isoformat() if c.calibration_due else None,
+        'status': c.status,
+        'review_count': getattr(c, '_review_count', None),
+        'created_at': c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+def _serialize_perf_review(r) -> dict:
+    return {
+        'id': r.id,
+        'cycle_id': r.cycle_id,
+        'cycle_name': r.cycle.name if r.cycle_id else None,
+        'employee_id': r.employee_id,
+        'employee_name': r.employee.full_name if r.employee_id else None,
+        'reviewer_id': r.reviewer_id,
+        'reviewer_name': r.reviewer.full_name if r.reviewer_id else None,
+        'status': r.status,
+        'self_summary': r.self_summary,
+        'manager_summary': r.manager_summary,
+        'strengths': r.strengths,
+        'growth_areas': r.growth_areas,
+        'goals': r.goals or [],
+        'overall_rating': r.overall_rating,
+        'self_submitted_at': r.self_submitted_at.isoformat() if r.self_submitted_at else None,
+        'manager_submitted_at': r.manager_submitted_at.isoformat() if r.manager_submitted_at else None,
+        'finalized_at': r.finalized_at.isoformat() if r.finalized_at else None,
+        'visible_to_employee': r.visible_to_employee,
+    }
+
+
+def _parse_iso_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_review_cycles(request):
+    from hr_agent.models import PerformanceReviewCycle
+    company = request.user.company
+    qs = (PerformanceReviewCycle.objects.filter(company=company)
+          .annotate(_review_count=Count('reviews'))
+          .order_by('-period_start', '-id'))
+    return Response({'status': 'success',
+                     'data': [_serialize_review_cycle(c) for c in qs]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_review_cycle(request):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.models import PerformanceReviewCycle
+    company = request.user.company
+    d = request.data or {}
+    name = (d.get('name') or '').strip()
+    period_start = _parse_iso_date(d.get('period_start'))
+    period_end = _parse_iso_date(d.get('period_end'))
+    if not (name and period_start and period_end):
+        return Response({'status': 'error',
+                         'message': 'name, period_start, period_end are required (YYYY-MM-DD)'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if period_end < period_start:
+        return Response({'status': 'error', 'message': 'period_end must be after period_start'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    user = _hr_get_or_create_user_for_company_user(request.user)
+    cycle = PerformanceReviewCycle.objects.create(
+        company=company, name=name[:120],
+        description=d.get('description') or '',
+        period_start=period_start, period_end=period_end,
+        self_review_due=_parse_iso_date(d.get('self_review_due')),
+        manager_review_due=_parse_iso_date(d.get('manager_review_due')),
+        calibration_due=_parse_iso_date(d.get('calibration_due')),
+        status=d.get('status') if d.get('status') in
+        ('draft', 'active', 'closed', 'cancelled') else 'draft',
+        created_by=user,
+    )
+    return Response({'status': 'success', 'data': _serialize_review_cycle(cycle)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def activate_review_cycle(request, cycle_id):
+    """Flip a draft cycle to active and generate one PerformanceReview row per
+    active employee in the company. Idempotent — won't duplicate existing rows."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.models import PerformanceReviewCycle, PerformanceReview
+    company = request.user.company
+    cycle = PerformanceReviewCycle.objects.filter(company=company, pk=cycle_id).first()
+    if not cycle:
+        return Response({'status': 'error', 'message': 'Cycle not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    existing_emp_ids = set(cycle.reviews.values_list('employee_id', flat=True))
+    eligible = Employee.objects.filter(
+        company=company, employment_status__in=['active', 'probation', 'on_leave', 'notice'],
+    ).exclude(pk__in=existing_emp_ids)
+    created = 0
+    for emp in eligible.iterator(chunk_size=500):
+        PerformanceReview.objects.create(
+            cycle=cycle, employee=emp, reviewer=emp.manager,
+            status='not_started',
+        )
+        created += 1
+    if cycle.status != 'active':
+        cycle.status = 'active'
+        cycle.save(update_fields=['status', 'updated_at'])
+    return Response({'status': 'success',
+                     'data': {**_serialize_review_cycle(cycle), 'reviews_created': created}})
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_review_cycle(request, cycle_id):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.models import PerformanceReviewCycle
+    deleted, _ = PerformanceReviewCycle.objects.filter(
+        pk=cycle_id, company=request.user.company,
+    ).delete()
+    if not deleted:
+        return Response({'status': 'error', 'message': 'Cycle not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': {'deleted_id': int(cycle_id)}})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_employee_reviews(request, employee_id):
+    """Performance review history for one employee. The reviewee, their manager
+    chain, and HR-admins see everything; everyone else only sees ``visible_to_employee``."""
+    from hr_agent.models import PerformanceReview
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    qs = PerformanceReview.objects.filter(employee=emp).select_related('cycle', 'reviewer')
+    if not _is_hr_admin(request.user):
+        # Self-view only sees released reviews.
+        caller_user_id = getattr(request.user, 'user_id', None)
+        if str(caller_user_id) != str(emp.user_id):
+            qs = qs.filter(visible_to_employee=True)
+    return Response({'status': 'success',
+                     'data': [_serialize_perf_review(r) for r in qs.order_by('-cycle__period_start')]})
+
+
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_perf_review(request, review_id):
+    """Update one review. Self-review fields editable by the reviewee until
+    submitted; manager-review fields by the reviewer or HR-admin."""
+    from hr_agent.models import PerformanceReview
+    company = request.user.company
+    r = (PerformanceReview.objects.select_related('cycle', 'employee', 'reviewer')
+         .filter(pk=review_id, cycle__company=company).first())
+    if not r:
+        return Response({'status': 'error', 'message': 'Review not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    caller_user_id = getattr(request.user, 'user_id', None)
+    is_admin = _is_hr_admin(request.user)
+    is_reviewee = caller_user_id and str(caller_user_id) == str(r.employee.user_id)
+    is_reviewer = caller_user_id and r.reviewer_id and str(caller_user_id) == str(r.reviewer.user_id)
+    if not (is_admin or is_reviewee or is_reviewer):
+        return Response({'status': 'error', 'message': 'Not authorized to edit this review'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    d = request.data or {}
+    fields = []
+    # Self-review fields
+    if 'self_summary' in d and (is_reviewee or is_admin):
+        if r.self_submitted_at and not is_admin:
+            return Response({'status': 'error', 'message': 'Self-review already submitted'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        r.self_summary = d['self_summary'] or ''
+        fields.append('self_summary')
+    if 'submit_self' in d and (is_reviewee or is_admin) and d['submit_self']:
+        r.self_submitted_at = timezone.now()
+        fields.append('self_submitted_at')
+        if r.status in ('not_started', 'self_in_progress'):
+            r.status = 'manager_in_progress'
+            fields.append('status')
+
+    # Manager fields
+    if 'manager_summary' in d and (is_reviewer or is_admin):
+        r.manager_summary = d['manager_summary'] or ''
+        fields.append('manager_summary')
+    if 'strengths' in d and (is_reviewer or is_admin):
+        r.strengths = d['strengths'] or ''
+        fields.append('strengths')
+    if 'growth_areas' in d and (is_reviewer or is_admin):
+        r.growth_areas = d['growth_areas'] or ''
+        fields.append('growth_areas')
+    if 'goals' in d and (is_reviewer or is_admin) and isinstance(d['goals'], list):
+        r.goals = d['goals']
+        fields.append('goals')
+    if 'overall_rating' in d and (is_reviewer or is_admin):
+        rating = d['overall_rating']
+        if rating not in (None, '', 1, 2, 3, 4, 5, '1', '2', '3', '4', '5'):
+            return Response({'status': 'error', 'message': 'overall_rating must be 1..5'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        r.overall_rating = int(rating) if rating not in (None, '') else None
+        fields.append('overall_rating')
+    if 'submit_manager' in d and (is_reviewer or is_admin) and d['submit_manager']:
+        r.manager_submitted_at = timezone.now()
+        fields.append('manager_submitted_at')
+        if r.status in ('not_started', 'self_in_progress', 'manager_in_progress'):
+            r.status = 'awaiting_calibration'
+            fields.append('status')
+
+    # Final release
+    if 'release' in d and is_admin and d['release']:
+        r.visible_to_employee = True
+        r.finalized_at = timezone.now()
+        r.status = 'closed'
+        fields.extend(['visible_to_employee', 'finalized_at', 'status'])
+
+    if 'status' in d and is_admin and d['status'] in dict(r.STATUS_CHOICES):
+        r.status = d['status']
+        if 'status' not in fields:
+            fields.append('status')
+
+    if fields:
+        fields.append('updated_at')
+        r.save(update_fields=fields)
+    return Response({'status': 'success', 'data': _serialize_perf_review(r)})

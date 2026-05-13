@@ -79,6 +79,19 @@ const HRDashboard = () => {
   const [employees, setEmployees] = useState([]);
   const [empLoading, setEmpLoading] = useState(false);
   const [empSearch, setEmpSearch] = useState('');
+  const [empDeptFilter, setEmpDeptFilter] = useState(''); // department_id, '' = all
+
+  // Departments — for the filter dropdown + management dialog
+  const [departments, setDepartments] = useState([]);
+  const [deptDialog, setDeptDialog] = useState({ open: false, mode: 'list', editing: null, name: '', code: '', description: '' });
+
+  // Performance review cycles
+  const [cycles, setCycles] = useState([]);
+  const [cycleDialog, setCycleDialog] = useState({
+    open: false,
+    name: '', period_start: '', period_end: '',
+    self_review_due: '', manager_review_due: '',
+  });
 
   // Documents
   const [documents, setDocuments] = useState([]);
@@ -124,12 +137,127 @@ const HRDashboard = () => {
   const loadEmployees = async () => {
     setEmpLoading(true);
     try {
-      const res = await hrAgentService.listHREmployees({ q: empSearch });
+      const params = { q: empSearch };
+      if (empDeptFilter) params.department_id = empDeptFilter;
+      const res = await hrAgentService.listHREmployees(params);
       setEmployees(res?.data || []);
     } catch (e) {
       toast({ title: 'Failed to load employees', description: e.message, variant: 'destructive' });
     } finally {
       setEmpLoading(false);
+    }
+  };
+
+  const loadDepartments = async () => {
+    try {
+      const res = await hrAgentService.listHRDepartments();
+      setDepartments(res?.data || []);
+    } catch (e) {
+      toast({ title: 'Failed to load departments', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const openDeptManager = () => {
+    loadDepartments();
+    setDeptDialog({ open: true, mode: 'list', editing: null, name: '', code: '', description: '' });
+  };
+
+  const handleSaveDept = async () => {
+    const payload = {
+      name: (deptDialog.name || '').trim(),
+      code: deptDialog.code || '',
+      description: deptDialog.description || '',
+    };
+    if (!payload.name) {
+      toast({ title: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    try {
+      if (deptDialog.editing) {
+        const res = await hrAgentService.updateHRDepartment(deptDialog.editing.id, payload);
+        setDepartments((arr) => arr.map((d) => (d.id === deptDialog.editing.id ? { ...d, ...(res?.data || {}) } : d)));
+      } else {
+        const res = await hrAgentService.createHRDepartment(payload);
+        if (res?.data) setDepartments((arr) => [...arr, res.data].sort((a, b) => a.name.localeCompare(b.name)));
+      }
+      setDeptDialog({ open: true, mode: 'list', editing: null, name: '', code: '', description: '' });
+      toast({ title: deptDialog.editing ? 'Department saved' : 'Department created' });
+    } catch (e) {
+      toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const loadCycles = async () => {
+    try {
+      const res = await hrAgentService.listHRReviewCycles();
+      setCycles(res?.data || []);
+    } catch (e) {
+      toast({ title: 'Failed to load review cycles', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const openCycleManager = () => {
+    loadCycles();
+    setCycleDialog({
+      open: true,
+      name: '', period_start: '', period_end: '',
+      self_review_due: '', manager_review_due: '',
+    });
+  };
+
+  const handleCreateCycle = async () => {
+    const payload = {
+      name: (cycleDialog.name || '').trim(),
+      period_start: cycleDialog.period_start,
+      period_end: cycleDialog.period_end,
+      self_review_due: cycleDialog.self_review_due || undefined,
+      manager_review_due: cycleDialog.manager_review_due || undefined,
+    };
+    if (!payload.name || !payload.period_start || !payload.period_end) {
+      toast({ title: 'Name, period start, and period end are required', variant: 'destructive' });
+      return;
+    }
+    try {
+      const res = await hrAgentService.createHRReviewCycle(payload);
+      if (res?.data) setCycles((arr) => [res.data, ...arr]);
+      setCycleDialog((s) => ({ ...s, name: '', period_start: '', period_end: '', self_review_due: '', manager_review_due: '' }));
+      toast({ title: 'Review cycle created' });
+    } catch (e) {
+      toast({ title: 'Create failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleActivateCycle = async (c) => {
+    try {
+      const res = await hrAgentService.activateHRReviewCycle(c.id);
+      const updated = res?.data || {};
+      setCycles((arr) => arr.map((x) => (x.id === c.id ? { ...x, ...updated } : x)));
+      toast({ title: 'Cycle activated', description: `${updated.reviews_created ?? 0} reviews generated` });
+    } catch (e) {
+      toast({ title: 'Activate failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteCycle = async (c) => {
+    if (!window.confirm(`Delete cycle "${c.name}"? All reviews under it will be removed.`)) return;
+    try {
+      await hrAgentService.deleteHRReviewCycle(c.id);
+      setCycles((arr) => arr.filter((x) => x.id !== c.id));
+      toast({ title: 'Cycle deleted' });
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteDept = async (dept) => {
+    if (!window.confirm(`Delete "${dept.name}"? Employees in it will be detached.`)) return;
+    try {
+      await hrAgentService.deleteHRDepartment(dept.id);
+      setDepartments((arr) => arr.filter((d) => d.id !== dept.id));
+      if (String(empDeptFilter) === String(dept.id)) setEmpDeptFilter('');
+      toast({ title: 'Department deleted' });
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -159,11 +287,20 @@ const HRDashboard = () => {
 
   useEffect(() => { loadStats(); }, []);
   useEffect(() => {
-    if (activeTab === 'employees') loadEmployees();
+    if (activeTab === 'employees') {
+      loadEmployees();
+      loadDepartments();
+    }
     if (activeTab === 'documents') loadDocuments();
     if (activeTab === 'workflows') loadWorkflows();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Re-fetch when the department filter changes.
+  useEffect(() => {
+    if (activeTab === 'employees') loadEmployees();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empDeptFilter]);
 
   // ---------- Handlers ----------
   const handleUpload = async () => {
@@ -359,6 +496,36 @@ const HRDashboard = () => {
     } catch (e) {
       toast({ title: 'Failed to load history', description: e.message, variant: 'destructive' });
       setWfHistory({ open: true, wf: w, loading: false, rows: [] });
+    }
+  };
+
+  const handleApproveExecution = async (row) => {
+    const comment = window.prompt('Optional approval comment:') || '';
+    try {
+      const res = await hrAgentService.approveHRWorkflowExecution(row.id, comment);
+      const updated = res?.data || {};
+      setWfHistory((s) => ({
+        ...s,
+        rows: s.rows.map((r) => (r.id === row.id ? { ...r, ...updated } : r)),
+      }));
+      toast({ title: 'Approved', description: `Execution now ${updated.status || 'resumed'}` });
+    } catch (e) {
+      toast({ title: 'Approve failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleRejectExecution = async (row) => {
+    const reason = window.prompt('Rejection reason (optional):') || '';
+    try {
+      const res = await hrAgentService.rejectHRWorkflowExecution(row.id, reason);
+      const updated = res?.data || {};
+      setWfHistory((s) => ({
+        ...s,
+        rows: s.rows.map((r) => (r.id === row.id ? { ...r, ...updated } : r)),
+      }));
+      toast({ title: 'Rejected', description: 'Workflow stopped at the approval gate.' });
+    } catch (e) {
+      toast({ title: 'Reject failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -593,7 +760,19 @@ const HRDashboard = () => {
                       </CardTitle>
                       <CardDescription>Auto-synced from your company's auth.User accounts.</CardDescription>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <select
+                        value={empDeptFilter}
+                        onChange={(e) => setEmpDeptFilter(e.target.value)}
+                        className="h-9 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-white/90"
+                      >
+                        <option value="">All departments</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}{d.employee_count != null ? ` (${d.employee_count})` : ''}</option>
+                        ))}
+                      </select>
+                      <Button variant="outline" size="sm" onClick={openDeptManager}>Manage depts</Button>
+                      <Button variant="outline" size="sm" onClick={openCycleManager}>Review cycles</Button>
                       <Input
                         placeholder="Search by name or email"
                         value={empSearch}
@@ -655,7 +834,7 @@ const HRDashboard = () => {
                                     </TableCell>
                                     <TableCell className="text-white/70 text-sm">{e.work_email || '—'}</TableCell>
                                     <TableCell className="text-white/70 text-sm">{e.job_title || '—'}</TableCell>
-                                    <TableCell className="text-white/70 text-sm">{e.department || '—'}</TableCell>
+                                    <TableCell className="text-white/70 text-sm">{e.department_name || e.department || '—'}</TableCell>
                                     <TableCell>
                                       <Badge variant="outline" className={`text-[10px] ${statusBadgeClass}`}>
                                         {e.employment_status || 'active'}
@@ -677,6 +856,142 @@ const HRDashboard = () => {
                     )}
                   </CardContent>
                 </Card>
+
+                {/* Department manager */}
+                <Dialog open={deptDialog.open} onOpenChange={(o) => setDeptDialog((s) => ({ ...s, open: o }))}>
+                  <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                      <DialogTitle>Departments</DialogTitle>
+                      <DialogDescription>Add, edit, or remove departments. Deleting a department detaches its employees.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="rounded-lg border border-white/[0.08] divide-y divide-white/[0.06] max-h-72 overflow-auto">
+                        {departments.length === 0 ? (
+                          <div className="p-3 text-sm text-white/50">No departments yet.</div>
+                        ) : (
+                          departments.map((d) => (
+                            <div key={d.id} className="flex items-center justify-between gap-2 p-2.5 text-sm">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-white/90 truncate">{d.name}{d.code ? <span className="text-white/45 text-xs"> · {d.code}</span> : null}</div>
+                                {d.description && <div className="text-xs text-white/50 truncate">{d.description}</div>}
+                              </div>
+                              <span className="text-[10px] text-white/45 shrink-0">{d.employee_count ?? 0} ppl</span>
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+                                      onClick={() => setDeptDialog((s) => ({
+                                        ...s, editing: d, name: d.name, code: d.code || '', description: d.description || '',
+                                      }))}>Edit</Button>
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-rose-300"
+                                      onClick={() => handleDeleteDept(d)}>Delete</Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <div className="rounded-lg border border-white/[0.08] p-3 space-y-2">
+                        <div className="text-xs uppercase tracking-wider text-white/50">
+                          {deptDialog.editing ? `Edit: ${deptDialog.editing.name}` : 'Add new department'}
+                        </div>
+                        <Input placeholder="Name *" value={deptDialog.name}
+                               onChange={(e) => setDeptDialog((s) => ({ ...s, name: e.target.value }))} />
+                        <Input placeholder="Code (e.g. ENG)" value={deptDialog.code}
+                               onChange={(e) => setDeptDialog((s) => ({ ...s, code: e.target.value }))} />
+                        <Input placeholder="Description (optional)" value={deptDialog.description}
+                               onChange={(e) => setDeptDialog((s) => ({ ...s, description: e.target.value }))} />
+                        <div className="flex justify-end gap-2 pt-1">
+                          {deptDialog.editing && (
+                            <Button size="sm" variant="ghost"
+                                    onClick={() => setDeptDialog((s) => ({ ...s, editing: null, name: '', code: '', description: '' }))}>
+                              Cancel edit
+                            </Button>
+                          )}
+                          <Button size="sm" onClick={handleSaveDept}>
+                            {deptDialog.editing ? 'Save' : 'Add'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setDeptDialog((s) => ({ ...s, open: false }))}>Close</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Review cycles manager */}
+                <Dialog open={cycleDialog.open} onOpenChange={(o) => setCycleDialog((s) => ({ ...s, open: o }))}>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Performance review cycles</DialogTitle>
+                      <DialogDescription>Define a window, then activate to generate one review per active employee.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="rounded-lg border border-white/[0.08] divide-y divide-white/[0.06] max-h-72 overflow-auto">
+                        {cycles.length === 0 ? (
+                          <div className="p-3 text-sm text-white/50">No cycles yet.</div>
+                        ) : (
+                          cycles.map((c) => (
+                            <div key={c.id} className="flex items-center justify-between gap-2 p-2.5 text-sm">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-white/90 truncate flex items-baseline gap-2">
+                                  {c.name}
+                                  <Badge variant="outline" className={`text-[10px] ${
+                                    {
+                                      active: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
+                                      draft: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
+                                      closed: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+                                      cancelled: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
+                                    }[c.status] || 'bg-white/[0.04] text-white/70'
+                                  }`}>{c.status}</Badge>
+                                </div>
+                                <div className="text-xs text-white/50">
+                                  {c.period_start} → {c.period_end}
+                                  {c.review_count != null && ` · ${c.review_count} reviews`}
+                                </div>
+                              </div>
+                              {c.status !== 'active' && c.status !== 'closed' && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-emerald-300"
+                                        onClick={() => handleActivateCycle(c)}>Activate</Button>
+                              )}
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-rose-300"
+                                      onClick={() => handleDeleteCycle(c)}>Delete</Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <div className="rounded-lg border border-white/[0.08] p-3 space-y-2">
+                        <div className="text-xs uppercase tracking-wider text-white/50">New cycle</div>
+                        <Input placeholder="Cycle name (e.g. H1 2026) *" value={cycleDialog.name}
+                               onChange={(e) => setCycleDialog((s) => ({ ...s, name: e.target.value }))} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">Period start *</Label>
+                            <Input type="date" value={cycleDialog.period_start}
+                                   onChange={(e) => setCycleDialog((s) => ({ ...s, period_start: e.target.value }))} />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Period end *</Label>
+                            <Input type="date" value={cycleDialog.period_end}
+                                   onChange={(e) => setCycleDialog((s) => ({ ...s, period_end: e.target.value }))} />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Self-review due</Label>
+                            <Input type="date" value={cycleDialog.self_review_due}
+                                   onChange={(e) => setCycleDialog((s) => ({ ...s, self_review_due: e.target.value }))} />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Manager-review due</Label>
+                            <Input type="date" value={cycleDialog.manager_review_due}
+                                   onChange={(e) => setCycleDialog((s) => ({ ...s, manager_review_due: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="flex justify-end pt-1">
+                          <Button size="sm" onClick={handleCreateCycle}>Create cycle</Button>
+                        </div>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setCycleDialog((s) => ({ ...s, open: false }))}>Close</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </ErrorBoundary>
             </TabsContent>
 
@@ -1149,7 +1464,7 @@ const HRDashboard = () => {
                               <TableHead className="text-[10px] uppercase">Status</TableHead>
                               <TableHead className="text-[10px] uppercase">Steps done</TableHead>
                               <TableHead className="text-[10px] uppercase">Completed</TableHead>
-                              <TableHead className="text-[10px] uppercase">Error</TableHead>
+                              <TableHead className="text-[10px] uppercase">Error / Action</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1169,8 +1484,30 @@ const HRDashboard = () => {
                                 </TableCell>
                                 <TableCell className="text-xs">{row.steps_completed ?? '—'}</TableCell>
                                 <TableCell className="text-xs">{row.completed_at ? new Date(row.completed_at).toLocaleString() : '—'}</TableCell>
-                                <TableCell className="text-xs text-rose-300 max-w-[14rem] truncate" title={row.error_message || ''}>
-                                  {row.error_message || ''}
+                                <TableCell className="text-xs max-w-[16rem]">
+                                  {row.status === 'awaiting_approval' ? (
+                                    <div className="space-y-1">
+                                      {row.approval_request?.message && (
+                                        <div className="text-white/70 text-[11px] truncate" title={row.approval_request.message}>
+                                          {row.approval_request.message}
+                                        </div>
+                                      )}
+                                      <div className="flex gap-1">
+                                        <Button size="sm" className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-500"
+                                                onClick={() => handleApproveExecution(row)}>
+                                          Approve
+                                        </Button>
+                                        <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+                                                onClick={() => handleRejectExecution(row)}>
+                                          Reject
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-rose-300 truncate inline-block max-w-full" title={row.error_message || ''}>
+                                      {row.error_message || ''}
+                                    </span>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             ))}
