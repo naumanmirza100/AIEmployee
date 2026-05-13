@@ -51,9 +51,9 @@ Things that are actively risky or broken in what's shipped today. These should b
 - [ ] **Confirm embedding similarity search is company-scoped** — vector search is easy to forget on
 - [ ] **File-hash dedupe must be (company, hash) not hash alone** — otherwise tenant A sees tenant B's doc was "already uploaded"
 - [ ] **Singleton agent init under concurrency** — shared instance may leak state across requests/tenants; use per-request construction or request-scoped context
-- [ ] **Signal-driven workflow triggers can loop** — workflow updates a ticket → `on_ticket_update` fires → workflow runs again; add re-entrancy guard
+- [x] **Signal-driven workflow triggers can loop** — workflow updates a ticket → `on_ticket_update` fires → workflow runs again; add re-entrancy guard *(Batch: `Frontline_agent/workflow_context.py` exposes a `contextvars.ContextVar`-based `workflow_execution_guard` that wraps `_execute_workflow_steps`; the `post_save` receiver checks `is_workflow_executing()` and skips. ContextVar (not threading.local) so it propagates through asyncio and Celery's execution context correctly.)*
 - [ ] **Cascading deletes** — when a Document or KnowledgeBase entry is deleted, are `DocumentChunk`, embeddings, and chat references cleaned up? Verify `on_delete` everywhere
-- [ ] **Directory typo `core/Fronline_agent/`** (missing 't') — not a bug but will confuse every new engineer forever; rename with an import-path refactor
+- [x] **Directory typo `core/Fronline_agent/`** (missing 't') — not a bug but will confuse every new engineer forever; rename with an import-path refactor *(Batch: real code moved to `core/Frontline_agent/`; the legacy path kept as a `sys.modules`-remap shim that re-aliases every submodule so `isinstance` / `is` checks stay consistent. Callers updated to the canonical spelling; `DeprecationWarning` fires on any remaining legacy import.)*
 
 ### 1.4 Cost & abuse vectors
 - [~] **No LLM cost caps per tenant** — runaway bill on a single abusive tenant *(Batch 1: `LLMUsage` model + BaseAgent tracking landed; caps/enforcement still to come)*
@@ -73,11 +73,11 @@ Things that are actively risky or broken in what's shipped today. These should b
 ### 1.6 Code quality & maintainability
 - [ ] **Zero tests** — no regression safety net anywhere
 - [ ] **N+1 queries in ticket / metric endpoints** — profile under load, add `select_related` / `prefetch_related`
-- [ ] **Embeddings stored as JSON in `TextField`** — 1000s of chunks → multi-MB rows, slow similarity search; migrate to pgvector
+- [x] **Embeddings stored as JSON in `TextField`** — 1000s of chunks → multi-MB rows, slow similarity search; migrate to pgvector *(Batch: MSSQL has no native vector type so pgvector isn't viable. Added `Frontline_agent/vector_store.py` — per-company FAISS `IndexFlatIP` over L2-normalized embeddings, persisted to `MEDIA_ROOT/frontline_vector_indexes/company_<id>.{faiss,meta.json}`. Lazy-built on first query; invalidated via `mark_index_dirty` from `process_document` + `prune_expired_documents`. `KnowledgeService._semantic_search` prefers FAISS, falls back to the legacy JSON-scan when the library is absent or the tenant has no embeddings yet.)*
 - [ ] **Hardcoded chunk size (4000) / overlap (200)** — not configurable per doc type or tenant
 - [ ] **Partial type hints** — tighten so mypy catches regressions
 - [ ] **Generic `except Exception:` blocks** — swallow real bugs; narrow them and log with stack traces
-- [ ] **No API versioning** — `/frontline/...` has no `/v1/` prefix; breaking changes will break widgets & integrations
+- [x] **No API versioning** — `/frontline/...` has no `/v1/` prefix; breaking changes will break widgets & integrations *(Batch: `api/urls.py` now programmatically mirrors every `^frontline/...` route under `^v1/frontline/...` (92 aliases) at import time. Legacy paths stay live so existing widget installs and integrations keep working; new clients should hit `/api/v1/frontline/*`. Each alias gets a `v1_`-prefixed name so `reverse()` can disambiguate.)*
 - [x] **No error boundaries in React** — one component crash = white screen *(Batch 1: wrapped `<Outlet />` in FrontlineAgentPage + every TabsContent in FrontlineDashboard with existing `ErrorBoundary`)*
 - [ ] **No frontend loading / empty / error states** in several dashboard tabs
 
@@ -128,6 +128,7 @@ Things that are actively risky or broken in what's shipped today. These should b
 - [x] Workflow versioning + dry-run mode *(Phase 2 Batch 4: `FrontlineWorkflowVersion` snapshots on every update; `/versions/`, `/versions/<N>/rollback/`, and `/dry-run/` endpoints)*
 - [~] Expanded step catalog *(Phase 2 Batch 4: already had `send_email`, `update_ticket`, `webhook`/`http_webhook`, `slack`, `assign`; added `wait`/`wait_for_duration`. Still pending: `create_calendar_event`, `run_script`, `wait_for_event`)*
 - [x] Execution timeout (kill runaway workflows) *(Phase 2 Batch 4: `FrontlineWorkflow.timeout_seconds` + monotonic check per step; aborts with `workflow_timeout` error)*
+- [x] Non-blocking `wait` step *(Audit Batch: added `_WorkflowPauseSignal` sentinel exception raised by the wait step; `_execute_step_list` catches and bubbles it up through branch recursion, each level prepending its own "steps after this branch" tail so the top sees a flat remainder. `_execute_workflow_steps` persists `remaining_steps + results_so_far + elapsed_active_seconds + context_data` into `FrontlineWorkflowExecution.pause_state`, flips status to `'paused'`, and schedules `resume_workflow_execution` (Celery ETA) to re-enter the executor later. Broker-down fallback probes the connection in ~1 s and runs resume inline rather than stalling 100 s on Celery's default retry loop. Migration 0027 adds `'paused'` status + `resume_at` + `pause_state` fields.)*
 - [ ] One-click approvals via email / Slack (not only dashboard)
 
 ### 2.5 Document Processing
@@ -336,7 +337,7 @@ Close loopholes + foundation. Nothing customer-visible but everything else rests
 - [x] React error boundaries *(Batch 1)* + loading/empty/error states (see §1.6)
 - [x] Widget-key origin validation *(Batch 1, see §1.1)*
 - [ ] Prompt-injection hardening: delimited prompts, output sanitization, red-team eval set (see §1.2)
-- [ ] Rename `core/Fronline_agent/` → `core/Frontline_agent/` (see §1.3)
+- [x] Rename `core/Fronline_agent/` → `core/Frontline_agent/` (see §1.3)
 - [ ] **Rotate the leaked `SECRET_KEY`** committed in `project_manager_ai/settings.py` and move it + `DEBUG` + `ALLOWED_HOSTS` to env (see §1.1)
 
 ### Horizon 2 — Make it sellable (months 2–4)

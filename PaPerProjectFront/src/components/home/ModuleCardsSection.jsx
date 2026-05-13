@@ -7,7 +7,9 @@ import {
   FolderKanban,
   Headphones,
   FileSearch,
-  Reply
+  Reply,
+  Target,
+  UserCog
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -125,6 +127,26 @@ const ModuleCardsSection = () => {
       highlight: false,
     },
     {
+      title: 'AI SDR Agent',
+      moduleName: 'ai_sdr_agent',
+      description: 'Automated sales development rep with AI lead scoring, multi-step outreach sequences, meeting scheduling, and pipeline analytics.',
+      icon: Target,
+      iconColor: 'text-rose-500',
+      gradientFrom: '#f43f5e',
+      gradientTo: '#a855f7',
+      price: 199,
+      pricePeriod: 'month',
+      features: [
+        'AI lead scoring (Hot / Warm / Cold)',
+        'Multi-step outreach sequences',
+        'Personalized AI email drafting',
+        'Meeting scheduling & AI prep notes',
+        'Pipeline funnel analytics',
+        'CRM-ready lead management',
+      ],
+      highlight: false,
+    },
+    {
       title: 'Reply Draft Agent',
       moduleName: 'reply_draft_agent',
       description: 'AI-assisted email reply drafting with human-in-the-loop review. Drafts replies from incoming emails, you edit and approve before sending.',
@@ -141,6 +163,26 @@ const ModuleCardsSection = () => {
         'Inline edit before approving',
         'Proper email threading (In-Reply-To)',
         'Full version history of regenerations'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'HR Support Agent',
+      moduleName: 'hr_agent',
+      description: 'Employee-facing HR assistant — answers policy questions, runs onboarding/offboarding workflows, processes HR documents, and books HR meetings.',
+      icon: UserCog,
+      iconColor: 'text-purple-500',
+      gradientFrom: gradientColors['purple-500'],
+      gradientTo: gradientColors['blue-500'],
+      price: 129,
+      pricePeriod: 'month',
+      features: [
+        'Knowledge Q&A from your handbook & policies',
+        'Confidentiality-aware retrieval (IC vs manager vs HR)',
+        'Onboarding & offboarding SOP automation',
+        'HR document processing (offer letters, contracts, payslips)',
+        'Birthday, anniversary & probation reminders',
+        'Typed HR meetings (1:1, performance review, exit, grievance)'
       ],
       highlight: false,
     }

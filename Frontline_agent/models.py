@@ -487,6 +487,7 @@ class FrontlineWorkflowExecution(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('in_progress', 'In Progress'),
+        ('paused', 'Paused (waiting)'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
         ('cancelled', 'Cancelled'),
@@ -503,6 +504,17 @@ class FrontlineWorkflowExecution(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
+
+    # Pause support for the non-blocking `wait` step. When a workflow hits a
+    # wait, we stop the sync executor, stash the remaining work into
+    # `pause_state`, set status='paused', and schedule a Celery task to resume
+    # at `resume_at`. Without this the worker thread blocked on time.sleep().
+    # pause_state shape: {'remaining_steps': [...], 'results_so_far': [...],
+    #                     'elapsed_active_seconds': float}
+    resume_at = models.DateTimeField(null=True, blank=True, db_index=True,
+                                     help_text='When a paused execution is due to resume.')
+    pause_state = models.JSONField(default=dict, blank=True,
+                                   help_text='Serialized remaining-work snapshot for a paused execution.')
 
     class Meta:
         app_label = 'Frontline_agent'

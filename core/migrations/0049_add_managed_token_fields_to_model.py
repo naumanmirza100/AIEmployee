@@ -11,6 +11,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('core', '0048_merge_20260424_1601'),
+        ('core', '0048_merge_20260423_0956'),
     ]
 
     operations = [

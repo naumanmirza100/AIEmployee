@@ -247,6 +247,9 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         except User.DoesNotExist:
             return {'success': False, 'error': 'User not found'}
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             self.log_action("Error creating campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}
     
@@ -442,6 +445,9 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                 'leads': leads_list
             }
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             self.log_action("Error generating leads", {"error": str(e)})
             return {
                 'success': False,
@@ -545,6 +551,9 @@ class OutreachCampaignAgent(MarketingBaseAgent):
             }
             
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             self.log_action("Error generating leads for campaign", {"error": str(e)})
             return {'count': 0, 'leads': []}
     
@@ -810,6 +819,9 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             self.log_action("Error launching campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}
     
@@ -852,6 +864,9 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             self.log_action("Error managing campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}
     
@@ -1035,6 +1050,9 @@ RULES: EMAIL-ONLY. No social, paid ads, or other channels. Be concise—short bu
             )
             return design
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             self.log_action("Error generating campaign design", {"error": str(e)})
             return f"Error generating campaign design: {str(e)}"
     

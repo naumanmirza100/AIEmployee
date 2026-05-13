@@ -34,10 +34,12 @@ from api.views import recruitment_agent
 from api.views import marketing_agent
 from api.views import reply_draft_agent as reply_draft_api
 from api.views import frontline_agent
+from api.views import hr_agent
 from api.views import module_purchase
 from api.views import company_api_keys
 from api.views import admin_api_keys
 from api.views import operations_agent
+from api.views import ai_sdr_agent as sdr_api
 from api.views.health import health_check
 
 app_name = 'api'
@@ -525,6 +527,14 @@ urlpatterns = [
     re_path(r'^reply-draft/accounts/delete/?$', reply_draft_api.delete_reply_account, name='reply_draft_delete_account'),
     re_path(r'^reply-draft/analytics/?$', reply_draft_api.reply_analytics, name='reply_draft_analytics'),
 
+    # Operations Notifications
+    re_path(r'^operations/notifications/?$', operations_agent.list_notifications, name='operations_notifications_list'),  # GET
+    re_path(r'^operations/notifications/unread-count/?$', operations_agent.unread_notifications_count, name='operations_notifications_unread_count'),  # GET
+    re_path(r'^operations/notifications/mark-all-read/?$', operations_agent.mark_all_notifications_read, name='operations_notifications_mark_all_read'),  # POST
+    re_path(r'^operations/notifications/clear/?$', operations_agent.clear_all_notifications, name='operations_notifications_clear'),  # DELETE
+    re_path(r'^operations/notifications/(?P<notification_id>\d+)/read/?$', operations_agent.mark_notification_read, name='operations_notifications_mark_read'),  # POST
+    re_path(r'^operations/notifications/(?P<notification_id>\d+)/delete/?$', operations_agent.delete_notification, name='operations_notifications_delete'),  # DELETE
+
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
@@ -560,4 +570,146 @@ urlpatterns = [
 
     # Company picker for admin forms
     re_path(r'^admin/companies-list/?$', admin_api_keys.list_companies_simple, name='admin_list_companies'),  # GET
+
+    # AI SDR Agent endpoints
+    re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET
+    re_path(r'^sdr/icp/?$', sdr_api.icp_profile, name='sdr_icp_profile'),  # GET, POST
+    re_path(r'^sdr/leads/?$', sdr_api.leads_list, name='sdr_leads_list'),  # GET, POST
+    re_path(r'^sdr/leads/research/?$', sdr_api.research_leads, name='sdr_research_leads'),  # POST
+    re_path(r'^sdr/leads/import/?$', sdr_api.import_leads_csv, name='sdr_import_leads_csv'),  # POST
+    re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
+    re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE
+    re_path(r'^sdr/leads/(?P<lead_id>\d+)/qualify/?$', sdr_api.qualify_lead, name='sdr_qualify_lead'),  # POST
+    # Campaigns
+    re_path(r'^sdr/campaigns/?$', sdr_api.sdr_campaigns_list, name='sdr_campaigns_list'),  # GET, POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/?$', sdr_api.sdr_campaign_detail, name='sdr_campaign_detail'),  # GET, PUT, DELETE
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/?$', sdr_api.sdr_campaign_steps, name='sdr_campaign_steps'),  # GET, POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/steps/(?P<step_id>\d+)/?$', sdr_api.sdr_campaign_step_detail, name='sdr_campaign_step_detail'),  # PUT, DELETE
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/generate-steps/?$', sdr_api.sdr_generate_steps, name='sdr_generate_steps'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enroll/?$', sdr_api.sdr_enroll_leads, name='sdr_enroll_leads'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/contacts/?$', sdr_api.sdr_campaign_enrollments, name='sdr_campaign_enrollments'),  # GET
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/process/?$', sdr_api.sdr_process_outreach, name='sdr_process_outreach'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reply/?$', sdr_api.sdr_mark_replied, name='sdr_mark_replied'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reset/?$', sdr_api.sdr_reset_enrollment, name='sdr_reset_enrollment'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/check-replies/?$', sdr_api.sdr_check_replies, name='sdr_check_replies'),  # POST
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
+    re_path(r'^sdr/meetings/?$', sdr_api.sdr_meetings_list, name='sdr_meetings_list'),  # GET, POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/?$', sdr_api.sdr_meeting_detail, name='sdr_meeting_detail'),  # GET, PUT, DELETE
+    # ---------------------------------------------------------------------
+    # HR Support Agent
+    # ---------------------------------------------------------------------
+    # Dashboard
+    re_path(r'^hr/dashboard/?$', hr_agent.hr_dashboard, name='hr_dashboard'),  # GET
+
+    # Employees
+    re_path(r'^hr/employees/?$', hr_agent.list_employees, name='hr_list_employees'),  # GET
+    re_path(r'^hr/employees/create/?$', hr_agent.create_employee, name='hr_create_employee'),  # POST
+    re_path(r'^hr/departments/?$', hr_agent.list_departments, name='hr_list_departments'),  # GET
+    re_path(r'^hr/departments/create/?$', hr_agent.create_department, name='hr_create_department'),  # POST
+    re_path(r'^hr/departments/(?P<dept_id>\d+)/update/?$', hr_agent.update_department, name='hr_update_department'),  # PATCH/POST
+    re_path(r'^hr/departments/(?P<dept_id>\d+)/delete/?$', hr_agent.delete_department, name='hr_delete_department'),  # DELETE/POST
+
+    # Knowledge Q&A
+    re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
+    # Persisted HR Q&A chats — sidebar history (mirrors PM agent's chat shape)
+    re_path(r'^hr/ai/knowledge-qa/chats/?$', hr_agent.list_hr_knowledge_chats, name='hr_list_knowledge_chats'),  # GET
+    re_path(r'^hr/ai/knowledge-qa/chats/create/?$', hr_agent.create_hr_knowledge_chat, name='hr_create_knowledge_chat'),  # POST
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_knowledge_chat, name='hr_update_knowledge_chat'),  # PATCH
+    re_path(r'^hr/ai/knowledge-qa/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_knowledge_chat, name='hr_delete_knowledge_chat'),  # DELETE
+
+    # Documents
+    re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
+    re_path(r'^hr/documents/upload/?$', hr_agent.upload_hr_document, name='hr_upload_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/?$', hr_agent.get_hr_document, name='hr_get_document'),  # GET
+    re_path(r'^hr/documents/(?P<document_id>\d+)/summarize/?$', hr_agent.summarize_hr_document, name='hr_summarize_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/extract/?$', hr_agent.extract_hr_document, name='hr_extract_document'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/delete/?$', hr_agent.delete_hr_document, name='hr_delete_document'),  # DELETE/POST
+
+    # Workflows / SOPs
+    re_path(r'^hr/workflows/?$', hr_agent.list_hr_workflows, name='hr_list_workflows'),  # GET
+    re_path(r'^hr/workflows/create/?$', hr_agent.create_hr_workflow, name='hr_create_workflow'),  # POST
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/?$', hr_agent.get_hr_workflow, name='hr_get_workflow'),  # GET
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/update/?$', hr_agent.update_hr_workflow, name='hr_update_workflow'),  # PATCH
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/delete/?$', hr_agent.delete_hr_workflow, name='hr_delete_workflow'),  # DELETE/POST
+    re_path(r'^hr/workflows/(?P<workflow_id>\d+)/execute/?$', hr_agent.execute_hr_workflow, name='hr_execute_workflow'),  # POST
+    re_path(r'^hr/workflows/executions/?$', hr_agent.list_hr_workflow_executions, name='hr_list_workflow_executions'),  # GET
+    re_path(r'^hr/workflows/executions/(?P<execution_id>\d+)/approve/?$', hr_agent.approve_hr_workflow_execution, name='hr_approve_workflow_execution'),  # POST
+    re_path(r'^hr/workflows/executions/(?P<execution_id>\d+)/reject/?$', hr_agent.reject_hr_workflow_execution, name='hr_reject_workflow_execution'),  # POST
+
+    # Notifications
+    re_path(r'^hr/notifications/templates/?$', hr_agent.list_hr_notification_templates, name='hr_list_notification_templates'),  # GET
+    re_path(r'^hr/notifications/templates/create/?$', hr_agent.create_hr_notification_template, name='hr_create_notification_template'),  # POST
+    re_path(r'^hr/notifications/scheduled/?$', hr_agent.list_hr_scheduled_notifications, name='hr_list_scheduled_notifications'),  # GET
+
+    # Meetings
+    re_path(r'^hr/meetings/?$', hr_agent.list_hr_meetings, name='hr_list_meetings'),  # GET
+    re_path(r'^hr/meetings/create/?$', hr_agent.create_hr_meeting, name='hr_create_meeting'),  # POST
+    re_path(r'^hr/meetings/availability/?$', hr_agent.hr_meeting_availability, name='hr_meeting_availability'),  # GET
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/?$', hr_agent.get_hr_meeting, name='hr_get_meeting'),  # GET
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/update/?$', hr_agent.update_hr_meeting, name='hr_update_meeting'),  # PATCH
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/cancel/?$', hr_agent.cancel_hr_meeting, name='hr_cancel_meeting'),  # POST
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', hr_agent.extract_hr_meeting_action_items, name='hr_extract_meeting_action_items'),  # POST
+    # Meeting Scheduler — natural-language LLM scheduling (mirrors PM agent)
+    re_path(r'^hr/ai/meetings/schedule/?$', hr_agent.hr_meeting_schedule, name='hr_meeting_schedule'),  # POST
+    re_path(r'^hr/ai/meeting-scheduler/chats/?$', hr_agent.list_hr_meeting_scheduler_chats, name='hr_list_meeting_scheduler_chats'),  # GET
+    re_path(r'^hr/ai/meeting-scheduler/chats/create/?$', hr_agent.create_hr_meeting_scheduler_chat, name='hr_create_meeting_scheduler_chat'),  # POST
+    re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/update/?$', hr_agent.update_hr_meeting_scheduler_chat, name='hr_update_meeting_scheduler_chat'),  # PATCH
+    re_path(r'^hr/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', hr_agent.delete_hr_meeting_scheduler_chat, name='hr_delete_meeting_scheduler_chat'),  # DELETE
+
+    # Leave requests
+    re_path(r'^hr/leave-requests/?$', hr_agent.list_leave_requests, name='hr_list_leave_requests'),  # GET
+    re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
+
+    # Holiday calendar
+    re_path(r'^hr/holidays/?$', hr_agent.list_holidays, name='hr_list_holidays'),  # GET
+    re_path(r'^hr/holidays/create/?$', hr_agent.create_holiday, name='hr_create_holiday'),  # POST (also upserts)
+    re_path(r'^hr/holidays/(?P<holiday_id>\d+)/delete/?$', hr_agent.delete_holiday, name='hr_delete_holiday'),  # DELETE
+
+    # Leave accrual policies
+    re_path(r'^hr/leave-accrual-policies/?$', hr_agent.list_accrual_policies, name='hr_list_accrual_policies'),  # GET
+    re_path(r'^hr/leave-accrual-policies/upsert/?$', hr_agent.upsert_accrual_policy, name='hr_upsert_accrual_policy'),  # POST
+    re_path(r'^hr/leave-accrual-policies/(?P<policy_id>\d+)/delete/?$', hr_agent.delete_accrual_policy, name='hr_delete_accrual_policy'),  # DELETE
+
+    # Employee detail bundle
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
+
+    # Compensation history (HR-admin only)
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/compensation/?$', hr_agent.list_compensation_history, name='hr_list_compensation'),  # GET
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/compensation/create/?$', hr_agent.create_compensation, name='hr_create_compensation'),  # POST
+    re_path(r'^hr/compensation/(?P<comp_id>\d+)/delete/?$', hr_agent.delete_compensation, name='hr_delete_compensation'),  # DELETE
+
+    # Performance reviews
+    re_path(r'^hr/review-cycles/?$', hr_agent.list_review_cycles, name='hr_list_review_cycles'),  # GET
+    re_path(r'^hr/review-cycles/create/?$', hr_agent.create_review_cycle, name='hr_create_review_cycle'),  # POST
+    re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/activate/?$', hr_agent.activate_review_cycle, name='hr_activate_review_cycle'),  # POST
+    re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/delete/?$', hr_agent.delete_review_cycle, name='hr_delete_review_cycle'),  # POST/DELETE
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/reviews/?$', hr_agent.list_employee_reviews, name='hr_list_employee_reviews'),  # GET
+    re_path(r'^hr/reviews/(?P<review_id>\d+)/update/?$', hr_agent.update_perf_review, name='hr_update_perf_review'),  # POST/PATCH
 ]
+
+
+# -------------------------------------------------------------------------
+# API versioning (Phase 1 §1.6 — close "no API versioning" loophole)
+# -------------------------------------------------------------------------
+# Mirror every ^frontline/ route under ^v1/frontline/. Legacy /frontline/* stays
+# live so existing embed widgets / integrations keep working; new clients should
+# use /api/v1/frontline/*. Names get a `v1_` prefix so reverse() can pick a version.
+from django.urls import URLPattern as _URLPattern  # noqa: E402
+
+_v1_aliases = []
+for _pat in list(urlpatterns):
+    if not isinstance(_pat, _URLPattern):
+        continue
+    _name = getattr(_pat, 'name', '') or ''
+    if not _name.startswith('frontline_'):
+        continue
+    # `_regex` is the raw pattern string we passed to re_path. It's been stable
+    # through Django 3.x/4.x — if that ever changes we'd fall back to
+    # str(_pat.pattern) which yields the same thing.
+    _raw_regex = getattr(_pat.pattern, '_regex', '') or str(_pat.pattern)
+    if not _raw_regex.startswith('^frontline/'):
+        continue
+    _new_regex = '^v1/' + _raw_regex.lstrip('^')
+    _v1_aliases.append(re_path(_new_regex, _pat.callback, name='v1_' + _name))
+urlpatterns += _v1_aliases

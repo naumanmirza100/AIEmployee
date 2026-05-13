@@ -986,6 +986,9 @@ class MarketingQAAgent(MarketingBaseAgent):
                 prompt, self.system_prompt, temperature=0.3, max_tokens=700
             )
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             err_str = str(e)
             if "429" in err_str or "rate_limit" in err_str.lower():
                 return "The service is busy. Please try again in a few seconds."

@@ -559,6 +559,7 @@ class CompanyUser(models.Model):
         ('marketing_agent', 'Marketing Agent'),
         ('operations_agent', 'Operations Agent'),
         ('reply_draft_agent', 'Reply Draft Agent'),
+        ('hr_agent', 'HR Support Agent'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='company_users')
@@ -617,8 +618,9 @@ class CompanyModulePurchase(models.Model):
         ('frontline_agent', 'Frontline Agent'),
         ('operations_agent', 'Operations Agent'),
         ('reply_draft_agent', 'Reply Draft Agent'),
+        ('hr_agent', 'HR Support Agent'),
     ]
-    
+
     STATUS_CHOICES = [
         ('active', 'Active'),
         ('cancelled', 'Cancelled'),
@@ -1235,6 +1237,8 @@ class Notification(models.Model):
         ('milestone_reached', 'Milestone Reached'),
         ('mention', 'Mention'),
         ('meeting_request', 'Meeting Request'),
+        ('quota_warning', 'Token Quota Warning'),
+        ('quota_exhausted', 'Token Quota Exhausted'),
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
@@ -1776,6 +1780,7 @@ AGENT_CHOICES = [
     ('frontline_agent', 'Frontline Agent'),
     ('operations_agent', 'Operations Agent'),
     ('reply_draft_agent', 'Reply Draft Agent'),
+    ('hr_agent', 'HR Support Agent'),
 ]
 
 PROVIDER_CHOICES = [
@@ -1786,7 +1791,7 @@ PROVIDER_CHOICES = [
     ('grok', 'xAI Grok'),
 ]
 
-DEFAULT_FREE_TOKENS = 1_000_000
+DEFAULT_FREE_TOKENS = 10_000
 
 
 class CompanyAPIKey(models.Model):
@@ -1882,6 +1887,10 @@ class AgentTokenQuota(models.Model):
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',
     )
+    # Notification dedup flags — reset to False when quota is reset/topped-up
+    notified_80pct = models.BooleanField(default=False)
+    notified_90pct = models.BooleanField(default=False)
+    notified_100pct = models.BooleanField(default=False)
     last_reset_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2059,4 +2068,5 @@ AGENT_DEFAULT_PROVIDER = {
     'frontline_agent': 'openai',
     'operations_agent': 'groq',
     'reply_draft_agent': 'groq',
+    'hr_agent': 'groq',
 }

@@ -295,8 +295,10 @@ INSTALLED_APPS = [
     'marketing_agent.apps.MarketingAgentConfig',  # Use app config for agent registration
     'reply_draft_agent.apps.ReplyDraftAgentConfig',  # AI reply drafter (human-in-the-loop)
     'Frontline_agent.apps.FrontlineAgentConfig',  # Frontline Agent app
+    'hr_agent.apps.HRAgentConfig',  # HR Support Agent app
     'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app
+    'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
     'whitenoise.runserver_nostatic',
 ]
 
@@ -771,6 +773,32 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 600}
     },
 
+    # ----- AI SDR Agent automated outreach -----
+    # Send next-due step (email/LinkedIn) for every active enrollment
+    'sdr-send-due-steps': {
+        'task': 'ai_sdr_agent.tasks.sdr_send_due_steps_task',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600},
+    },
+    # Poll IMAP inbox for replies, classify, hand off positives to scheduling agent
+    'sdr-check-inbox-replies': {
+        'task': 'ai_sdr_agent.tasks.sdr_check_inbox_replies_task',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'expires': 600},
+    },
+    # Auto-activate scheduled SDR campaigns when start_date arrives
+    'sdr-auto-start-campaigns': {
+        'task': 'ai_sdr_agent.tasks.sdr_auto_start_campaigns_task',
+        'schedule': 900.0,  # Every 15 minutes
+        'options': {'expires': 1800},
+    },
+    # Auto-complete SDR campaigns when end_date passes or all enrollments are done
+    'sdr-auto-complete-campaigns': {
+        'task': 'ai_sdr_agent.tasks.sdr_auto_complete_campaigns_task',
+        'schedule': 86400.0,  # Daily
+        'options': {'expires': 172800},
+    },
+
     # Stale meeting checker - runs daily
     # Sends reminders after 48h, auto-withdraws after 7 days
     'check-stale-meetings': {
@@ -822,6 +850,34 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'Frontline_agent.tasks.send_weekly_analytics_digest',
         'schedule': 604800.0,  # Every 7 days
         'options': {'expires': 1209600}
+    },
+
+    # ----- HR Support Agent -----
+    # Process pending HRScheduledNotification rows: send + retry/DLQ.
+    'hr-process-scheduled-notifications': {
+        'task': 'hr_agent.tasks.process_hr_scheduled_notifications',
+        'schedule': 60.0,
+        'options': {'expires': 90},
+    },
+    # Daily walk of time-based HR events (probation, birthdays, anniversaries,
+    # document expirations) — fans out into HRScheduledNotification rows.
+    'hr-walk-time-based-events': {
+        'task': 'hr_agent.tasks.walk_hr_time_based_events',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800},
+    },
+    # 24h + 15min HR meeting reminders.
+    'hr-send-meeting-reminders': {
+        'task': 'hr_agent.tasks.send_hr_meeting_reminders',
+        'schedule': 300.0,
+        'options': {'expires': 600},
+    },
+    # Leave accrual — daily tick is plenty since the task gates by period
+    # internally (monthly / biweekly / annual). Cheap and idempotent.
+    'hr-accrue-leave-balances': {
+        'task': 'hr_agent.tasks.accrue_leave_balances',
+        'schedule': 86400.0,
+        'options': {'expires': 172800},
     },
 }
 
@@ -883,6 +939,11 @@ REST_FRAMEWORK = {
         'frontline_llm': '60/hour',      # Authenticated LLM-powered endpoints (Q&A, triage, auto-resolve, summarize, extract)
         'frontline_upload': '30/hour',   # Document uploads (expensive: parse + embed)
         'frontline_crud': '300/hour',    # Authenticated CRUD endpoints
+        # HR Support Agent throttles
+        'hr_public': '20/hour',
+        'hr_llm': '60/hour',
+        'hr_upload': '30/hour',
+        'hr_crud': '300/hour',
         # Company auth endpoints (login / register) — by IP, to stop credential stuffing
         'company_auth': '10/hour',
     },

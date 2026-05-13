@@ -468,8 +468,12 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       if (action === 'create_multi_channel' && onCampaignCreated) onCampaignCreated();
       toast({ title: 'Success', description: agentResult?.message || 'Done' });
     } catch (err) {
-      setError(err.message || 'Request failed');
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      const isQuota = err?.status === 402;
+      const msg = isQuota
+        ? (err.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+        : (err.message || 'Request failed');
+      setError(msg);
+      toast({ title: isQuota ? 'Token Limit Reached' : 'Error', description: msg, variant: 'destructive' });
     } finally {
       setLoading(false);
     }

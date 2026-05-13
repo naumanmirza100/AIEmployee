@@ -67,6 +67,7 @@ const OperationsDashboard = () => {
 
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const handleTabChange = (tab) => {
     navigate(`/operations/${TAB_TO_PATH[tab] || 'dashboard'}`);
@@ -84,7 +85,21 @@ const OperationsDashboard = () => {
     }
   }, []);
 
+  const fetchUnread = useCallback(async () => {
+    try {
+      const res = await operationsService.getUnreadNotificationsCount();
+      if (res?.status === 'success') setUnreadCount(res.unread_count || 0);
+    } catch (_) { /* silent */ }
+  }, []);
+
   useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  // Poll unread count every 45s + refetch when user switches to/from the notifications tab
+  useEffect(() => {
+    fetchUnread();
+    const id = setInterval(fetchUnread, 45000);
+    return () => clearInterval(id);
+  }, [fetchUnread, activeTab]);
 
   // If on detail pages, render those instead
   if (docDetailMatch) {
@@ -145,6 +160,7 @@ const OperationsDashboard = () => {
             <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto">
               {TAB_ITEMS.map((item) => {
                 const isActive = item.value === activeTab;
+                const showBadge = item.value === 'notifications' && unreadCount > 0;
                 return (
                   <DropdownMenuItem
                     key={item.value}
@@ -156,6 +172,11 @@ const OperationsDashboard = () => {
                     <div className="flex items-center gap-3">
                       <item.icon className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
                       <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
+                      {showBadge && (
+                        <span className="ml-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
                     </div>
                     {isActive && <Check className="h-4 w-4 text-primary" />}
                   </DropdownMenuItem>
@@ -171,30 +192,38 @@ const OperationsDashboard = () => {
             className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
             style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
           >
-            {TAB_ITEMS.map((item) => (
-              <TabsTrigger
-                key={item.value}
-                value={item.value}
-                className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
-                style={activeTab === item.value
-                  ? {
-                      background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                      color: '#fff',
-                      border: '1.5px solid #f59e0b',
-                      boxShadow: '0 0 8px 0 #f59e0b55',
-                    }
-                  : {
-                      background: 'rgba(60, 30, 90, 0.22)',
-                      color: '#cfc6e6',
-                      border: '1.5px solid #2d2342',
-                      boxShadow: 'none',
-                    }
-                }
-              >
-                <item.icon className="h-4 w-4 mr-2" />
-                {item.label}
-              </TabsTrigger>
-            ))}
+            {TAB_ITEMS.map((item) => {
+              const showBadge = item.value === 'notifications' && unreadCount > 0;
+              return (
+                <TabsTrigger
+                  key={item.value}
+                  value={item.value}
+                  className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative"
+                  style={activeTab === item.value
+                    ? {
+                        background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
+                        color: '#fff',
+                        border: '1.5px solid #f59e0b',
+                        boxShadow: '0 0 8px 0 #f59e0b55',
+                      }
+                    : {
+                        background: 'rgba(60, 30, 90, 0.22)',
+                        color: '#cfc6e6',
+                        border: '1.5px solid #2d2342',
+                        boxShadow: 'none',
+                      }
+                  }
+                >
+                  <item.icon className="h-4 w-4 mr-2" />
+                  {item.label}
+                  {showBadge && (
+                    <span className="ml-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
         </div>
 

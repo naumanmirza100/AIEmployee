@@ -1958,15 +1958,45 @@ const CompanyDashboardPage = () => {
                               {/* Right: Actions */}
                               <div className="flex flex-col gap-2 lg:min-w-[160px]">
                                 {isActive && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="border-green-500/30 text-green-400 hover:bg-green-500/10 w-full"
-                                    disabled
-                                  >
-                                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                                    Active
-                                  </Button>
+                                  <>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-green-500/30 text-green-400 hover:bg-green-500/10 w-full"
+                                      disabled
+                                    >
+                                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                                      Active
+                                    </Button>
+                                    {/* Open Agent Dashboard button */}
+                                    {({
+                                      recruitment_agent:     '/recruitment/dashboard',
+                                      marketing_agent:       '/marketing/dashboard',
+                                      project_manager_agent: '/project-manager/dashboard',
+                                      frontline_agent:       '/frontline/dashboard',
+                                      operations_agent:      '/operations/dashboard',
+                                      reply_draft_agent:     '/reply-draft/dashboard',
+                                      ai_sdr_agent:          '/ai-sdr/dashboard',
+                                    }[agent.module_name]) && (
+                                      <Button
+                                        size="sm"
+                                        className="w-full"
+                                        style={{ background: 'linear-gradient(90deg,#7c3aed,#4f46e5)', border: 'none' }}
+                                        onClick={() => navigate(({
+                                          recruitment_agent:     '/recruitment/dashboard',
+                                          marketing_agent:       '/marketing/dashboard',
+                                          project_manager_agent: '/project-manager/dashboard',
+                                          frontline_agent:       '/frontline/dashboard',
+                                          operations_agent:      '/operations/dashboard',
+                                          reply_draft_agent:     '/reply-draft/dashboard',
+                                          ai_sdr_agent:          '/ai-sdr/dashboard',
+                                        }[agent.module_name]))}
+                                      >
+                                        <PlayCircle className="h-4 w-4 mr-2" />
+                                        Open Agent
+                                      </Button>
+                                    )}
+                                  </>
                                 )}
                                 {canRepurchase && (
                                   <Button

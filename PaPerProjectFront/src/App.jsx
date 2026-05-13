@@ -51,8 +51,11 @@ import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
+import HRAgentPage from '@/pages/HRAgentPage';
+import HRDashboard from '@/components/hr/HRDashboard';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
+import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
@@ -152,6 +155,12 @@ import { useTranslation } from 'react-i18next';
               <Route index element={<FrontlineDashboard />} />
             </Route>
 
+            {/* HR Support Agent routes */}
+            <Route path="/hr" element={<Navigate to="/hr/dashboard" replace />} />
+            <Route path="/hr/dashboard" element={<HRAgentPage />}>
+              <Route index element={<HRDashboard />} />
+            </Route>
+
             {/* Operations Agent routes without header/footer */}
             <Route path="/operations" element={<Navigate to="/operations/dashboard" replace />} />
             <Route path="/operations/dashboard" element={<OperationsAgentPage />} />
@@ -167,6 +176,16 @@ import { useTranslation } from 'react-i18next';
             {/* Reply Draft Agent routes without header/footer */}
             <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
             <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
+
+            {/* AI SDR Agent routes without header/footer */}
+            <Route path="/ai-sdr" element={<Navigate to="/ai-sdr/dashboard" replace />} />
+            <Route path="/ai-sdr/dashboard" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/leads" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/outreach" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/meetings" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/analytics" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/email-assistant" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/crm-sync" element={<AiSdrAgentPage />} />
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

@@ -1106,13 +1106,20 @@ def marketing_qa(request):
                         }
 
             result.setdefault('token_usage', token_usage)
-        
+            result.setdefault('source', 'llm' if bool(getattr(agent, 'last_llm_used', False)) else 'database')
+
         return Response({
             'status': 'success',
             'data': result
         }, status=status.HTTP_200_OK)
-        
+
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("marketing_qa failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1163,6 +1170,12 @@ def market_research(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("market_research failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1243,6 +1256,12 @@ def outreach_campaign(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("outreach_campaign failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1458,6 +1477,12 @@ def document_authoring(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("document_authoring failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1551,6 +1576,12 @@ def proactive_notification_monitor(request):
         )
         return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("proactive_notification_monitor failed")
         return Response(
             {'status': 'error', 'message': 'Monitor failed', 'error': str(e)},

@@ -4,8 +4,10 @@ Frontline Agent periodic + on-demand tasks.
 import json
 import logging
 from datetime import timedelta
+from pathlib import Path
 from celery import shared_task
 from django.utils import timezone
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ def process_document(self, document_id):
     from django.conf import settings
     from Frontline_agent.models import Document, DocumentChunk
     from Frontline_agent.document_processor import DocumentProcessor
-    from core.Fronline_agent.embedding_service import EmbeddingService
+    from core.Frontline_agent.embedding_service import EmbeddingService
 
     document = Document.objects.filter(id=document_id).first()
     if not document:
@@ -39,8 +41,22 @@ def process_document(self, document_id):
     DocumentChunk.objects.filter(document=document).delete()
 
     try:
+        # document.file_path is stored relative to MEDIA_ROOT (the upload view does
+        # `.relative_to(settings.MEDIA_ROOT)` before saving). DocumentProcessor
+        # opens the path directly, so we must resolve it to an absolute path here
+        # — the Celery worker's CWD isn't MEDIA_ROOT, which silently made every
+        # upload fail with "File does not exist" and stay stuck in 'processing'.
+        import os as _os
+        fp = document.file_path
+        if fp and not _os.path.isabs(fp):
+            fp = str(Path(settings.MEDIA_ROOT) / fp)
+        # The second arg feeds `get_file_format` which keys off the extension.
+        # Previously we passed `document.title` here — titles have no extension
+        # (e.g. "nlp"), so format came back as 'other' and every upload failed
+        # with "Unsupported file format: other". Use the stored filename instead.
+        filename_with_ext = _os.path.basename(fp)
         processor = DocumentProcessor()
-        result = processor.process_document(document.file_path, document.title)
+        result = processor.process_document(fp, filename_with_ext)
         if not result.get('success'):
             raise RuntimeError(result.get('error') or 'process_document failed')
 
@@ -92,23 +108,50 @@ def process_document(self, document_id):
         document.embedding_model = embedding_service.embedding_model if has_embeddings else None
         document.save(update_fields=['processing_status', 'is_indexed', 'processed',
                                      'embedding_model', 'updated_at'])
+        # Invalidate the company's FAISS index so next query rebuilds from the new chunks.
+        try:
+            if has_embeddings and document.company_id:
+                from Frontline_agent.vector_store import mark_index_dirty
+                mark_index_dirty(document.company_id)
+        except Exception:
+            logger.exception("process_document: failed to mark vector index dirty")
         logger.info("process_document: doc %s ready (%d chunks)", document_id, document.chunks_total)
         return {'status': 'ready', 'document_id': document_id, 'chunks': document.chunks_total}
 
     except Exception as exc:
         logger.exception("process_document failed for doc %s: %s", document_id, exc)
+        # Stamp 'failed' FIRST so the doc never stays stuck in 'processing' when:
+        #   (a) we're running eagerly via `.apply()` and `self.retry()` can't
+        #       actually reschedule anything, or
+        #   (b) the broker is unreachable and the retry call itself raises.
+        # Celery will still retry on top of this if we're running async — if
+        # a retry eventually succeeds, the success path overwrites the status
+        # back to 'ready'.
         try:
-            # Celery auto-retry with backoff; on final failure mark the doc as failed.
+            document.processing_status = 'failed'
+            document.processing_error = f"{type(exc).__name__}: {exc}"[:4000]
+            document.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+        except Exception:
+            logger.exception("process_document: failed to stamp 'failed' status for doc %s",
+                             document_id)
+        # In eager mode (e.g. the upload view's inline fallback) there's no
+        # broker to schedule a retry against — bail with the failure we just stamped.
+        try:
+            is_eager = bool(getattr(self.request, 'is_eager', False))
+        except Exception:
+            is_eager = False
+        if is_eager:
+            return {'status': 'failed', 'document_id': document_id,
+                    'error': f"{type(exc).__name__}: {exc}"[:400]}
+        # Async Celery path: let the retry machinery take another shot.
+        try:
             raise self.retry(exc=exc)
         except self.MaxRetriesExceededError:
-            pass
+            return {'status': 'failed', 'document_id': document_id}
         except Exception:
-            # Retry scheduled — fall through to leave status as 'processing'
+            # Retry was scheduled — the doc currently reads 'failed', but on a
+            # successful retry the happy-path branch above will flip it to 'ready'.
             return {'status': 'retrying', 'document_id': document_id}
-        document.processing_status = 'failed'
-        document.processing_error = f"{type(exc).__name__}: {exc}"[:4000]
-        document.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
-        return {'status': 'failed', 'document_id': document_id}
 
 
 @shared_task(name='Frontline_agent.tasks.send_weekly_analytics_digest')
@@ -242,12 +285,17 @@ def send_meeting_reminders():
             logger.warning("Meeting reminder send failed for meeting %s: %s", meeting.id, exc)
             return False
 
-    # 24h reminder: scheduled_at is ~24h from now (window 23h57m..24h02m) and not yet sent.
-    r24_lo = now + _td(hours=24) - _td(minutes=3)
-    r24_hi = now + _td(hours=24) + _td(minutes=2)
+    # 24h reminder: fire whenever the meeting is <= 24h away AND > 15m away (so the
+    # 15-minute reminder stage owns the final stretch) AND the 24h reminder hasn't
+    # been sent yet. The previous narrow ±window was correct only if cron was
+    # punctual; if a worker slipped even 3 minutes, meetings in the missed band
+    # lost their reminder. "Still upcoming + not yet sent" is the real condition.
+    r24_cutoff_upper = now + _td(hours=24)
+    r24_cutoff_lower = now + _td(minutes=15)   # don't double with the 15m stage
     for m in FrontlineMeeting.objects.filter(
         status__in=['scheduled', 'rescheduled'],
-        scheduled_at__gte=r24_lo, scheduled_at__lte=r24_hi,
+        scheduled_at__gt=r24_cutoff_lower,
+        scheduled_at__lte=r24_cutoff_upper,
         reminder_24h_sent_at__isnull=True,
     ):
         if _send(m, '24 hours'):
@@ -257,12 +305,14 @@ def send_meeting_reminders():
         else:
             results['failed'] += 1
 
-    # 15-minute reminder: scheduled_at is ~15m from now (window 12m..17m) and not yet sent.
-    r15_lo = now + _td(minutes=12)
-    r15_hi = now + _td(minutes=17)
+    # 15-minute reminder: fire whenever the meeting is <= 15m away AND hasn't
+    # already started (>= now). Same stateful logic as above. The old ±2.5m
+    # window missed meetings when cron lagged; this does not.
+    r15_upper = now + _td(minutes=15)
     for m in FrontlineMeeting.objects.filter(
         status__in=['scheduled', 'rescheduled'],
-        scheduled_at__gte=r15_lo, scheduled_at__lte=r15_hi,
+        scheduled_at__gte=now,
+        scheduled_at__lte=r15_upper,
         reminder_15m_sent_at__isnull=True,
     ):
         if _send(m, '15 minutes'):
@@ -286,8 +336,10 @@ def prune_expired_documents():
     # Only consider rows with a positive retention_days
     candidates = Document.objects.filter(retention_days__isnull=False, retention_days__gt=0)
     deleted = 0
+    # Track companies whose chunk set shrinks so we can invalidate their FAISS index.
+    dirty_companies = set()
     # Evaluated in Python because retention is a per-row offset, not a simple cutoff.
-    for doc in candidates.only('id', 'retention_days', 'created_at', 'file_path').iterator():
+    for doc in candidates.only('id', 'retention_days', 'created_at', 'file_path', 'company_id').iterator():
         expires_at = doc.created_at + timedelta(days=int(doc.retention_days))
         if expires_at <= now:
             try:
@@ -301,11 +353,23 @@ def prune_expired_documents():
                 except Exception as e:
                     logger.warning("prune: failed to delete file for doc %s: %s", doc.id, e)
                 doc_pk = doc.id
+                doc_company_id = doc.company_id
                 doc.delete()
                 deleted += 1
+                if doc_company_id:
+                    dirty_companies.add(doc_company_id)
                 logger.info("prune: deleted expired doc %s", doc_pk)
             except Exception as e:
                 logger.exception("prune: failed to delete doc %s: %s", doc.id, e)
+    # Mark every affected company's vector index dirty so the next query rebuilds
+    # without the deleted chunks.
+    if dirty_companies:
+        try:
+            from Frontline_agent.vector_store import mark_index_dirty
+            for cid in dirty_companies:
+                mark_index_dirty(cid)
+        except Exception:
+            logger.exception("prune: failed to invalidate vector indexes")
     return {'deleted': deleted}
 
 
@@ -629,6 +693,91 @@ def process_inbound_email(self, payload: dict):
             raise self.retry(exc=exc)
         except self.MaxRetriesExceededError:
             return {'status': 'failed', 'error': str(exc)[:400]}
+
+
+# --------------------------------------------------------------------------
+# Workflow pause / resume — non-blocking `wait` step
+# --------------------------------------------------------------------------
+
+@shared_task(name='Frontline_agent.tasks.resume_workflow_execution',
+             bind=True, max_retries=3, default_retry_delay=30)
+def resume_workflow_execution(self, execution_id: int):
+    """Resume a paused FrontlineWorkflowExecution.
+
+    Reads the pause snapshot saved by `_execute_workflow_steps` into
+    `execution.pause_state`, re-enters the executor with the remaining-steps
+    list and accumulated results, and finalizes the execution on completion
+    (or schedules another resume if the workflow hits another `wait`).
+    """
+    from Frontline_agent.models import FrontlineWorkflowExecution
+    from api.views.frontline_agent import _execute_workflow_steps
+
+    execution = (FrontlineWorkflowExecution.objects
+                 .select_related('workflow')
+                 .filter(pk=execution_id).first())
+    if not execution:
+        logger.warning("resume_workflow_execution: execution %s not found", execution_id)
+        return {'status': 'missing', 'execution_id': execution_id}
+    if execution.status != 'paused':
+        # Could have been cancelled, or a duplicate resume fired. Idempotent no-op.
+        logger.info("resume_workflow_execution: execution %s status=%s, skipping",
+                    execution_id, execution.status)
+        return {'status': 'noop', 'execution_id': execution_id, 'current_status': execution.status}
+    workflow = execution.workflow
+    if workflow is None:
+        execution.status = 'failed'
+        execution.error_message = 'Workflow deleted while execution was paused'
+        execution.completed_at = timezone.now()
+        execution.save(update_fields=['status', 'error_message', 'completed_at'])
+        return {'status': 'failed', 'execution_id': execution_id, 'reason': 'workflow_missing'}
+
+    snap = execution.pause_state or {}
+    remaining_steps = list(snap.get('remaining_steps') or [])
+    results_so_far = list(snap.get('results_so_far') or [])
+    elapsed_active = float(snap.get('elapsed_active_seconds') or 0.0)
+    context_data = dict(snap.get('context_data') or execution.context_data or {})
+
+    # Move back to in_progress while the resume runs so another scheduled
+    # resume can't pick the same row if Celery double-delivered.
+    execution.status = 'in_progress'
+    execution.save(update_fields=['status'])
+
+    try:
+        success, result_data, err = _execute_workflow_steps(
+            workflow, context_data, execution.executed_by,
+            simulate=False,
+            execution=execution,
+            _steps_override=remaining_steps,
+            _prior_results=results_so_far,
+            _prior_elapsed=elapsed_active,
+        )
+    except Exception as exc:
+        logger.exception("resume_workflow_execution: executor crashed on execution %s", execution_id)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            execution.status = 'failed'
+            execution.error_message = f"{type(exc).__name__}: {exc}"[:4000]
+            execution.completed_at = timezone.now()
+            execution.save(update_fields=['status', 'error_message', 'completed_at'])
+        return {'status': 'retrying_or_failed', 'execution_id': execution_id}
+
+    # If the executor paused AGAIN, state was already persisted by
+    # _persist_and_schedule_resume. Just acknowledge and return.
+    if result_data and result_data.get('paused'):
+        return {'status': 'paused_again', 'execution_id': execution_id,
+                'wait_seconds': result_data.get('wait_seconds')}
+
+    # Terminal: the remainder ran to completion (or failed).
+    execution.status = 'completed' if success else 'failed'
+    execution.result_data = result_data or {}
+    execution.error_message = err
+    execution.completed_at = timezone.now()
+    execution.resume_at = None
+    execution.pause_state = {}
+    execution.save(update_fields=['status', 'result_data', 'error_message',
+                                  'completed_at', 'resume_at', 'pause_state'])
+    return {'status': execution.status, 'execution_id': execution_id}
 
 
 def _ensure_system_user():

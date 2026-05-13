@@ -192,7 +192,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
               <p className="text-sm text-white/70 font-medium">Platform key (free tier)</p>
               <p className="text-xs text-white/40 mt-0.5">
                 Provider: <span className="uppercase text-white/60">{agent.default_provider}</span>
-                {' · '}1M free tokens included with your purchase
+                {' · '}{formatTokens(agent.quota?.included_tokens ?? 0)} free tokens included with your purchase
               </p>
             </div>
           </div>
@@ -411,7 +411,7 @@ const AgentKeysSettingsPage = () => {
             <div className="text-sm text-white/70">
               <p className="text-white font-medium mb-1">How this works</p>
               <p className="text-white/60 leading-relaxed">
-                Each agent you purchase includes <span className="text-white font-semibold">1M free tokens</span> via a platform-managed key.
+                Each agent you purchase includes <span className="text-white font-semibold">free tokens</span> via a platform-managed key.
                 When those run out, you can either <span className="text-blue-300">add your own API key (BYOK)</span> to pay the provider directly,
                 or <span className="text-emerald-300">request a managed key</span> from the admin. Keys are encrypted at rest and never shown in plaintext.
               </p>

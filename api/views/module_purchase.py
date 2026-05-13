@@ -31,6 +31,7 @@ MODULE_PRICES = {
     'frontline_agent': 149,
     'operations_agent': 179,
     'reply_draft_agent': 79,
+    'hr_agent': 129,
 }
 
 MODULE_DISPLAY_NAMES = {
@@ -40,6 +41,7 @@ MODULE_DISPLAY_NAMES = {
     'frontline_agent': 'Frontline Agent',
     'operations_agent': 'Operations Agent',
     'reply_draft_agent': 'Reply Draft Agent',
+    'hr_agent': 'HR Support Agent',
 }
 
 # Subscription duration (30 days per purchase)

@@ -293,6 +293,9 @@ def adjust_quota(request, quota_id):
     try:
         if action == 'reset':
             q.used_tokens = 0
+            q.notified_80pct = False
+            q.notified_90pct = False
+            q.notified_100pct = False
         elif action == 'set_included':
             q.included_tokens = int(request.data.get('value'))
         elif action == 'add_tokens':

@@ -176,6 +176,30 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     raise NoKeyAvailable()
 
 
+def _check_quota_notifications(quota_id: int) -> None:
+    """Fire 80% / 90% / 100% notifications exactly once per threshold crossing."""
+    try:
+        from core.notification_utils import notify_company_quota
+        q = AgentTokenQuota.objects.select_related('company').get(pk=quota_id)
+        if q.included_tokens <= 0:
+            return
+        pct = (q.used_tokens / q.included_tokens) * 100
+        actual = round(pct, 1)
+
+        if pct >= 100 and not q.notified_100pct:
+            AgentTokenQuota.objects.filter(pk=quota_id).update(notified_100pct=True)
+            notify_company_quota(q.company, q.get_agent_name_display(), 100, actual_pct=actual)
+        elif pct >= 90 and not q.notified_90pct:
+            AgentTokenQuota.objects.filter(pk=quota_id).update(notified_90pct=True)
+            notify_company_quota(q.company, q.get_agent_name_display(), 90, actual_pct=actual)
+        elif pct >= 80 and not q.notified_80pct:
+            AgentTokenQuota.objects.filter(pk=quota_id).update(notified_80pct=True)
+            notify_company_quota(q.company, q.get_agent_name_display(), 80, actual_pct=actual)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Quota notification check failed: %s", exc)
+
+
 def record_usage(ctx: CallContext, total_tokens: int) -> None:
     """Increment the right counter after an LLM call completes.
 
@@ -203,6 +227,10 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
                 AgentProviderUsage.objects.filter(
                     quota_id=ctx.quota_id, provider=ctx.provider
                 ).update(used_tokens=F('used_tokens') + total_tokens)
+
+        # Quota threshold notifications (fire once per threshold)
+        _check_quota_notifications(ctx.quota_id)
+
     elif ctx.mode == 'byok':
         AgentTokenQuota.objects.filter(
             company_id=ctx.company_id, agent_name=ctx.agent_name
