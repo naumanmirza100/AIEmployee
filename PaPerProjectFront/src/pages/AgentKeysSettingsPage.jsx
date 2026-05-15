@@ -14,7 +14,8 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,
-  BrainCircuit, Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight
+  BrainCircuit, Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,
+  Zap, Coins
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
@@ -157,7 +158,7 @@ const QuotaBar = ({ quota }) => {
   );
 };
 
-const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
+const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool }) => {
   const m = modeBadge(agent);
   return (
     <motion.div
@@ -239,6 +240,42 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
                 Provider: <span className="uppercase text-white/60">{agent.default_provider}</span>
                 {' · '}{formatTokens(agent.quota?.included_tokens ?? 0)} free tokens included with your purchase
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Pool selector — only show when both free tokens remain AND managed key is active */}
+        {agent.managed?.status === 'active' && !agent.byok &&
+          agent.quota?.remaining > 0 && agent.quota?.managed_included_tokens > 0 &&
+          !agent.quota?.managed_is_exhausted && (
+          <div className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg space-y-2">
+            <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Active token pool</p>
+            <p className="text-xs text-white/50">You have both free tokens and managed key tokens available. Choose which pool your calls draw from.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onSetPool(agent.agent_name, 'free')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
+                  agent.quota.preferred_pool === 'free'
+                    ? 'bg-violet-600/20 border-violet-500/60 text-violet-200'
+                    : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
+                }`}
+              >
+                <Coins className="w-4 h-4" />
+                Free tokens
+                {agent.quota.preferred_pool === 'free' && <span className="text-[10px] ml-1 text-violet-300">● active</span>}
+              </button>
+              <button
+                onClick={() => onSetPool(agent.agent_name, 'managed')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
+                  agent.quota.preferred_pool !== 'free'
+                    ? 'bg-emerald-600/20 border-emerald-500/60 text-emerald-200'
+                    : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
+                }`}
+              >
+                <Zap className="w-4 h-4" />
+                Managed key
+                {agent.quota.preferred_pool !== 'free' && <span className="text-[10px] ml-1 text-emerald-300">● active</span>}
+              </button>
             </div>
           </div>
         )}
@@ -523,6 +560,16 @@ const AgentKeysSettingsPage = () => {
     }
   };
 
+  const setPool = async (agentName, preferred_pool) => {
+    try {
+      await agentKeysService.setTokenPool({ agent_name: agentName, preferred_pool });
+      toast({ title: preferred_pool === 'free' ? 'Using free tokens' : 'Using managed key tokens' });
+      loadData({ silent: true });
+    } catch (e) {
+      toast({ title: 'Failed to switch pool', description: String(e.message || e), variant: 'destructive' });
+    }
+  };
+
   const submitRequest = async () => {
     setSubmitting(true);
     try {
@@ -657,6 +704,7 @@ const AgentKeysSettingsPage = () => {
                   onByok={openByok}
                   onRevoke={revokeByok}
                   onRequest={openRequest}
+                  onSetPool={setPool}
                 />
               ))}
             </div>

@@ -1883,6 +1883,13 @@ class AgentTokenQuota(models.Model):
     # until a managed key is purchased.
     managed_included_tokens = models.BigIntegerField(default=0)
     managed_used_tokens = models.BigIntegerField(default=0)
+    # Which token pool to draw from when both free and managed are available.
+    # 'managed' is the default (managed key takes priority, saves free tokens).
+    preferred_pool = models.CharField(
+        max_length=10,
+        choices=[('free', 'Free Platform Tokens'), ('managed', 'Managed Key Tokens')],
+        default='managed',
+    )
     byok_tokens_info = models.BigIntegerField(
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',

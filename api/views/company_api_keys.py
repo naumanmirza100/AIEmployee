@@ -71,6 +71,7 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
         'managed_included_tokens': quota.managed_included_tokens,
         'managed_used_tokens': quota.managed_used_tokens,
         'managed_is_exhausted': quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens,
+        'preferred_pool': quota.preferred_pool,
         'provider_breakdown': provider_breakdown,
         'default_provider': default_provider,
     }
@@ -189,6 +190,36 @@ def revoke_byok_key(request, agent_name):
         company=company, agent_name=agent_name, mode='byok',
     ).delete()
     return Response({'status': 'success', 'deleted': deleted})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def set_token_pool(request):
+    """Set the preferred token pool for an agent.
+
+    Body: { agent_name, preferred_pool }  — preferred_pool: 'free' | 'managed'
+    Only relevant when the company has both free tokens remaining and an active
+    managed key. The chosen pool is used for subsequent LLM calls.
+    """
+    company = request.user.company
+    agent_name = (request.data.get('agent_name') or '').strip()
+    preferred_pool = (request.data.get('preferred_pool') or '').strip()
+
+    if agent_name not in {name for name, _ in AGENT_CHOICES}:
+        return Response({'status': 'error', 'message': 'Invalid agent_name'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if preferred_pool not in ('free', 'managed'):
+        return Response({'status': 'error', 'message': "preferred_pool must be 'free' or 'managed'"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    quota, _ = AgentTokenQuota.objects.get_or_create(
+        company=company, agent_name=agent_name,
+        defaults={'included_tokens': 0},
+    )
+    quota.preferred_pool = preferred_pool
+    quota.save(update_fields=['preferred_pool'])
+    return Response({'status': 'success', 'preferred_pool': preferred_pool})
 
 
 @api_view(['GET'])

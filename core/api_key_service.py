@@ -146,25 +146,30 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
         .filter(company=company, agent_name=agent_name, mode='managed', status='active')
         .first()
     )
+    quota = None
     if managed:
         plaintext = managed.get_plaintext_key()
         if plaintext:
             quota = _ensure_quota(company, agent_name)
-            # Enforce managed token limit when admin set one (>0)
-            if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
-                raise ManagedQuotaExhausted()
-            return CallContext(
-                company_id=company.id,
-                agent_name=agent_name,
-                mode='managed',
-                provider=managed.provider,
-                api_key=plaintext,
-                key_id=managed.id,
-                quota_id=quota.id,
-            )
+            # If company prefers free tokens and free quota isn't exhausted yet,
+            # fall through to the platform key path to preserve managed tokens.
+            prefer_free = quota.preferred_pool == 'free' and not quota.is_exhausted
+            if not prefer_free:
+                if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
+                    raise ManagedQuotaExhausted()
+                return CallContext(
+                    company_id=company.id,
+                    agent_name=agent_name,
+                    mode='managed',
+                    provider=managed.provider,
+                    api_key=plaintext,
+                    key_id=managed.id,
+                    quota_id=quota.id,
+                )
 
     # Step 3 — quota gate (platform-key path only)
-    quota = _ensure_quota(company, agent_name)
+    if quota is None:
+        quota = _ensure_quota(company, agent_name)
     if quota.is_exhausted:
         raise QuotaExhausted()
 

@@ -8,6 +8,9 @@ export const upsertByokKey = ({ agent_name, provider, api_key }) =>
 export const revokeByokKey = (agentName) =>
   companyApi.delete(`/company/agent-keys/byok/${agentName}`);
 
+export const setTokenPool = ({ agent_name, preferred_pool }) =>
+  companyApi.post('/company/agent-keys/pool', { agent_name, preferred_pool });
+
 export const listKeyRequests = () => companyApi.get('/company/key-requests');
 
 export const createKeyRequest = ({ agent_name, provider, note }) =>
@@ -26,6 +29,7 @@ export default {
   listAgentKeys,
   upsertByokKey,
   revokeByokKey,
+  setTokenPool,
   listKeyRequests,
   createKeyRequest,
   payForRequest,

@@ -388,6 +388,10 @@ def adjust_quota(request, quota_id):
             q.included_tokens = int(request.data.get('value'))
         elif action == 'add_tokens':
             q.included_tokens = max(0, q.included_tokens + int(request.data.get('value')))
+        elif action == 'set_managed':
+            q.managed_included_tokens = max(0, int(request.data.get('value')))
+        elif action == 'reset_managed':
+            q.managed_used_tokens = 0
         else:
             return Response({'status': 'error', 'message': 'Invalid action'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -671,6 +675,8 @@ def admin_overview(request):
         total_included=Sum('included_tokens'),
         total_used=Sum('used_tokens'),
         total_byok_info=Sum('byok_tokens_info'),
+        total_managed_included=Sum('managed_included_tokens'),
+        total_managed_used=Sum('managed_used_tokens'),
     )
     # Per-provider aggregate across all companies.
     # AgentProviderUsage only tracks tokens from when per-provider logging was added;
@@ -702,9 +708,18 @@ def admin_overview(request):
         'byok_keys': CompanyAPIKey.objects.filter(status='active', mode='byok').count(),
         'platform_keys_configured': PlatformAPIKey.objects.filter(status='active').exclude(encrypted_key='').count(),
         'pending_requests': KeyRequest.objects.filter(status__in=['pending', 'payment_received']).count(),
-        'exhausted_quotas': AgentTokenQuota.objects.filter(used_tokens__gte=F('included_tokens')).count(),
+        'exhausted_quotas': AgentTokenQuota.objects.filter(
+            included_tokens__gt=0,
+            used_tokens__gte=F('included_tokens'),
+        ).count(),
+        'exhausted_managed_quotas': AgentTokenQuota.objects.filter(
+            managed_included_tokens__gt=0,
+            managed_used_tokens__gte=F('managed_included_tokens'),
+        ).count(),
         'total_included_tokens': agg['total_included'] or 0,
         'total_used_tokens': agg['total_used'] or 0,
+        'total_managed_included_tokens': agg['total_managed_included'] or 0,
+        'total_managed_used_tokens': agg['total_managed_used'] or 0,
         'total_byok_info_tokens': agg['total_byok_info'] or 0,
         'provider_totals': provider_totals,
     }

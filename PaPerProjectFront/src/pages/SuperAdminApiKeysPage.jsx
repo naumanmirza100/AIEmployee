@@ -185,18 +185,28 @@ const PlatformTab = ({ platformKeys, onSave, savingProvider }) => (
 // -------------------- Overview Tab --------------------
 const OverviewTab = ({ stats }) => (
   <div className="space-y-6">
+    {/* Row 1: Company & request health */}
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <StatCard icon={Building2} label="Companies" value={stats.total_companies} accent="bg-violet-500/15 text-violet-300" />
-      <StatCard icon={ShieldCheck} label="Active Keys" value={stats.total_keys} accent="bg-emerald-500/15 text-emerald-300" />
-      <StatCard icon={Inbox} label="Pending Requests" value={stats.pending_requests} accent="bg-amber-500/15 text-amber-300" />
-      <StatCard icon={AlertTriangle} label="Exhausted Quotas" value={stats.exhausted_quotas} accent={stats.exhausted_quotas > 0 ? 'bg-red-500/15 text-red-300' : 'bg-gray-500/15 text-gray-400'} />
-    </div>
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-      <StatCard icon={Key} label="Managed Keys" value={stats.managed_keys} accent="bg-emerald-500/15 text-emerald-300" />
-      <StatCard icon={Key} label="BYOK Keys" value={stats.byok_keys} accent="bg-blue-500/15 text-blue-300" />
-      <StatCard icon={Gauge} label="Active Purchases" value={stats.total_purchases} accent="bg-fuchsia-500/15 text-fuchsia-300" />
+      <StatCard icon={Building2} label="Companies" value={stats.total_companies ?? '—'} accent="bg-violet-500/15 text-violet-300" />
+      <StatCard icon={Gauge} label="Active Purchases" value={stats.total_purchases ?? '—'} accent="bg-fuchsia-500/15 text-fuchsia-300" />
+      <StatCard icon={Inbox} label="Pending Requests" value={stats.pending_requests ?? '—'} accent={stats.pending_requests > 0 ? 'bg-amber-500/15 text-amber-300' : 'bg-gray-500/15 text-gray-400'} />
+      <StatCard icon={Globe} label="Platform Keys Set" value={stats.platform_keys_configured ?? '—'} accent={stats.platform_keys_configured > 0 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'} />
     </div>
 
+    {/* Row 2: Keys breakdown */}
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <StatCard icon={ShieldCheck} label="Active Keys (Total)" value={stats.total_keys ?? '—'} accent="bg-emerald-500/15 text-emerald-300" />
+      <StatCard icon={Key} label="Managed Keys" value={stats.managed_keys ?? '—'} accent="bg-emerald-500/15 text-emerald-300" />
+      <StatCard icon={Key} label="BYOK Keys" value={stats.byok_keys ?? '—'} accent="bg-blue-500/15 text-blue-300" />
+      <StatCard
+        icon={AlertTriangle}
+        label="Exhausted Quotas"
+        value={`${stats.exhausted_quotas ?? 0} free · ${stats.exhausted_managed_quotas ?? 0} managed`}
+        accent={(stats.exhausted_quotas > 0 || stats.exhausted_managed_quotas > 0) ? 'bg-red-500/15 text-red-300' : 'bg-gray-500/15 text-gray-400'}
+      />
+    </div>
+
+    {/* Token Ledger */}
     <Card className={CARD_CLASS}>
       <CardHeader>
         <CardTitle className="text-white flex items-center gap-2">
@@ -205,19 +215,38 @@ const OverviewTab = ({ stats }) => (
         <CardDescription className="text-white/50">Aggregate token usage across all companies and agents.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-            <p className="text-xs text-white/40 uppercase mb-1">Total Included</p>
-            <p className="text-xl font-bold text-white">{formatTokens(stats.total_included_tokens)}</p>
+        {/* Free platform tokens */}
+        <div>
+          <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Free Platform Tokens</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+              <p className="text-xs text-white/40 uppercase mb-1">Included</p>
+              <p className="text-xl font-bold text-white">{formatTokens(stats.total_included_tokens)}</p>
+            </div>
+            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+              <p className="text-xs text-white/40 uppercase mb-1">Used</p>
+              <p className="text-xl font-bold text-violet-300">{formatTokens(stats.total_used_tokens)}</p>
+            </div>
           </div>
-          <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-            <p className="text-xs text-white/40 uppercase mb-1">Total Used</p>
-            <p className="text-xl font-bold text-violet-300">{formatTokens(stats.total_used_tokens)}</p>
+        </div>
+        {/* Managed key tokens */}
+        <div>
+          <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Managed Key Tokens</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+              <p className="text-xs text-white/40 uppercase mb-1">Included</p>
+              <p className="text-xl font-bold text-white">{formatTokens(stats.total_managed_included_tokens)}</p>
+            </div>
+            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+              <p className="text-xs text-white/40 uppercase mb-1">Used</p>
+              <p className="text-xl font-bold text-emerald-300">{formatTokens(stats.total_managed_used_tokens)}</p>
+            </div>
           </div>
-          <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-            <p className="text-xs text-white/40 uppercase mb-1">BYOK (info only)</p>
-            <p className="text-xl font-bold text-blue-300">{formatTokens(stats.total_byok_info_tokens)}</p>
-          </div>
+        </div>
+        {/* BYOK info */}
+        <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+          <p className="text-xs text-white/40 uppercase mb-1">BYOK (tracked, info only)</p>
+          <p className="text-xl font-bold text-blue-300">{formatTokens(stats.total_byok_info_tokens)}</p>
         </div>
         {/* Per-provider breakdown */}
         {stats.provider_totals && Object.keys(stats.provider_totals).length > 0 && (
@@ -313,7 +342,7 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
                   {/* Token usage */}
                   {q ? (
                     <div className="mt-3 space-y-2">
-                      <div>
+                      {/* <div>
                         <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
                           <span>Free tokens</span>
                           <span>{formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)} ({freePct.toFixed(0)}%)</span>
@@ -321,7 +350,7 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
                         <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
                           <div className={`h-full ${freeBar} transition-all`} style={{ width: `${freePct}%` }} />
                         </div>
-                      </div>
+                      </div> */}
                       {q.managed_included_tokens > 0 && (
                         <div>
                           <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
@@ -342,17 +371,18 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
                 <div className="flex flex-col items-end gap-2 shrink-0">
                   {q && (
                     <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjustQuota(q, k)}>
-                      <Gauge className="w-3 h-3 mr-1" /> Edit tokens
+                      {/* <Gauge className="w-3 h-3 mr-1" /> */}
+                       Edit tokens
                     </Button>
                   )}
                   {k.status === 'revoked' ? (
-                    <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
+                    <Button size="sm" className=" bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
                       Re-assign
                     </Button>
                   ) : (
                     <>
                       {k.mode === 'managed' && (
-                        <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
+                        <Button size="sm" className="pr-4 pl-4 bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
                           Replace
                         </Button>
                       )}
@@ -493,6 +523,8 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
         {quotas.map(q => {
           const pct = q.included_tokens > 0 ? Math.min(100, (q.used_tokens / q.included_tokens) * 100) : 0;
           const bar = pct >= 100 ? 'from-red-500 to-rose-500' : pct >= 80 ? 'from-amber-400 to-orange-500' : 'from-emerald-400 to-teal-500';
+          const mPct = q.managed_included_tokens > 0 ? Math.min(100, (q.managed_used_tokens / q.managed_included_tokens) * 100) : 0;
+          const mBar = mPct >= 100 ? 'from-red-500 to-rose-500' : mPct >= 80 ? 'from-amber-400 to-orange-500' : 'from-violet-500 to-purple-500';
           return (
             <div key={q.id} className={`${ROW_CLASS} rounded-lg p-4`}>
               <div className="flex items-center justify-between mb-2 gap-3">
@@ -500,17 +532,38 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
                   <p className="text-white font-semibold truncate">{q.company_name}</p>
                   <p className="text-xs text-white/50">{q.agent_label}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm text-white">
-                    <span className="font-semibold">{formatTokens(Math.min(q.used_tokens, q.included_tokens))}</span>
-                    <span className="text-white/40"> / {formatTokens(q.included_tokens)}</span>
-                  </p>
-                  <p className="text-[10px] text-white/40">{pct.toFixed(1)}% used</p>
+              </div>
+
+              {/* Free platform tokens */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+                  <span className="uppercase tracking-wider font-medium">Free platform tokens</span>
+                  <span>
+                    {formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)}
+                    <span className="ml-1 text-white/30">({pct.toFixed(1)}% used)</span>
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                  <div className={`h-full bg-gradient-to-r ${bar}`} style={{ width: `${pct}%` }} />
                 </div>
               </div>
-              <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342] mb-2">
-                <div className={`h-full bg-gradient-to-r ${bar}`} style={{ width: `${pct}%` }} />
-              </div>
+
+              {/* Managed key tokens */}
+              {q.managed_included_tokens > 0 && (
+                <div className="mb-3">
+                  <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+                    <span className="uppercase tracking-wider font-medium">Managed key tokens</span>
+                    <span>
+                      {formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)}
+                      <span className="ml-1 text-white/30">({mPct.toFixed(1)}% used)</span>
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                    <div className={`h-full bg-gradient-to-r ${mBar}`} style={{ width: `${mPct}%` }} />
+                  </div>
+                </div>
+              )}
+
               {q.provider_breakdown && Object.keys(q.provider_breakdown).length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {Object.entries(q.provider_breakdown).map(([provider, tokens]) => (
@@ -521,16 +574,29 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-2 justify-end">
-                <Button size="sm" variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={() => onAdjust(q, 'reset')}>
+
+              <div className="flex items-center gap-2 justify-between flex-wrap">
+                <div className="flex items-center gap-2">
+                <span className="text-[10px] text-white/25 mr-auto">Free quota:</span>
+                <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjust(q, 'reset')}>
                   Reset used
                 </Button>
-                <Button size="sm" variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={() => onAdjust(q, 'add_tokens')}>
-                  + Add tokens
+                {/* <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjust(q, 'add_tokens')}>
+                  + Add
+                </Button> */}
+                <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjust(q, 'set_included')}>
+                  Set
                 </Button>
-                <Button size="sm" variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={() => onAdjust(q, 'set_included')}>
-                  Set quota
+                </div>
+                <div className="flex items-center gap-2">
+                <span className="text-[10px] text-white/25 ml-2">Managed:</span>
+                <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'set_managed')}>
+                  Set tokens
                 </Button>
+                <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'reset_managed')}>
+                  Reset used
+                </Button>
+                </div>
               </div>
             </div>
           );
@@ -551,7 +617,7 @@ const REQUEST_STATUS_META = {
   revoked:          { label: 'Revoked',           cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30',  Icon: XCircle },
 };
 
-const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFilter, onRefresh, loading }) => (
+const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFilter, onRefresh, loading, pricing }) => (
   <div className="space-y-4">
     <div className="flex items-center gap-2 flex-wrap">
       <Select value={filter.status || 'all'} onValueChange={(v) => setFilter({ ...filter, status: v === 'all' ? '' : v })}>
@@ -589,6 +655,7 @@ const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFi
           const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
           const { Icon } = meta;
           const total = ((r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0));
+          const agentPricing = pricing?.find(p => p.agent_name === r.agent_name);
           return (
             <div key={r.id} className={`${ROW_CLASS} rounded-lg p-4`}>
               <div className="flex items-start justify-between gap-3">
@@ -612,6 +679,13 @@ const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFi
                     <p className="text-xs text-blue-300 mt-1">
                       Payment confirmed: <span className="font-semibold">${r.amount_paid.toFixed(2)}</span>
                       {r.paid_at && <span className="text-white/40 ml-1">• {new Date(r.paid_at).toLocaleString()}</span>}
+                    </p>
+                  )}
+                  {agentPricing && agentPricing.managed_key_tokens > 0 && ['payment_pending', 'payment_received', 'key_assigned'].includes(r.status) && (
+                    <p className="text-xs text-violet-300 mt-1">
+                      <span className="text-white/40">Managed key tokens:</span>{' '}
+                      <span className="font-semibold">{formatTokens(agentPricing.managed_key_tokens)}</span>
+                      {' '}<span className="text-white/30">will be granted on key assignment</span>
                     </p>
                   )}
                   <p className="text-[10px] text-white/30 mt-1">
@@ -702,7 +776,7 @@ const SuperAdminApiKeysPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = useState('platform');
+  const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
   const [keys, setKeys] = useState([]);
@@ -712,7 +786,7 @@ const SuperAdminApiKeysPage = () => {
   const [platformKeys, setPlatformKeys] = useState([]);
   const [savingProvider, setSavingProvider] = useState(null);
 
-  const [keyFilter, setKeyFilter] = useState({});
+  const [keyFilter, setKeyFilter] = useState({ mode: 'managed' });
   const [quotaFilter, setQuotaFilter] = useState({});
   const [requestFilter, setRequestFilter] = useState({});
 
@@ -870,14 +944,22 @@ const SuperAdminApiKeysPage = () => {
   };
 
   const openAdjust = (quota, action) => {
-    setAdjustModal({ open: true, quota, action, value: action === 'reset' ? '' : '1000000' });
+    const defaultVal = action === 'reset' || action === 'reset_managed'
+      ? ''
+      : action === 'set_managed'
+        ? String(quota?.managed_included_tokens ?? 0)
+        : action === 'set_included'
+          ? String(quota?.included_tokens ?? 0)
+          : '1000000';
+    setAdjustModal({ open: true, quota, action, value: defaultVal });
   };
 
   const submitAdjust = async () => {
     const { quota, action, value } = adjustModal;
     setSubmitting(true);
     try {
-      const payload = action === 'reset' ? { action } : { action, value: Number(value) };
+      const noValueActions = ['reset', 'reset_managed'];
+      const payload = noValueActions.includes(action) ? { action } : { action, value: Number(value) };
       await adminApiKeysService.adjustQuota(quota.id, payload);
       toast({ title: 'Quota updated' });
       setAdjustModal({ open: false, quota: null, action: '', value: '' });
@@ -935,10 +1017,10 @@ const SuperAdminApiKeysPage = () => {
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="bg-[#1a1333] border border-[#3a295a] rounded-xl p-1 flex gap-1 h-auto flex-wrap mb-6">
+            <TabsList className="bg-[#1a1333] border border-[#3a295a] rounded-xl p-1 flex w-full h-auto mb-6">
               {[
-                { value: 'platform', icon: Globe, label: 'Platform Keys' },
                 { value: 'overview', icon: Gauge, label: 'Overview' },
+                { value: 'platform', icon: Globe, label: 'Platform Keys' },
                 { value: 'keys', icon: Key, label: 'Per-Company Keys' },
                 { value: 'pricing', icon: DollarSign, label: 'Pricing' },
                 { value: 'quotas', icon: Gauge, label: 'Quotas' },
@@ -947,12 +1029,12 @@ const SuperAdminApiKeysPage = () => {
                 <TabsTrigger
                   key={t.value}
                   value={t.value}
-                  className="flex items-center gap-2 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-[0_0_12px_rgba(139,92,246,0.3)] text-white/60 hover:text-white"
+                  className="flex-1 flex items-center justify-center gap-1.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-[0_0_12px_rgba(139,92,246,0.3)] text-white/60 hover:text-white rounded-lg py-2"
                 >
-                  <t.icon className="h-4 w-4" />
-                  <span className="text-sm">{t.label}</span>
+                  <t.icon className="h-4 w-4 shrink-0" />
+                  <span className="text-sm font-medium truncate">{t.label}</span>
                   {t.badge > 0 && (
-                    <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold -ml-1">
+                    <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold shrink-0">
                       {t.badge > 99 ? '99+' : t.badge}
                     </span>
                   )}
@@ -973,14 +1055,15 @@ const SuperAdminApiKeysPage = () => {
                 onAssign={openAssign}
                 onRevoke={revokeOne}
                 onAdjustQuota={(q, key) => {
-                  // Normalize to the shape adjustModal expects (same as Quotas tab rows)
                   openAdjust({
                     id: q.id,
                     company_name: key.company_name,
                     agent_label: key.agent_label,
                     included_tokens: q.included_tokens,
                     used_tokens: q.used_tokens,
-                  }, 'add_tokens');
+                    managed_included_tokens: q.managed_included_tokens,
+                    managed_used_tokens: q.managed_used_tokens,
+                  }, 'set_managed');
                 }}
                 filter={keyFilter}
                 setFilter={setKeyFilter}
@@ -997,6 +1080,7 @@ const SuperAdminApiKeysPage = () => {
             <TabsContent value="requests">
               <RequestsTab
                 requests={requests}
+                pricing={pricing}
                 onApprove={(r) => {
                   const p = pricing.find(x => x.agent_name === r.agent_name);
                   setApproveModal({ open: true, request: r, key_cost: String(p?.monthly_flat_usd ?? ''), service_charge: String(p?.service_charge_usd ?? ''), admin_note: '' });
@@ -1103,19 +1187,32 @@ const SuperAdminApiKeysPage = () => {
       <Dialog open={adjustModal.open} onOpenChange={(o) => !o && setAdjustModal({ ...adjustModal, open: false })}>
         <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
           <DialogHeader>
-            <DialogTitle>Adjust Quota — {adjustModal.quota?.company_name}</DialogTitle>
+            <DialogTitle>
+              {['set_managed', 'reset_managed'].includes(adjustModal.action) ? 'Managed Key Tokens' : 'Free Quota'} — {adjustModal.quota?.company_name}
+            </DialogTitle>
             <DialogDescription className="text-white/60">
-              {adjustModal.quota?.agent_label} • used {formatTokens(adjustModal.quota?.used_tokens)} of {formatTokens(adjustModal.quota?.included_tokens)}
+              {adjustModal.quota?.agent_label}
+              {adjustModal.action === 'reset' && ` • Free used: ${formatTokens(adjustModal.quota?.used_tokens)} of ${formatTokens(adjustModal.quota?.included_tokens)}`}
+              {adjustModal.action === 'reset_managed' && ` • Managed used: ${formatTokens(adjustModal.quota?.managed_used_tokens)} of ${formatTokens(adjustModal.quota?.managed_included_tokens)}`}
+              {adjustModal.action === 'set_managed' && ` • Current: ${formatTokens(adjustModal.quota?.managed_included_tokens)}`}
+              {adjustModal.action === 'set_included' && ` • Current: ${formatTokens(adjustModal.quota?.included_tokens)}`}
+              {adjustModal.action === 'add_tokens' && ` • Current: ${formatTokens(adjustModal.quota?.included_tokens)}`}
             </DialogDescription>
           </DialogHeader>
-          {adjustModal.action === 'reset' ? (
+          {(adjustModal.action === 'reset') && (
             <p className="text-sm text-white/70 py-2">
-              Reset <span className="font-semibold text-white">used_tokens</span> to 0. Included tokens unchanged. This gives the company a clean slate for the current period.
+              Reset free <span className="font-semibold text-white">used_tokens</span> to 0. Included tokens unchanged.
             </p>
-          ) : (
+          )}
+          {(adjustModal.action === 'reset_managed') && (
+            <p className="text-sm text-white/70 py-2">
+              Reset managed key <span className="font-semibold text-white">used_tokens</span> to 0. The managed token limit stays the same.
+            </p>
+          )}
+          {['set_included', 'add_tokens', 'set_managed'].includes(adjustModal.action) && (
             <div className="space-y-2 py-2">
               <Label className="text-white/70 text-sm">
-                {adjustModal.action === 'add_tokens' ? 'Tokens to add' : 'New included tokens'}
+                {adjustModal.action === 'add_tokens' ? 'Free tokens to add' : adjustModal.action === 'set_included' ? 'New free token limit' : 'New managed key token limit'}
               </Label>
               <Input
                 type="number" className="bg-[#1a1333] border-[#3a295a] text-white"
@@ -1123,8 +1220,9 @@ const SuperAdminApiKeysPage = () => {
                 onChange={(e) => setAdjustModal({ ...adjustModal, value: e.target.value })}
               />
               <p className="text-[11px] text-white/40">
-                {adjustModal.action === 'add_tokens' && `Will set included to ${formatTokens((adjustModal.quota?.included_tokens || 0) + Number(adjustModal.value || 0))}`}
-                {adjustModal.action === 'set_included' && `Will set included to ${formatTokens(Number(adjustModal.value || 0))}`}
+                {adjustModal.action === 'add_tokens' && `Will set free limit to ${formatTokens((adjustModal.quota?.included_tokens || 0) + Number(adjustModal.value || 0))}`}
+                {adjustModal.action === 'set_included' && `Will set free limit to ${formatTokens(Number(adjustModal.value || 0))}`}
+                {adjustModal.action === 'set_managed' && `Will set managed token limit to ${formatTokens(Number(adjustModal.value || 0))}`}
               </p>
             </div>
           )}

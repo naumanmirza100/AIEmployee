@@ -548,6 +548,7 @@ urlpatterns = [
     re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET
     re_path(r'^company/agent-keys/byok/?$', company_api_keys.upsert_byok_key, name='upsert_byok_key'),  # POST
     re_path(r'^company/agent-keys/byok/(?P<agent_name>[a-z_]+)/?$', company_api_keys.revoke_byok_key, name='revoke_byok_key'),  # DELETE
+    re_path(r'^company/agent-keys/pool/?$', company_api_keys.set_token_pool, name='set_token_pool'),  # POST
     re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
     re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
     re_path(r'^company/key-requests/(?P<request_id>\d+)/pay/?$', company_api_keys.pay_for_key_request, name='pay_for_key_request'),  # POST
