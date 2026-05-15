@@ -1114,8 +1114,8 @@ def marketing_qa(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
-        from core.api_key_service import QuotaExhausted, NoKeyAvailable
-        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
             return Response(
                 {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
                 status=status.HTTP_402_PAYMENT_REQUIRED
@@ -1170,8 +1170,8 @@ def market_research(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
-        from core.api_key_service import QuotaExhausted, NoKeyAvailable
-        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
             return Response(
                 {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
                 status=status.HTTP_402_PAYMENT_REQUIRED
@@ -1256,8 +1256,8 @@ def outreach_campaign(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
-        from core.api_key_service import QuotaExhausted, NoKeyAvailable
-        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
             return Response(
                 {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
                 status=status.HTTP_402_PAYMENT_REQUIRED
@@ -1477,8 +1477,8 @@ def document_authoring(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
-        from core.api_key_service import QuotaExhausted, NoKeyAvailable
-        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
             return Response(
                 {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
                 status=status.HTTP_402_PAYMENT_REQUIRED
@@ -1576,8 +1576,8 @@ def proactive_notification_monitor(request):
         )
         return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
     except Exception as e:
-        from core.api_key_service import QuotaExhausted, NoKeyAvailable
-        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
             return Response(
                 {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
                 status=status.HTTP_402_PAYMENT_REQUIRED

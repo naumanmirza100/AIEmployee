@@ -288,12 +288,11 @@ Reply only with the definition, no preamble."""
             )
         except Exception as e:
             self.log_action("Error generating research", {"error": str(e)})
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, QuotaExhausted):
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
                 raise
-            if isinstance(e, NoKeyAvailable):
-                raise
-            research_response = f"Research analysis encountered an error: {str(e)}"
+            self.log_action("Research call failed (hidden from user)", {"error": str(e)})
+            research_response = "Research analysis could not be completed at this time. Please try again."
         
         # Parse and structure findings
         findings = self._parse_research_response(research_type, research_response, additional_context)

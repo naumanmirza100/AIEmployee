@@ -1278,8 +1278,8 @@ def stream_generate_document(request):
             yield _emit('done', {'document': _serialize_generated(doc, include_content=True)})
 
         except Exception as e:
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
                 yield _emit('error', {'message': e.user_message, 'error_code': e.reason})
             else:
                 logger.error(f'stream_generate_document error: {e}', exc_info=True)

@@ -315,8 +315,12 @@ class BaseAgent:
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
                         success=False,
                     )
+                    from core.api_key_service import raise_if_auth_error
+                    raise_if_auth_error(fallback_err, key_ctx)
                     raise
             logger.error(f"Error in {self.agent_name} LLM call: {str(e)}")
+            from core.api_key_service import raise_if_auth_error
+            raise_if_auth_error(e, key_ctx)
             raise
     
     def log_action(self, action, details=None):

@@ -122,8 +122,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         except User.DoesNotExist:
             return {'success': False, 'error': 'User not found'}
         except Exception as e:
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
                 raise
             self.log_action("Error monitoring campaigns", {"error": str(e)})
             return {'success': False, 'error': str(e)}
@@ -269,8 +269,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
                 raise
             self.log_action("Error checking campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}

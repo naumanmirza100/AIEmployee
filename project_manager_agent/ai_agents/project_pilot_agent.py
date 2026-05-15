@@ -1440,7 +1440,7 @@ Return a helpful text response (NOT JSON) explaining this."""
                     return {
                         "success": False,
                         "answer": response,
-                        "error": f"Failed to parse JSON response. The response may have been truncated. Try asking again or breaking your request into smaller parts. Error: {str(e)}",
+                        "error": "Failed to parse JSON response. The response may have been truncated. Try asking again or breaking your request into smaller parts.",
                         "action": None,
                         "actions": None,
                         "question": question
@@ -1459,7 +1459,7 @@ Return a helpful text response (NOT JSON) explaining this."""
             return {
                 "success": False,
                 "error": str(e),
-                "answer": f"I'm sorry, I encountered an error while processing your request. Please try again.\n\n_Debug: {str(e)}_"
+                "answer": "I'm sorry, I encountered an error while processing your request. Please try again."
             }
     
     def process(self, question: str, **kwargs) -> Dict:

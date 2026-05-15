@@ -1883,6 +1883,15 @@ class AgentTokenQuota(models.Model):
     # until a managed key is purchased.
     managed_included_tokens = models.BigIntegerField(default=0)
     managed_used_tokens = models.BigIntegerField(default=0)
+    # User-set soft cap for BYOK spending (0 = no limit). Never blocks calls.
+    byok_token_limit = models.BigIntegerField(default=0)
+    # Which token pool to draw from when both free and managed are available.
+    # 'managed' is the default (managed key takes priority, saves free tokens).
+    preferred_pool = models.CharField(
+        max_length=10,
+        choices=[('free', 'Free Platform Tokens'), ('managed', 'Managed Key Tokens')],
+        default='managed',
+    )
     byok_tokens_info = models.BigIntegerField(
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',
@@ -1891,6 +1900,14 @@ class AgentTokenQuota(models.Model):
     notified_80pct = models.BooleanField(default=False)
     notified_90pct = models.BooleanField(default=False)
     notified_100pct = models.BooleanField(default=False)
+    # Same flags for the managed key token pool
+    managed_notified_80pct = models.BooleanField(default=False)
+    managed_notified_90pct = models.BooleanField(default=False)
+    managed_notified_100pct = models.BooleanField(default=False)
+    # Same flags for BYOK soft-cap notifications (only fire when byok_token_limit > 0)
+    byok_notified_80pct = models.BooleanField(default=False)
+    byok_notified_90pct = models.BooleanField(default=False)
+    byok_notified_100pct = models.BooleanField(default=False)
     last_reset_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1939,8 +1956,12 @@ class KeyRequest(models.Model):
     """User → superadmin request to be assigned a managed key for an agent."""
     STATUS_CHOICES = [
         ('pending', 'Pending'),
-        ('approved', 'Approved'),
+        ('payment_pending', 'Payment Pending'),
+        ('payment_received', 'Payment Received'),
+        ('key_assigned', 'Key Assigned'),
+        ('approved', 'Approved'),       # legacy: direct assign without payment flow
         ('rejected', 'Rejected'),
+        ('revoked', 'Revoked'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
@@ -1991,6 +2012,10 @@ class AdminPricingConfig(models.Model):
         default=DEFAULT_FREE_TOKENS,
         help_text='Free tokens granted when a company purchases this agent '
                   '(NOT on signup). Superadmin can change this per agent.',
+    )
+    managed_key_tokens = models.BigIntegerField(
+        default=0,
+        help_text='Tokens granted when admin assigns a paid managed key via the request flow.',
     )
     updated_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,

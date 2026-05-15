@@ -444,9 +444,33 @@ def stripe_webhook(request):
 
     session = event['data']['object']
     metadata = session.get('metadata') or {}
-    ok, _ = _fulfill_purchase_from_metadata(metadata)
-    if not ok:
-        logger.warning('Stripe webhook fulfill failed for metadata: %s', metadata)
+
+    if metadata.get('type') == 'key_request':
+        # Key request payment — mark payment_received and notify admins
+        try:
+            from django.utils import timezone
+            from core.models import KeyRequest
+            request_id = metadata.get('request_id')
+            req = KeyRequest.objects.get(pk=int(request_id), status='payment_pending')
+            total = float((req.key_cost_snapshot or 0) + (req.service_charge_snapshot or 0))
+            req.status = 'payment_received'
+            req.amount_paid = total
+            req.paid_at = timezone.now()
+            req.save()
+            from core.notification_utils import notify_admins
+            notify_admins(
+                title=f"Payment received — {req.company.name} / {req.get_agent_name_display()}",
+                message=f"{req.company.name} paid ${total:.2f} via Stripe. Please assign the managed key.",
+                action_url='/admin/api-keys',
+                notification_type='key_request_new',
+            )
+        except Exception as exc:
+            logger.error('Webhook: failed to fulfill key request payment: %s', exc)
+    else:
+        ok, _ = _fulfill_purchase_from_metadata(metadata)
+        if not ok:
+            logger.warning('Stripe webhook fulfill failed for metadata: %s', metadata)
+
     return JsonResponse({'received': True}, status=200)
 
 

@@ -232,6 +232,8 @@ class MarketingBaseAgent:
 
         except Exception as e:
             logger.error(f"Error in {self.agent_name} OpenAI LLM call: {str(e)}")
+            from core.api_key_service import raise_if_auth_error
+            raise_if_auth_error(e, key_ctx)
             raise
     
     def _get_embeddings(self, text, model=None):
@@ -379,11 +381,15 @@ class MarketingBaseAgent:
                     logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
                     if is_rate_limit:
                         raise RuntimeError("The service is busy. Please try again in a moment.")
+                    from core.api_key_service import raise_if_auth_error
+                    raise_if_auth_error(e, key_ctx)
                     raise
         if last_error:
             err_str = str(last_error)
             if "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower():
                 raise RuntimeError("The service is busy. Please try again in a moment.")
+            from core.api_key_service import raise_if_auth_error
+            raise_if_auth_error(last_error, key_ctx)
             raise last_error
     
     def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000):

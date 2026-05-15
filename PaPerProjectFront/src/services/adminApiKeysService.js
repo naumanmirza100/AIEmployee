@@ -47,6 +47,12 @@ export const listRequests = (params = {}) => {
   return req(`/admin/key-requests${qs ? `?${qs}` : ''}`);
 };
 
+export const approveRequest = (requestId, payload) =>
+  req(`/admin/key-requests/${requestId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
 export const rejectRequest = (requestId, adminNote) =>
   req(`/admin/key-requests/${requestId}/reject`, {
     method: 'POST',
@@ -77,6 +83,7 @@ export default {
   listQuotas,
   adjustQuota,
   listRequests,
+  approveRequest,
   rejectRequest,
   listPlatformKeys,
   upsertPlatformKey,
