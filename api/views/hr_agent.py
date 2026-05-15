@@ -38,7 +38,7 @@ from hr_agent.models import (
     HRNotificationTemplate, HRScheduledNotification,
     HRKnowledgeChat, HRKnowledgeChatMessage,
     HRMeetingSchedulerChat, HRMeetingSchedulerChatMessage,
-    Department, HRAuditLog,
+    Department, HRAuditLog, PerformanceGoal, PerformanceReviewCycle,
 )
 from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
@@ -627,6 +627,9 @@ def list_hr_documents(request):
             'file_format': d.file_format, 'file_size': d.file_size,
             'processing_status': d.processing_status, 'is_indexed': d.is_indexed,
             'chunks_processed': d.chunks_processed, 'chunks_total': d.chunks_total,
+            'version': d.version,
+            'parent_document_id': d.parent_document_id,
+            'superseded_by_id': d.superseded_by_id,
             'created_at': d.created_at.isoformat(),
         } for d in qs.order_by('-created_at')[offset:offset + limit]]
         return Response({'status': 'success', 'data': rows,
@@ -2473,6 +2476,48 @@ def delete_accrual_policy(request, policy_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
+def _build_employee_bundle(emp: Employee, company) -> dict:
+    """Common bundle used by both ``get_employee_detail`` and the self-service
+    ``/hr/me`` endpoint — profile, manager chain, balances, docs, leaves, meetings."""
+    chain = []
+    cur = emp.manager
+    seen: set = set()
+    while cur and cur.id not in seen and len(chain) < 5:
+        chain.append({'id': cur.id, 'full_name': cur.full_name, 'job_title': cur.job_title})
+        seen.add(cur.id)
+        cur = cur.manager
+
+    balances = list(emp.leave_balances.values('leave_type', 'accrued_days', 'used_days',
+                                              'carried_over_days', 'period_start', 'period_end'))
+    for b in balances:
+        for k in ('accrued_days', 'used_days', 'carried_over_days'):
+            b[k] = float(b[k] or 0)
+        b['remaining'] = b['accrued_days'] + b['carried_over_days'] - b['used_days']
+        for k in ('period_start', 'period_end'):
+            b[k] = b[k].isoformat() if b.get(k) else None
+
+    personal_docs = HRDocument.objects.filter(
+        company=company, employee=emp,
+    ).order_by('-created_at')[:50]
+    leave_rows = LeaveRequest.objects.filter(employee=emp).order_by('-created_at')[:20]
+    meetings = HRMeeting.objects.filter(
+        company=company, participants=emp,
+    ).order_by('-scheduled_at')[:10]
+
+    return {
+        'employee': _serialize_employee(emp),
+        'manager_chain': chain,
+        'leave_balances': balances,
+        'personal_documents': [_serialize_hr_document(d) for d in personal_docs],
+        'leave_requests': [_serialize_leave_request(lr) for lr in leave_rows],
+        'meetings': [{
+            'id': m.id, 'title': m.title, 'meeting_type': m.meeting_type,
+            'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+            'status': m.status,
+        } for m in meetings],
+    }
+
+
 def get_employee_detail(request, employee_id):
     """Bundle every relevant view of one employee for the drawer:
     profile, manager chain, leave balances, personal documents, recent
@@ -2481,48 +2526,36 @@ def get_employee_detail(request, employee_id):
         emp, err = _company_employee_or_404(request, employee_id)
         if err:
             return err
-        company = request.user.company
-        # Manager chain — walk up to 5 levels then stop.
-        chain = []
-        cur = emp.manager
-        seen = set()
-        while cur and cur.id not in seen and len(chain) < 5:
-            chain.append({'id': cur.id, 'full_name': cur.full_name, 'job_title': cur.job_title})
-            seen.add(cur.id)
-            cur = cur.manager
-
-        balances = list(emp.leave_balances.values('leave_type', 'accrued_days', 'used_days',
-                                                  'carried_over_days', 'period_start', 'period_end'))
-        for b in balances:
-            for k in ('accrued_days', 'used_days', 'carried_over_days'):
-                b[k] = float(b[k] or 0)
-            b['remaining'] = b['accrued_days'] + b['carried_over_days'] - b['used_days']
-            for k in ('period_start', 'period_end'):
-                b[k] = b[k].isoformat() if b.get(k) else None
-
-        personal_docs = HRDocument.objects.filter(
-            company=company, employee=emp,
-        ).order_by('-created_at')[:50]
-        leave_rows = LeaveRequest.objects.filter(employee=emp).order_by('-created_at')[:20]
-        meetings = HRMeeting.objects.filter(
-            company=company, participants=emp,
-        ).order_by('-scheduled_at')[:10]
-
-        return Response({'status': 'success', 'data': {
-            'employee': _serialize_employee(emp),
-            'manager_chain': chain,
-            'leave_balances': balances,
-            'personal_documents': [_serialize_hr_document(d) for d in personal_docs],
-            'leave_requests': [_serialize_leave_request(lr) for lr in leave_rows],
-            'meetings': [{
-                'id': m.id, 'title': m.title, 'meeting_type': m.meeting_type,
-                'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
-                'status': m.status,
-            } for m in meetings],
-        }})
+        return Response({'status': 'success',
+                         'data': _build_employee_bundle(emp, request.user.company)})
     except Exception:
         logger.exception("get_employee_detail failed")
         return Response({'status': 'error', 'message': 'Failed to load employee detail'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def get_my_hr_profile(request):
+    """Self-service entry point. Resolves the caller to their Employee row
+    and returns the same bundle shape as ``get_employee_detail`` — no
+    ``employee_id`` required from the client."""
+    try:
+        cu = request.user
+        company = cu.company
+        emp = (Employee.objects.filter(company=company, company_user=cu).first()
+               or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
+        if not emp:
+            return Response({
+                'status': 'error',
+                'message': "No HR Employee record found for your account. Ask HR to set one up.",
+            }, status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'success', 'data': _build_employee_bundle(emp, company)})
+    except Exception:
+        logger.exception("get_my_hr_profile failed")
+        return Response({'status': 'error', 'message': 'Failed to load your profile'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -3117,3 +3150,473 @@ def update_perf_review(request, review_id):
         _write_audit_log(request.user, company, 'review.update', 'review', r.id,
                          before=before_review, after=_serialize_perf_review(r))
     return Response({'status': 'success', 'data': _serialize_perf_review(r)})
+
+
+# ============================================================================
+# Built-in workflow templates — clone-to-instantiate
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_workflow_templates(request):
+    """Lists the canonical workflow templates (onboarding, offboarding, 30-day
+    check-in) so HR can clone one rather than building a workflow from scratch."""
+    from hr_agent.workflow_templates import list_template_summaries
+    return Response({'status': 'success', 'data': list_template_summaries()})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_workflow_from_template(request):
+    """Clone a built-in template into a new HRWorkflow row. HR-admin only.
+    Body: ``{template_key, name?}``."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.workflow_templates import get_template
+    d = request.data or {}
+    key = (d.get('template_key') or '').strip()
+    spec = get_template(key)
+    if not spec:
+        return Response({'status': 'error', 'message': f"Unknown template_key '{key}'"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    name = (d.get('name') or spec['name']).strip()[:200]
+    w = HRWorkflow.objects.create(
+        company=request.user.company,
+        name=name,
+        description=spec.get('description', ''),
+        trigger_conditions=spec.get('trigger_conditions') or {},
+        steps=spec.get('steps') or [],
+        requires_approval=bool(spec.get('requires_approval')),
+        timeout_seconds=int(spec.get('timeout_seconds') or 0),
+        is_active=True,
+    )
+    _write_audit_log(request.user, request.user.company, 'workflow.from_template',
+                     'workflow', w.id, created={'template_key': key, 'name': w.name})
+    return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name}},
+                    status=status.HTTP_201_CREATED)
+
+
+# ============================================================================
+# Performance goals / OKRs
+# ============================================================================
+
+def _serialize_goal(g: PerformanceGoal) -> dict:
+    return {
+        'id': g.id,
+        'employee_id': g.employee_id,
+        'cycle_id': g.cycle_id,
+        'parent_id': g.parent_id,
+        'title': g.title,
+        'description': g.description,
+        'success_criteria': g.success_criteria,
+        'status': g.status,
+        'weight_pct': g.weight_pct,
+        'target_value': g.target_value,
+        'current_value': g.current_value,
+        'progress_pct': g.progress_pct,
+        'due_date': g.due_date.isoformat() if g.due_date else None,
+        'assigned_by_id': g.assigned_by_id,
+        'assigned_by_name': g.assigned_by.full_name if g.assigned_by_id else None,
+        'closed_at': g.closed_at.isoformat() if g.closed_at else None,
+        'created_at': g.created_at.isoformat() if g.created_at else None,
+        'updated_at': g.updated_at.isoformat() if g.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_employee_goals(request, employee_id):
+    """List goals for an employee. Visible to the employee themselves, their
+    manager, and HR-admins. Optional ``?cycle_id=`` filter."""
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    caller_user_id = getattr(request.user, 'user_id', None)
+    is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
+    is_admin = _is_hr_admin(request.user)
+    is_manager = False
+    if not (is_self or is_admin):
+        caller_emp = (Employee.objects.filter(company=request.user.company, company_user=request.user).first()
+                      or Employee.objects.filter(company=request.user.company, work_email__iexact=request.user.email).first())
+        is_manager = bool(caller_emp and emp.manager_id == caller_emp.id)
+    if not (is_self or is_admin or is_manager):
+        return Response({'status': 'error', 'message': 'Not authorized to view this employee\'s goals'},
+                        status=status.HTTP_403_FORBIDDEN)
+    qs = PerformanceGoal.objects.filter(employee=emp)
+    cycle_id = request.GET.get('cycle_id')
+    if cycle_id:
+        qs = qs.filter(cycle_id=cycle_id)
+    return Response({'status': 'success', 'data': [_serialize_goal(g) for g in qs]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def create_employee_goal(request, employee_id):
+    """Create a goal for an employee. Manager or HR-admin only."""
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    is_admin = _is_hr_admin(request.user)
+    caller_emp = (Employee.objects.filter(company=request.user.company, company_user=request.user).first()
+                  or Employee.objects.filter(company=request.user.company, work_email__iexact=request.user.email).first())
+    is_manager = bool(caller_emp and emp.manager_id == caller_emp.id)
+    if not (is_admin or is_manager):
+        return Response({'status': 'error', 'message': 'Only the manager or HR-admin can set goals'},
+                        status=status.HTTP_403_FORBIDDEN)
+    d = request.data or {}
+    title = (d.get('title') or '').strip()
+    if not title:
+        return Response({'status': 'error', 'message': 'title is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    due_date = None
+    if d.get('due_date'):
+        try:
+            due_date = datetime.fromisoformat(d['due_date']).date()
+        except (TypeError, ValueError):
+            return Response({'status': 'error', 'message': 'due_date must be YYYY-MM-DD'},
+                            status=status.HTTP_400_BAD_REQUEST)
+    cycle_id = d.get('cycle_id')
+    if cycle_id and not PerformanceReviewCycle.objects.filter(
+            company=request.user.company, pk=cycle_id).exists():
+        return Response({'status': 'error', 'message': 'cycle_id not found for this company'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    parent_id = d.get('parent_id')
+    if parent_id and not PerformanceGoal.objects.filter(
+            employee__company=request.user.company, pk=parent_id).exists():
+        return Response({'status': 'error', 'message': 'parent_id not found'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    g = PerformanceGoal.objects.create(
+        employee=emp,
+        cycle_id=cycle_id or None,
+        parent_id=parent_id or None,
+        title=title[:240],
+        description=(d.get('description') or '')[:5000],
+        success_criteria=(d.get('success_criteria') or '')[:5000],
+        status=d.get('status') or 'open',
+        weight_pct=max(0, min(100, int(d.get('weight_pct') or 0))),
+        target_value=(d.get('target_value') or '')[:80],
+        current_value=(d.get('current_value') or '')[:80],
+        progress_pct=max(0, min(100, int(d.get('progress_pct') or 0))),
+        due_date=due_date,
+        assigned_by=caller_emp,
+    )
+    _write_audit_log(request.user, request.user.company, 'goal.create',
+                     'goal', g.id, created=_serialize_goal(g))
+    return Response({'status': 'success', 'data': _serialize_goal(g)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST', 'PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_employee_goal(request, goal_id):
+    """Update a goal. Employee can update progress/status on their own goals;
+    manager/HR can edit any field."""
+    g = PerformanceGoal.objects.filter(
+        employee__company=request.user.company, pk=goal_id).select_related('employee').first()
+    if not g:
+        return Response({'status': 'error', 'message': 'Goal not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    is_admin = _is_hr_admin(request.user)
+    caller_user_id = getattr(request.user, 'user_id', None)
+    is_self = caller_user_id and str(caller_user_id) == str(g.employee.user_id)
+    caller_emp = (Employee.objects.filter(company=request.user.company, company_user=request.user).first()
+                  or Employee.objects.filter(company=request.user.company, work_email__iexact=request.user.email).first())
+    is_manager = bool(caller_emp and g.employee.manager_id == caller_emp.id)
+    if not (is_admin or is_self or is_manager):
+        return Response({'status': 'error', 'message': 'Not authorized to update this goal'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    before = _serialize_goal(g)
+    d = request.data or {}
+    fields = []
+    # Self can only update progress fields; manager/admin can edit anything.
+    self_only_keys = {'progress_pct', 'current_value', 'status'}
+    for k in list(d.keys()):
+        if not (is_admin or is_manager) and k not in self_only_keys:
+            continue
+        if k == 'title' and d[k]:
+            g.title = str(d[k])[:240]; fields.append('title')
+        elif k == 'description':
+            g.description = (d[k] or '')[:5000]; fields.append('description')
+        elif k == 'success_criteria':
+            g.success_criteria = (d[k] or '')[:5000]; fields.append('success_criteria')
+        elif k == 'status' and d[k]:
+            g.status = str(d[k])
+            fields.append('status')
+            if d[k] in ('met', 'missed', 'dropped', 'partially_met'):
+                g.closed_at = timezone.now()
+                fields.append('closed_at')
+        elif k == 'weight_pct':
+            try:
+                g.weight_pct = max(0, min(100, int(d[k] or 0))); fields.append('weight_pct')
+            except (TypeError, ValueError):
+                pass
+        elif k == 'progress_pct':
+            try:
+                g.progress_pct = max(0, min(100, int(d[k] or 0))); fields.append('progress_pct')
+            except (TypeError, ValueError):
+                pass
+        elif k == 'target_value':
+            g.target_value = (d[k] or '')[:80]; fields.append('target_value')
+        elif k == 'current_value':
+            g.current_value = (d[k] or '')[:80]; fields.append('current_value')
+        elif k == 'due_date':
+            if d[k] in (None, ''):
+                g.due_date = None; fields.append('due_date')
+            else:
+                try:
+                    g.due_date = datetime.fromisoformat(d[k]).date(); fields.append('due_date')
+                except (TypeError, ValueError):
+                    return Response({'status': 'error', 'message': 'due_date must be YYYY-MM-DD'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+        elif k == 'cycle_id':
+            if d[k] in (None, ''):
+                g.cycle_id = None; fields.append('cycle_id')
+            elif PerformanceReviewCycle.objects.filter(
+                    company=request.user.company, pk=d[k]).exists():
+                g.cycle_id = d[k]; fields.append('cycle_id')
+    if fields:
+        fields.append('updated_at')
+        g.save(update_fields=fields)
+        _write_audit_log(request.user, request.user.company, 'goal.update',
+                         'goal', g.id, before=before, after=_serialize_goal(g))
+    return Response({'status': 'success', 'data': _serialize_goal(g)})
+
+
+@api_view(['POST', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_employee_goal(request, goal_id):
+    """Delete a goal. Manager or HR-admin only."""
+    g = PerformanceGoal.objects.filter(
+        employee__company=request.user.company, pk=goal_id).select_related('employee').first()
+    if not g:
+        return Response({'status': 'error', 'message': 'Goal not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    is_admin = _is_hr_admin(request.user)
+    caller_emp = (Employee.objects.filter(company=request.user.company, company_user=request.user).first()
+                  or Employee.objects.filter(company=request.user.company, work_email__iexact=request.user.email).first())
+    is_manager = bool(caller_emp and g.employee.manager_id == caller_emp.id)
+    if not (is_admin or is_manager):
+        return Response({'status': 'error', 'message': 'Only the manager or HR-admin can delete goals'},
+                        status=status.HTTP_403_FORBIDDEN)
+    snapshot = _serialize_goal(g)
+    g.delete()
+    _write_audit_log(request.user, request.user.company, 'goal.delete',
+                     'goal', goal_id, deleted=snapshot)
+    return Response({'status': 'success', 'data': {'id': goal_id, 'deleted': True}})
+
+
+# ============================================================================
+# Manager portal — "my team" rollup
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def manager_team_summary(request):
+    """Return the calling manager's direct reports with per-employee summary
+    (leave balances, pending requests, upcoming meetings, open goals).
+
+    HR-admins can pass ``?manager_id=`` to view any manager's team. Anyone else
+    only ever sees their own team and only if they actually manage someone.
+    """
+    company = request.user.company
+    is_admin = _is_hr_admin(request.user)
+    if is_admin and request.GET.get('manager_id'):
+        manager = Employee.objects.filter(company=company, pk=request.GET['manager_id']).first()
+    else:
+        manager = (Employee.objects.filter(company=company, company_user=request.user).first()
+                   or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
+    if not manager:
+        return Response({'status': 'error', 'message': 'No employee record found for the caller'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    reports = Employee.objects.filter(company=company, manager=manager)
+    now = timezone.now()
+    today = now.date()
+    report_ids = list(reports.values_list('id', flat=True))
+
+    # Bulk pulls — one query per dataset, then map by employee_id.
+    pending_leaves = {}
+    for lr in LeaveRequest.objects.filter(employee_id__in=report_ids, status='pending'):
+        pending_leaves.setdefault(lr.employee_id, []).append({
+            'id': lr.id, 'leave_type': lr.leave_type,
+            'start_date': lr.start_date.isoformat() if lr.start_date else None,
+            'end_date': lr.end_date.isoformat() if lr.end_date else None,
+            'days_requested': float(lr.days_requested or 0),
+        })
+    balances_by_emp = {}
+    for b in LeaveBalance.objects.filter(employee_id__in=report_ids):
+        balances_by_emp.setdefault(b.employee_id, []).append({
+            'leave_type': b.leave_type, 'remaining': float(b.remaining),
+        })
+    upcoming_meetings = {}
+    for m in HRMeeting.objects.filter(
+            company=company, status__in=['scheduled', 'rescheduled'],
+            scheduled_at__gte=now, scheduled_at__lte=now + timedelta(days=14),
+            participants__id__in=report_ids).distinct():
+        for p in m.participants.filter(id__in=report_ids):
+            upcoming_meetings.setdefault(p.id, []).append({
+                'id': m.id, 'title': m.title,
+                'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+                'meeting_type': m.meeting_type,
+            })
+    open_goals = {}
+    for g in PerformanceGoal.objects.filter(
+            employee_id__in=report_ids, status__in=['open', 'in_progress']):
+        open_goals.setdefault(g.employee_id, []).append({
+            'id': g.id, 'title': g.title, 'status': g.status,
+            'progress_pct': g.progress_pct,
+            'due_date': g.due_date.isoformat() if g.due_date else None,
+        })
+
+    team = []
+    for r in reports:
+        team.append({
+            'id': r.id,
+            'full_name': r.full_name,
+            'job_title': r.job_title,
+            'work_email': r.work_email,
+            'employment_status': r.employment_status,
+            'probation_ending_in_days': (
+                (r.probation_end_date - today).days
+                if r.probation_end_date and r.probation_end_date >= today else None
+            ),
+            'leave_balances': balances_by_emp.get(r.id, []),
+            'pending_leave_requests': pending_leaves.get(r.id, []),
+            'upcoming_meetings': upcoming_meetings.get(r.id, []),
+            'open_goals': open_goals.get(r.id, []),
+        })
+    return Response({'status': 'success', 'data': {
+        'manager': {'id': manager.id, 'full_name': manager.full_name},
+        'team': team,
+        'team_size': len(team),
+    }})
+
+
+# ============================================================================
+# Org chart — department tree + employee leaves
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def org_chart(request):
+    """Returns a department tree with employees as leaves.
+
+    Shape:
+      [{ id, name, type: 'department', head: {id, full_name} | None,
+         employees: [{id, full_name, job_title, manager_id}],
+         children: [...] }, ...]
+
+    Departments with no parent become roots. Employees with no department are
+    bucketed under a synthetic "(Unassigned)" root so they don't disappear.
+    """
+    company = request.user.company
+    departments = list(Department.objects.filter(company=company, is_active=True)
+                       .select_related('head'))
+    employees = list(Employee.objects.filter(
+        company=company, employment_status__in=['active', 'on_leave', 'probation']
+    ).only('id', 'full_name', 'job_title', 'manager_id', 'department', 'department_id'))
+
+    # Group employees by department FK (or string fallback for legacy rows).
+    emp_by_dept_id: dict[int, list[dict]] = {}
+    unassigned: list[dict] = []
+    dept_name_to_id = {d.name.lower(): d.id for d in departments}
+    for e in employees:
+        wire = {'id': e.id, 'full_name': e.full_name,
+                'job_title': e.job_title, 'manager_id': e.manager_id}
+        if getattr(e, 'department_id', None):
+            emp_by_dept_id.setdefault(e.department_id, []).append(wire)
+        elif e.department and e.department.lower() in dept_name_to_id:
+            emp_by_dept_id.setdefault(dept_name_to_id[e.department.lower()], []).append(wire)
+        else:
+            unassigned.append(wire)
+
+    # Build parent -> children map for departments.
+    children_of: dict[int | None, list] = {}
+    for d in departments:
+        children_of.setdefault(d.parent_id, []).append(d)
+
+    def _build(dept):
+        return {
+            'id': dept.id, 'name': dept.name, 'type': 'department',
+            'head': ({'id': dept.head.id, 'full_name': dept.head.full_name}
+                     if dept.head_id else None),
+            'employees': emp_by_dept_id.get(dept.id, []),
+            'children': [_build(child) for child in children_of.get(dept.id, [])],
+        }
+
+    roots = [_build(d) for d in children_of.get(None, [])]
+    if unassigned:
+        roots.append({
+            'id': None, 'name': '(Unassigned)', 'type': 'department',
+            'head': None, 'employees': unassigned, 'children': [],
+        })
+    return Response({'status': 'success', 'data': roots})
+
+
+# ============================================================================
+# Document version chain
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_document_versions(request, document_id):
+    """Return the full version chain for a document. Walks up via
+    ``parent_document`` then down via ``superseded_by`` so any node in the
+    chain returns the same ordered list. The current (non-superseded) row is
+    flagged ``is_current=True``."""
+    company = request.user.company
+    anchor = HRDocument.objects.filter(company=company, pk=document_id).first()
+    if not anchor:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    # Walk to the root: the oldest ancestor with no parent.
+    root = anchor
+    seen_up: set = set()
+    while root.parent_document_id and root.parent_document_id not in seen_up:
+        seen_up.add(root.id)
+        parent = HRDocument.objects.filter(company=company, pk=root.parent_document_id).first()
+        if not parent:
+            break
+        root = parent
+    # Walk forward via superseded_by to collect the chain in order.
+    chain = [root]
+    seen_down = {root.id}
+    cur = root
+    while cur.superseded_by_id and cur.superseded_by_id not in seen_down:
+        nxt = HRDocument.objects.filter(company=company, pk=cur.superseded_by_id).first()
+        if not nxt:
+            break
+        chain.append(nxt)
+        seen_down.add(nxt.id)
+        cur = nxt
+    rows = [{
+        'id': d.id, 'title': d.title, 'version': d.version,
+        'document_type': d.document_type, 'confidentiality': d.confidentiality,
+        'file_format': d.file_format, 'file_size': d.file_size,
+        'processing_status': d.processing_status,
+        'parent_document_id': d.parent_document_id,
+        'superseded_by_id': d.superseded_by_id,
+        'is_current': d.superseded_by_id is None,
+        'created_at': d.created_at.isoformat() if d.created_at else None,
+    } for d in chain]
+    return Response({'status': 'success', 'data': rows})

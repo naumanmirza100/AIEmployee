@@ -53,6 +53,7 @@ import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
 import HRAgentPage from '@/pages/HRAgentPage';
 import HRDashboard from '@/components/hr/HRDashboard';
+import HRMyProfilePage from '@/components/hr/HRMyProfilePage';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
@@ -159,6 +160,9 @@ import { useTranslation } from 'react-i18next';
             <Route path="/hr" element={<Navigate to="/hr/dashboard" replace />} />
             <Route path="/hr/dashboard" element={<HRAgentPage />}>
               <Route index element={<HRDashboard />} />
+            </Route>
+            <Route path="/hr/me" element={<HRAgentPage />}>
+              <Route index element={<HRMyProfilePage />} />
             </Route>
 
             {/* Operations Agent routes without header/footer */}

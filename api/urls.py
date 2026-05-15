@@ -691,6 +691,24 @@ urlpatterns = [
 
     # Audit log (HR-admin only)
     re_path(r'^hr/audit-log/?$', hr_agent.list_hr_audit_log, name='hr_audit_log'),  # GET
+
+    # Built-in workflow templates — clone-to-instantiate
+    re_path(r'^hr/workflow-templates/?$', hr_agent.list_workflow_templates, name='hr_list_workflow_templates'),  # GET
+    re_path(r'^hr/workflows/from-template/?$', hr_agent.create_workflow_from_template, name='hr_create_workflow_from_template'),  # POST
+
+    # Performance goals / OKRs
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/goals/?$', hr_agent.list_employee_goals, name='hr_list_employee_goals'),  # GET
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/goals/create/?$', hr_agent.create_employee_goal, name='hr_create_employee_goal'),  # POST
+    re_path(r'^hr/goals/(?P<goal_id>\d+)/update/?$', hr_agent.update_employee_goal, name='hr_update_employee_goal'),  # POST/PATCH
+    re_path(r'^hr/goals/(?P<goal_id>\d+)/delete/?$', hr_agent.delete_employee_goal, name='hr_delete_employee_goal'),  # POST/DELETE
+
+    # Manager portal + org chart
+    re_path(r'^hr/manager/team/?$', hr_agent.manager_team_summary, name='hr_manager_team'),  # GET
+    re_path(r'^hr/org-chart/?$', hr_agent.org_chart, name='hr_org_chart'),  # GET
+
+    # Self-service + document versions
+    re_path(r'^hr/me/?$', hr_agent.get_my_hr_profile, name='hr_get_my_profile'),  # GET
+    re_path(r'^hr/documents/(?P<document_id>\d+)/versions/?$', hr_agent.list_hr_document_versions, name='hr_list_document_versions'),  # GET
 ]
 
 

@@ -518,9 +518,25 @@ def walk_hr_time_based_events():
 
     from django.db.models import Q
 
-    for tpl in HRNotificationTemplate.objects.all():
+    # Dedup: at most ONE template per (company, event) fires. If HR has both a
+    # "legacy" and "new" probation_ending template, the most recently updated
+    # one wins. Older ones are silently skipped so employees don't get duplicate
+    # emails for the same event. To intentionally run two flows for the same
+    # event, encode them under different `on` values.
+    seen_event_winner: dict[tuple, int] = {}
+    templates = list(HRNotificationTemplate.objects.all().order_by('-updated_at', '-id'))
+
+    for tpl in templates:
         cfg = tpl.trigger_config or {}
         event = cfg.get('on') or tpl.notification_type
+        key = (tpl.company_id, event)
+        if key in seen_event_winner:
+            logger.info(
+                "walk_hr_time_based_events: skipping template %s — template %s already wins for (company=%s, event=%s)",
+                tpl.id, seen_event_winner[key], tpl.company_id, event,
+            )
+            continue
+        seen_event_winner[key] = tpl.id
         days_before = int(cfg.get('days_before') or 0)
         target_date = today + timedelta(days=days_before) if days_before else today
 
@@ -579,6 +595,23 @@ def walk_hr_time_based_events():
 
     logger.info("walk_hr_time_based_events: scheduled %d notifications", created_total)
     return {'scheduled': created_total}
+
+
+@shared_task(name='hr_agent.tasks.purge_hr_audit_log')
+def purge_hr_audit_log(retention_days: int = 730):
+    """Trim HRAuditLog rows older than ``retention_days`` (default 2 years).
+
+    Audit log entries are write-only and grow unboundedly otherwise — every
+    employee edit, compensation row, leave decision, document upload writes
+    one. 2 years is a common SOX-style retention window. Override per-deployment
+    via ``settings.HR_AUDIT_LOG_RETENTION_DAYS`` if your jurisdiction needs more.
+    """
+    from hr_agent.models import HRAuditLog
+    retention = int(getattr(settings, 'HR_AUDIT_LOG_RETENTION_DAYS', retention_days))
+    cutoff = timezone.now() - timedelta(days=retention)
+    deleted, _ = HRAuditLog.objects.filter(created_at__lt=cutoff).delete()
+    logger.info("purge_hr_audit_log: deleted %d rows older than %s", deleted, cutoff.isoformat())
+    return {'deleted': deleted, 'cutoff': cutoff.isoformat(), 'retention_days': retention}
 
 
 def _ensure_scheduled(template, employee, when, *, context=None, related_document_id=None):
