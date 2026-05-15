@@ -53,28 +53,39 @@ def notify_company_user(company_user, *, title, message, action_url=None,
         return None
 
 
-def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float = None):
-    """Send quota threshold notification to all owner/admin CompanyUsers via PMNotification."""
+def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float = None, pool: str = 'free'):
+    """Send quota threshold notification to all CompanyUsers via PMNotification.
+
+    pool: 'free' for platform tokens, 'managed' for managed key tokens.
+    """
     try:
         from core.models import CompanyUser
         from project_manager_agent.models import PMNotification
 
-        recipients = CompanyUser.objects.filter(
-            company=company, is_active=True
-        )
+        recipients = CompanyUser.objects.filter(company=company, is_active=True)
         display_pct = actual_pct if actual_pct is not None else pct
+        pool_label = 'managed key tokens' if pool == 'managed' else 'free platform tokens'
+
         if pct >= 100:
-            title = f"Token quota exhausted — {agent_label}"
+            title = f"{'Managed key' if pool == 'managed' else 'Free token'} quota exhausted — {agent_label}"
             message = (
-                f"Your {agent_label} has used {display_pct}% of its free tokens and is now blocked. "
-                f"Add your own API key (BYOK) or request a managed key to continue."
+                f"Your {agent_label} has used {display_pct}% of its {pool_label} and is now blocked. "
+                + (
+                    "Contact your admin to increase the managed key token limit."
+                    if pool == 'managed'
+                    else "Add your own API key (BYOK) or request a managed key to continue."
+                )
             )
             severity = 'critical'
         else:
-            title = f"Token quota at {display_pct}% — {agent_label}"
+            title = f"{'Managed key' if pool == 'managed' else 'Token'} quota at {display_pct}% — {agent_label}"
             message = (
-                f"Your {agent_label} has used {display_pct}% of its free tokens. "
-                f"Consider adding your own API key (BYOK) or requesting a managed key soon."
+                f"Your {agent_label} has used {display_pct}% of its {pool_label}. "
+                + (
+                    "Contact your admin soon to increase the managed key token limit."
+                    if pool == 'managed'
+                    else "Consider adding your own API key (BYOK) or requesting a managed key soon."
+                )
             )
             severity = 'warning'
 

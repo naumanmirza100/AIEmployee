@@ -390,8 +390,14 @@ def adjust_quota(request, quota_id):
             q.included_tokens = max(0, q.included_tokens + int(request.data.get('value')))
         elif action == 'set_managed':
             q.managed_included_tokens = max(0, int(request.data.get('value')))
+            q.managed_notified_80pct = False
+            q.managed_notified_90pct = False
+            q.managed_notified_100pct = False
         elif action == 'reset_managed':
             q.managed_used_tokens = 0
+            q.managed_notified_80pct = False
+            q.managed_notified_90pct = False
+            q.managed_notified_100pct = False
         else:
             return Response({'status': 'error', 'message': 'Invalid action'},
                             status=status.HTTP_400_BAD_REQUEST)

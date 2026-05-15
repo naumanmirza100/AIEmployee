@@ -1898,6 +1898,10 @@ class AgentTokenQuota(models.Model):
     notified_80pct = models.BooleanField(default=False)
     notified_90pct = models.BooleanField(default=False)
     notified_100pct = models.BooleanField(default=False)
+    # Same flags for the managed key token pool
+    managed_notified_80pct = models.BooleanField(default=False)
+    managed_notified_90pct = models.BooleanField(default=False)
+    managed_notified_100pct = models.BooleanField(default=False)
     last_reset_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

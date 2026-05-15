@@ -198,12 +198,34 @@ const OverviewTab = ({ stats }) => (
       <StatCard icon={ShieldCheck} label="Active Keys (Total)" value={stats.total_keys ?? '—'} accent="bg-emerald-500/15 text-emerald-300" />
       <StatCard icon={Key} label="Managed Keys" value={stats.managed_keys ?? '—'} accent="bg-emerald-500/15 text-emerald-300" />
       <StatCard icon={Key} label="BYOK Keys" value={stats.byok_keys ?? '—'} accent="bg-blue-500/15 text-blue-300" />
-      <StatCard
-        icon={AlertTriangle}
-        label="Exhausted Quotas"
-        value={`${stats.exhausted_quotas ?? 0} free · ${stats.exhausted_managed_quotas ?? 0} managed`}
-        accent={(stats.exhausted_quotas > 0 || stats.exhausted_managed_quotas > 0) ? 'bg-red-500/15 text-red-300' : 'bg-gray-500/15 text-gray-400'}
-      />
+      {/* Exhausted Quotas — dual number card */}
+      {(() => {
+        const hasExhausted = (stats.exhausted_quotas > 0 || stats.exhausted_managed_quotas > 0);
+        const accent = hasExhausted ? 'bg-red-500/15 text-red-300' : 'bg-gray-500/15 text-gray-400';
+        return (
+          <div className={`${CARD_CLASS} rounded-xl p-4 hover:border-violet-500/30 transition-colors`}>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <p className="text-[11px] uppercase tracking-wider text-white/40 mb-2">Exhausted Quotas</p>
+                <div className="flex items-end gap-3">
+                  <div>
+                    <p className="text-2xl font-bold text-white leading-none">{stats.exhausted_quotas ?? 0}</p>
+                    <p className="text-[10px] text-white/40 mt-1">free</p>
+                  </div>
+                  <span className="text-white/20 text-lg mb-4">·</span>
+                  <div>
+                    <p className="text-2xl font-bold text-white leading-none">{stats.exhausted_managed_quotas ?? 0}</p>
+                    <p className="text-[10px] text-white/40 mt-1">managed</p>
+                  </div>
+                </div>
+              </div>
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${accent}`}>
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
 
     {/* Token Ledger */}

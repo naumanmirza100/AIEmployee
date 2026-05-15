@@ -432,14 +432,14 @@ FORMATTING (when your answer has multiple parts or a list):
         except GroqClientError as e:
             logger.exception("Recruitment QA Groq error")
             return {
-                "answer": f"I couldn't complete the analysis due to an API error: {str(e)}. Please check your API key and try again.",
+                "answer": "I couldn't complete the analysis due to an API error. Please check your API key configuration and try again.",
                 "insights": [],
                 "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
             }
         except Exception as e:
             logger.exception("Recruitment QA failed")
             return {
-                "answer": f"An error occurred while processing your question: {str(e)}.",
+                "answer": "An error occurred while processing your question. Please try again.",
                 "insights": [],
                 "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
             }

@@ -143,11 +143,15 @@ const QuotaBar = ({ quota }) => {
               <div className={`h-full bg-gradient-to-r ${mGrad} transition-all`} style={{ width: `${mPct}%` }} />
             </div>
             {quota.managed_is_exhausted && (
-              <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                <div className="text-xs text-red-200">
+              <div className="flex items-start gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                <div className="text-xs text-amber-100">
                   <p className="font-semibold">Managed key token limit reached.</p>
-                  <p className="text-red-300/80">Contact your admin to increase the limit or add your own API key (BYOK).</p>
+                  <p className="text-amber-200/80 mt-0.5">
+                    {quota.is_exhausted
+                      ? 'Free tokens are also exhausted. Add your own API key (BYOK) or ask admin to increase the limit.'
+                      : 'Calls are automatically using your free platform tokens until the limit is increased.'}
+                  </p>
                 </div>
               </div>
             )}
@@ -244,41 +248,63 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool }
           </div>
         )}
 
-        {/* Pool selector — only show when both free tokens remain AND managed key is active */}
-        {agent.managed?.status === 'active' && !agent.byok &&
-          agent.quota?.remaining > 0 && agent.quota?.managed_included_tokens > 0 &&
-          !agent.quota?.managed_is_exhausted && (
-          <div className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg space-y-2">
-            <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Active token pool</p>
-            <p className="text-xs text-white/50">You have both free tokens and managed key tokens available. Choose which pool your calls draw from.</p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onSetPool(agent.agent_name, 'free')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
-                  agent.quota.preferred_pool === 'free'
-                    ? 'bg-violet-600/20 border-violet-500/60 text-violet-200'
-                    : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
-                }`}
-              >
-                <Coins className="w-4 h-4" />
-                Free tokens
-                {agent.quota.preferred_pool === 'free' && <span className="text-[10px] ml-1 text-violet-300">● active</span>}
-              </button>
-              <button
-                onClick={() => onSetPool(agent.agent_name, 'managed')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
-                  agent.quota.preferred_pool !== 'free'
-                    ? 'bg-emerald-600/20 border-emerald-500/60 text-emerald-200'
-                    : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
-                }`}
-              >
-                <Zap className="w-4 h-4" />
-                Managed key
-                {agent.quota.preferred_pool !== 'free' && <span className="text-[10px] ml-1 text-emerald-300">● active</span>}
-              </button>
+        {/* Pool selector — show when managed key is active and managed tokens are configured */}
+        {agent.managed?.status === 'active' && !agent.byok && agent.quota?.managed_included_tokens > 0 && (() => {
+          const q = agent.quota;
+          // Determine which pool is actually being used right now
+          const actualPool = q.managed_is_exhausted ? 'free' : (q.preferred_pool || 'managed');
+          const freeAvailable = q.remaining > 0;
+          const managedAvailable = !q.managed_is_exhausted;
+          return (
+            <div className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Active token pool</p>
+                {q.managed_is_exhausted && freeAvailable && (
+                  <span className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">Auto-switched to free</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {/* Free tokens button */}
+                <button
+                  onClick={() => freeAvailable && onSetPool(agent.agent_name, 'free')}
+                  disabled={!freeAvailable}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
+                    !freeAvailable
+                      ? 'opacity-35 cursor-not-allowed bg-transparent border-white/10 text-white/30'
+                      : actualPool === 'free'
+                        ? 'bg-violet-600/20 border-violet-500/60 text-violet-200'
+                        : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
+                  }`}
+                >
+                  <Coins className="w-4 h-4" />
+                  Free tokens
+                  {actualPool === 'free' && freeAvailable && <span className="text-[10px] ml-1 text-violet-300">● in use</span>}
+                  {!freeAvailable && <span className="text-[10px] ml-1 opacity-60">exhausted</span>}
+                </button>
+                {/* Managed key button */}
+                <button
+                  onClick={() => managedAvailable && onSetPool(agent.agent_name, 'managed')}
+                  disabled={!managedAvailable}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
+                    !managedAvailable
+                      ? 'opacity-35 cursor-not-allowed bg-transparent border-white/10 text-white/30'
+                      : actualPool === 'managed'
+                        ? 'bg-emerald-600/20 border-emerald-500/60 text-emerald-200'
+                        : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  Managed key
+                  {actualPool === 'managed' && managedAvailable && <span className="text-[10px] ml-1 text-emerald-300">● in use</span>}
+                  {!managedAvailable && <span className="text-[10px] ml-1 opacity-60">exhausted</span>}
+                </button>
+              </div>
+              {!freeAvailable && !managedAvailable && (
+                <p className="text-xs text-red-300/70">Both pools exhausted. Add your own BYOK key or ask admin to increase limits.</p>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         <div className="flex flex-wrap gap-2 pt-1">
           <Button
