@@ -23,6 +23,36 @@ from django.utils import timezone
 # Employee — first-class HR entity (not a Contact, not just a User)
 # ============================================================================
 
+class Department(models.Model):
+    """First-class department record. Replaces the free-text ``Employee.department``
+    string with a reusable row that can carry hierarchy (``parent``), a head
+    (``head``), and routing metadata. The legacy string is kept on Employee for
+    one transition cycle so existing reports keep working."""
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='departments')
+    name = models.CharField(max_length=120)
+    code = models.CharField(max_length=32, blank=True, default='',
+                            help_text='Short identifier (ENG, SALES, OPS).')
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='children')
+    head = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='departments_led')
+    description = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['name']
+        unique_together = [('company', 'name')]
+        indexes = [
+            models.Index(fields=['company', 'is_active']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Employee(models.Model):
     """A person on the company's payroll. One row per (company, work_email).
 
@@ -66,7 +96,11 @@ class Employee(models.Model):
     phone = models.CharField(max_length=40, blank=True, default='')
 
     job_title = models.CharField(max_length=160, blank=True, default='')
-    department = models.CharField(max_length=120, blank=True, default='')
+    department = models.CharField(max_length=120, blank=True, default='',
+                                  help_text='Legacy free-text — prefer department_obj going forward.')
+    department_obj = models.ForeignKey('Department', on_delete=models.SET_NULL,
+                                       null=True, blank=True, related_name='employees',
+                                       help_text='Canonical department FK. Backfilled from `department` string.')
     manager = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
                                 related_name='direct_reports')
 
@@ -240,6 +274,159 @@ class LeaveRequest(models.Model):
 # ============================================================================
 # Documents — handbooks, policies, contracts, payroll, etc.
 # ============================================================================
+
+class Compensation(models.Model):
+    """Per-employee compensation history. One row per change (raise, promotion,
+    role change, contract renewal). Latest row by ``effective_date`` is the
+    current pay; older rows are kept for audit + payroll integrations.
+
+    Confidentiality: this is the most sensitive data in HR. Retrieval / API
+    access should be restricted to ``hr_only`` actors. Knowledge QA never
+    surfaces these rows directly — the doc-side ``payroll`` ``confidentiality``
+    gate is the read path.
+    """
+    PAY_FREQUENCY_CHOICES = [
+        ('monthly', 'Monthly'),
+        ('biweekly', 'Biweekly'),
+        ('weekly', 'Weekly'),
+        ('annual', 'Annual'),
+        ('hourly', 'Hourly'),
+    ]
+    REASON_CHOICES = [
+        ('initial', 'Initial offer'),
+        ('annual_raise', 'Annual raise'),
+        ('promotion', 'Promotion'),
+        ('market_adjustment', 'Market adjustment'),
+        ('contract_renewal', 'Contract renewal'),
+        ('correction', 'Correction'),
+        ('other', 'Other'),
+    ]
+
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='compensations')
+    effective_date = models.DateField(help_text='Date this compensation level took effect.')
+    base_salary = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default='USD',
+                                help_text='ISO 4217 code, e.g. USD, EUR, PKR.')
+    pay_frequency = models.CharField(max_length=10, choices=PAY_FREQUENCY_CHOICES, default='annual')
+    bonus_target_pct = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
+                                           help_text='Target annual bonus as percent of base.')
+    equity_grant_value = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True,
+                                             help_text='Notional value of equity granted at this change, if any.')
+    grade = models.CharField(max_length=40, blank=True, default='',
+                             help_text='Internal level / band, e.g. "L4", "Senior".')
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES, default='other')
+    notes = models.TextField(blank=True, default='')
+
+    recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='hr_compensation_records')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-effective_date', '-id']
+        indexes = [
+            models.Index(fields=['employee', '-effective_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id} · {self.base_salary} {self.currency} eff {self.effective_date}"
+
+
+class PerformanceReviewCycle(models.Model):
+    """A scheduled performance-review window (e.g. "H1 2026"). One cycle owns
+    a batch of `PerformanceReview` rows — one per active employee. Cycles are
+    company-scoped and have an opening / closing date plus optional sub-deadlines
+    so the notification agent can chase self-review then manager-review."""
+    STATUS_CHOICES = [
+        ('draft', 'Draft (cycle defined, reviews not generated)'),
+        ('active', 'Active (reviews in progress)'),
+        ('closed', 'Closed (read-only)'),
+        ('cancelled', 'Cancelled'),
+    ]
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='review_cycles')
+    name = models.CharField(max_length=120, help_text='e.g. "H1 2026", "Annual 2025".')
+    description = models.TextField(blank=True, default='')
+    period_start = models.DateField()
+    period_end = models.DateField()
+    self_review_due = models.DateField(null=True, blank=True)
+    manager_review_due = models.DateField(null=True, blank=True)
+    calibration_due = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='hr_review_cycles_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-period_start', '-id']
+        unique_together = [('company', 'name')]
+        indexes = [
+            models.Index(fields=['company', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.period_start}→{self.period_end})"
+
+
+class PerformanceReview(models.Model):
+    """One employee's review within a cycle. Holds the self-assessment,
+    manager review, ratings, and final notes. Ratings are 1–5; nullable until
+    submitted. Confidentiality: ``hr_only`` for unreleased rows, then surfaces
+    to the employee on ``status='closed'``."""
+    STATUS_CHOICES = [
+        ('not_started', 'Not started'),
+        ('self_in_progress', 'Self-review in progress'),
+        ('manager_in_progress', 'Manager review in progress'),
+        ('awaiting_calibration', 'Awaiting calibration'),
+        ('closed', 'Closed (released)'),
+        ('skipped', 'Skipped (not applicable)'),
+    ]
+    RATING_CHOICES = [
+        (1, '1 — Below expectations'),
+        (2, '2 — Approaching expectations'),
+        (3, '3 — Meets expectations'),
+        (4, '4 — Exceeds expectations'),
+        (5, '5 — Far exceeds expectations'),
+    ]
+
+    cycle = models.ForeignKey(PerformanceReviewCycle, on_delete=models.CASCADE, related_name='reviews')
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='performance_reviews')
+    reviewer = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='reviews_given',
+                                 help_text='Manager or peer who fills the manager-review portion.')
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='not_started')
+
+    self_summary = models.TextField(blank=True, default='')
+    manager_summary = models.TextField(blank=True, default='')
+    strengths = models.TextField(blank=True, default='')
+    growth_areas = models.TextField(blank=True, default='')
+    goals = models.JSONField(default=list, blank=True,
+                             help_text='List of {goal, target_date, weight_pct} dicts.')
+
+    overall_rating = models.PositiveSmallIntegerField(choices=RATING_CHOICES, null=True, blank=True)
+    self_submitted_at = models.DateTimeField(null=True, blank=True)
+    manager_submitted_at = models.DateTimeField(null=True, blank=True)
+    finalized_at = models.DateTimeField(null=True, blank=True)
+    visible_to_employee = models.BooleanField(default=False,
+                                              help_text='Set when the review is released to the reviewee.')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-cycle__period_start', 'employee__full_name']
+        unique_together = [('cycle', 'employee')]
+        indexes = [
+            models.Index(fields=['employee', 'status']),
+            models.Index(fields=['cycle', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id} · {self.cycle_id} · {self.status}"
+
 
 class HRDocument(models.Model):
     """HR document (handbook, policy, offer letter, contract, payslip…).

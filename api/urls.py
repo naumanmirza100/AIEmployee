@@ -615,6 +615,10 @@ urlpatterns = [
     # Employees
     re_path(r'^hr/employees/?$', hr_agent.list_employees, name='hr_list_employees'),  # GET
     re_path(r'^hr/employees/create/?$', hr_agent.create_employee, name='hr_create_employee'),  # POST
+    re_path(r'^hr/departments/?$', hr_agent.list_departments, name='hr_list_departments'),  # GET
+    re_path(r'^hr/departments/create/?$', hr_agent.create_department, name='hr_create_department'),  # POST
+    re_path(r'^hr/departments/(?P<dept_id>\d+)/update/?$', hr_agent.update_department, name='hr_update_department'),  # PATCH/POST
+    re_path(r'^hr/departments/(?P<dept_id>\d+)/delete/?$', hr_agent.delete_department, name='hr_delete_department'),  # DELETE/POST
 
     # Knowledge Q&A
     re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
@@ -640,6 +644,8 @@ urlpatterns = [
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/delete/?$', hr_agent.delete_hr_workflow, name='hr_delete_workflow'),  # DELETE/POST
     re_path(r'^hr/workflows/(?P<workflow_id>\d+)/execute/?$', hr_agent.execute_hr_workflow, name='hr_execute_workflow'),  # POST
     re_path(r'^hr/workflows/executions/?$', hr_agent.list_hr_workflow_executions, name='hr_list_workflow_executions'),  # GET
+    re_path(r'^hr/workflows/executions/(?P<execution_id>\d+)/approve/?$', hr_agent.approve_hr_workflow_execution, name='hr_approve_workflow_execution'),  # POST
+    re_path(r'^hr/workflows/executions/(?P<execution_id>\d+)/reject/?$', hr_agent.reject_hr_workflow_execution, name='hr_reject_workflow_execution'),  # POST
 
     # Notifications
     re_path(r'^hr/notifications/templates/?$', hr_agent.list_hr_notification_templates, name='hr_list_notification_templates'),  # GET
@@ -678,6 +684,19 @@ urlpatterns = [
 
     # Employee detail bundle
     re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
+
+    # Compensation history (HR-admin only)
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/compensation/?$', hr_agent.list_compensation_history, name='hr_list_compensation'),  # GET
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/compensation/create/?$', hr_agent.create_compensation, name='hr_create_compensation'),  # POST
+    re_path(r'^hr/compensation/(?P<comp_id>\d+)/delete/?$', hr_agent.delete_compensation, name='hr_delete_compensation'),  # DELETE
+
+    # Performance reviews
+    re_path(r'^hr/review-cycles/?$', hr_agent.list_review_cycles, name='hr_list_review_cycles'),  # GET
+    re_path(r'^hr/review-cycles/create/?$', hr_agent.create_review_cycle, name='hr_create_review_cycle'),  # POST
+    re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/activate/?$', hr_agent.activate_review_cycle, name='hr_activate_review_cycle'),  # POST
+    re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/delete/?$', hr_agent.delete_review_cycle, name='hr_delete_review_cycle'),  # POST/DELETE
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/reviews/?$', hr_agent.list_employee_reviews, name='hr_list_employee_reviews'),  # GET
+    re_path(r'^hr/reviews/(?P<review_id>\d+)/update/?$', hr_agent.update_perf_review, name='hr_update_perf_review'),  # POST/PATCH
 ]
 
 

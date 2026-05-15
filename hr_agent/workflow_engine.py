@@ -33,13 +33,20 @@ logger = logging.getLogger(__name__)
 class _WorkflowPauseSignal(Exception):
     """Same shape as the Frontline executor's pause signal — see
     `api.views.frontline_agent._WorkflowPauseSignal`. Carries `wait_seconds`
-    + `remaining_steps` (flat) + `partial_results`."""
-    def __init__(self, wait_seconds: int, step_path: str = ''):
+    + `remaining_steps` (flat) + `partial_results`.
+
+    `awaiting_approval=True` means the pause is open-ended — there is no
+    countdown, the workflow waits for an explicit approve/reject API call.
+    """
+    def __init__(self, wait_seconds: int, step_path: str = '',
+                 awaiting_approval: bool = False, approval_request: dict | None = None):
         super().__init__(f"workflow_pause:wait_seconds={wait_seconds}")
         self.wait_seconds = int(wait_seconds)
         self.step_path = step_path
         self.remaining_steps: list = []
         self.partial_results: list = []
+        self.awaiting_approval = bool(awaiting_approval)
+        self.approval_request = approval_request or None
 
 
 # --------------------------------------------------------------------------
@@ -291,6 +298,26 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
             raise _WorkflowPauseSignal(wait_seconds=seconds, step_path=step_path)
         return True, {**base, 'done': True, 'waited_seconds': 0}, None
 
+    if step_type == 'wait_for_approval':
+        # Open-ended pause: no countdown, no Celery scheduling. Resumes only
+        # when an HR-admin (or the named approver) hits the approve endpoint.
+        approval_request = {
+            'approver_role': step.get('approver_role') or 'hr_admin',
+            'approver_user_id': step.get('approver_user_id'),
+            'approver_employee_id': step.get('approver_employee_id'),
+            'message': _render(step.get('message') or 'Approval required to proceed', ctx),
+            'requested_at': timezone.now().isoformat(),
+        }
+        if simulate:
+            return True, {**base, 'done': True, 'simulated': True,
+                          'awaiting_approval': True,
+                          'approval_request': approval_request}, None
+        sig = _WorkflowPauseSignal(
+            wait_seconds=0, step_path=step_path,
+            awaiting_approval=True, approval_request=approval_request,
+        )
+        raise sig
+
     handler = STEP_HANDLERS.get(step_type)
     if handler is None:
         return True, {**base, 'done': True, 'note': 'unknown step type treated as no-op'}, None
@@ -394,6 +421,8 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
             'steps_completed': sum(1 for r in accumulated if r.get('done')),
             'results': accumulated, 'simulated': simulate,
             'elapsed_active_seconds': elapsed_active,
+            'awaiting_approval': pause.awaiting_approval,
+            'approval_request': pause.approval_request,
         }
         if execution is not None and not simulate:
             _persist_and_schedule_resume(
@@ -401,6 +430,8 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
                 remaining_steps=list(pause.remaining_steps or []),
                 results_so_far=accumulated, elapsed_active_seconds=elapsed_active,
                 context_data=context_data,
+                awaiting_approval=pause.awaiting_approval,
+                approval_request=pause.approval_request,
             )
         return True, result_data, None
 
@@ -414,31 +445,45 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
 
 
 def _persist_and_schedule_resume(*, execution, wait_seconds, remaining_steps, results_so_far,
-                                 elapsed_active_seconds, context_data):
+                                 elapsed_active_seconds, context_data,
+                                 awaiting_approval: bool = False,
+                                 approval_request: dict | None = None):
     """Save pause snapshot onto the HRWorkflowExecution and schedule
     `resume_hr_workflow_execution` to fire after `wait_seconds`. Probes the
     broker first so a Redis outage degrades to inline rather than stalling
-    100s in Celery's connection-retry loop."""
+    100s in Celery's connection-retry loop.
+
+    When `awaiting_approval=True`, sets status to ``awaiting_approval`` and
+    skips Celery scheduling — the workflow waits indefinitely until the
+    approve/reject endpoint fires.
+    """
     from datetime import timedelta as _td
     from hr_agent.tasks import resume_hr_workflow_execution
 
-    resume_at = timezone.now() + _td(seconds=wait_seconds)
-    execution.status = 'paused'
+    resume_at = None if awaiting_approval else (timezone.now() + _td(seconds=wait_seconds))
+    execution.status = 'awaiting_approval' if awaiting_approval else 'paused'
     execution.resume_at = resume_at
     execution.pause_state = {
         'remaining_steps': remaining_steps,
         'results_so_far': results_so_far,
         'elapsed_active_seconds': elapsed_active_seconds,
         'context_data': context_data,
+        'awaiting_approval': awaiting_approval,
+        'approval_request': approval_request,
     }
     execution.result_data = {
         'paused': True, 'wait_seconds': wait_seconds,
-        'resume_at': resume_at.isoformat(),
+        'resume_at': resume_at.isoformat() if resume_at else None,
         'steps_completed': sum(1 for r in results_so_far if r.get('done')),
         'results': results_so_far,
         'elapsed_active_seconds': elapsed_active_seconds,
+        'awaiting_approval': awaiting_approval,
+        'approval_request': approval_request,
     }
     execution.save(update_fields=['status', 'resume_at', 'pause_state', 'result_data'])
+
+    if awaiting_approval:
+        return  # No countdown — waits for explicit approve/reject API call.
 
     # Cheap broker probe — same shape as the Frontline + upload paths.
     import socket

@@ -127,12 +127,25 @@ def process_hr_document(self, document_id):
         overlap = max(0, min(overlap, max(0, chunk_size - 1)))
 
         text_to_chunk = f"{document.title}\n{document.description}\n{extracted_text}".strip()
-        chunks = []
-        start = 0
-        step = max(1, chunk_size - overlap)
-        while start < len(text_to_chunk):
-            chunks.append(text_to_chunk[start:start + chunk_size])
-            start += step
+        # Section-aware chunking for handbook / policy / procedure / training /
+        # compliance / benefits — splits on headings (Markdown #, ALL-CAPS,
+        # `Article X`, `Section X.Y`, `4.2 Title`) so citations point at a
+        # whole section rather than a sentence fragment. Falls back to fixed
+        # chunks when no headings exist. Other doc types use the naive split.
+        from hr_agent.chunking import chunk_with_headings, SECTION_AWARE_TYPES
+        if document.document_type in SECTION_AWARE_TYPES:
+            chunks = chunk_with_headings(
+                text_to_chunk, max_chunk_size=chunk_size, overlap=overlap,
+            )
+            logger.info("process_hr_document: doc %s chunked section-aware (%d sections)",
+                        document_id, len(chunks))
+        else:
+            chunks = []
+            start = 0
+            step = max(1, chunk_size - overlap)
+            while start < len(text_to_chunk):
+                chunks.append(text_to_chunk[start:start + chunk_size])
+                start += step
 
         document.chunks_total = len(chunks)
         document.save(update_fields=['document_content', 'file_hash',
