@@ -19,12 +19,14 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import (
     AGENT_CHOICES,
+    AGENT_DEFAULT_PROVIDER,
     PROVIDER_CHOICES,
     AgentTokenQuota,
     CompanyAPIKey,
     CompanyModulePurchase,
     KeyRequest,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +46,33 @@ def _serialize_key(key: CompanyAPIKey):
     }
 
 
-def _serialize_quota(quota: AgentTokenQuota):
+def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
     if not quota:
         return None
+    provider_breakdown = {
+        row.provider: row.used_tokens
+        for row in quota.provider_usage.all()
+    }
+    default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name or quota.agent_name, 'openai')
+    if not provider_breakdown and quota.used_tokens > 0:
+        provider_breakdown = {default_provider: quota.used_tokens}
+    else:
+        # Attribute any untracked tokens (usage before per-provider logging existed)
+        # to the default provider so the breakdown sum matches the total.
+        untracked = quota.used_tokens - sum(provider_breakdown.values())
+        if untracked > 0:
+            provider_breakdown[default_provider] = provider_breakdown.get(default_provider, 0) + untracked
     return {
         'included_tokens': quota.included_tokens,
         'used_tokens': quota.used_tokens,
         'remaining': quota.remaining,
         'is_exhausted': quota.is_exhausted,
         'byok_tokens_info': quota.byok_tokens_info,
+        'managed_included_tokens': quota.managed_included_tokens,
+        'managed_used_tokens': quota.managed_used_tokens,
+        'managed_is_exhausted': quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens,
+        'provider_breakdown': provider_breakdown,
+        'default_provider': default_provider,
     }
 
 
@@ -80,7 +100,8 @@ def list_agent_keys(request):
         keys_by_agent.setdefault(k.agent_name, {})[k.mode] = k
 
     quotas_by_agent = {
-        q.agent_name: q for q in AgentTokenQuota.objects.filter(company=company)
+        q.agent_name: q
+        for q in AgentTokenQuota.objects.filter(company=company).prefetch_related('provider_usage')
     }
 
     rows = []
@@ -93,7 +114,8 @@ def list_agent_keys(request):
             'agent_label': agent_label,
             'byok': _serialize_key(agent_keys['byok']) if 'byok' in agent_keys else None,
             'managed': _serialize_key(agent_keys['managed']) if 'managed' in agent_keys else None,
-            'quota': _serialize_quota(quotas_by_agent.get(agent_name)),
+            'quota': _serialize_quota(quotas_by_agent.get(agent_name), agent_name),
+            'default_provider': AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai'),
         })
 
     return Response({

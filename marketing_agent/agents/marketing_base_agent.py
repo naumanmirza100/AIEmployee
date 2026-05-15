@@ -147,38 +147,40 @@ class MarketingBaseAgent:
     def _call_openai(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
         Make a call to the OpenAI LLM API (for document writing and advanced tasks).
-        
+
         Args:
             prompt (str): User prompt/question
             system_prompt (str): System prompt for context
             temperature (float): Sampling temperature (0-2)
             max_tokens (int): Maximum tokens in response
             model (str): Override model for this call
-            
+
         Returns:
             str: LLM response text
         """
-        if not self.openai_client:
+        resolved_client, key_ctx = self._resolve_company_client(wanted_provider='openai')
+        call_client = resolved_client or self.openai_client
+        if not call_client:
             raise ValueError("OpenAI client not available. Please set OPENAI_API_KEY in .env file.")
-        
+
         try:
             messages = []
-            
+
             if system_prompt:
                 messages.append({
                     "role": "system",
                     "content": system_prompt
                 })
-            
+
             messages.append({
                 "role": "user",
                 "content": prompt
             })
-            
+
             # Use specified model or default
             model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
-            
-            response = self.openai_client.chat.completions.create(
+
+            response = call_client.chat.completions.create(
                 model=model_to_use,
                 messages=messages,
                 temperature=temperature,
@@ -219,9 +221,15 @@ class MarketingBaseAgent:
                 'total_tokens': total_tokens,
                 'estimated': estimated,
             }
+            if key_ctx and total_tokens:
+                try:
+                    from core.api_key_service import record_usage
+                    record_usage(key_ctx, total_tokens)
+                except Exception as e:
+                    logger.warning("marketing quota decrement failed: %s", e)
 
             return content
-            
+
         except Exception as e:
             logger.error(f"Error in {self.agent_name} OpenAI LLM call: {str(e)}")
             raise

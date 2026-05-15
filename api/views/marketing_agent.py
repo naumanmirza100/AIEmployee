@@ -1106,13 +1106,20 @@ def marketing_qa(request):
                         }
 
             result.setdefault('token_usage', token_usage)
-        
+            result.setdefault('source', 'llm' if bool(getattr(agent, 'last_llm_used', False)) else 'database')
+
         return Response({
             'status': 'success',
             'data': result
         }, status=status.HTTP_200_OK)
-        
+
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("marketing_qa failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1131,8 +1138,15 @@ def market_research(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("market_research")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         data = request.data
-        
+
         research_type = data.get('research_type', 'market_trend')
         topic = data.get('topic', '')
         additional_context = data.get('context', {})
@@ -1156,6 +1170,12 @@ def market_research(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("market_research failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1174,8 +1194,15 @@ def outreach_campaign(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("outreach_campaign")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         data = request.data
-        
+
         action = data.get('action', 'design')
         campaign_data = data.get('campaign_data', {})
         campaign_id = data.get('campaign_id')
@@ -1229,6 +1256,12 @@ def outreach_campaign(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("outreach_campaign failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1408,8 +1441,15 @@ def document_authoring(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         agent = AgentRegistry.get_agent("document_authoring")
+        try:
+            agent.last_token_usage = None
+            agent.last_llm_used = False
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         data = request.data
-        
+
         action = data.get('action', 'create')
         document_type = data.get('document_type', 'strategy')
         document_data = data.get('document_data', {})
@@ -1437,6 +1477,12 @@ def document_authoring(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("document_authoring failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1530,6 +1576,12 @@ def proactive_notification_monitor(request):
         )
         return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
     except Exception as e:
+        from core.api_key_service import QuotaExhausted, NoKeyAvailable
+        if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            return Response(
+                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
         logger.exception("proactive_notification_monitor failed")
         return Response(
             {'status': 'error', 'message': 'Monitor failed', 'error': str(e)},
@@ -3220,6 +3272,13 @@ def api_marketing_generate_graph(request):
         from marketing_agent.agents.graph_generator_agent import GraphGeneratorAgent
 
         graph_agent = GraphGeneratorAgent(user=user)
+        try:
+            graph_agent.last_token_usage = None
+            graph_agent.last_llm_used = False
+            graph_agent.company_id = company_user.company_id
+            graph_agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
         result = graph_agent.generate_graph(prompt)
 
         return Response({
@@ -3227,6 +3286,7 @@ def api_marketing_generate_graph(request):
             'data': {
                 'chart': result['chart'],
                 'insights': result.get('insights', ''),
+                'source': 'llm' if bool(getattr(graph_agent, 'last_llm_used', False)) else 'database',
             }
         })
     except Exception as e:

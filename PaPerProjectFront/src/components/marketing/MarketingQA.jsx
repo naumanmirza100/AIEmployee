@@ -1802,7 +1802,8 @@ import {
   Save,
   LayoutDashboard,
   PieChart,
-  Activity
+  Activity,
+  Database,
 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -2787,7 +2788,8 @@ const MarketingQA = () => {
               chart: response.chart,
               chartTitle: response.chart?.title || response.title || 'Chart',
               chartType: response.chart?.type || 'bar',
-              insights: response.insights || []
+              insights: response.insights || [],
+              source: response.source,
             }
           };
           handleResponse(q, userMsg, assistantMsg, response);
@@ -2815,10 +2817,13 @@ const MarketingQA = () => {
       // Run comparison in background (no await - non-blocking)
       compareResponses(q, inputMode).catch(err => console.error('Comparison failed:', err));
     } catch (error) {
+      const isQuota = error?.status === 402;
       toast({
-        title: 'Warning',
-        description: 'Please try again.',
-        variant: 'default'
+        title: isQuota ? 'Token Limit Reached' : 'Warning',
+        description: isQuota
+          ? (error.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+          : 'Please try again.',
+        variant: isQuota ? 'destructive' : 'default'
       });
     } finally {
       setLoading(false);
@@ -3373,6 +3378,12 @@ const MarketingQA = () => {
                                   <Bot className="h-3 w-3 text-primary" />
                                 </div>
                                 <span className="text-xs font-medium">Marketing Assistant</span>
+                                {msg.responseData?.source === 'database' && (
+                                  <Badge variant="outline" className="text-[10px] h-4 rounded-full bg-blue-500/10 border-blue-500/20 text-blue-400 flex items-center gap-1">
+                                    <Database className="h-2.5 w-2.5" />
+                                    Database
+                                  </Badge>
+                                )}
                                 {msg.responseData?.research_id && (
                                   <Badge variant="outline" className="text-[10px] h-4 rounded-full bg-primary/10 border-primary/20">
                                     ID: {msg.responseData.research_id.slice(0, 6)}

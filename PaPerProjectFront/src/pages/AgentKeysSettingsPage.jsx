@@ -57,13 +57,32 @@ const QuotaBar = ({ quota }) => {
     pct >= 100 ? 'from-red-500 to-rose-500'
     : pct >= 80 ? 'from-amber-400 to-orange-500'
     : 'from-emerald-400 to-teal-500';
+
+  const PROVIDER_META = {
+    openai:  { label: 'OpenAI',         accent: 'bg-green-500/15 text-green-300 border-green-500/20'     },
+    groq:    { label: 'Groq (Llama)',    accent: 'bg-violet-500/15 text-violet-300 border-violet-500/20'  },
+    claude:  { label: 'Claude',          accent: 'bg-orange-500/15 text-orange-300 border-orange-500/20'  },
+    gemini:  { label: 'Google Gemini',   accent: 'bg-blue-500/15 text-blue-300 border-blue-500/20'        },
+    grok:    { label: 'xAI Grok',        accent: 'bg-red-500/15 text-red-300 border-red-500/20'           },
+  };
+  const breakdown = quota.provider_breakdown ?? {};
+  const providerRows = Object.entries(breakdown)
+    .filter(([, tokens]) => tokens > 0)
+    .map(([key, tokens]) => ({
+      key,
+      tokens: Math.min(tokens, quota.included_tokens),
+      label:  PROVIDER_META[key]?.label  ?? key.toUpperCase(),
+      accent: PROVIDER_META[key]?.accent ?? 'bg-white/10 text-white/60 border-white/20',
+    }));
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {/* Overall */}
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-baseline gap-2">
-          <span className="text-white font-semibold text-base">{formatTokens(quota.used_tokens)}</span>
+          <span className="text-white font-semibold text-base">{formatTokens(Math.min(quota.used_tokens, quota.included_tokens))}</span>
           <span className="text-white/40">/ {formatTokens(quota.included_tokens)}</span>
-          <span className="text-white/30 text-xs">managed tokens</span>
+          <span className="text-white/30 text-xs">total tokens</span>
         </div>
         <span className="text-white/50 text-xs">{pct.toFixed(1)}% used</span>
       </div>
@@ -73,12 +92,27 @@ const QuotaBar = ({ quota }) => {
           style={{ width: `${pct}%`, boxShadow: '0 0 8px rgba(139,92,246,0.25)' }}
         />
       </div>
+
+      {/* Per-model breakdown — only show providers that have been used */}
+      {providerRows.length > 0 && (
+        <div className={`grid gap-2 ${providerRows.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {providerRows.map(p => (
+            <div key={p.key} className={`rounded-lg border px-3 py-2 ${p.accent}`}>
+              <p className="text-[10px] uppercase font-semibold tracking-wider opacity-80">{p.label}</p>
+              <p className="text-sm font-bold mt-0.5">{formatTokens(p.tokens)}</p>
+              <p className="text-[10px] opacity-60 mt-0.5">tokens used</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {quota.byok_tokens_info > 0 && (
         <p className="text-xs text-white/40 flex items-center gap-1">
-          <Info className="w-3 h-3" /> BYOK spent (info only): {formatTokens(quota.byok_tokens_info)}
+          <Info className="w-3 h-3" /> BYOK (your own key): {formatTokens(quota.byok_tokens_info)} tokens — info only
         </p>
       )}
-      {quota.is_exhausted && (
+
+      {quota.is_exhausted && !quota.managed_included_tokens && (
         <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
           <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
           <div className="text-xs text-red-200">
@@ -87,6 +121,37 @@ const QuotaBar = ({ quota }) => {
           </div>
         </div>
       )}
+
+      {/* Managed key quota bar — only shown when admin set a token limit */}
+      {quota.managed_included_tokens > 0 && (() => {
+        const mPct = Math.min(100, (quota.managed_used_tokens / quota.managed_included_tokens) * 100);
+        const mGrad = mPct >= 100 ? 'from-red-500 to-rose-500' : mPct >= 80 ? 'from-amber-400 to-orange-500' : 'from-violet-500 to-purple-500';
+        return (
+          <div className="space-y-2 pt-1 border-t border-[#2d2342]">
+            <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Managed key quota</p>
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-baseline gap-2">
+                <span className="text-white font-semibold text-base">{formatTokens(Math.min(quota.managed_used_tokens, quota.managed_included_tokens))}</span>
+                <span className="text-white/40">/ {formatTokens(quota.managed_included_tokens)}</span>
+                <span className="text-white/30 text-xs">tokens</span>
+              </div>
+              <span className="text-white/50 text-xs">{mPct.toFixed(1)}% used</span>
+            </div>
+            <div className="w-full h-2 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+              <div className={`h-full bg-gradient-to-r ${mGrad} transition-all`} style={{ width: `${mPct}%` }} />
+            </div>
+            {quota.managed_is_exhausted && (
+              <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                <div className="text-xs text-red-200">
+                  <p className="font-semibold">Managed key token limit reached.</p>
+                  <p className="text-red-300/80">Contact your admin to increase the limit or add your own API key (BYOK).</p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -148,6 +213,19 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
               </div>
             </div>
             <Badge variant="outline" className="text-white/60 border-white/20 text-xs">Admin-controlled</Badge>
+          </div>
+        )}
+
+        {!agent.byok && !agent.managed && agent.default_provider && (
+          <div className="flex items-center gap-3 p-3 bg-white/[0.03] border border-white/10 rounded-lg">
+            <Activity className="w-4 h-4 text-violet-300/70 shrink-0" />
+            <div>
+              <p className="text-sm text-white/70 font-medium">Platform key (free tier)</p>
+              <p className="text-xs text-white/40 mt-0.5">
+                Provider: <span className="uppercase text-white/60">{agent.default_provider}</span>
+                {' · '}{formatTokens(agent.quota?.included_tokens ?? 0)} free tokens included with your purchase
+              </p>
+            </div>
           </div>
         )}
 
@@ -364,7 +442,7 @@ const AgentKeysSettingsPage = () => {
             <div className="text-sm text-white/70">
               <p className="text-white font-medium mb-1">How this works</p>
               <p className="text-white/60 leading-relaxed">
-                Each agent you purchase includes <span className="text-white font-semibold">1M free tokens</span> via a platform-managed key.
+                Each agent you purchase includes <span className="text-white font-semibold">free tokens</span> via a platform-managed key.
                 When those run out, you can either <span className="text-blue-300">add your own API key (BYOK)</span> to pay the provider directly,
                 or <span className="text-emerald-300">request a managed key</span> from the admin. Keys are encrypted at rest and never shown in plaintext.
               </p>

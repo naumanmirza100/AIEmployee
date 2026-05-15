@@ -517,10 +517,13 @@ const MarketResearch = () => {
         throw new Error(result?.message || result?.error || 'Failed to conduct research');
       }
     } catch (error) {
-      toast({ 
-        title: 'Error', 
-        description: 'Something went wrong. Please try again.', 
-        variant: 'destructive' 
+      const isQuota = error?.status === 402;
+      toast({
+        title: isQuota ? 'Token Limit Reached' : 'Error',
+        description: isQuota
+          ? (error.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+          : 'Something went wrong. Please try again.',
+        variant: 'destructive'
       });
     } finally {
       setLoading(false);

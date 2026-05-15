@@ -381,7 +381,14 @@ const Notifications = ({ onUnreadCountChange }) => {
       }
     } catch (err) {
       if (!isConnectionError(err)) {
-        toast({ title: 'Error', description: err.message || 'Monitor failed', variant: 'destructive' });
+        const isQuota = err?.status === 402;
+        toast({
+          title: isQuota ? 'Token Limit Reached' : 'Error',
+          description: isQuota
+            ? (err.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+            : (err.message || 'Monitor failed'),
+          variant: 'destructive'
+        });
       }
     } finally {
       setMonitoring(false);
