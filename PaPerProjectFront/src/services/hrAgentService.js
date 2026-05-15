@@ -327,6 +327,112 @@ export const updateHRPerfReview = async (reviewId, payload) => {
   }
 };
 
+// ---------- Performance goals / OKRs ----------
+export const listEmployeeGoals = async (employeeId, { cycleId } = {}) => {
+  try {
+    const qs = cycleId ? `?cycle_id=${encodeURIComponent(cycleId)}` : '';
+    const response = await companyApi.get(`/hr/employees/${employeeId}/goals${qs}`);
+    return response;
+  } catch (error) {
+    console.error('List employee goals error:', error);
+    throw error;
+  }
+};
+
+export const createEmployeeGoal = async (employeeId, payload) => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/goals/create`, payload);
+    return response;
+  } catch (error) {
+    console.error('Create employee goal error:', error);
+    throw error;
+  }
+};
+
+export const updateEmployeeGoal = async (goalId, payload) => {
+  try {
+    const response = await companyApi.post(`/hr/goals/${goalId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update employee goal error:', error);
+    throw error;
+  }
+};
+
+export const deleteEmployeeGoal = async (goalId) => {
+  try {
+    const response = await companyApi.post(`/hr/goals/${goalId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete employee goal error:', error);
+    throw error;
+  }
+};
+
+// ---------- Built-in workflow templates ----------
+export const listWorkflowTemplates = async () => {
+  try {
+    const response = await companyApi.get('/hr/workflow-templates');
+    return response;
+  } catch (error) {
+    console.error('List workflow templates error:', error);
+    throw error;
+  }
+};
+
+export const createWorkflowFromTemplate = async (payload) => {
+  try {
+    const response = await companyApi.post('/hr/workflows/from-template', payload);
+    return response;
+  } catch (error) {
+    console.error('Create workflow from template error:', error);
+    throw error;
+  }
+};
+
+// ---------- Manager portal + org chart ----------
+export const getManagerTeamSummary = async ({ managerId } = {}) => {
+  try {
+    const qs = managerId ? `?manager_id=${encodeURIComponent(managerId)}` : '';
+    const response = await companyApi.get(`/hr/manager/team${qs}`);
+    return response;
+  } catch (error) {
+    console.error('Get manager team summary error:', error);
+    throw error;
+  }
+};
+
+export const getHROrgChart = async () => {
+  try {
+    const response = await companyApi.get('/hr/org-chart');
+    return response;
+  } catch (error) {
+    console.error('Get org chart error:', error);
+    throw error;
+  }
+};
+
+// ---------- Self-service + document versions ----------
+export const getMyHRProfile = async () => {
+  try {
+    const response = await companyApi.get('/hr/me');
+    return response;
+  } catch (error) {
+    console.error('Get my HR profile error:', error);
+    throw error;
+  }
+};
+
+export const listHRDocumentVersions = async (documentId) => {
+  try {
+    const response = await companyApi.get(`/hr/documents/${documentId}/versions`);
+    return response;
+  } catch (error) {
+    console.error('List HR document versions error:', error);
+    throw error;
+  }
+};
+
 // ---------- Departments ----------
 export const listHRDepartments = async ({ activeOnly = false } = {}) => {
   try {
@@ -795,4 +901,14 @@ export default {
   deleteCompensation,
   updateHREmployee,
   listHRAuditLog,
+  listEmployeeGoals,
+  createEmployeeGoal,
+  updateEmployeeGoal,
+  deleteEmployeeGoal,
+  listWorkflowTemplates,
+  createWorkflowFromTemplate,
+  getManagerTeamSummary,
+  getHROrgChart,
+  getMyHRProfile,
+  listHRDocumentVersions,
 };

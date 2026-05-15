@@ -25,7 +25,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, User, Briefcase, Building2, Mail, CalendarClock, FileText,
   ClipboardList, ChevronRight, DollarSign, Plus, Trash2, Star,
-  Pencil, Shield,
+  Pencil, Shield, Target,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -198,6 +198,92 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
   };
 
   const setEditField = (k, v) => setEditForm((s) => ({ ...s, payload: { ...s.payload, [k]: v } }));
+
+  // Goals — lazy fetched per drawer open.
+  const [goals, setGoals] = useState({ rows: [], loading: false, allowed: true });
+  const [goalForm, setGoalForm] = useState({
+    open: false, saving: false, mode: 'create', editingId: null, payload: {},
+  });
+
+  useEffect(() => {
+    if (!open || !employeeId) { setGoals({ rows: [], loading: false, allowed: true }); return; }
+    let cancelled = false;
+    setGoals((s) => ({ ...s, loading: true }));
+    hrAgentService.listEmployeeGoals(employeeId)
+      .then((res) => { if (!cancelled) setGoals({ rows: res?.data || [], loading: false, allowed: true }); })
+      .catch((err) => {
+        if (cancelled) return;
+        const restricted = /Not authorized/i.test(err.message || '') || /403/.test(err.message || '');
+        setGoals({ rows: [], loading: false, allowed: !restricted });
+      });
+    return () => { cancelled = true; };
+  }, [open, employeeId]);
+
+  const openCreateGoal = () => setGoalForm({
+    open: true, saving: false, mode: 'create', editingId: null,
+    payload: {
+      title: '', description: '', success_criteria: '',
+      status: 'open', weight_pct: '', target_value: '',
+      current_value: '', progress_pct: '', due_date: '',
+    },
+  });
+
+  const openEditGoal = (g) => setGoalForm({
+    open: true, saving: false, mode: 'edit', editingId: g.id,
+    payload: {
+      title: g.title || '', description: g.description || '',
+      success_criteria: g.success_criteria || '',
+      status: g.status || 'open',
+      weight_pct: g.weight_pct ?? '',
+      target_value: g.target_value || '',
+      current_value: g.current_value || '',
+      progress_pct: g.progress_pct ?? '',
+      due_date: g.due_date || '',
+    },
+  });
+
+  const setGoalField = (k, v) => setGoalForm((s) => ({ ...s, payload: { ...s.payload, [k]: v } }));
+
+  const handleSaveGoal = async () => {
+    const { mode, editingId, payload } = goalForm;
+    if (mode === 'create' && !payload.title) {
+      toast({ title: 'Title is required', variant: 'destructive' });
+      return;
+    }
+    setGoalForm((s) => ({ ...s, saving: true }));
+    try {
+      const body = {
+        ...payload,
+        weight_pct: payload.weight_pct === '' ? 0 : Number(payload.weight_pct),
+        progress_pct: payload.progress_pct === '' ? 0 : Number(payload.progress_pct),
+        due_date: payload.due_date || null,
+      };
+      const res = mode === 'create'
+        ? await hrAgentService.createEmployeeGoal(employeeId, body)
+        : await hrAgentService.updateEmployeeGoal(editingId, body);
+      const updated = res?.data;
+      if (mode === 'create' && updated) {
+        setGoals((s) => ({ ...s, rows: [updated, ...s.rows] }));
+      } else if (mode === 'edit' && updated) {
+        setGoals((s) => ({ ...s, rows: s.rows.map((g) => g.id === updated.id ? updated : g) }));
+      }
+      toast({ title: mode === 'create' ? 'Goal added' : 'Goal updated' });
+      setGoalForm({ open: false, saving: false, mode: 'create', editingId: null, payload: {} });
+    } catch (e) {
+      toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
+      setGoalForm((s) => ({ ...s, saving: false }));
+    }
+  };
+
+  const handleDeleteGoal = async (g) => {
+    if (!confirm(`Delete the goal "${g.title}"?`)) return;
+    try {
+      await hrAgentService.deleteEmployeeGoal(g.id);
+      setGoals((s) => ({ ...s, rows: s.rows.filter((x) => x.id !== g.id) }));
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    }
+  };
 
   const handleUnreleaseReview = async (row) => {
     if (!confirm(`Retract visibility of the "${row.cycle_name || `Cycle #${row.cycle_id}`}" review from this employee?`)) return;
@@ -388,6 +474,72 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                       )}
                       {row.manager_summary && (
                         <div className="text-xs text-white/70 mt-1 line-clamp-3 whitespace-pre-line">{row.manager_summary}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* GOALS / OKRs */}
+            <section>
+              <div className="flex items-baseline justify-between mb-2">
+                <SectionTitle icon={Target} title="Goals & OKRs" count={goals.rows.length} />
+                {goals.allowed && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openCreateGoal}>
+                    <Plus className="h-3 w-3 mr-1" /> Add goal
+                  </Button>
+                )}
+              </div>
+              {!goals.allowed ? (
+                <Empty text="You don't have access to view this employee's goals." />
+              ) : goals.loading ? (
+                <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-white/40" /></div>
+              ) : goals.rows.length === 0 ? (
+                <Empty text="No goals set. Managers and HR can add objectives here." />
+              ) : (
+                <div className="space-y-1.5">
+                  {goals.rows.map((g) => (
+                    <div key={g.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5">
+                      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                        <span className="text-white font-semibold text-sm truncate">{g.title}</span>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className={`text-[10px] ${
+                            g.status === 'met' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
+                            : g.status === 'missed' || g.status === 'dropped' ? 'bg-rose-500/10 text-rose-300 border-rose-400/30'
+                            : g.status === 'in_progress' ? 'bg-sky-500/10 text-sky-300 border-sky-400/30'
+                            : 'bg-amber-500/10 text-amber-300 border-amber-400/30'
+                          }`}>
+                            {g.status.replace(/_/g, ' ')}
+                          </Badge>
+                          <Button variant="outline" size="sm" className="h-5 px-1.5 text-[10px]"
+                            onClick={() => openEditGoal(g)}>
+                            <Pencil className="h-2.5 w-2.5" />
+                          </Button>
+                          <Button variant="outline" size="sm"
+                            className="h-5 px-1.5 text-[10px] text-rose-400 hover:text-rose-300"
+                            onClick={() => handleDeleteGoal(g)}>
+                            <Trash2 className="h-2.5 w-2.5" />
+                          </Button>
+                        </div>
+                      </div>
+                      {(g.target_value || g.current_value) && (
+                        <div className="text-xs text-white/55 mt-1">
+                          {g.current_value || '—'} <ChevronRight className="inline h-2.5 w-2.5" /> {g.target_value || '—'}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                          <div className="h-full bg-violet-400/70 rounded-full transition-all"
+                            style={{ width: `${Math.max(0, Math.min(100, g.progress_pct || 0))}%` }} />
+                        </div>
+                        <span className="text-[10px] text-white/55 shrink-0">{g.progress_pct || 0}%</span>
+                        {g.due_date && (
+                          <span className="text-[10px] text-white/45 shrink-0">due {g.due_date}</span>
+                        )}
+                      </div>
+                      {g.description && (
+                        <div className="text-xs text-white/65 mt-1 line-clamp-2 whitespace-pre-line">{g.description}</div>
                       )}
                     </div>
                   ))}
@@ -596,6 +748,93 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
           <Button onClick={handleSaveEdit} disabled={editForm.saving}>
             {editForm.saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
             Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Goal create/edit dialog */}
+    <Dialog open={goalForm.open} onOpenChange={(o) => setGoalForm((s) => ({ ...s, open: o }))}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{goalForm.mode === 'create' ? 'Add goal' : 'Edit goal'}</DialogTitle>
+          <DialogDescription>
+            Goals are queryable and trackable across review cycles. Employees can update progress on their own goals.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs">Title</Label>
+            <Input value={goalForm.payload.title || ''}
+              onChange={(ev) => setGoalField('title', ev.target.value)}
+              placeholder="e.g. Ship onboarding revamp" />
+          </div>
+          <div>
+            <Label className="text-xs">Success criteria</Label>
+            <Textarea rows={2} value={goalForm.payload.success_criteria || ''}
+              onChange={(ev) => setGoalField('success_criteria', ev.target.value)}
+              placeholder="How will we know this is done?" />
+          </div>
+          <div>
+            <Label className="text-xs">Description</Label>
+            <Textarea rows={2} value={goalForm.payload.description || ''}
+              onChange={(ev) => setGoalField('description', ev.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Target</Label>
+              <Input value={goalForm.payload.target_value || ''}
+                onChange={(ev) => setGoalField('target_value', ev.target.value)}
+                placeholder="e.g. $50k ARR" />
+            </div>
+            <div>
+              <Label className="text-xs">Current</Label>
+              <Input value={goalForm.payload.current_value || ''}
+                onChange={(ev) => setGoalField('current_value', ev.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label className="text-xs">Progress %</Label>
+              <Input type="number" min="0" max="100"
+                value={goalForm.payload.progress_pct ?? ''}
+                onChange={(ev) => setGoalField('progress_pct', ev.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Weight %</Label>
+              <Input type="number" min="0" max="100"
+                value={goalForm.payload.weight_pct ?? ''}
+                onChange={(ev) => setGoalField('weight_pct', ev.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Due date</Label>
+              <Input type="date" value={goalForm.payload.due_date || ''}
+                onChange={(ev) => setGoalField('due_date', ev.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Status</Label>
+            <Select value={goalForm.payload.status || 'open'}
+              onValueChange={(v) => setGoalField('status', v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="in_progress">In progress</SelectItem>
+                <SelectItem value="met">Met</SelectItem>
+                <SelectItem value="partially_met">Partially met</SelectItem>
+                <SelectItem value="missed">Missed</SelectItem>
+                <SelectItem value="dropped">Dropped</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline"
+            onClick={() => setGoalForm({ open: false, saving: false, mode: 'create', editingId: null, payload: {} })}
+            disabled={goalForm.saving}>Cancel</Button>
+          <Button onClick={handleSaveGoal} disabled={goalForm.saving}>
+            {goalForm.saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+            {goalForm.mode === 'create' ? 'Add' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

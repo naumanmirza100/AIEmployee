@@ -428,6 +428,61 @@ class PerformanceReview(models.Model):
         return f"{self.employee_id} · {self.cycle_id} · {self.status}"
 
 
+class PerformanceGoal(models.Model):
+    """A single, queryable goal/OKR for an employee.
+
+    Supplements ``PerformanceReview.goals`` (which is a frozen JSON snapshot
+    inside a review) by giving goals a queryable, mutable home. Goals can
+    cascade (``parent``), be weighted, and track progress over time.
+    """
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('in_progress', 'In progress'),
+        ('met', 'Met'),
+        ('partially_met', 'Partially met'),
+        ('missed', 'Missed'),
+        ('dropped', 'Dropped'),
+    ]
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='goals')
+    cycle = models.ForeignKey(PerformanceReviewCycle, on_delete=models.SET_NULL,
+                              null=True, blank=True, related_name='goals',
+                              help_text='Optional — goal can exist outside a review cycle.')
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name='subgoals',
+                               help_text='Optional cascade: this goal supports a parent goal.')
+    title = models.CharField(max_length=240)
+    description = models.TextField(blank=True, default='')
+    success_criteria = models.TextField(blank=True, default='',
+                                        help_text='How "done" is judged (definition of done).')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    weight_pct = models.PositiveSmallIntegerField(default=0,
+                                                  help_text='Weighting toward the cycle score (0-100).')
+    target_value = models.CharField(max_length=80, blank=True, default='',
+                                    help_text='Free-text target metric (e.g. "$50k ARR", "Ship v2").')
+    current_value = models.CharField(max_length=80, blank=True, default='')
+    progress_pct = models.PositiveSmallIntegerField(default=0,
+                                                    help_text='0-100. Manually updated or derived.')
+    due_date = models.DateField(null=True, blank=True)
+    assigned_by = models.ForeignKey(Employee, on_delete=models.SET_NULL,
+                                    null=True, blank=True, related_name='goals_assigned',
+                                    help_text='Usually the manager who set the goal.')
+    closed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', 'status']),
+            models.Index(fields=['cycle', 'status']),
+            models.Index(fields=['due_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id} · {self.title} ({self.status})"
+
+
 class HRDocument(models.Model):
     """HR document (handbook, policy, offer letter, contract, payslip…).
 
