@@ -232,8 +232,36 @@ export default function MeetingBookingPage() {
             {confirmed.duration_minutes} minutes · with {confirmed.sender_name || 'our team'}
           </p>
         </div>
+
+        {/* Meeting join link */}
+        {confirmed.meet_link && (
+          <div style={{ margin: '0 0 20px', padding: '14px 20px', background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 12 }}>
+            <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 10px' }}>Your video call link</p>
+            <a
+              href={confirmed.meet_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-block',
+                background: 'linear-gradient(90deg,#10b981,#059669)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: 14,
+                padding: '10px 24px',
+                borderRadius: 9,
+                textDecoration: 'none',
+              }}
+            >
+              Join Meeting
+            </a>
+            <p style={{ color: '#374151', fontSize: 11, margin: '10px 0 0', wordBreak: 'break-all' }}>
+              {confirmed.meet_link}
+            </p>
+          </div>
+        )}
+
         <p style={{ color: '#4b5563', fontSize: 12 }}>
-          A confirmation email has been sent. See you then!
+          A confirmation email has been sent with the meeting link. See you then!
         </p>
       </div>
     </div>

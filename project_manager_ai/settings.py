@@ -662,6 +662,11 @@ CORS_ALLOW_METHODS = [
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'sk_test_placeholder')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', 'pk_test_placeholder')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_placeholder')
+# Google Calendar / Meet integration (for auto-generating Meet links on booking)
+GOOGLE_CLIENT_ID     = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REFRESH_TOKEN = os.getenv('GOOGLE_REFRESH_TOKEN', '')
+
 # Frontend base URL (React app) – for CORS, Stripe success/cancel redirects. Set FRONTEND_URL in .env.
 FRONTEND_URL = (os.getenv('FRONTEND_URL') or '').rstrip('/')
 # Backend base URL (Django server) – for links in emails (e.g. interview slot selection page). Set BACKEND_URL in .env (e.g. http://localhost:8000 or https://api.yourapp.com).

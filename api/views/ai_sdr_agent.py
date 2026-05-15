@@ -11,6 +11,7 @@ import io
 import json
 import logging
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -1250,19 +1251,21 @@ def sdr_check_replies(request, campaign_id):
             enrollment = r['enrollment']
             reply_text = r['reply_text']
 
-            # Skip if already marked replied
-            if enrollment.status == 'replied':
+            # Skip if already replied AND meeting already exists
+            already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
+            if enrollment.status == 'replied' and already_has_meeting:
                 continue
 
             sentiment_result = agent.analyze_reply_sentiment(reply_text)
             sentiment = sentiment_result['sentiment']
             is_interested = sentiment_result['is_interested']
 
-            enrollment.status = 'replied'
-            enrollment.replied_at = timezone.now()
-            enrollment.reply_content = reply_text[:2000]
-            enrollment.reply_sentiment = sentiment
-            enrollment.save()
+            if enrollment.status != 'replied':
+                enrollment.status = 'replied'
+                enrollment.replied_at = timezone.now()
+                enrollment.reply_content = reply_text[:2000]
+                enrollment.reply_sentiment = sentiment
+                enrollment.save()
 
             campaign.replies_received = (campaign.replies_received or 0) + 1
             new_replies += 1
@@ -1638,7 +1641,8 @@ def sdr_check_all_replies(request):
 
             for r in replies:
                 enrollment = r['enrollment']
-                if enrollment.status == 'replied':
+                already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
+                if enrollment.status == 'replied' and already_has_meeting:
                     continue
 
                 reply_text = r['reply_text']
@@ -1646,14 +1650,14 @@ def sdr_check_all_replies(request):
                 sentiment = sentiment_result['sentiment']
                 is_interested = sentiment_result['is_interested']
 
-                enrollment.status = 'replied'
-                enrollment.replied_at = timezone.now()
-                enrollment.reply_content = reply_text[:2000]
-                enrollment.reply_sentiment = sentiment
-                enrollment.save()
-
-                campaign.replies_received = (campaign.replies_received or 0) + 1
-                total_new_replies += 1
+                if enrollment.status != 'replied':
+                    enrollment.status = 'replied'
+                    enrollment.replied_at = timezone.now()
+                    enrollment.reply_content = reply_text[:2000]
+                    enrollment.reply_sentiment = sentiment
+                    enrollment.save()
+                    campaign.replies_received = (campaign.replies_received or 0) + 1
+                    total_new_replies += 1
 
                 if is_interested:
                     enrollment.lead.status = 'replied'
@@ -1704,6 +1708,123 @@ def sdr_check_all_replies(request):
         'new_meetings': total_new_meetings,
         'errors': errors,
     })
+
+
+# ==========================================================================
+# ==========================================================================
+# Google Calendar OAuth — one-time setup to get refresh_token
+# ==========================================================================
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([])
+def sdr_google_auth_start(request):
+    """Redirect company owner to Google OAuth consent page (no PKCE)."""
+    import urllib.parse
+    client_id = settings.GOOGLE_CLIENT_ID
+    if not client_id or not settings.GOOGLE_CLIENT_SECRET:
+        return Response({'error': 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET not set in .env'}, status=400)
+
+    redirect_uri = request.build_absolute_uri('/api/sdr/google-auth/callback/')
+    params = {
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'scope': 'https://www.googleapis.com/auth/calendar',
+        'access_type': 'offline',
+        'prompt': 'consent',
+    }
+    auth_url = 'https://accounts.google.com/o/oauth2/auth?' + urllib.parse.urlencode(params)
+    from django.shortcuts import redirect as django_redirect
+    return django_redirect(auth_url)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([])
+def sdr_google_auth_callback(request):
+    """Exchange auth code for tokens and display refresh_token."""
+    import requests as _requests
+    client_id     = settings.GOOGLE_CLIENT_ID
+    client_secret = settings.GOOGLE_CLIENT_SECRET
+    redirect_uri  = request.build_absolute_uri('/api/sdr/google-auth/callback/')
+    code = request.GET.get('code')
+
+    if not code:
+        return Response({'error': 'No code in callback', 'params': dict(request.GET)}, status=400)
+
+    resp = _requests.post('https://oauth2.googleapis.com/token', data={
+        'code': code,
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+    })
+    token = resp.json()
+    refresh_token = token.get('refresh_token')
+    if not refresh_token:
+        return Response({'error': 'No refresh_token returned', 'response': token}, status=400)
+
+    logger.info("Google OAuth refresh_token obtained: %s", refresh_token)
+    return Response({
+        'message': 'Success! Copy this refresh_token into your .env as GOOGLE_REFRESH_TOKEN',
+        'refresh_token': refresh_token,
+    })
+
+
+def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
+    """Create a Google Calendar event with a Meet link. Returns the meet URL or None."""
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from datetime import timedelta
+        import uuid as _uuid
+
+        client_id     = settings.GOOGLE_CLIENT_ID
+        client_secret = settings.GOOGLE_CLIENT_SECRET
+        refresh_token = settings.GOOGLE_REFRESH_TOKEN
+
+        if not all([client_id, client_secret, refresh_token]):
+            logger.warning("Google Meet not configured — missing GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN")
+            return None
+
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_uri='https://oauth2.googleapis.com/token',
+            scopes=['https://www.googleapis.com/auth/calendar'],
+        )
+
+        service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
+        end_time = scheduled_at + timedelta(minutes=duration_minutes)
+
+        event = {
+            'summary': meeting.title or 'Meeting',
+            'start': {'dateTime': scheduled_at.isoformat(), 'timeZone': 'UTC'},
+            'end':   {'dateTime': end_time.isoformat(),   'timeZone': 'UTC'},
+            'conferenceData': {
+                'createRequest': {
+                    'requestId': str(_uuid.uuid4()),
+                    'conferenceSolutionKey': {'type': 'hangoutsMeet'},
+                }
+            },
+        }
+
+        created = service.events().insert(
+            calendarId='primary',
+            body=event,
+            conferenceDataVersion=1,
+        ).execute()
+
+        meet_url = created.get('hangoutLink') or ''
+        logger.info("Google Meet created: %s for meeting %d", meet_url, meeting.id)
+        return meet_url or None
+
+    except Exception as exc:
+        logger.warning("Google Meet creation failed for meeting %d: %s", meeting.id, exc)
+        return None
 
 
 # ==========================================================================
@@ -1782,11 +1903,20 @@ def sdr_booking_confirm(request, token):
     if scheduled_at <= timezone.now():
         return Response({'error': 'Please select a future date and time.'}, status=400)
 
+    # Try Google Meet first; fall back to Jitsi if not configured
+    duration_minutes = meeting.duration_minutes or 30
+    meet_link = _create_google_meet_link(meeting, scheduled_at, duration_minutes)
+    if not meet_link:
+        import uuid as _uuid
+        room_slug = str(meeting.booking_token).replace('-', '')[:16]
+        meet_link = f"https://meet.jit.si/SDR-{room_slug}"
+
     # Claim the slot atomically — prevent double-booking if the page is submitted twice
     rows = SDRMeeting.objects.filter(id=meeting.id, status='pending').update(
         status='scheduled',
         scheduled_at=scheduled_at,
         confirmed_at=timezone.now(),
+        calendar_link=meet_link,
     )
     if rows == 0:
         return Response({
@@ -1797,8 +1927,9 @@ def sdr_booking_confirm(request, token):
     meeting.status = 'scheduled'
     meeting.scheduled_at = scheduled_at
     meeting.confirmed_at = timezone.now()
+    meeting.calendar_link = meet_link
 
-    # Send confirmation email
+    # Send confirmation email (calendar_link is already included in the email body)
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
     if campaign:
         try:
@@ -1808,8 +1939,8 @@ def sdr_booking_confirm(request, token):
             logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
 
     logger.info(
-        "SDR [booking] meeting=%d lead=%s scheduled_at=%s — CONFIRMED via booking page",
-        meeting.id, meeting.lead.display_name, scheduled_at.isoformat(),
+        "SDR [booking] meeting=%d lead=%s scheduled_at=%s meet_link=%s — CONFIRMED via booking page",
+        meeting.id, meeting.lead.display_name, scheduled_at.isoformat(), meet_link,
     )
 
     return Response({
@@ -1819,4 +1950,5 @@ def sdr_booking_confirm(request, token):
         'duration_minutes': meeting.duration_minutes or 30,
         'lead_name': meeting.lead.display_name,
         'sender_name': campaign.sender_name if campaign else '',
+        'meet_link': meet_link,
     })
