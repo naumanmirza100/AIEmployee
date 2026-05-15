@@ -72,6 +72,7 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
         'managed_used_tokens': quota.managed_used_tokens,
         'managed_is_exhausted': quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens,
         'preferred_pool': quota.preferred_pool,
+        'byok_token_limit': quota.byok_token_limit,
         'provider_breakdown': provider_breakdown,
         'default_provider': default_provider,
     }
@@ -165,7 +166,7 @@ def upsert_byok_key(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    key, _ = CompanyAPIKey.objects.get_or_create(
+    key, created = CompanyAPIKey.objects.get_or_create(
         company=company, agent_name=agent_name, mode='byok',
         defaults={'provider': provider, 'encrypted_key': ''},
     )
@@ -174,7 +175,25 @@ def upsert_byok_key(request):
     key.set_plaintext_key(api_key)
     key.save()
 
-    return Response({'status': 'success', 'key': _serialize_key(key)})
+    # In-app notification to the user who added/updated the key
+    try:
+        from project_manager_agent.models import PMNotification
+        agent_label = dict(AGENT_CHOICES).get(agent_name, agent_name)
+        action = 'added' if created else 'updated'
+        PMNotification.objects.create(
+            company_user=request.user,
+            notification_type='custom',
+            severity='info',
+            title=f'API key {action} — {agent_label}',
+            message=(
+                f'Your {provider.upper()} API key for {agent_label} has been {action} successfully. '
+                f'Calls for this agent will now use your own key.'
+            ),
+        )
+    except Exception:
+        pass
+
+    return Response({'status': 'success', 'key': _serialize_key(key), 'created': created})
 
 
 @api_view(['DELETE'])
@@ -220,6 +239,37 @@ def set_token_pool(request):
     quota.preferred_pool = preferred_pool
     quota.save(update_fields=['preferred_pool'])
     return Response({'status': 'success', 'preferred_pool': preferred_pool})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def set_byok_limit(request):
+    """Set or clear the user's self-imposed BYOK spending cap.
+
+    Body: { agent_name, limit }  — limit: integer tokens, 0 = no limit (clear).
+    This is a soft cap: calls are never blocked, but the UI shows a progress bar
+    and warns when usage approaches/exceeds the cap.
+    """
+    company = request.user.company
+    agent_name = (request.data.get('agent_name') or '').strip()
+    try:
+        limit = max(0, int(request.data.get('limit', 0)))
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'limit must be an integer'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if agent_name not in {name for name, _ in AGENT_CHOICES}:
+        return Response({'status': 'error', 'message': 'Invalid agent_name'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    quota, _ = AgentTokenQuota.objects.get_or_create(
+        company=company, agent_name=agent_name,
+        defaults={'included_tokens': 0},
+    )
+    quota.byok_token_limit = limit
+    quota.save(update_fields=['byok_token_limit'])
+    return Response({'status': 'success', 'byok_token_limit': limit})
 
 
 @api_view(['GET'])

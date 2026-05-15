@@ -1883,6 +1883,8 @@ class AgentTokenQuota(models.Model):
     # until a managed key is purchased.
     managed_included_tokens = models.BigIntegerField(default=0)
     managed_used_tokens = models.BigIntegerField(default=0)
+    # User-set soft cap for BYOK spending (0 = no limit). Never blocks calls.
+    byok_token_limit = models.BigIntegerField(default=0)
     # Which token pool to draw from when both free and managed are available.
     # 'managed' is the default (managed key takes priority, saves free tokens).
     preferred_pool = models.CharField(

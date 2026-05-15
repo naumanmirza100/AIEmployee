@@ -15,7 +15,7 @@ import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,
   BrainCircuit, Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,
-  Zap, Coins
+  Zap, Coins, Settings
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
@@ -162,177 +162,186 @@ const QuotaBar = ({ quota }) => {
   );
 };
 
-const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool }) => {
+const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, onSetByokLimit }) => {
   const m = modeBadge(agent);
+  const q = agent.quota;
+  const freePct = q && q.included_tokens > 0 ? Math.min(100, (q.used_tokens / q.included_tokens) * 100) : 0;
+  const managedPct = q && q.managed_included_tokens > 0 ? Math.min(100, (q.managed_used_tokens / q.managed_included_tokens) * 100) : 0;
+  const byokPct = q && q.byok_token_limit > 0 ? Math.min(100, (q.byok_tokens_info / q.byok_token_limit) * 100) : 0;
+  const barColor = (pct) => pct >= 100 ? 'from-red-500 to-rose-500' : pct >= 80 ? 'from-amber-400 to-orange-500' : 'from-emerald-400 to-teal-500';
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="bg-[#120d22] border border-[#2d2342] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors"
     >
-      <div className="p-5 border-b border-[#2d2342] bg-gradient-to-r from-[#1a1333]/60 to-transparent">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
-              <BrainCircuit className="w-5 h-5 text-violet-300" />
+      <div className="flex gap-0">
+        {/* LEFT — identity */}
+        <div className="w-44 shrink-0 p-4 border-r border-[#2d2342] flex flex-col justify-between bg-gradient-to-b from-[#1a1333]/40 to-transparent">
+          <div>
+            <div className="w-9 h-9 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center mb-2">
+              <BrainCircuit className="w-4 h-4 text-violet-300" />
             </div>
-            <div>
-              <h3 className="text-white font-semibold">{agent.agent_label}</h3>
-              <p className="text-xs text-white/40 font-mono">{agent.agent_name}</p>
-            </div>
+            <p className="text-white font-semibold text-sm leading-tight">{agent.agent_label}</p>
+            <p className="text-[10px] text-white/30 font-mono mt-0.5">{agent.agent_name}</p>
           </div>
-          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${m.class}`}>{m.label}</span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium mt-3 self-start ${m.class}`}>{m.label}</span>
         </div>
-      </div>
 
-      <div className="p-5 space-y-4">
-        <QuotaBar quota={agent.quota} />
-
-        {agent.byok && (
-          <div className="flex items-center justify-between p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-            <div className="flex items-center gap-3">
-              <Lock className="w-4 h-4 text-blue-300 shrink-0" />
-              <div>
-                <p className="text-sm text-white font-medium">Your BYOK key</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-xs text-white/50 uppercase">{agent.byok.provider}</span>
-                  <span className="font-mono text-xs text-white/70">{agent.byok.masked}</span>
-                </div>
-              </div>
-            </div>
-            <Button size="sm" variant="ghost" className="text-red-300 hover:text-red-200 hover:bg-red-500/10" onClick={() => onRevoke(agent.agent_name)}>
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-        )}
-
-        {agent.managed?.status === 'revoked' && (
-          <div className="flex items-start gap-3 p-3 bg-red-500/5 border border-red-500/30 rounded-lg">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        {/* MIDDLE — quota bars + key info */}
+        <div className="flex-1 p-4 space-y-3 min-w-0">
+          {/* Free tokens bar */}
+          {q && q.included_tokens > 0 && (
             <div>
-              <p className="text-sm text-red-300 font-medium">Managed key revoked by admin</p>
-              <p className="text-xs text-red-300/70 mt-0.5">
-                The <span className="uppercase">{agent.managed.provider}</span> key assigned by your admin has been removed.
-                Add your own API key (BYOK) or request a new managed key to continue.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {agent.managed?.status === 'active' && (
-          <div className="flex items-center justify-between p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
-            <div className="flex items-center gap-3">
-              <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0" />
-              <div>
-                <p className="text-sm text-white font-medium">Managed key (assigned by admin)</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-xs text-white/50 uppercase">{agent.managed.provider}</span>
-                  <span className="font-mono text-xs text-white/70">{agent.managed.masked}</span>
-                </div>
+              <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+                <span className="uppercase tracking-wide">Free tokens</span>
+                <span>{formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)}</span>
+              </div>
+              <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                <div className={`h-full bg-gradient-to-r ${barColor(freePct)} transition-all`} style={{ width: `${freePct}%` }} />
               </div>
             </div>
-            <Badge variant="outline" className="text-white/60 border-white/20 text-xs">Admin-controlled</Badge>
-          </div>
-        )}
+          )}
 
-        {!agent.byok && !agent.managed && agent.default_provider && (
-          <div className="flex items-center gap-3 p-3 bg-white/[0.03] border border-white/10 rounded-lg">
-            <Activity className="w-4 h-4 text-violet-300/70 shrink-0" />
+          {/* Managed tokens bar */}
+          {q && q.managed_included_tokens > 0 && (
             <div>
-              <p className="text-sm text-white/70 font-medium">Platform key (free tier)</p>
-              <p className="text-xs text-white/40 mt-0.5">
-                Provider: <span className="uppercase text-white/60">{agent.default_provider}</span>
-                {' · '}{formatTokens(agent.quota?.included_tokens ?? 0)} free tokens included with your purchase
-              </p>
+              <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+                <span className="uppercase tracking-wide">Managed key</span>
+                <span>{formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)}</span>
+              </div>
+              <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                <div className={`h-full bg-gradient-to-r ${barColor(managedPct)} transition-all`} style={{ width: `${managedPct}%` }} />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Pool selector — show when managed key is active and managed tokens are configured */}
-        {agent.managed?.status === 'active' && !agent.byok && agent.quota?.managed_included_tokens > 0 && (() => {
-          const q = agent.quota;
-          // Determine which pool is actually being used right now
-          const actualPool = q.managed_is_exhausted ? 'free' : (q.preferred_pool || 'managed');
-          const freeAvailable = q.remaining > 0;
-          const managedAvailable = !q.managed_is_exhausted;
-          return (
-            <div className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Active token pool</p>
-                {q.managed_is_exhausted && freeAvailable && (
-                  <span className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">Auto-switched to free</span>
-                )}
+          {/* BYOK usage */}
+          {agent.byok && q && (
+            <div>
+              <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+                <span className="uppercase tracking-wide">Your key (BYOK)</span>
+                {q.byok_token_limit > 0
+                  ? <span>{formatTokens(Math.min(q.byok_tokens_info, q.byok_token_limit))} / {formatTokens(q.byok_token_limit)} cap</span>
+                  : <span>{formatTokens(q.byok_tokens_info)} used</span>}
               </div>
-              <div className="flex gap-2">
-                {/* Free tokens button */}
-                <button
-                  onClick={() => freeAvailable && onSetPool(agent.agent_name, 'free')}
-                  disabled={!freeAvailable}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
-                    !freeAvailable
-                      ? 'opacity-35 cursor-not-allowed bg-transparent border-white/10 text-white/30'
-                      : actualPool === 'free'
-                        ? 'bg-violet-600/20 border-violet-500/60 text-violet-200'
-                        : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
-                  }`}
-                >
-                  <Coins className="w-4 h-4" />
-                  Free tokens
-                  {actualPool === 'free' && freeAvailable && <span className="text-[10px] ml-1 text-violet-300">● in use</span>}
-                  {!freeAvailable && <span className="text-[10px] ml-1 opacity-60">exhausted</span>}
-                </button>
-                {/* Managed key button */}
-                <button
-                  onClick={() => managedAvailable && onSetPool(agent.agent_name, 'managed')}
-                  disabled={!managedAvailable}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
-                    !managedAvailable
-                      ? 'opacity-35 cursor-not-allowed bg-transparent border-white/10 text-white/30'
-                      : actualPool === 'managed'
-                        ? 'bg-emerald-600/20 border-emerald-500/60 text-emerald-200'
-                        : 'bg-transparent border-white/10 text-white/50 hover:border-white/25 hover:text-white/70'
-                  }`}
-                >
-                  <Zap className="w-4 h-4" />
-                  Managed key
-                  {actualPool === 'managed' && managedAvailable && <span className="text-[10px] ml-1 text-emerald-300">● in use</span>}
-                  {!managedAvailable && <span className="text-[10px] ml-1 opacity-60">exhausted</span>}
-                </button>
-              </div>
-              {!freeAvailable && !managedAvailable && (
-                <p className="text-xs text-red-300/70">Both pools exhausted. Add your own BYOK key or ask admin to increase limits.</p>
+              {q.byok_token_limit > 0 ? (
+                <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                  <div className={`h-full bg-gradient-to-r ${barColor(byokPct)} transition-all`} style={{ width: `${byokPct}%` }} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 h-1.5 bg-[#1a1333] rounded-full border border-[#2d2342]" />
+                  <button onClick={() => onSetByokLimit(agent)} className="text-[10px] text-white/30 hover:text-violet-300 transition-colors whitespace-nowrap">+ set cap</button>
+                </div>
               )}
             </div>
-          );
-        })()}
+          )}
 
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button
-            size="sm"
-            className="bg-violet-600 hover:bg-violet-700 text-white shadow-[0_0_12px_rgba(139,92,246,0.3)]"
-            onClick={() => onByok(agent)}
-          >
-            <Key className="w-4 h-4 mr-1.5" />
-            {agent.byok ? 'Update my key' : 'Add my own key'}
+          {/* Key info pills */}
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {agent.byok && (
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <Lock className="w-3 h-3 text-blue-300" />
+                <span className="text-[10px] text-white/70 uppercase">{agent.byok.provider}</span>
+                <span className="font-mono text-[10px] text-white/50">{agent.byok.masked}</span>
+                <button className="text-red-300/60 hover:text-red-300 ml-0.5" onClick={() => onRevoke(agent.agent_name)}>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            {agent.managed?.status === 'active' && (
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                <ShieldCheck className="w-3 h-3 text-emerald-300" />
+                <span className="text-[10px] text-white/70 uppercase">{agent.managed.provider}</span>
+                <span className="font-mono text-[10px] text-white/50">{agent.managed.masked}</span>
+                <span className="text-[9px] text-white/30 ml-0.5">admin</span>
+              </div>
+            )}
+            {agent.managed?.status === 'revoked' && (
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <AlertTriangle className="w-3 h-3 text-red-400" />
+                <span className="text-[10px] text-red-300">Managed key revoked</span>
+              </div>
+            )}
+            {agent.default_provider && (
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/10 rounded-lg">
+                <Activity className="w-3 h-3 text-violet-300/50" />
+                <span className="text-[10px] text-white/40">Platform key · {agent.default_provider}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Pool selector — compact inline */}
+          {agent.managed?.status === 'active' && !agent.byok && q?.managed_included_tokens > 0 && (() => {
+            const actualPool = q.managed_is_exhausted ? 'free' : (q.preferred_pool || 'managed');
+            const freeAvailable = q.remaining > 0;
+            const managedAvailable = !q.managed_is_exhausted;
+            return (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-white/30 uppercase tracking-wide shrink-0">Using:</span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => freeAvailable && onSetPool(agent.agent_name, 'free')}
+                    disabled={!freeAvailable}
+                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                      !freeAvailable ? 'opacity-30 cursor-not-allowed border-white/10 text-white/30'
+                        : actualPool === 'free' ? 'bg-violet-600/20 border-violet-500/50 text-violet-200'
+                        : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                    }`}
+                  >
+                    <Coins className="w-2.5 h-2.5 inline mr-0.5" />Free{actualPool === 'free' && freeAvailable && ' ●'}
+                  </button>
+                  <button
+                    onClick={() => managedAvailable && onSetPool(agent.agent_name, 'managed')}
+                    disabled={!managedAvailable}
+                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                      !managedAvailable ? 'opacity-30 cursor-not-allowed border-white/10 text-white/30'
+                        : actualPool === 'managed' ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-200'
+                        : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                    }`}
+                  >
+                    <Zap className="w-2.5 h-2.5 inline mr-0.5" />Managed{actualPool === 'managed' && managedAvailable && ' ●'}
+                  </button>
+                </div>
+                {q.managed_is_exhausted && freeAvailable && (
+                  <span className="text-[9px] text-amber-300/70">auto-switched</span>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* RIGHT — action buttons */}
+        <div className="w-36 shrink-0 p-4 border-l border-[#2d2342] flex flex-col gap-2 justify-start">
+          <Button size="sm" className="w-full bg-violet-600 hover:bg-violet-700 text-white text-xs justify-start" onClick={() => onByok(agent)}>
+            <Key className="w-3 h-3 mr-1.5" />
+            {agent.byok ? 'Update key' : 'Add my key'}
           </Button>
           {!agent.managed && (
             <Button
-              size="sm"
-              variant="outline"
-              className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white"
+              size="sm" variant="outline"
+              className="w-full border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs justify-start"
               onClick={() => onRequest(agent)}
               disabled={!!pendingReq}
             >
-              <Send className="w-4 h-4 mr-1.5" />
+              <Send className="w-3 h-3 mr-1.5" />
               {pendingReq
-                ? pendingReq.status === 'payment_pending' ? 'Payment required'
-                  : pendingReq.status === 'payment_received' ? 'Payment processing'
-                  : 'Request in progress'
-                : 'Request managed key'}
+                ? pendingReq.status === 'payment_pending' ? 'Pay now'
+                  : pendingReq.status === 'payment_received' ? 'Processing'
+                  : 'Pending'
+                : 'Request key'}
+            </Button>
+          )}
+          {agent.byok && q?.byok_token_limit > 0 && (
+            <Button size="sm" variant="ghost" className="w-full text-white/40 hover:text-white/70 text-xs justify-start" onClick={() => onSetByokLimit(agent)}>
+              <Settings className="w-3 h-3 mr-1.5" />Edit cap
             </Button>
           )}
         </div>
       </div>
+
     </motion.div>
   );
 };
@@ -501,6 +510,7 @@ const AgentKeysSettingsPage = () => {
   const [payModal, setPayModal] = useState({ open: false, request: null });
   const [submitting, setSubmitting] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [byokLimitModal, setByokLimitModal] = useState({ open: false, agent: null, limitInput: '' });
 
   const stats = useMemo(() => {
     const totalAgents = agents.length;
@@ -593,6 +603,31 @@ const AgentKeysSettingsPage = () => {
       loadData({ silent: true });
     } catch (e) {
       toast({ title: 'Failed to switch pool', description: String(e.message || e), variant: 'destructive' });
+    }
+  };
+
+  const openSetByokLimit = (agent) => {
+    const current = agent.quota?.byok_token_limit ?? 0;
+    setByokLimitModal({ open: true, agent, limitInput: current > 0 ? String(current) : '' });
+  };
+
+  const submitByokLimit = async () => {
+    const raw = byokLimitModal.limitInput.trim();
+    const limit = raw === '' ? 0 : parseInt(raw, 10);
+    if (raw !== '' && (isNaN(limit) || limit < 0)) {
+      toast({ title: 'Invalid limit', description: 'Enter a positive number or leave blank to remove cap.', variant: 'destructive' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await agentKeysService.setByokLimit({ agent_name: byokLimitModal.agent.agent_name, limit });
+      toast({ title: limit === 0 ? 'BYOK cap removed' : `BYOK cap set to ${formatTokens(limit)} tokens` });
+      setByokLimitModal({ open: false, agent: null, limitInput: '' });
+      loadData({ silent: true });
+    } catch (e) {
+      toast({ title: 'Failed to set cap', description: String(e.message || e), variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -721,7 +756,7 @@ const AgentKeysSettingsPage = () => {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-3">
               {agents.map(a => (
                 <AgentCard
                   key={a.agent_name}
@@ -731,6 +766,7 @@ const AgentKeysSettingsPage = () => {
                   onRevoke={revokeByok}
                   onRequest={openRequest}
                   onSetPool={setPool}
+                  onSetByokLimit={openSetByokLimit}
                 />
               ))}
             </div>
@@ -938,6 +974,56 @@ const AgentKeysSettingsPage = () => {
             <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setRequestModal({ ...requestModal, open: false })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitRequest} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Send request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BYOK token cap modal */}
+      <Dialog open={byokLimitModal.open} onOpenChange={(o) => !o && setByokLimitModal({ ...byokLimitModal, open: false })}>
+        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Settings className="w-5 h-5 text-violet-400" />
+              BYOK Spending Cap
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              {byokLimitModal.agent?.agent_label} — set a soft limit on how many tokens your own API key can spend. Leave blank to remove the cap.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 justify-between">
+              <Label className="text-white/70 text-sm">Token limit</Label>
+              {byokLimitModal.limitInput && !isNaN(parseInt(byokLimitModal.limitInput, 10)) && parseInt(byokLimitModal.limitInput, 10) > 0 && (
+                <p className="text-xs text-violet-300 font-medium">
+                  = {formatTokens(parseInt(byokLimitModal.limitInput, 10))} tokens
+                </p>
+              )}
+              </div>
+              <Input
+                type="number"
+                min="0"
+                placeholder="e.g. 500000 (blank = no limit)"
+                className="bg-[#1a1333] border-[#3a295a] text-white placeholder:text-white/30"
+                value={byokLimitModal.limitInput}
+                onChange={(e) => setByokLimitModal({ ...byokLimitModal, limitInput: e.target.value })}
+              />
+              <p className="text-xs text-white/40 flex items-center gap-1">
+                <Info className="w-3 h-3" /> This is a soft cap — it never blocks usage, just shows a progress bar.
+              </p>
+            </div>
+            {byokLimitModal.agent?.quota?.byok_tokens_info > 0 && (
+              <div className="flex items-center justify-between bg-[#1a1333] border border-[#2d2342] rounded-lg px-3 py-2">
+                <span className="text-xs text-white/50">Current BYOK usage</span>
+                <span className="text-sm text-white font-semibold">{formatTokens(byokLimitModal.agent.quota.byok_tokens_info)}</span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setByokLimitModal({ ...byokLimitModal, open: false })}>Cancel</Button>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitByokLimit} disabled={submitting}>
+              {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save cap
             </Button>
           </DialogFooter>
         </DialogContent>

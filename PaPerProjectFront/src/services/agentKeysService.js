@@ -11,6 +11,9 @@ export const revokeByokKey = (agentName) =>
 export const setTokenPool = ({ agent_name, preferred_pool }) =>
   companyApi.post('/company/agent-keys/pool', { agent_name, preferred_pool });
 
+export const setByokLimit = ({ agent_name, limit }) =>
+  companyApi.post('/company/agent-keys/byok-limit', { agent_name, limit });
+
 export const listKeyRequests = () => companyApi.get('/company/key-requests');
 
 export const createKeyRequest = ({ agent_name, provider, note }) =>
@@ -30,6 +33,7 @@ export default {
   upsertByokKey,
   revokeByokKey,
   setTokenPool,
+  setByokLimit,
   listKeyRequests,
   createKeyRequest,
   payForRequest,
