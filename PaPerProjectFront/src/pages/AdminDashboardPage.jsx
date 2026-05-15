@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { contactService, careerService, companyService } from '@/services';
+import adminApiKeysService from '@/services/adminApiKeysService';
 import { aiPredictorService } from '@/services/aiPredictorService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { 
@@ -85,6 +86,9 @@ const AdminDashboardPage = () => {
     description: '',
   });
   const [companySubmitting, setCompanySubmitting] = useState(false);
+
+  // API Keys pending badge
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   // AI Agents State
   const [agents, setAgents] = useState([]);
@@ -512,6 +516,13 @@ const AdminDashboardPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, pagination.page, statusFilter, searchTerm, predictionsPagination.page, predictionsSearchTerm, applicationsPagination.page, applicationsSearchTerm, applicationsStatusFilter, companiesPagination.page, companiesSearchTerm, fetchCompanies, agentsPagination.page, agentsSearchTerm, agentsStatusFilter, agentsModuleFilter, fetchAgents]);
 
+  // Fetch pending key-requests count for the dashboard badge
+  useEffect(() => {
+    adminApiKeysService.getOverview()
+      .then(res => setPendingRequestsCount(res?.stats?.pending_requests || 0))
+      .catch(() => {});
+  }, []);
+
   // Debug modal state
   useEffect(() => {
     if (showCreateCompanyModal) {
@@ -734,9 +745,14 @@ const AdminDashboardPage = () => {
 
         <div className="container mx-auto px-4 py-4 sm:py-6 lg:py-8">
           <div className="mb-4 flex justify-end">
-            <Button variant="outline" onClick={() => navigate('/admin/api-keys')} className="gap-2">
+            <Button variant="outline" onClick={() => navigate('/admin/api-keys')} className="gap-2 relative">
               <BrainCircuit className="h-4 w-4" />
               API Keys & Pricing Control
+              {pendingRequestsCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold shadow-lg">
+                  {pendingRequestsCount > 99 ? '99+' : pendingRequestsCount}
+                </span>
+              )}
             </Button>
           </div>
           {/* Tabs */}

@@ -1939,8 +1939,12 @@ class KeyRequest(models.Model):
     """User → superadmin request to be assigned a managed key for an agent."""
     STATUS_CHOICES = [
         ('pending', 'Pending'),
-        ('approved', 'Approved'),
+        ('payment_pending', 'Payment Pending'),
+        ('payment_received', 'Payment Received'),
+        ('key_assigned', 'Key Assigned'),
+        ('approved', 'Approved'),       # legacy: direct assign without payment flow
         ('rejected', 'Rejected'),
+        ('revoked', 'Revoked'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
@@ -1991,6 +1995,10 @@ class AdminPricingConfig(models.Model):
         default=DEFAULT_FREE_TOKENS,
         help_text='Free tokens granted when a company purchases this agent '
                   '(NOT on signup). Superadmin can change this per agent.',
+    )
+    managed_key_tokens = models.BigIntegerField(
+        default=0,
+        help_text='Tokens granted when admin assigns a paid managed key via the request flow.',
     )
     updated_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,

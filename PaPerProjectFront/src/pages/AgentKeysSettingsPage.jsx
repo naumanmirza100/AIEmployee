@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,
-  BrainCircuit, Lock, Info
+  BrainCircuit, Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
@@ -30,6 +30,7 @@ const formatTokens = (n) => {
 
 const modeBadge = (a) => {
   if (a.byok) return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
+  if (a.managed?.status === 'revoked') return { label: 'Key Revoked', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (a.managed) return { label: 'Managed Active', class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
   return { label: 'No key', class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
 };
@@ -200,7 +201,20 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
           </div>
         )}
 
-        {agent.managed && (
+        {agent.managed?.status === 'revoked' && (
+          <div className="flex items-start gap-3 p-3 bg-red-500/5 border border-red-500/30 rounded-lg">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-red-300 font-medium">Managed key revoked by admin</p>
+              <p className="text-xs text-red-300/70 mt-0.5">
+                The <span className="uppercase">{agent.managed.provider}</span> key assigned by your admin has been removed.
+                Add your own API key (BYOK) or request a new managed key to continue.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {agent.managed?.status === 'active' && (
           <div className="flex items-center justify-between p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
             <div className="flex items-center gap-3">
               <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0" />
@@ -247,7 +261,11 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
               disabled={!!pendingReq}
             >
               <Send className="w-4 h-4 mr-1.5" />
-              {pendingReq ? 'Request pending' : 'Request managed key'}
+              {pendingReq
+                ? pendingReq.status === 'payment_pending' ? 'Payment required'
+                  : pendingReq.status === 'payment_received' ? 'Payment processing'
+                  : 'Request in progress'
+                : 'Request managed key'}
             </Button>
           )}
         </div>
@@ -256,34 +274,157 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest }) => {
   );
 };
 
-const RequestRow = ({ r }) => {
-  const statusStyle = {
-    approved: { icon: CheckCircle2, class: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
-    rejected: { icon: XCircle, class: 'text-red-300 bg-red-500/10 border-red-500/30' },
-    pending: { icon: Clock, class: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
-  }[r.status] || { icon: Clock, class: 'text-gray-300 bg-gray-500/10 border-gray-500/30' };
-  const Icon = statusStyle.icon;
+const REQUEST_STATUS_META = {
+  pending:          { label: 'Pending Review',    cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30',    Icon: Clock },
+  payment_pending:  { label: 'Payment Required',  cls: 'text-yellow-300 bg-yellow-500/10 border-yellow-500/30', Icon: DollarSign },
+  payment_received: { label: 'Payment Confirmed', cls: 'text-blue-300 bg-blue-500/10 border-blue-500/30',       Icon: CreditCard },
+  key_assigned:     { label: 'Key Assigned',      cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30', Icon: ShieldCheck },
+  approved:         { label: 'Approved',          cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30', Icon: CheckCircle2 },
+  rejected:         { label: 'Rejected',          cls: 'text-red-300 bg-red-500/10 border-red-500/30',           Icon: XCircle },
+  revoked:          { label: 'Revoked',           cls: 'text-orange-300 bg-orange-500/10 border-orange-500/30',  Icon: XCircle },
+};
+
+const FLOW_STAGES = [
+  { key: 'pending',          label: 'Requested',    Icon: Clock },
+  { key: 'payment_pending',  label: 'Approved',     Icon: CheckCircle2 },
+  { key: 'payment_received', label: 'Payment Sent', Icon: DollarSign },
+  { key: 'key_assigned',     label: 'Key Active',   Icon: ShieldCheck },
+];
+const FLOW_ORDER = { pending: 0, payment_pending: 1, payment_received: 2, key_assigned: 3 };
+
+const RequestTimeline = ({ r }) => {
+  const currentIdx = FLOW_ORDER[r.status] ?? -1;
+  if (currentIdx < 0) return null;
+
+  const timestamps = [
+    r.created_at,
+    r.status === 'payment_pending' ? r.resolved_at : (currentIdx > 1 ? r.resolved_at : null),
+    r.paid_at,
+    r.status === 'key_assigned' ? r.resolved_at : null,
+  ];
+
   return (
-    <div className="flex items-center justify-between p-3 bg-[#0f0a20] border border-[#2d2342] rounded-lg hover:border-violet-500/30 transition-colors">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="text-sm text-white font-medium truncate">{r.agent_label}</p>
-          <span className="text-xs text-white/40 uppercase">{r.provider}</span>
+    <div className="flex items-start mt-3">
+      {FLOW_STAGES.map((stage, i) => {
+        const done = currentIdx > i;
+        const active = currentIdx === i;
+        const ts = timestamps[i];
+        return (
+          <React.Fragment key={stage.key}>
+            <div className="flex flex-col items-center min-w-[60px] flex-1">
+              <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center ${
+                done    ? 'bg-violet-600 border-violet-500' :
+                active  ? 'bg-violet-600/25 border-violet-400 ring-2 ring-violet-500/30 ring-offset-1 ring-offset-[#0f0a20]' :
+                          'bg-[#1a1333] border-[#3a295a]'
+              }`}>
+                {done
+                  ? <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  : <stage.Icon className={`w-3.5 h-3.5 ${active ? 'text-violet-300' : 'text-white/25'}`} />
+                }
+              </div>
+              <p className={`text-[9px] mt-1 font-medium text-center leading-tight ${done || active ? 'text-white/70' : 'text-white/25'}`}>
+                {stage.label}
+              </p>
+              {ts && (done || active) && (
+                <p className="text-[8px] text-white/35 text-center mt-0.5">
+                  {new Date(ts).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+            {i < FLOW_STAGES.length - 1 && (
+              <div className={`flex-1 h-[2px] mt-3.5 ${done ? 'bg-violet-500' : 'bg-[#3a295a]'}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
+const RequestRow = ({ r, onPay, paying }) => {
+  const [expanded, setExpanded] = useState(false);
+  const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
+  const { Icon } = meta;
+  const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
+  const showFlow = r.status in FLOW_ORDER;
+
+  return (
+    <div className="bg-[#0f0a20] border border-[#2d2342] rounded-lg overflow-hidden hover:border-violet-500/30 transition-colors">
+      <button
+        className="w-full flex items-center justify-between p-3 text-left"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-white font-medium truncate">{r.agent_label}</p>
+            <span className="text-xs text-white/40 uppercase">{r.provider}</span>
+          </div>
+          <p className="text-xs text-white/40 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
         </div>
-        <p className="text-xs text-white/40 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
-        {r.note && <p className="text-xs text-white/60 mt-1 italic">"{r.note}"</p>}
-        {r.admin_note && <p className="text-xs text-violet-300 mt-1">Admin: {r.admin_note}</p>}
-      </div>
-      <span className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-medium ${statusStyle.class}`}>
-        <Icon className="w-3 h-3" />
-        {r.status}
-      </span>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {r.status === 'payment_pending' && (
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white h-7 text-xs px-3"
+              onClick={(e) => { e.stopPropagation(); onPay(r); }}
+              disabled={paying}
+            >
+              {paying ? <Loader2 className="w-3 h-3 animate-spin" /> : <DollarSign className="w-3 h-3 mr-1" />}
+              Pay {total > 0 ? `$${total.toFixed(2)}` : 'Now'}
+            </Button>
+          )}
+          <span className={`flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full border font-medium ${meta.cls}`}>
+            <Icon className="w-3 h-3" />{meta.label}
+          </span>
+          {expanded ? <ChevronDown className="w-4 h-4 text-white/30" /> : <ChevronRight className="w-4 h-4 text-white/30" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-[#2d2342] pt-3 space-y-3">
+          {r.note && <p className="text-xs text-white/60 italic">Your note: "{r.note}"</p>}
+          {r.admin_note && <p className="text-xs text-violet-300">Admin: {r.admin_note}</p>}
+
+          {r.status === 'payment_pending' && (
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 space-y-2">
+              <p className="text-xs text-amber-300 font-semibold">Payment required to receive key</p>
+              <div className="space-y-1 text-xs text-white/70">
+                <div className="flex justify-between"><span>Key cost</span><span>${(r.key_cost_snapshot ?? 0).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Service charge</span><span>${(r.service_charge_snapshot ?? 0).toFixed(2)}</span></div>
+                {total > 0 && (
+                  <div className="flex justify-between text-white font-semibold pt-1 border-t border-amber-500/20">
+                    <span>Total due</span><span>${total.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+              {/* <Button
+                size="sm"
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white mt-1"
+                onClick={() => onPay(r)}
+                disabled={paying}
+              >
+                {paying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <DollarSign className="w-4 h-4 mr-2" />}
+                Confirm Payment{total > 0 ? ` — $${total.toFixed(2)}` : ''}
+              </Button> */}
+            </div>
+          )}
+
+          {r.status === 'payment_received' && r.amount_paid != null && (
+            <p className="text-xs text-blue-300">
+              Paid ${r.amount_paid.toFixed(2)} — waiting for admin to assign the key.
+            </p>
+          )}
+
+          {showFlow && <RequestTimeline r={r} />}
+        </div>
+      )}
     </div>
   );
 };
 
 const AgentKeysSettingsPage = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
@@ -294,13 +435,15 @@ const AgentKeysSettingsPage = () => {
 
   const [byokModal, setByokModal] = useState({ open: false, agent: null, provider: 'openai', apiKey: '' });
   const [requestModal, setRequestModal] = useState({ open: false, agent: null, provider: 'openai', note: '' });
+  const [payModal, setPayModal] = useState({ open: false, request: null });
   const [submitting, setSubmitting] = useState(false);
+  const [paying, setPaying] = useState(false);
 
   const stats = useMemo(() => {
     const totalAgents = agents.length;
     const byokCount = agents.filter(a => a.byok).length;
     const managedCount = agents.filter(a => a.managed).length;
-    const pendingReqs = requests.filter(r => r.status === 'pending').length;
+    const pendingReqs = requests.filter(r => ['pending', 'payment_pending', 'payment_received'].includes(r.status)).length;
     const exhausted = agents.filter(a => a.quota?.is_exhausted).length;
     return { totalAgents, byokCount, managedCount, pendingReqs, exhausted };
   }, [agents, requests]);
@@ -324,7 +467,25 @@ const AgentKeysSettingsPage = () => {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    loadData();
+    const keySession = searchParams.get('key_session');
+    if (keySession) {
+      setSearchParams({}, { replace: true });
+      agentKeysService.verifyKeyPaymentSession(keySession)
+        .then((res) => {
+          if (res.status === 'success') {
+            toast({ title: 'Payment confirmed!', description: `${res.agent_label || 'Agent'} managed key payment received. Admin will assign your key shortly.` });
+            loadData({ silent: true });
+          }
+        })
+        .catch(() => {
+          toast({ title: 'Payment verification', description: 'Your payment was processed. Reloading...', variant: 'default' });
+          loadData({ silent: true });
+        });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openByok = (agent) => setByokModal({ open: true, agent, provider: agent.byok?.provider || 'openai', apiKey: '' });
   const openRequest = (agent) => setRequestModal({ open: true, agent, provider: 'openai', note: '' });
@@ -383,9 +544,30 @@ const AgentKeysSettingsPage = () => {
     }
   };
 
+  const submitPay = async () => {
+    setPaying(true);
+    try {
+      const res = await agentKeysService.createKeyPaymentSession(payModal.request.id);
+      if (res?.url) {
+        window.location.href = res.url;
+      } else {
+        throw new Error('No checkout URL returned.');
+      }
+    } catch (e) {
+      const msg = String(e.message || e);
+      if (msg.includes('not configured') || msg.includes('503')) {
+        toast({ title: 'Stripe not configured', description: 'Payment gateway is not set up yet. Contact the admin.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Payment failed', description: msg, variant: 'destructive' });
+      }
+      setPaying(false);
+    }
+  };
+
   const pendingByAgent = useMemo(() => {
     const map = {};
-    requests.filter(r => r.status === 'pending').forEach(r => { map[r.agent_name] = r; });
+    const inProgress = ['pending', 'payment_pending', 'payment_received'];
+    requests.filter(r => inProgress.includes(r.status)).forEach(r => { map[r.agent_name] = r; });
     return map;
   }, [requests]);
 
@@ -489,12 +671,19 @@ const AgentKeysSettingsPage = () => {
                 </CardTitle>
                 <CardDescription className="text-white/50">
                   {stats.pendingReqs > 0
-                    ? `${stats.pendingReqs} request${stats.pendingReqs > 1 ? 's' : ''} awaiting admin review.`
-                    : 'No pending requests.'}
+                    ? `${stats.pendingReqs} active request${stats.pendingReqs > 1 ? 's' : ''} in progress.`
+                    : 'No active requests.'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {requests.map(r => <RequestRow key={r.id} r={r} />)}
+                {requests.map(r => (
+                  <RequestRow
+                    key={r.id}
+                    r={r}
+                    onPay={(req) => setPayModal({ open: true, request: req })}
+                    paying={paying && payModal.request?.id === r.id}
+                  />
+                ))}
               </CardContent>
             </Card>
           )}
@@ -544,6 +733,97 @@ const AgentKeysSettingsPage = () => {
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save key
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stripe Checkout modal */}
+      <Dialog open={payModal.open} onOpenChange={(o) => !o && !paying && setPayModal({ ...payModal, open: false })}>
+        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-md p-0 overflow-hidden">
+          {/* Header stripe */}
+          <div className="bg-gradient-to-r from-violet-700 to-fuchsia-700 px-6 py-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-white font-bold text-base leading-tight">Secure Checkout</p>
+                <p className="text-white/70 text-xs mt-0.5">Powered by Stripe</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 py-5 space-y-5">
+            {/* What you're getting */}
+            <div>
+              <p className="text-white/50 text-[10px] uppercase tracking-wider mb-2">You're purchasing</p>
+              <div className="flex items-center gap-3 bg-[#1a1333] border border-[#2d2342] rounded-lg p-3">
+                <div className="w-9 h-9 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
+                  <Key className="w-4 h-4 text-violet-300" />
+                </div>
+                <div>
+                  <p className="text-white font-semibold text-sm">{payModal.request?.agent_label} — Managed Key</p>
+                  <p className="text-white/50 text-xs uppercase">{payModal.request?.provider}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Order summary */}
+            <div>
+              <p className="text-white/50 text-[10px] uppercase tracking-wider mb-2">Order summary</p>
+              <div className="bg-[#1a1333] border border-[#2d2342] rounded-lg overflow-hidden">
+                <div className="flex justify-between items-center px-4 py-3 border-b border-[#2d2342]">
+                  <div>
+                    <p className="text-white/80 text-sm">API Key Cost</p>
+                    <p className="text-white/40 text-xs">One-time managed key</p>
+                  </div>
+                  <span className="text-white font-semibold text-sm">${(payModal.request?.key_cost_snapshot ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center px-4 py-3 border-b border-[#2d2342]">
+                  <div>
+                    <p className="text-white/80 text-sm">Service Charge</p>
+                    <p className="text-white/40 text-xs">Platform fee</p>
+                  </div>
+                  <span className="text-white font-semibold text-sm">${(payModal.request?.service_charge_snapshot ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center px-4 py-3 bg-violet-500/5">
+                  <span className="text-white font-bold">Total due</span>
+                  <span className="text-violet-300 font-bold text-lg">
+                    ${((payModal.request?.key_cost_snapshot ?? 0) + (payModal.request?.service_charge_snapshot ?? 0)).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="flex items-start gap-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-white/60 leading-relaxed">
+                You'll be redirected to <span className="text-white font-semibold">Stripe's secure checkout</span>. After payment the admin will assign your managed key.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <Button
+                variant="outline"
+                className="flex-1 border-white/15 text-white/70 hover:bg-white/5"
+                onClick={() => setPayModal({ open: false, request: null })}
+                disabled={paying}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white font-semibold shadow-lg"
+                onClick={submitPay}
+                disabled={paying}
+              >
+                {paying ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Redirecting…</>
+                ) : (
+                  <><CreditCard className="w-4 h-4 mr-2" />Pay with Stripe</>
+                )}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

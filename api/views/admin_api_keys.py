@@ -79,14 +79,38 @@ def list_all_keys(request):
     limit = min(int(request.GET.get('limit', 20)), 100)
     total = qs.count()
     start = (page - 1) * limit
-    items = qs[start:start + limit]
+    items = list(qs[start:start + limit])
+
+    # Fetch quotas for this page's (company_id, agent_name) pairs in one query
+    pairs = {(k.company_id, k.agent_name) for k in items}
+    quota_map = {}
+    if pairs:
+        company_ids = {p[0] for p in pairs}
+        agent_names = {p[1] for p in pairs}
+        for q in AgentTokenQuota.objects.filter(company_id__in=company_ids, agent_name__in=agent_names):
+            quota_map[(q.company_id, q.agent_name)] = q
+
+    def _serialize_with_quota(key):
+        data = _serialize_admin_key(key)
+        q = quota_map.get((key.company_id, key.agent_name))
+        if q:
+            data['quota'] = {
+                'id': q.id,
+                'included_tokens': q.included_tokens,
+                'used_tokens': q.used_tokens,
+                'managed_included_tokens': q.managed_included_tokens,
+                'managed_used_tokens': q.managed_used_tokens,
+            }
+        else:
+            data['quota'] = None
+        return data
 
     return Response({
         'status': 'success',
         'total': total,
         'page': page,
         'limit': limit,
-        'keys': [_serialize_admin_key(k) for k in items],
+        'keys': [_serialize_with_quota(k) for k in items],
     })
 
 
@@ -103,7 +127,6 @@ def assign_managed_key(request):
     provider = (request.data.get('provider') or 'openai').strip()
     api_key = (request.data.get('api_key') or '').strip()
     request_id = request.data.get('request_id')
-    managed_token_limit = request.data.get('managed_token_limit')
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
@@ -117,12 +140,8 @@ def assign_managed_key(request):
         return Response({'status': 'error', 'message': 'Company not found'},
                         status=status.HTTP_404_NOT_FOUND)
 
-    try:
-        token_limit = int(managed_token_limit) if managed_token_limit not in (None, '') else 0
-        if token_limit < 0:
-            token_limit = 0
-    except (ValueError, TypeError):
-        token_limit = 0
+    pricing_conf = AdminPricingConfig.objects.filter(agent_name=agent_name).first()
+    token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
 
     with transaction.atomic():
         key, _ = CompanyAPIKey.objects.get_or_create(
@@ -147,9 +166,11 @@ def assign_managed_key(request):
         if request_id:
             try:
                 req = KeyRequest.objects.get(pk=request_id, company=company, agent_name=agent_name)
-                req.status = 'approved'
+                # Use key_assigned for the new payment flow; approved for legacy direct assign
+                req.status = 'key_assigned' if req.status in ('payment_pending', 'payment_received') else 'approved'
                 req.resolved_by = request.user
                 req.resolved_at = timezone.now()
+                req.linked_key_id = key.id
                 req.save()
                 approved_req = req
             except KeyRequest.DoesNotExist:
@@ -158,17 +179,22 @@ def assign_managed_key(request):
     # Notify the requester — outside the transaction so a notification failure
     # can never roll back the key assignment.
     if approved_req and approved_req.requested_by:
-        from core.notification_utils import notify_company_user
-        notify_company_user(
-            approved_req.requested_by,
-            title=f"Managed key approved — {key.get_agent_name_display()}",
-            message=(
-                f"Admin has assigned a managed {key.get_provider_display()} key for "
-                f"{key.get_agent_name_display()}. It is now active on your account."
-            ),
-            action_url='/company/settings/api-keys',
-            notification_type='key_request_approved',
-        )
+        from project_manager_agent.models import PMNotification
+        from core.models import CompanyUser
+        for cu in CompanyUser.objects.filter(company=company, is_active=True):
+            try:
+                PMNotification.objects.create(
+                    company_user=cu,
+                    notification_type='custom',
+                    severity='info',
+                    title=f"Key assigned — {key.get_agent_name_display()}",
+                    message=(
+                        f"Your managed {key.get_provider_display()} key for "
+                        f"{key.get_agent_name_display()} has been assigned and is now active."
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("PMNotification failed on key assign: %s", exc)
 
     return Response({'status': 'success', 'key': _serialize_admin_key(key)})
 
@@ -181,8 +207,35 @@ def revoke_key(request, key_id):
         key = CompanyAPIKey.objects.get(pk=key_id)
     except CompanyAPIKey.DoesNotExist:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    was_managed_active = key.mode == 'managed' and key.status == 'active'
     key.status = 'revoked'
     key.save(update_fields=['status', 'updated_at'])
+
+    # Mark the most-recent approved/key_assigned KeyRequest as revoked
+    if was_managed_active:
+        KeyRequest.objects.filter(
+            company=key.company, agent_name=key.agent_name, status__in=['approved', 'key_assigned']
+        ).update(status='revoked')
+
+    if was_managed_active:
+        try:
+            from core.models import CompanyUser
+            from project_manager_agent.models import PMNotification
+            for cu in CompanyUser.objects.filter(company=key.company, is_active=True):
+                PMNotification.objects.create(
+                    company_user=cu,
+                    notification_type='custom',
+                    severity='critical',
+                    title=f"Managed key removed — {key.get_agent_name_display()}",
+                    message=(
+                        f"The admin has removed the managed {key.get_provider_display()} key "
+                        f"for {key.get_agent_name_display()}. "
+                        f"Add your own API key (BYOK) or request a new managed key to continue using this agent."
+                    ),
+                )
+        except Exception as exc:
+            logger.warning("Failed to notify company on key revoke: %s", exc)
+
     return Response({'status': 'success'})
 
 
@@ -197,6 +250,7 @@ def _serialize_pricing(p: AdminPricingConfig):
         'monthly_flat_usd': str(p.monthly_flat_usd),
         'service_charge_usd': str(p.service_charge_usd),
         'free_tokens_on_purchase': p.free_tokens_on_purchase,
+        'managed_key_tokens': p.managed_key_tokens,
         'updated_by': p.updated_by.username if p.updated_by else None,
         'updated_at': p.updated_at.isoformat(),
     }
@@ -221,17 +275,28 @@ def update_pricing(request, agent_name):
         return Response({'status': 'error', 'message': 'Invalid agent'}, status=status.HTTP_400_BAD_REQUEST)
     p, _ = AdminPricingConfig.objects.get_or_create(agent_name=agent_name)
     try:
+        old_free_tokens = p.free_tokens_on_purchase
         if 'monthly_flat_usd' in request.data:
             p.monthly_flat_usd = request.data['monthly_flat_usd']
         if 'service_charge_usd' in request.data:
             p.service_charge_usd = request.data['service_charge_usd']
         if 'free_tokens_on_purchase' in request.data:
             p.free_tokens_on_purchase = int(request.data['free_tokens_on_purchase'])
+        if 'managed_key_tokens' in request.data:
+            p.managed_key_tokens = int(request.data['managed_key_tokens'])
     except (TypeError, ValueError):
         return Response({'status': 'error', 'message': 'Bad numeric value'},
                         status=status.HTTP_400_BAD_REQUEST)
     p.updated_by = request.user
     p.save()
+
+    # Propagate free_tokens_on_purchase change to all existing quotas for this agent
+    if p.free_tokens_on_purchase != old_free_tokens:
+        from core.models import AgentTokenQuota
+        AgentTokenQuota.objects.filter(agent_name=agent_name).update(
+            included_tokens=p.free_tokens_on_purchase
+        )
+
     return Response({'status': 'success', 'pricing': _serialize_pricing(p)})
 
 
@@ -260,14 +325,14 @@ def _serialize_quota_admin(q: AgentTokenQuota):
         'agent_name': q.agent_name,
         'agent_label': q.get_agent_name_display(),
         'included_tokens': q.included_tokens,
-        'used_tokens': q.used_tokens,
+        'used_tokens': min(q.used_tokens, q.included_tokens),
         'remaining': q.remaining,
         'is_exhausted': q.is_exhausted,
         'byok_tokens_info': q.byok_tokens_info,
         'managed_included_tokens': q.managed_included_tokens,
-        'managed_used_tokens': q.managed_used_tokens,
+        'managed_used_tokens': min(q.managed_used_tokens, q.managed_included_tokens) if q.managed_included_tokens > 0 else q.managed_used_tokens,
         'managed_is_exhausted': q.managed_included_tokens > 0 and q.managed_used_tokens >= q.managed_included_tokens,
-        'provider_breakdown': provider_breakdown,
+        'provider_breakdown': {p: min(t, q.included_tokens) for p, t in provider_breakdown.items()},
         'default_provider': default_provider,
         'updated_at': q.updated_at.isoformat(),
     }
@@ -337,7 +402,10 @@ def adjust_quota(request, quota_id):
 # Key Requests
 # ----------------------------------------------------------------------------
 
-def _serialize_request_admin(r: KeyRequest):
+def _serialize_request_admin(r: KeyRequest, revoked_keys: set = None):
+    status = r.status
+    if status == 'approved' and revoked_keys and (r.company_id, r.agent_name) in revoked_keys:
+        status = 'revoked'
     return {
         'id': r.id,
         'company_id': r.company_id,
@@ -345,13 +413,17 @@ def _serialize_request_admin(r: KeyRequest):
         'agent_name': r.agent_name,
         'agent_label': r.get_agent_name_display(),
         'provider': r.provider,
-        'status': r.status,
+        'status': status,
         'note': r.note,
         'admin_note': r.admin_note,
         'requested_by': r.requested_by.email if r.requested_by else None,
         'resolved_by': r.resolved_by.username if r.resolved_by else None,
         'created_at': r.created_at.isoformat(),
         'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
+        'key_cost_snapshot': float(r.key_cost_snapshot) if r.key_cost_snapshot is not None else None,
+        'service_charge_snapshot': float(r.service_charge_snapshot) if r.service_charge_snapshot is not None else None,
+        'amount_paid': float(r.amount_paid) if r.amount_paid is not None else None,
+        'paid_at': r.paid_at.isoformat() if r.paid_at else None,
     }
 
 
@@ -370,14 +442,104 @@ def list_requests(request):
     limit = min(int(request.GET.get('limit', 50)), 200)
     total = qs.count()
     start = (page - 1) * limit
-    items = qs[start:start + limit]
+    items = list(qs[start:start + limit])
+
+    # Build set of (company_id, agent_name) pairs whose managed key is revoked
+    revoked_keys = set(
+        CompanyAPIKey.objects.filter(mode='managed', status='revoked')
+        .values_list('company_id', 'agent_name')
+    )
+
     return Response({
         'status': 'success',
         'total': total,
         'page': page,
         'limit': limit,
-        'requests': [_serialize_request_admin(r) for r in items],
+        'requests': [_serialize_request_admin(r, revoked_keys) for r in items],
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def approve_key_request(request, request_id):
+    """Admin approves a KeyRequest and sets the price.
+
+    Body: { key_cost, service_charge, admin_note? }
+    Sets status='payment_pending', snapshots prices, notifies company via
+    PMNotification + email: "pay $X to get your key".
+    Does NOT assign the key yet — that happens after payment_received.
+    """
+    try:
+        req = KeyRequest.objects.select_related('company', 'requested_by').get(pk=request_id)
+    except KeyRequest.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if req.status != 'pending':
+        return Response({'status': 'error', 'message': f'Request is already {req.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        key_cost = float(request.data.get('key_cost', 0) or 0)
+        service_charge = float(request.data.get('service_charge', 0) or 0)
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'Invalid price values'}, status=status.HTTP_400_BAD_REQUEST)
+
+    admin_note = (request.data.get('admin_note') or '').strip()
+    total_due = round(key_cost + service_charge, 2)
+
+    req.status = 'payment_pending'
+    req.key_cost_snapshot = key_cost
+    req.service_charge_snapshot = service_charge
+    req.resolved_by = request.user
+    req.resolved_at = timezone.now()
+    if admin_note:
+        req.admin_note = admin_note
+    req.save()
+
+    agent_label = req.get_agent_name_display()
+    amount_str = f"${total_due:.2f}" if total_due > 0 else "no charge"
+
+    # PMNotification to all company users
+    try:
+        from core.models import CompanyUser
+        from project_manager_agent.models import PMNotification
+        for cu in CompanyUser.objects.filter(company=req.company, is_active=True):
+            PMNotification.objects.create(
+                company_user=cu,
+                notification_type='custom',
+                severity='info',
+                title=f"Key request approved — {agent_label}",
+                message=(
+                    f"Your request for a managed key for {agent_label} has been approved. "
+                    f"Amount due: {amount_str} (key cost: ${key_cost:.2f} + service charge: ${service_charge:.2f}). "
+                    f"Please confirm your payment to receive the key."
+                ),
+            )
+    except Exception as exc:
+        logger.warning("PMNotification failed on approve: %s", exc)
+
+    # Email to requester
+    try:
+        from core.email_service import EmailService
+        email_svc = EmailService()
+        requester_email = req.requested_by.email if req.requested_by else None
+        if requester_email:
+            email_svc.send_email(
+                recipient=requester_email,
+                subject=f"[AIEmployee] Key request approved — {agent_label}",
+                message_text=(
+                    f"Hi,\n\n"
+                    f"Your request for a managed {req.provider.upper()} key for {agent_label} has been approved.\n\n"
+                    f"Amount due: {amount_str}\n"
+                    f"  - Key cost: ${key_cost:.2f}\n"
+                    f"  - Service charge: ${service_charge:.2f}\n\n"
+                    f"Please log in and confirm your payment to receive the key.\n\n"
+                    f"{'Admin note: ' + admin_note if admin_note else ''}"
+                ),
+            )
+    except Exception as exc:
+        logger.warning("Email failed on approve: %s", exc)
+
+    return Response({'status': 'success', 'request': _serialize_request_admin(req)})
 
 
 @api_view(['POST'])
@@ -510,11 +672,28 @@ def admin_overview(request):
         total_used=Sum('used_tokens'),
         total_byok_info=Sum('byok_tokens_info'),
     )
-    # Per-provider aggregate across all companies
+    # Per-provider aggregate across all companies.
+    # AgentProviderUsage only tracks tokens from when per-provider logging was added;
+    # attribute the per-agent gap (used_tokens minus tracked sum) to each agent's
+    # default provider so the ledger sums to the real total. Two queries only.
     provider_totals = {
         row['provider']: row['total']
         for row in AgentProviderUsage.objects.values('provider').annotate(total=Sum('used_tokens'))
     }
+    # Per-agent: total used vs total tracked
+    agent_used = {
+        row['agent_name']: row['total']
+        for row in AgentTokenQuota.objects.values('agent_name').annotate(total=Sum('used_tokens'))
+    }
+    agent_tracked = {
+        row['quota__agent_name']: row['total']
+        for row in AgentProviderUsage.objects.values('quota__agent_name').annotate(total=Sum('used_tokens'))
+    }
+    for agent_name, used in agent_used.items():
+        gap = (used or 0) - (agent_tracked.get(agent_name) or 0)
+        if gap > 0:
+            default_p = AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai')
+            provider_totals[default_p] = provider_totals.get(default_p, 0) + gap
     stats = {
         'total_companies': Company.objects.count(),
         'total_purchases': CompanyModulePurchase.objects.filter(status='active').count(),
@@ -522,7 +701,7 @@ def admin_overview(request):
         'managed_keys': CompanyAPIKey.objects.filter(status='active', mode='managed').count(),
         'byok_keys': CompanyAPIKey.objects.filter(status='active', mode='byok').count(),
         'platform_keys_configured': PlatformAPIKey.objects.filter(status='active').exclude(encrypted_key='').count(),
-        'pending_requests': KeyRequest.objects.filter(status='pending').count(),
+        'pending_requests': KeyRequest.objects.filter(status__in=['pending', 'payment_received']).count(),
         'exhausted_quotas': AgentTokenQuota.objects.filter(used_tokens__gte=F('included_tokens')).count(),
         'total_included_tokens': agg['total_included'] or 0,
         'total_used_tokens': agg['total_used'] or 0,

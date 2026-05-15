@@ -550,6 +550,9 @@ urlpatterns = [
     re_path(r'^company/agent-keys/byok/(?P<agent_name>[a-z_]+)/?$', company_api_keys.revoke_byok_key, name='revoke_byok_key'),  # DELETE
     re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
     re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
+    re_path(r'^company/key-requests/(?P<request_id>\d+)/pay/?$', company_api_keys.pay_for_key_request, name='pay_for_key_request'),  # POST
+    re_path(r'^company/key-requests/(?P<request_id>\d+)/checkout/?$', company_api_keys.create_key_checkout_session, name='create_key_checkout_session'),  # POST
+    re_path(r'^company/key-requests/verify-session/(?P<session_id>[^/]+)/?$', company_api_keys.verify_key_session, name='verify_key_session'),  # GET
 
     # Super Admin — API keys, pricing, quotas, requests
     re_path(r'^admin/api-keys/overview/?$', admin_api_keys.admin_overview, name='admin_overview'),  # GET
@@ -561,6 +564,7 @@ urlpatterns = [
     re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
     re_path(r'^admin/token-quotas/(?P<quota_id>\d+)/?$', admin_api_keys.adjust_quota, name='admin_adjust_quota'),  # PATCH
     re_path(r'^admin/key-requests/?$', admin_api_keys.list_requests, name='admin_list_requests'),  # GET
+    re_path(r'^admin/key-requests/(?P<request_id>\d+)/approve/?$', admin_api_keys.approve_key_request, name='admin_approve_request'),  # POST
     re_path(r'^admin/key-requests/(?P<request_id>\d+)/reject/?$', admin_api_keys.reject_request, name='admin_reject_request'),  # POST
 
     # Platform keys (shared default keys, one per provider)
