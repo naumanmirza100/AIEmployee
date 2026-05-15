@@ -301,10 +301,19 @@ export const checkReplies = async (campaignId) => {
 };
 
 // Meetings
-export const listMeetings = async ({ status = '' } = {}) => {
+export const listMeetings = async ({
+  status = '', campaign_id = '', search = '',
+  active_only = true, page = 1, page_size = 20,
+} = {}) => {
   try {
-    const qs = status ? `?status=${status}` : '';
-    return await companyApi.get(`/sdr/meetings/${qs}`);
+    const params = new URLSearchParams();
+    if (status)      params.set('status', status);
+    if (campaign_id) params.set('campaign_id', campaign_id);
+    if (search)      params.set('search', search);
+    params.set('active_only', active_only ? 'true' : 'false');
+    params.set('page', page);
+    params.set('page_size', page_size);
+    return await companyApi.get(`/sdr/meetings/?${params.toString()}`);
   } catch (error) {
     console.error('List meetings error:', error);
     throw error;
@@ -338,6 +347,51 @@ export const deleteMeeting = async (id) => {
   }
 };
 
+export const confirmMeeting = async (id, data) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/confirm/`, data);
+  } catch (error) {
+    console.error('Confirm meeting error:', error);
+    throw error;
+  }
+};
+
+export const sendMeetingReminder = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/send-reminder/`, {});
+  } catch (error) {
+    console.error('Send reminder error:', error);
+    throw error;
+  }
+};
+
+export const generateMeetingPrep = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/generate-prep/`, {});
+  } catch (error) {
+    console.error('Generate prep error:', error);
+    throw error;
+  }
+};
+
+export const resendSchedulingEmail = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/meetings/${id}/resend-scheduling/`, {});
+  } catch (error) {
+    console.error('Resend scheduling email error:', error);
+    throw error;
+  }
+};
+
+export const checkAllReplies = async () => {
+  try {
+    return await companyApi.post('/sdr/check-all-replies/', {});
+  } catch (error) {
+    console.error('Check all replies error:', error);
+    throw error;
+  }
+};
+
 // Analytics
 export const getSdrAnalytics = async () => {
   try {
@@ -355,4 +409,27 @@ export const generatePersonalizedEmail = async (data) => {
     console.error('Generate email error:', error);
     throw error;
   }
+};
+
+// --------------------------------------------------------------------------
+// Public booking (no auth — token from URL)
+// --------------------------------------------------------------------------
+const _bookingBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+
+export const getBookingInfo = async (token) => {
+  const resp = await fetch(`${_bookingBase}/sdr/book/${token}/`);
+  const data = await resp.json();
+  if (!resp.ok) throw data;
+  return data;
+};
+
+export const confirmBooking = async (token, scheduledAt) => {
+  const resp = await fetch(`${_bookingBase}/sdr/book/${token}/confirm/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scheduled_at: scheduledAt }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw data;
+  return data;
 };
