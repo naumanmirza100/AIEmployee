@@ -548,6 +548,11 @@ class HRDocumentChunk(models.Model):
     document = models.ForeignKey(HRDocument, on_delete=models.CASCADE, related_name='chunks')
     chunk_index = models.IntegerField()
     chunk_text = models.TextField()
+    section_heading = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='The detected heading (Markdown #, ALL-CAPS, Article/Section marker) '
+                  'that opened the section this chunk belongs to. Empty for non-section-aware types.',
+    )
     embedding = models.TextField(null=True, blank=True,
                                  help_text='Vector embedding as JSON; nvarchar(max) on MSSQL.')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -870,3 +875,50 @@ class HRKnowledgeChatMessage(models.Model):
     class Meta:
         app_label = 'hr_agent'
         ordering = ['created_at']
+
+
+# ============================================================================
+# Audit log — immutable record of HR-sensitive changes
+# ============================================================================
+
+class HRAuditLog(models.Model):
+    """Immutable record of who changed HR-sensitive data.
+
+    Written on: employee edits, compensation create/delete, performance review
+    updates. Never mutated after creation — only inserted and read.
+
+    ``diff`` holds ``{"before": {...}, "after": {...}}`` for updates or
+    ``{"deleted": {...}}`` / ``{"created": {...}}`` for create/delete events.
+    """
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE,
+                                related_name='hr_audit_logs')
+    actor = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL,
+                              null=True, blank=True, related_name='hr_audit_actions',
+                              help_text='The CompanyUser who made the change.')
+    action = models.CharField(
+        max_length=80,
+        help_text='Dot-path verb: employee.update, compensation.create, '
+                  'compensation.delete, review.update …',
+    )
+    target_type = models.CharField(
+        max_length=40,
+        help_text='Lower-case model name: employee, compensation, review …',
+    )
+    target_id = models.IntegerField(help_text='Primary key of the changed row.')
+    diff = models.JSONField(
+        default=dict, blank=True,
+        help_text='{"before": {...}, "after": {...}} or {"created": {...}} or {"deleted": {...}}.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', '-created_at']),
+            models.Index(fields=['target_type', 'target_id']),
+            models.Index(fields=['actor']),
+        ]
+
+    def __str__(self):
+        return f"{self.action} by actor={self.actor_id} on {self.target_type}:{self.target_id}"

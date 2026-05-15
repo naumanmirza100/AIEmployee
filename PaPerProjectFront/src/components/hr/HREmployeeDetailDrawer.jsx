@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, User, Briefcase, Building2, Mail, CalendarClock, FileText,
   ClipboardList, ChevronRight, DollarSign, Plus, Trash2, Star,
+  Pencil, Shield,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -145,6 +146,73 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
     }
   };
 
+  // Edit employee state — inline edit dialog.
+  const [editForm, setEditForm] = useState({ open: false, saving: false, payload: {} });
+
+  // Audit log — HR-admin only, lazy-fetched when the section is expanded.
+  const [auditLog, setAuditLog] = useState({ rows: [], loading: false, loaded: false, allowed: true });
+
+  const openEditForm = () => {
+    const emp = data?.employee;
+    if (!emp) return;
+    setEditForm({
+      open: true, saving: false,
+      payload: {
+        full_name: emp.full_name || '',
+        job_title: emp.job_title || '',
+        department: emp.department_name || emp.department || '',
+        employment_status: emp.employment_status || 'active',
+        employment_type: emp.employment_type || 'full_time',
+        start_date: emp.start_date || '',
+        probation_end_date: emp.probation_end_date || '',
+        timezone_name: emp.timezone_name || 'UTC',
+        phone: emp.phone || '',
+      },
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    setEditForm((s) => ({ ...s, saving: true }));
+    try {
+      const res = await hrAgentService.updateHREmployee(employeeId, editForm.payload);
+      const updated = res?.data;
+      if (updated) setData((prev) => ({ ...prev, employee: updated }));
+      toast({ title: 'Employee updated' });
+      setEditForm({ open: false, saving: false, payload: {} });
+    } catch (err) {
+      toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+      setEditForm((s) => ({ ...s, saving: false }));
+    }
+  };
+
+  const loadAuditLog = async () => {
+    if (auditLog.loaded || auditLog.loading) return;
+    setAuditLog((s) => ({ ...s, loading: true }));
+    try {
+      const res = await hrAgentService.listHRAuditLog({ target_type: 'employee', target_id: employeeId, limit: 30 });
+      setAuditLog({ rows: res?.data || [], loading: false, loaded: true, allowed: true });
+    } catch (err) {
+      const restricted = /HR-admin/i.test(err.message || '') || /403/.test(err.message || '');
+      setAuditLog({ rows: [], loading: false, loaded: true, allowed: !restricted });
+    }
+  };
+
+  const setEditField = (k, v) => setEditForm((s) => ({ ...s, payload: { ...s.payload, [k]: v } }));
+
+  const handleUnreleaseReview = async (row) => {
+    if (!confirm(`Retract visibility of the "${row.cycle_name || `Cycle #${row.cycle_id}`}" review from this employee?`)) return;
+    try {
+      await hrAgentService.updateHRPerfReview(row.id, { unrelease: true });
+      setReviews((s) => ({
+        ...s,
+        rows: s.rows.map((r) => r.id === row.id ? { ...r, visible_to_employee: false, status: 'awaiting_calibration' } : r),
+      }));
+      toast({ title: 'Review retracted from employee view' });
+    } catch (e) {
+      toast({ title: 'Retract failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
   const e = data?.employee;
   const chain = data?.manager_chain || [];
   const balances = data?.leave_balances || [];
@@ -184,6 +252,11 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-1 gap-x-4 flex-1 text-sm">
+                  <div className="col-span-2 flex justify-end -mt-1 mb-1">
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={openEditForm}>
+                      <Pencil className="h-3 w-3 mr-1" /> Edit
+                    </Button>
+                  </div>
                   <KV icon={Mail} label="Email" value={e.work_email} />
                   <KV icon={Briefcase} label="Title" value={e.job_title} />
                   <KV icon={Building2} label="Department" value={e.department_name || e.department} />
@@ -297,9 +370,18 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                             <span className="text-amber-300 text-xs">{'★'.repeat(row.overall_rating)}{'☆'.repeat(Math.max(0, 5 - row.overall_rating))}</span>
                           )}
                         </div>
-                        <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[row.status === 'closed' ? 'approved' : (row.visible_to_employee ? 'approved' : 'pending')] || ''}`}>
-                          {String(row.status || '').replace(/_/g, ' ')}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[row.status === 'closed' ? 'approved' : (row.visible_to_employee ? 'approved' : 'pending')] || ''}`}>
+                            {String(row.status || '').replace(/_/g, ' ')}
+                          </Badge>
+                          {row.status === 'closed' && row.visible_to_employee && (
+                            <Button variant="outline" size="sm"
+                              className="h-5 px-1.5 text-[10px] text-amber-300 hover:text-amber-200 border-amber-400/30"
+                              onClick={() => handleUnreleaseReview(row)}>
+                              Retract
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       {row.reviewer_name && (
                         <div className="text-xs text-white/45 mt-0.5">Reviewer: {row.reviewer_name}</div>
@@ -398,8 +480,124 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                 </div>
               )}
             </section>
+
+            {/* AUDIT LOG */}
+            <section>
+              <div className="flex items-center justify-between mb-2">
+                <SectionTitle icon={Shield} title="Audit log" count={auditLog.loaded ? auditLog.rows.length : null} />
+                {!auditLog.loaded && (
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={loadAuditLog}>
+                    Load
+                  </Button>
+                )}
+              </div>
+              {!auditLog.loaded ? null : !auditLog.allowed ? (
+                <Empty text="Audit log is restricted to HR admins." />
+              ) : auditLog.loading ? (
+                <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-white/40" /></div>
+              ) : auditLog.rows.length === 0 ? (
+                <Empty text="No audit events recorded for this employee yet." />
+              ) : (
+                <div className="space-y-1.5">
+                  {auditLog.rows.map((log) => (
+                    <div key={log.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-violet-300">{log.action}</span>
+                        <span className="text-white/40 shrink-0">{new Date(log.created_at).toLocaleString()}</span>
+                      </div>
+                      {log.actor_name && <div className="text-white/50 mt-0.5">by {log.actor_name}</div>}
+                      {log.diff?.before && log.diff?.after && (
+                        <div className="mt-1 text-white/40 space-y-0.5">
+                          {Object.keys(log.diff.after).filter((k) =>
+                            JSON.stringify(log.diff.before[k]) !== JSON.stringify(log.diff.after[k])
+                          ).map((k) => (
+                            <div key={k} className="truncate">
+                              <span className="text-white/60">{k}:</span>{' '}
+                              <span className="line-through text-rose-400/60">{String(log.diff.before[k] ?? '—')}</span>
+                              {' → '}
+                              <span className="text-emerald-400/80">{String(log.diff.after[k] ?? '—')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+
+    {/* Edit employee dialog */}
+    <Dialog open={editForm.open} onOpenChange={(o) => setEditForm((s) => ({ ...s, open: o }))}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Edit employee</DialogTitle>
+          <DialogDescription>HR-admins can edit all fields. Changes are written to the audit log.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="col-span-2">
+            <Label className="text-xs">Full name</Label>
+            <Input value={editForm.payload.full_name || ''} onChange={(ev) => setEditField('full_name', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Job title</Label>
+            <Input value={editForm.payload.job_title || ''} onChange={(ev) => setEditField('job_title', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Department</Label>
+            <Input value={editForm.payload.department || ''} onChange={(ev) => setEditField('department', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Employment status</Label>
+            <Select value={editForm.payload.employment_status || 'active'} onValueChange={(v) => setEditField('employment_status', v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {['candidate','onboarding','active','on_leave','probation','notice','offboarded'].map((s) => (
+                  <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Employment type</Label>
+            <Select value={editForm.payload.employment_type || 'full_time'} onValueChange={(v) => setEditField('employment_type', v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {['full_time','part_time','contract','intern'].map((s) => (
+                  <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Start date</Label>
+            <Input type="date" value={editForm.payload.start_date || ''} onChange={(ev) => setEditField('start_date', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Probation end date</Label>
+            <Input type="date" value={editForm.payload.probation_end_date || ''} onChange={(ev) => setEditField('probation_end_date', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Phone</Label>
+            <Input value={editForm.payload.phone || ''} onChange={(ev) => setEditField('phone', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Timezone</Label>
+            <Input placeholder="UTC" value={editForm.payload.timezone_name || ''} onChange={(ev) => setEditField('timezone_name', ev.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setEditForm((s) => ({ ...s, open: false }))} disabled={editForm.saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveEdit} disabled={editForm.saving}>
+            {editForm.saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+            Save
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 
