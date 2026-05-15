@@ -127,6 +127,7 @@ def assign_managed_key(request):
     provider = (request.data.get('provider') or 'openai').strip()
     api_key = (request.data.get('api_key') or '').strip()
     request_id = request.data.get('request_id')
+    reset_tokens = bool(request.data.get('reset_tokens', True))
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
@@ -157,10 +158,13 @@ def assign_managed_key(request):
         # Set managed token quota on the AgentTokenQuota row
         from core.api_key_service import _ensure_quota
         quota = _ensure_quota(company, agent_name)
-        AgentTokenQuota.objects.filter(pk=quota.pk).update(
-            managed_included_tokens=token_limit,
-            managed_used_tokens=0,
-        )
+        quota_update = {'managed_included_tokens': token_limit}
+        if reset_tokens:
+            quota_update['managed_used_tokens'] = 0
+            quota_update['managed_notified_80pct'] = False
+            quota_update['managed_notified_90pct'] = False
+            quota_update['managed_notified_100pct'] = False
+        AgentTokenQuota.objects.filter(pk=quota.pk).update(**quota_update)
 
         approved_req = None
         if request_id:

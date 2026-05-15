@@ -33,6 +33,42 @@ logger = logging.getLogger(__name__)
 VALID_AGENTS = {name for name, _ in AGENT_CHOICES}
 VALID_PROVIDERS = {name for name, _ in PROVIDER_CHOICES}
 
+_PROVIDER_VALIDATE = {
+    'openai':  ('https://api.openai.com/v1/models',                         lambda k: {'Authorization': f'Bearer {k}'}),
+    'groq':    ('https://api.groq.com/openai/v1/models',                    lambda k: {'Authorization': f'Bearer {k}'}),
+    'claude':  ('https://api.anthropic.com/v1/models',                      lambda k: {'x-api-key': k, 'anthropic-version': '2023-06-01'}),
+    'grok':    ('https://api.x.ai/v1/models',                               lambda k: {'Authorization': f'Bearer {k}'}),
+    'gemini':  ('https://generativelanguage.googleapis.com/v1beta/models',   lambda k: {'x-goog-api-key': k}),
+}
+
+
+def _validate_byok_key(provider: str, api_key: str):
+    """Make a cheap GET (list models) to confirm the key is accepted by the provider.
+    Returns (is_valid: bool, user_facing_error: str).
+    On unexpected network errors we allow the save so a timeout never blocks a real key.
+    """
+    entry = _PROVIDER_VALIDATE.get(provider)
+    if not entry:
+        return True, ''
+    url, make_headers = entry
+    try:
+        import httpx
+        with httpx.Client(timeout=8) as client:
+            resp = client.get(url, headers=make_headers(api_key))
+        if resp.status_code == 401:
+            return False, 'Invalid API key — the provider rejected it. Please check you copied the key correctly.'
+        if resp.status_code == 403:
+            return False, 'API key rejected — it does not have the required permissions. Check your key scopes.'
+        if resp.status_code >= 400:
+            return False, 'The provider rejected this key. Please verify the key is correct and active.'
+        return True, ''
+    except httpx.TimeoutException:
+        logger.warning('BYOK key validation timed out for provider %s', provider)
+        return True, ''   # timeout → allow save, don't block legitimate keys
+    except Exception as exc:
+        logger.warning('BYOK key validation unexpected error for %s: %s', provider, exc)
+        return True, ''   # network issue → allow save
+
 
 def _serialize_key(key: CompanyAPIKey):
     return {
@@ -166,6 +202,11 @@ def upsert_byok_key(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    # Validate the key against the provider before storing it
+    is_valid, err_msg = _validate_byok_key(provider, api_key)
+    if not is_valid:
+        return Response({'status': 'error', 'message': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+
     key, created = CompanyAPIKey.objects.get_or_create(
         company=company, agent_name=agent_name, mode='byok',
         defaults={'provider': provider, 'encrypted_key': ''},
@@ -174,6 +215,15 @@ def upsert_byok_key(request):
     key.status = 'active'
     key.set_plaintext_key(api_key)
     key.save()
+
+    # Reset BYOK usage counter, token cap, and notification flags — new key = fresh start
+    AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).update(
+        byok_tokens_info=0,
+        byok_token_limit=0,
+        byok_notified_80pct=False,
+        byok_notified_90pct=False,
+        byok_notified_100pct=False,
+    )
 
     # In-app notification to the user who added/updated the key
     try:
@@ -228,8 +278,8 @@ def set_token_pool(request):
     if agent_name not in {name for name, _ in AGENT_CHOICES}:
         return Response({'status': 'error', 'message': 'Invalid agent_name'},
                         status=status.HTTP_400_BAD_REQUEST)
-    if preferred_pool not in ('free', 'managed'):
-        return Response({'status': 'error', 'message': "preferred_pool must be 'free' or 'managed'"},
+    if preferred_pool not in ('free', 'managed', 'byok'):
+        return Response({'status': 'error', 'message': "preferred_pool must be 'free', 'managed', or 'byok'"},
                         status=status.HTTP_400_BAD_REQUEST)
 
     quota, _ = AgentTokenQuota.objects.get_or_create(

@@ -391,27 +391,26 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
                 </div>
 
                 <div className="flex flex-col items-end gap-2 shrink-0">
+                  {k.status !== 'revoked' && (
+                    <Button size="sm" variant="ghost" className="text-red-300 hover:text-red-200 hover:bg-red-500/10" onClick={() => onRevoke(k)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                   {q && (
                     <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjustQuota(q, k)}>
-                      {/* <Gauge className="w-3 h-3 mr-1" /> */}
                        Edit tokens
                     </Button>
                   )}
                   {k.status === 'revoked' ? (
-                    <Button size="sm" className=" bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
+                    <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
                       Re-assign
                     </Button>
                   ) : (
-                    <>
-                      {k.mode === 'managed' && (
-                        <Button size="sm" className="pr-4 pl-4 bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
-                          Replace
-                        </Button>
-                      )}
-                      <Button size="sm" variant="ghost" className="text-red-300 hover:text-red-200 hover:bg-red-500/10" onClick={() => onRevoke(k)}>
-                        <Trash2 className="w-4 h-4" />
+                    k.mode === 'managed' && (
+                      <Button size="sm" className="pr-4 pl-4 bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
+                        Replace
                       </Button>
-                    </>
+                    )
                   )}
                 </div>
               </div>
@@ -813,7 +812,7 @@ const SuperAdminApiKeysPage = () => {
   const [requestFilter, setRequestFilter] = useState({});
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
-  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '' });
+  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true });
   const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', admin_note: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
@@ -892,18 +891,21 @@ const SuperAdminApiKeysPage = () => {
         agent_name: prefill.agent_name,
         provider: prefill.provider || 'openai',
         api_key: '',
+        reset_tokens: true,
       });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: prefill });
     } else if (existingOrRequest) {
+      const hasUsage = existingOrRequest.quota?.managed_used_tokens > 0;
       setAssignForm({
         company_id: existingOrRequest.company_id,
         agent_name: existingOrRequest.agent_name,
         provider: existingOrRequest.provider || 'openai',
         api_key: '',
+        reset_tokens: !hasUsage, // default: reset only if no prior usage to preserve
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -920,6 +922,7 @@ const SuperAdminApiKeysPage = () => {
         agent_name: assignForm.agent_name,
         provider: assignForm.provider,
         api_key: assignForm.api_key,
+        reset_tokens: assignForm.reset_tokens,
       };
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
@@ -1121,82 +1124,118 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Assign Managed Key Modal */}
       <Dialog open={assignModal.open} onOpenChange={(o) => !o && setAssignModal({ open: false, replacingKey: null, prefillRequest: null })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
-          <DialogHeader>
+        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white sm:max-w-3xl w-full">
+          <DialogHeader className="pb-2 border-b border-white/8">
             <DialogTitle className="flex items-center gap-2">
               <Key className="w-5 h-5 text-violet-400" />
               {assignModal.replacingKey ? 'Replace Managed Key' : assignModal.prefillRequest ? 'Approve & Assign Key' : 'Assign Managed Key'}
             </DialogTitle>
-            <DialogDescription className="text-white/60">
-              The key is encrypted on save. Only a masked preview will be visible afterward.
+            <DialogDescription className="text-white/50 text-xs">
+              Encrypted on save — only a masked preview is visible afterward.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-white/70 text-sm">Company</Label>
-              <div className="mt-1">
-                <CompanyPicker
-                  value={assignForm.company_id}
-                  onChange={(id) => setAssignForm({ ...assignForm, company_id: id })}
+
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-3">
+            {/* LEFT — target fields */}
+            <div className="space-y-4">
+              <div>
+                <Label className="text-white/60 text-xs uppercase tracking-wider">Company</Label>
+                <div className="mt-1">
+                  <CompanyPicker
+                    value={assignForm.company_id}
+                    onChange={(id) => setAssignForm({ ...assignForm, company_id: id })}
+                    disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
+                    lockedLabel={(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
+                  />
+                </div>
+                {(assignModal.replacingKey || assignModal.prefillRequest) && (
+                  <p className="text-[10px] text-white/35 mt-1">
+                    Locked: {(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label className="text-white/60 text-xs uppercase tracking-wider">Agent</Label>
+                <Select
+                  value={assignForm.agent_name}
+                  onValueChange={(v) => setAssignForm({ ...assignForm, agent_name: v })}
                   disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
-                  lockedLabel={(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
+                >
+                  <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                    {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-white/60 text-xs uppercase tracking-wider">Provider</Label>
+                <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
+                  <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                    {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* RIGHT — key + options */}
+            <div className="space-y-4">
+              <div>
+                <Label className="text-white/60 text-xs uppercase tracking-wider">API Key</Label>
+                <Input
+                  type="password" autoComplete="off" placeholder="sk-..."
+                  className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
+                  value={assignForm.api_key}
+                  onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
                 />
               </div>
-              {(assignModal.replacingKey || assignModal.prefillRequest) && (
-                <p className="text-[11px] text-white/50 mt-1">
-                  Locked: {(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
+              <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
+                <Info className="w-3.5 h-3.5 text-violet-300 mt-0.5 shrink-0" />
+                <p className="text-xs text-white/55">
+                  Free tokens applied from{' '}
+                  <span className="text-violet-300 font-semibold">Pricing</span> config.
+                  {(() => {
+                    const p = pricing.find(x => x.agent_name === assignForm.agent_name);
+                    return p ? (
+                      <span className="block mt-1 text-white/80 font-semibold">
+                        Will grant: {formatTokens(p.free_tokens_on_purchase)} tokens
+                      </span>
+                    ) : null;
+                  })()}
                 </p>
+              </div>
+              {assignModal.replacingKey && (
+                <div
+                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                    assignForm.reset_tokens
+                      ? 'border-amber-500/40 bg-amber-500/8'
+                      : 'border-white/10 bg-white/3 hover:border-white/20'
+                  }`}
+                  onClick={() => setAssignForm((f) => ({ ...f, reset_tokens: !f.reset_tokens }))}
+                >
+                  <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                    assignForm.reset_tokens ? 'bg-amber-500 border-amber-500' : 'border-white/30'
+                  }`}>
+                    {assignForm.reset_tokens && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12">
+                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm text-white font-medium">Reset token usage to 0</p>
+                    <p className="text-xs text-white/50 mt-0.5">
+                      {assignModal.replacingKey.quota?.managed_used_tokens > 0
+                        ? `Currently ${formatTokens(assignModal.replacingKey.quota.managed_used_tokens)} used — uncheck to keep history.`
+                        : 'No tokens used yet.'}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
-            <div>
-              <Label className="text-white/70 text-sm">Agent</Label>
-              <Select
-                value={assignForm.agent_name}
-                onValueChange={(v) => setAssignForm({ ...assignForm, agent_name: v })}
-                disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
-              >
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                  {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-white/70 text-sm">Provider</Label>
-              <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                  {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-white/70 text-sm">API Key</Label>
-              <Input
-                type="password" autoComplete="off" placeholder="sk-..."
-                className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
-                value={assignForm.api_key}
-                onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
-              />
-            </div>
-            <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
-              <Info className="w-4 h-4 text-violet-300 mt-0.5 shrink-0" />
-              <p className="text-xs text-white/60">
-                Free tokens for this agent are automatically applied from the{' '}
-                <span className="text-violet-300 font-semibold">Pricing</span> tab configuration.
-                To change the token limit, update it in Pricing first.
-                {(() => {
-                  const p = pricing.find(x => x.agent_name === assignForm.agent_name);
-                  return p ? (
-                    <span className="block mt-1 text-white/80 font-semibold">
-                      Will grant: {formatTokens(p.free_tokens_on_purchase)} tokens
-                    </span>
-                  ) : null;
-                })()}
-              </p>
-            </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="pt-2 border-t border-white/8">
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setAssignModal({ open: false, replacingKey: null, prefillRequest: null })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitAssign} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Assign key

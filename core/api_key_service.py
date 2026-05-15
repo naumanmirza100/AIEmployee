@@ -75,6 +75,60 @@ class InvalidAgent(KeyServiceError):
     user_message = "Unknown agent."
 
 
+class ByokCapReached(KeyServiceError):
+    reason = "byok_cap_reached"
+    user_message = (
+        "Your BYOK token cap has been reached. "
+        "Increase the limit in API Keys settings to continue, or remove the cap to use your key without restriction."
+    )
+
+
+class BadAPIKey(KeyServiceError):
+    reason = "bad_api_key"
+
+    def __init__(self, mode: Optional[str] = None):
+        if mode == 'byok':
+            self.user_message = (
+                "Your API key was rejected by the provider. "
+                "Please check it in API Keys settings and update or replace it."
+            )
+        elif mode == 'managed':
+            self.user_message = (
+                "The managed key for this agent was rejected by the provider. "
+                "Please contact your admin."
+            )
+        else:
+            self.user_message = (
+                "The API key for this agent was rejected by the provider. "
+                "Please check your key configuration."
+            )
+        super().__init__(self.user_message)
+
+
+def _is_provider_auth_error(exc: Exception) -> bool:
+    """Return True if exc looks like a 401/auth rejection from any LLM provider SDK."""
+    type_name = type(exc).__name__
+    if 'AuthenticationError' in type_name or 'AuthError' in type_name:
+        return True
+    if getattr(exc, 'status_code', None) == 401:
+        return True
+    msg = str(exc).lower()
+    return 'invalid_api_key' in msg or (
+        '401' in msg and ('unauthorized' in msg or 'authentication' in msg)
+    )
+
+
+def raise_if_auth_error(exc: Exception, ctx=None) -> None:
+    """Convert a provider 401/auth error into BadAPIKey so the DRF handler surfaces a clear message.
+
+    Call this inside every LLM call's except block before re-raising the original error.
+    Does nothing if the exception is not an auth error.
+    """
+    if _is_provider_auth_error(exc):
+        mode = getattr(ctx, 'mode', None)
+        raise BadAPIKey(mode=mode) from exc
+
+
 @dataclass
 class CallContext:
     """Everything a caller needs for one LLM call."""
@@ -110,19 +164,19 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     """Pick the key to use for one LLM call. Raises on hard-block.
 
     Preference order:
-      1. Active BYOK key (no quota — info-only metering)
+      1. Active BYOK key — hard-blocks if user-set token cap is exhausted (ByokCapReached)
       2. Active per-company managed key (admin override) — bypasses platform quota
       3. Quota exhausted? → hard block (platform path only)
       4. Platform key for the agent's default provider (the "free tokens" path)
       5. Hard block: no key available anywhere
 
-    BYOK and managed keys both bypass the platform quota gate because they
-    bring their own API keys.  Platform quota only gates the free-tier path.
+    Managed keys bypass the platform quota gate because they bring their own API keys.
+    BYOK hard-blocks only when byok_token_limit > 0 and the cap is reached.
     """
     if agent_name not in VALID_AGENTS:
         raise InvalidAgent()
 
-    # Step 1 — BYOK wins, always (no quota consumed)
+    # Step 1 — BYOK (unless user explicitly prefers free or managed pool)
     byok = (
         CompanyAPIKey.objects
         .filter(company=company, agent_name=agent_name, mode='byok', status='active')
@@ -131,14 +185,21 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     if byok:
         plaintext = byok.get_plaintext_key()
         if plaintext:
-            return CallContext(
-                company_id=company.id,
-                agent_name=agent_name,
-                mode='byok',
-                provider=byok.provider,
-                api_key=plaintext,
-                key_id=byok.id,
-            )
+            # Respect the user's pool preference — if they chose free or managed, honour it.
+            _q = AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).first()
+            if not _q or _q.preferred_pool not in ('free', 'managed'):
+                # Hard-block if the user has set a token cap and it is exhausted
+                if _q and _q.byok_token_limit > 0 and _q.byok_tokens_info >= _q.byok_token_limit:
+                    raise ByokCapReached()
+                return CallContext(
+                    company_id=company.id,
+                    agent_name=agent_name,
+                    mode='byok',
+                    provider=byok.provider,
+                    api_key=plaintext,
+                    key_id=byok.id,
+                )
+            # preferred_pool is 'free' or 'managed' — fall through to those paths below
 
     # Step 2 — per-company managed key (admin-assigned) bypasses platform quota
     managed = (
@@ -248,6 +309,35 @@ def _check_managed_quota_notifications(quota_id: int) -> None:
         logging.getLogger(__name__).warning("Managed quota notification check failed: %s", exc)
 
 
+def _check_byok_quota_notifications(company_id: int, agent_name: str) -> None:
+    """Fire 80% / 90% / 100% notifications for BYOK soft-cap tokens (once per threshold).
+
+    Only fires when the company has set a byok_token_limit > 0.
+    """
+    try:
+        from core.notification_utils import notify_company_quota
+        q = AgentTokenQuota.objects.select_related('company').filter(
+            company_id=company_id, agent_name=agent_name
+        ).first()
+        if not q or q.byok_token_limit <= 0:
+            return
+        pct = (q.byok_tokens_info / q.byok_token_limit) * 100
+        actual = round(pct, 1)
+
+        if pct >= 100 and not q.byok_notified_100pct:
+            AgentTokenQuota.objects.filter(pk=q.pk).update(byok_notified_100pct=True)
+            notify_company_quota(q.company, q.get_agent_name_display(), 100, actual_pct=actual, pool='byok')
+        elif pct >= 90 and not q.byok_notified_90pct:
+            AgentTokenQuota.objects.filter(pk=q.pk).update(byok_notified_90pct=True)
+            notify_company_quota(q.company, q.get_agent_name_display(), 90, actual_pct=actual, pool='byok')
+        elif pct >= 80 and not q.byok_notified_80pct:
+            AgentTokenQuota.objects.filter(pk=q.pk).update(byok_notified_80pct=True)
+            notify_company_quota(q.company, q.get_agent_name_display(), 80, actual_pct=actual, pool='byok')
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("BYOK quota notification check failed: %s", exc)
+
+
 def record_usage(ctx: CallContext, total_tokens: int) -> None:
     """Increment the right counter after an LLM call completes.
 
@@ -290,6 +380,7 @@ def record_usage(ctx: CallContext, total_tokens: int) -> None:
         AgentTokenQuota.objects.filter(
             company_id=ctx.company_id, agent_name=ctx.agent_name
         ).update(byok_tokens_info=F('byok_tokens_info') + total_tokens)
+        _check_byok_quota_notifications(ctx.company_id, ctx.agent_name)
 
 
 @transaction.atomic
