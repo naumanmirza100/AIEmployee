@@ -283,7 +283,8 @@ const DocumentAuthoring = () => {
             setStreamingContent('');
             setStreamingTitle('');
             setView('create');
-            const isHardBlock = meta?.status === 402 || meta?.status === 403 || meta?.error_code === 'quota_exhausted' || meta?.error_code === 'no_key' || meta?.hard_block;
+            const HARD_BLOCK_CODES = ['quota_exhausted', 'managed_quota_exhausted', 'byok_cap_reached', 'no_key', 'bad_api_key'];
+            const isHardBlock = meta?.status === 402 || meta?.status === 403 || meta?.hard_block || HARD_BLOCK_CODES.includes(meta?.error_code);
             toast({
               title: isHardBlock ? 'Generation blocked' : 'Generation failed',
               description: message || (isHardBlock ? 'API key or token quota issue. Check your API Keys settings.' : 'Please try again.'),
