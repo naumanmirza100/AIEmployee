@@ -80,6 +80,8 @@ const AGENT_OPTIONS = [
   { value: 'project_manager_agent', label: 'Project Manager Agent' },
   { value: 'frontline_agent', label: 'Frontline Agent' },
   { value: 'operations_agent', label: 'Operations Agent' },
+  { value: 'reply_draft_agent', label: 'Reply Draft Agent' },
+  { value: 'hr_agent', label: 'HR Support Agent' },
 ];
 
 const formatTokens = (n) => {

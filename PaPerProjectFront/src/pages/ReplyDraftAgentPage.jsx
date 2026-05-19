@@ -144,13 +144,16 @@ const humanizeAiError = (raw) => {
     || lower.includes('rate limit')
     || lower.includes('rate_limit')
     || lower.includes('too many requests')
-    || lower.includes('insufficient_quota')
+  ) {
+    return 'AI request limit reached. Please try again in a few minutes.';
+  }
+  if (
+    lower.includes('insufficient_quota')
     || lower.includes('insufficient quota')
-    || lower.includes('quota')
     || lower.includes('credits')
     || lower.includes('billing')
   ) {
-    return 'AI request limit reached. Please try again in a few minutes — or contact support if this keeps happening.';
+    return 'AI service quota exhausted. Please contact support.';
   }
 
   // Auth — usually a missing / expired API key on the server side. The
@@ -698,9 +701,10 @@ const ReplyDraftAgentPage = () => {
       }
     } catch (e) {
       console.error('Generate draft failed', e);
+      const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
       toast({
-        title: 'Could not generate draft',
-        description: humanizeAiError(e?.message),
+        title: isHardBlock ? 'Generation blocked' : 'Could not generate draft',
+        description: isHardBlock ? (e?.message || 'API key or quota issue.') : humanizeAiError(e?.message),
         variant: 'destructive',
       });
     } finally {
@@ -743,9 +747,10 @@ const ReplyDraftAgentPage = () => {
       }
     } catch (e) {
       console.error('Regenerate draft failed', e);
+      const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
       toast({
-        title: 'Could not regenerate draft',
-        description: humanizeAiError(e?.message),
+        title: isHardBlock ? 'Generation blocked' : 'Could not regenerate draft',
+        description: isHardBlock ? (e?.message || 'API key or quota issue.') : humanizeAiError(e?.message),
         variant: 'destructive',
       });
     } finally {
