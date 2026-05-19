@@ -39,6 +39,7 @@ from hr_agent.models import (
     HRKnowledgeChat, HRKnowledgeChatMessage,
     HRMeetingSchedulerChat, HRMeetingSchedulerChatMessage,
     Department, HRAuditLog, PerformanceGoal, PerformanceReviewCycle,
+    HRDocumentAccessLog,
 )
 from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
@@ -851,6 +852,7 @@ def summarize_hr_document(request, document_id):
         if not result.get('success'):
             return Response({'status': 'error', 'message': result.get('error') or 'Summarize failed'},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        _log_document_access(request, d, action='summarize')
         return Response({'status': 'success', 'data': {
             'document_id': d.id, 'title': d.title, 'summary': result.get('summary'),
         }})
@@ -883,6 +885,7 @@ def extract_hr_document(request, document_id):
         # Persist what we found onto the row so future calls can use it
         d.extracted_fields = {**(d.extracted_fields or {}), **(result.get('data') or {})}
         d.save(update_fields=['extracted_fields', 'updated_at'])
+        _log_document_access(request, d, action='extract')
         return Response({'status': 'success', 'data': {
             'document_id': d.id, 'extracted': result.get('data'),
         }})
@@ -922,18 +925,39 @@ def _serialize_hr_document(d: HRDocument, *, include_content: bool = False) -> d
     return out
 
 
+def _log_document_access(request, document, action: str = 'read') -> None:
+    """Fire-and-forget access-log writer. Compliance reads need a who/when/what
+    trail even when the operation itself is a benign view."""
+    try:
+        ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() \
+            or request.META.get('REMOTE_ADDR') or None
+        ua = (request.META.get('HTTP_USER_AGENT') or '')[:400]
+        HRDocumentAccessLog.objects.create(
+            company=document.company, actor=request.user,
+            document=document, action=action,
+            ip_address=ip, user_agent=ua,
+        )
+    except Exception:
+        logger.exception("_log_document_access failed for doc %s action=%s",
+                         getattr(document, 'id', None), action)
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def get_hr_document(request, document_id):
-    """Single document detail incl. extracted text (capped at 50k chars)."""
+    """Single document detail incl. extracted text (capped at 50k chars).
+
+    Writes an HRDocumentAccessLog row so compliance can answer "who read
+    this confidential doc, and when?"."""
     try:
         company = request.user.company
         d = HRDocument.objects.filter(pk=document_id, company=company).first()
         if not d:
             return Response({'status': 'error', 'message': 'Document not found'},
                             status=status.HTTP_404_NOT_FOUND)
+        _log_document_access(request, d, action='read')
         return Response({'status': 'success', 'data': _serialize_hr_document(d, include_content=True)})
     except Exception:
         logger.exception("get_hr_document failed")
@@ -1358,7 +1382,7 @@ def create_hr_notification_template(request):
                         status=status.HTTP_400_BAD_REQUEST)
     trigger_config = d.get('trigger_config') or {}
     if trigger_config:
-        _KNOWN_EVENTS = {'probation_ending', 'birthday', 'work_anniversary', 'document_expiring'}
+        _KNOWN_EVENTS = {'probation_ending', 'birthday', 'work_anniversary', 'document_expiring', 'review_due'}
         event_on = trigger_config.get('on')
         if not event_on:
             return Response({
@@ -1642,6 +1666,53 @@ def update_leave_request(request, request_id):
     except Exception:
         logger.exception("update_leave_request failed")
         return Response({'status': 'error', 'message': 'Failed to update leave request'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def cancel_leave_request(request, request_id):
+    """Withdraw a still-pending leave request. Owner or HR-admin only — the
+    approver does not cancel; they reject. Distinct status from `rejected` so
+    the audit trail tells the right story ("I changed my mind" vs "denied").
+    Locks once decided."""
+    try:
+        company = request.user.company
+        lr = LeaveRequest.objects.filter(pk=request_id, employee__company=company).first()
+        if not lr:
+            return Response({'status': 'error', 'message': 'Leave request not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        is_admin = _is_hr_admin(request.user)
+        caller_user_id = getattr(request.user, 'user_id', None)
+        is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
+        if not (is_admin or is_owner):
+            return Response({'status': 'error', 'message': 'Only the submitter or HR-admin can cancel this request'},
+                            status=status.HTTP_403_FORBIDDEN)
+        if lr.status != 'pending':
+            return Response({
+                'status': 'error',
+                'message': f'Leave request is already {lr.status} and cannot be cancelled.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        prev_status = lr.status
+        lr.status = 'cancelled'
+        lr.decided_at = timezone.now()
+        lr.approval_note = (request.data.get('note') or '')[:2000]
+        lr.save(update_fields=['status', 'decided_at', 'approval_note', 'updated_at'])
+
+        _write_audit_log(
+            request.user, company, 'leave_request.cancel',
+            'leave_request', lr.id,
+            before={'status': prev_status},
+            after={'status': lr.status, 'employee_id': lr.employee_id,
+                   'days_requested': float(lr.days_requested or 0)},
+        )
+        return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
+    except Exception:
+        logger.exception("cancel_leave_request failed")
+        return Response({'status': 'error', 'message': 'Failed to cancel leave request'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -2503,6 +2574,14 @@ def _build_employee_bundle(emp: Employee, company) -> dict:
     meetings = HRMeeting.objects.filter(
         company=company, participants=emp,
     ).order_by('-scheduled_at')[:10]
+    goals = PerformanceGoal.objects.filter(employee=emp).order_by('-created_at')[:50]
+    # Reviews are only included if released to the employee. Used in /me so an
+    # employee sees their own closed reviews; harmless on the admin drawer
+    # because the drawer also reads from list_employee_reviews separately.
+    from hr_agent.models import PerformanceReview
+    visible_reviews = PerformanceReview.objects.filter(
+        employee=emp, visible_to_employee=True,
+    ).select_related('cycle', 'reviewer').order_by('-cycle__period_start')[:10]
 
     return {
         'employee': _serialize_employee(emp),
@@ -2515,6 +2594,28 @@ def _build_employee_bundle(emp: Employee, company) -> dict:
             'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
             'status': m.status,
         } for m in meetings],
+        'goals': [{
+            'id': g.id, 'title': g.title, 'status': g.status,
+            'progress_pct': g.progress_pct, 'weight_pct': g.weight_pct,
+            'target_value': g.target_value, 'current_value': g.current_value,
+            'due_date': g.due_date.isoformat() if g.due_date else None,
+            'description': g.description,
+            'cycle_id': g.cycle_id,
+        } for g in goals],
+        'released_reviews': [{
+            'id': r.id,
+            'cycle_id': r.cycle_id,
+            'cycle_name': r.cycle.name if r.cycle_id else None,
+            'period_start': r.cycle.period_start.isoformat() if r.cycle_id and r.cycle.period_start else None,
+            'period_end': r.cycle.period_end.isoformat() if r.cycle_id and r.cycle.period_end else None,
+            'reviewer_name': r.reviewer.full_name if r.reviewer_id else None,
+            'overall_rating': r.overall_rating,
+            'manager_summary': r.manager_summary,
+            'strengths': r.strengths,
+            'growth_areas': r.growth_areas,
+            'status': r.status,
+            'finalized_at': r.finalized_at.isoformat() if r.finalized_at else None,
+        } for r in visible_reviews],
     }
 
 
@@ -2765,15 +2866,29 @@ def list_hr_audit_log(request):
 
 
 def _serialize_compensation(c) -> dict:
+    base = float(c.base_salary) if c.base_salary is not None else None
+    bonus_pct = float(c.bonus_target_pct) if c.bonus_target_pct is not None else None
+    equity = float(c.equity_grant_value) if c.equity_grant_value is not None else None
+    # Target comp = base + (base * bonus%/100) + equity_grant_value. Missing
+    # parts are treated as zero so a base-only comp row still surfaces a total.
+    total = None
+    if base is not None:
+        total = base
+        if bonus_pct is not None:
+            total += base * (bonus_pct / 100.0)
+        if equity is not None:
+            total += equity
+        total = round(total, 2)
     return {
         'id': c.id,
         'employee_id': c.employee_id,
         'effective_date': c.effective_date.isoformat() if c.effective_date else None,
-        'base_salary': float(c.base_salary) if c.base_salary is not None else None,
+        'base_salary': base,
         'currency': c.currency,
         'pay_frequency': c.pay_frequency,
-        'bonus_target_pct': float(c.bonus_target_pct) if c.bonus_target_pct is not None else None,
-        'equity_grant_value': float(c.equity_grant_value) if c.equity_grant_value is not None else None,
+        'bonus_target_pct': bonus_pct,
+        'equity_grant_value': equity,
+        'total_target_compensation': total,
         'grade': c.grade or '',
         'reason': c.reason,
         'notes': c.notes or '',
@@ -3620,3 +3735,139 @@ def list_hr_document_versions(request, document_id):
         'created_at': d.created_at.isoformat() if d.created_at else None,
     } for d in chain]
     return Response({'status': 'success', 'data': rows})
+
+
+# ============================================================================
+# GDPR — anonymize employee + document access log
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def anonymize_employee(request, employee_id):
+    """GDPR "right to delete" — scrub PII on an employee row in place rather
+    than hard-deleting it. Audit trail references stay intact because the row
+    still exists; only personal fields are zeroed.
+
+    Scrubs: full_name, work_email, personal_email, phone, date_of_birth,
+    custom_fields, plus all personal documents (title, description, content,
+    extracted_fields, on-disk file).
+
+    Preserves: id (audit FK target), company, employment_status, employment_type,
+    start_date, end_date, manager link, leave history (aggregate counts),
+    performance reviews (free-text fields are also scrubbed), goals.
+
+    HR-admin only. Irreversible.
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    if emp.anonymized_at:
+        return Response({'status': 'error', 'message': 'Employee is already anonymized'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    before_snapshot = {
+        'full_name': emp.full_name, 'work_email': emp.work_email,
+        'phone': emp.phone or '', 'date_of_birth': emp.date_of_birth.isoformat() if emp.date_of_birth else None,
+    }
+
+    # Scrub PII fields on the employee row.
+    redact_tag = f'[redacted #{emp.id}]'
+    emp.full_name = redact_tag
+    # work_email is unique_together with company — keep it unique via a tombstone.
+    emp.work_email = f'redacted-{emp.id}@redacted.invalid'
+    emp.personal_email = ''
+    emp.phone = ''
+    emp.date_of_birth = None
+    emp.work_anniversary_month_day = ''
+    emp.custom_fields = {}
+    emp.anonymized_at = timezone.now()
+    emp.save(update_fields=[
+        'full_name', 'work_email', 'personal_email', 'phone',
+        'date_of_birth', 'work_anniversary_month_day', 'custom_fields',
+        'anonymized_at', 'updated_at',
+    ])
+
+    # Scrub personal documents — both DB row and on-disk file.
+    personal_docs = HRDocument.objects.filter(company=request.user.company, employee=emp)
+    docs_scrubbed = 0
+    for d in personal_docs:
+        try:
+            if d.file_path:
+                from django.conf import settings as _s
+                full = Path(_s.MEDIA_ROOT) / d.file_path
+                if full.exists():
+                    full.unlink()
+        except Exception:
+            logger.exception("anonymize_employee: file unlink failed for doc %s", d.id)
+        d.title = f'[redacted personal doc #{d.id}]'
+        d.description = ''
+        d.document_content = ''
+        d.extracted_fields = {}
+        d.file_path = ''
+        d.save(update_fields=['title', 'description', 'document_content',
+                              'extracted_fields', 'file_path', 'updated_at'])
+        d.chunks.all().delete()
+        docs_scrubbed += 1
+
+    # Scrub free-text fields on performance reviews (manager_summary etc. could
+    # contain personal references). Ratings + status stay so aggregate analytics
+    # remain useful.
+    from hr_agent.models import PerformanceReview
+    PerformanceReview.objects.filter(employee=emp).update(
+        self_summary='[redacted]', manager_summary='[redacted]',
+        strengths='[redacted]', growth_areas='[redacted]', goals=[],
+    )
+
+    # Scrub free-text reason on leave requests (keep dates + status for accrual maths).
+    LeaveRequest.objects.filter(employee=emp).update(reason='[redacted]', approval_note='[redacted]')
+
+    _write_audit_log(request.user, request.user.company, 'employee.anonymize',
+                     'employee', emp.id, before=before_snapshot,
+                     after={'anonymized_at': emp.anonymized_at.isoformat(),
+                            'documents_scrubbed': docs_scrubbed})
+    return Response({'status': 'success', 'data': {
+        'id': emp.id,
+        'anonymized_at': emp.anonymized_at.isoformat(),
+        'documents_scrubbed': docs_scrubbed,
+    }})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_hr_document_access_log(request, document_id):
+    """Who read this document, and when? HR-admin only. Pagination via
+    ``limit`` / ``offset`` query params (defaults 50/0, hard cap 200)."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    d = HRDocument.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    try:
+        limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+        offset = max(0, int(request.GET.get('offset') or 0))
+    except ValueError:
+        limit, offset = 50, 0
+    qs = HRDocumentAccessLog.objects.filter(document=d).select_related('actor')
+    total = qs.count()
+    rows = [{
+        'id': r.id,
+        'action': r.action,
+        'actor_id': r.actor_id,
+        'actor_email': r.actor.email if r.actor_id else None,
+        'actor_name': (r.actor.first_name + ' ' + r.actor.last_name).strip() if r.actor_id else None,
+        'ip_address': r.ip_address,
+        'user_agent': r.user_agent,
+        'created_at': r.created_at.isoformat() if r.created_at else None,
+    } for r in qs[offset:offset + limit]]
+    return Response({'status': 'success', 'data': rows,
+                     'pagination': {'total': total, 'limit': limit, 'offset': offset}})

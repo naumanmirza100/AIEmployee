@@ -433,6 +433,28 @@ export const listHRDocumentVersions = async (documentId) => {
   }
 };
 
+// ---------- Compliance — GDPR anonymize + document access log ----------
+export const anonymizeHREmployee = async (employeeId) => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/anonymize`);
+    return response;
+  } catch (error) {
+    console.error('Anonymize HR employee error:', error);
+    throw error;
+  }
+};
+
+export const listHRDocumentAccessLog = async (documentId, { limit = 50, offset = 0 } = {}) => {
+  try {
+    const qs = `?limit=${limit}&offset=${offset}`;
+    const response = await companyApi.get(`/hr/documents/${documentId}/access-log${qs}`);
+    return response;
+  } catch (error) {
+    console.error('List HR document access log error:', error);
+    throw error;
+  }
+};
+
 // ---------- Departments ----------
 export const listHRDepartments = async ({ activeOnly = false } = {}) => {
   try {
@@ -836,6 +858,16 @@ export const decideLeaveRequest = async (requestId, action, note = '') => {
   }
 };
 
+export const cancelLeaveRequest = async (requestId, note = '') => {
+  try {
+    const response = await companyApi.post(`/hr/leave-requests/${requestId}/cancel`, { note });
+    return response;
+  } catch (error) {
+    console.error('Cancel leave request error:', error);
+    throw error;
+  }
+};
+
 export default {
   getHRDashboard,
   listHREmployees,
@@ -888,6 +920,7 @@ export default {
   submitLeaveRequest,
   updateLeaveRequest,
   decideLeaveRequest,
+  cancelLeaveRequest,
   listLeaveRequests,
   getHREmployeeDetail,
   listHolidays,
@@ -911,4 +944,6 @@ export default {
   getHROrgChart,
   getMyHRProfile,
   listHRDocumentVersions,
+  anonymizeHREmployee,
+  listHRDocumentAccessLog,
 };

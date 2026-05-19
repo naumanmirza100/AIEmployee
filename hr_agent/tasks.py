@@ -593,6 +593,35 @@ def walk_hr_time_based_events():
                         related_document_id=d.id,
                     )
 
+        elif event == 'review_due':
+            # Find active cycles whose self_review_due or manager_review_due
+            # lands on target_date, then nudge every employee with a still-open
+            # review in that cycle. ``role`` in cfg picks which sub-deadline to
+            # fire on (default 'manager').
+            from hr_agent.models import PerformanceReviewCycle, PerformanceReview
+            role = (cfg.get('role') or 'manager').lower()
+            cycles = PerformanceReviewCycle.objects.filter(
+                company_id=tpl.company_id, status='active',
+            )
+            for cyc in cycles:
+                due = cyc.manager_review_due if role == 'manager' else cyc.self_review_due
+                if not due or due != target_date:
+                    continue
+                # Open = anything that isn't closed or skipped — both reviewer
+                # and reviewee can act on it.
+                open_reviews = PerformanceReview.objects.filter(
+                    cycle=cyc,
+                ).exclude(status__in=['closed', 'skipped']).select_related('employee')
+                for r in open_reviews:
+                    created_total += _ensure_scheduled(
+                        tpl, r.employee, due,
+                        context={'event_date': due.isoformat(),
+                                 'cycle_name': cyc.name,
+                                 'review_id': r.id,
+                                 'employee_name': r.employee.full_name,
+                                 'role': role},
+                    )
+
     logger.info("walk_hr_time_based_events: scheduled %d notifications", created_total)
     return {'scheduled': created_total}
 

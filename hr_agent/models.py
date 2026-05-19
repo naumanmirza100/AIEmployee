@@ -119,6 +119,12 @@ class Employee(models.Model):
     custom_fields = models.JSONField(default=dict, blank=True,
                                      help_text='Tenant-specific attributes (location, cost center, etc.).')
 
+    # GDPR / Right to delete — non-null = row has been scrubbed in place.
+    # Audit-trail references (HRAuditLog.target_id, etc.) stay valid because
+    # the row itself isn't deleted, only PII fields are zeroed.
+    anonymized_at = models.DateTimeField(null=True, blank=True,
+                                         help_text='When PII on this row was scrubbed. Non-null = anonymized.')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -977,3 +983,41 @@ class HRAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} by actor={self.actor_id} on {self.target_type}:{self.target_id}"
+
+
+class HRDocumentAccessLog(models.Model):
+    """Records each *read* of a confidential HR document.
+
+    HRAuditLog tracks writes (create/update/delete). This table tracks reads
+    so compliance can answer "who looked at this payslip / contract / grievance
+    record, and when?". Append-only — never updated, never deleted by app
+    code (a retention purge task may drop very old rows).
+    """
+    ACTION_CHOICES = [
+        ('read', 'Read'),
+        ('download', 'Download'),
+        ('summarize', 'Summarize (LLM)'),
+        ('extract', 'Extract fields (LLM)'),
+    ]
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE,
+                                related_name='hr_document_access_logs')
+    actor = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL,
+                              null=True, blank=True, related_name='hr_document_reads')
+    document = models.ForeignKey('HRDocument', on_delete=models.CASCADE,
+                                 related_name='access_log')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, default='read')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=400, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['document', '-created_at']),
+            models.Index(fields=['company', '-created_at']),
+            models.Index(fields=['actor', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.action} doc={self.document_id} by={self.actor_id}"

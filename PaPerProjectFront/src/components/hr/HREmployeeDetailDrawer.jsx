@@ -285,6 +285,31 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
     }
   };
 
+  const handleAnonymize = async () => {
+    const emp = data?.employee;
+    if (!emp) return;
+    const tag = emp.full_name || emp.work_email || `#${emp.id}`;
+    const ok = confirm(
+      `Anonymize ${tag}?\n\n` +
+      `This irreversibly scrubs PII (name, emails, phone, DOB, personal docs) ` +
+      `and marks the employee row as anonymized. Audit history and aggregate ` +
+      `data are preserved. This action cannot be undone.`
+    );
+    if (!ok) return;
+    try {
+      const res = await hrAgentService.anonymizeHREmployee(emp.id);
+      toast({
+        title: 'Employee anonymized',
+        description: `${res?.data?.documents_scrubbed || 0} personal document(s) scrubbed.`,
+      });
+      // Reload to reflect the redacted state
+      const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
+      setData(refreshed?.data || null);
+    } catch (e) {
+      toast({ title: 'Anonymize failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
   const handleUnreleaseReview = async (row) => {
     if (!confirm(`Retract visibility of the "${row.cycle_name || `Cycle #${row.cycle_id}`}" review from this employee?`)) return;
     try {
@@ -338,10 +363,23 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-1 gap-x-4 flex-1 text-sm">
-                  <div className="col-span-2 flex justify-end -mt-1 mb-1">
-                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={openEditForm}>
+                  <div className="col-span-2 flex justify-end -mt-1 mb-1 gap-2">
+                    {e.anonymized_at && (
+                      <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-400/30">
+                        <Shield className="h-2.5 w-2.5 mr-1" /> Anonymized
+                      </Badge>
+                    )}
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={openEditForm}
+                      disabled={!!e.anonymized_at}>
                       <Pencil className="h-3 w-3 mr-1" /> Edit
                     </Button>
+                    {!e.anonymized_at && (
+                      <Button size="sm" variant="outline"
+                        className="h-7 px-2 text-xs text-rose-300 hover:text-rose-200 border-rose-400/30"
+                        onClick={handleAnonymize}>
+                        <Shield className="h-3 w-3 mr-1" /> Anonymize (GDPR)
+                      </Button>
+                    )}
                   </div>
                   <KV icon={Mail} label="Email" value={e.work_email} />
                   <KV icon={Briefcase} label="Title" value={e.job_title} />
@@ -416,6 +454,14 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                             {fmtMoney(row.base_salary, row.currency)}
                           </span>
                           <span className="text-[10px] text-white/45">/ {row.pay_frequency}</span>
+                          {row.total_target_compensation != null
+                            && row.total_target_compensation !== row.base_salary && (
+                            <Badge variant="outline"
+                              className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-400/30"
+                              title="base + bonus target + equity">
+                              total {fmtMoney(row.total_target_compensation, row.currency)}
+                            </Badge>
+                          )}
                           {row.grade && <Badge variant="outline" className="text-[10px]">{row.grade}</Badge>}
                           {row.reason && (
                             <span className="text-[10px] text-white/50">{String(row.reason).replace(/_/g, ' ')}</span>

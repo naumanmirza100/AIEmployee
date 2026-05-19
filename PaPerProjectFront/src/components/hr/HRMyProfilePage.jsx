@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, User, Mail, Briefcase, Building2, CalendarClock, PlaneTakeoff,
   FileText, Pencil, Plus, ClipboardList, LayoutDashboard, AlertCircle,
+  Target, Star,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -138,6 +139,8 @@ export default function HRMyProfilePage() {
   const docs = data.personal_documents || [];
   const leaves = data.leave_requests || [];
   const meetings = data.meetings || [];
+  const goals = data.goals || [];
+  const releasedReviews = data.released_reviews || [];
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto p-4">
@@ -256,6 +259,112 @@ export default function HRMyProfilePage() {
                       <Badge variant="outline" className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-400/30">v{d.version}</Badge>
                     )}
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* My goals */}
+      <Card className="border-white/10 bg-black/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Target className="h-4 w-4 text-violet-400" /> My goals
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Set by your manager. You can update progress from your manager's view of the drawer.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {goals.length === 0 ? (
+            <div className="text-white/45 text-sm">No goals set yet.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {goals.map((g) => (
+                <div key={g.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5">
+                  <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                    <span className="text-white font-semibold text-sm truncate">{g.title}</span>
+                    <Badge variant="outline" className={`text-[10px] ${
+                      g.status === 'met' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
+                      : g.status === 'missed' || g.status === 'dropped' ? 'bg-rose-500/10 text-rose-300 border-rose-400/30'
+                      : g.status === 'in_progress' ? 'bg-sky-500/10 text-sky-300 border-sky-400/30'
+                      : 'bg-amber-500/10 text-amber-300 border-amber-400/30'
+                    }`}>
+                      {g.status.replace(/_/g, ' ')}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                      <div className="h-full bg-violet-400/70 rounded-full transition-all"
+                        style={{ width: `${Math.max(0, Math.min(100, g.progress_pct || 0))}%` }} />
+                    </div>
+                    <span className="text-[10px] text-white/55 shrink-0">{g.progress_pct || 0}%</span>
+                    {g.due_date && (
+                      <span className="text-[10px] text-white/45 shrink-0">due {g.due_date}</span>
+                    )}
+                  </div>
+                  {(g.target_value || g.current_value) && (
+                    <div className="text-xs text-white/55 mt-1">
+                      {g.current_value || '—'} → {g.target_value || '—'}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Released performance reviews */}
+      <Card className="border-white/10 bg-black/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Star className="h-4 w-4 text-violet-400" /> My performance reviews
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Only reviews your manager has released are shown here.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {releasedReviews.length === 0 ? (
+            <div className="text-white/45 text-sm">No released reviews yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {releasedReviews.map((r) => (
+                <div key={r.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+                  <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className="text-white font-semibold text-sm">{r.cycle_name || `Cycle #${r.cycle_id}`}</span>
+                      {r.overall_rating != null && (
+                        <span className="text-amber-300 text-xs">
+                          {'★'.repeat(r.overall_rating)}{'☆'.repeat(Math.max(0, 5 - r.overall_rating))}
+                        </span>
+                      )}
+                    </div>
+                    {r.reviewer_name && (
+                      <span className="text-[11px] text-white/45">by {r.reviewer_name}</span>
+                    )}
+                  </div>
+                  {r.manager_summary && (
+                    <div className="text-xs text-white/75 mt-1.5 whitespace-pre-line">{r.manager_summary}</div>
+                  )}
+                  {(r.strengths || r.growth_areas) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                      {r.strengths && (
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wider text-emerald-300/80 mb-0.5">Strengths</div>
+                          <div className="text-xs text-white/70 whitespace-pre-line">{r.strengths}</div>
+                        </div>
+                      )}
+                      {r.growth_areas && (
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wider text-sky-300/80 mb-0.5">Growth areas</div>
+                          <div className="text-xs text-white/70 whitespace-pre-line">{r.growth_areas}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

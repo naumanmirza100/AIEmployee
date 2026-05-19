@@ -660,6 +660,7 @@ urlpatterns = [
     re_path(r'^hr/leave-requests/?$', hr_agent.list_leave_requests, name='hr_list_leave_requests'),  # GET
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/update/?$', hr_agent.update_leave_request, name='hr_update_leave_request'),  # PATCH
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/cancel/?$', hr_agent.cancel_leave_request, name='hr_cancel_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
 
     # Holiday calendar
@@ -709,6 +710,10 @@ urlpatterns = [
     # Self-service + document versions
     re_path(r'^hr/me/?$', hr_agent.get_my_hr_profile, name='hr_get_my_profile'),  # GET
     re_path(r'^hr/documents/(?P<document_id>\d+)/versions/?$', hr_agent.list_hr_document_versions, name='hr_list_document_versions'),  # GET
+
+    # Compliance — GDPR + document access log
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/anonymize/?$', hr_agent.anonymize_employee, name='hr_anonymize_employee'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/access-log/?$', hr_agent.list_hr_document_access_log, name='hr_list_document_access_log'),  # GET
 ]
 
 

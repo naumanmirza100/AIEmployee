@@ -117,6 +117,7 @@ const HRDashboard = () => {
   });
   const [docDelete, setDocDelete] = useState({ open: false, doc: null, loading: false });
   const [docVersions, setDocVersions] = useState({ open: false, doc: null, rows: [], loading: false });
+  const [docAccess, setDocAccess] = useState({ open: false, doc: null, rows: [], loading: false, allowed: true });
 
   // Workflows
   const [workflows, setWorkflows] = useState([]);
@@ -376,6 +377,23 @@ const HRDashboard = () => {
     } catch (e) {
       toast({ title: 'Failed to load versions', description: e.message, variant: 'destructive' });
       setDocVersions({ open: false, doc: null, rows: [], loading: false });
+    }
+  };
+
+  const openDocAccessLog = async (d) => {
+    setDocAccess({ open: true, doc: d, rows: [], loading: true, allowed: true });
+    try {
+      const res = await hrAgentService.listHRDocumentAccessLog(d.id, { limit: 100 });
+      setDocAccess({ open: true, doc: d, rows: res?.data || [], loading: false, allowed: true });
+    } catch (e) {
+      const restricted = /HR-admin/i.test(e.message || '') || /403/.test(e.message || '');
+      if (restricted) {
+        toast({ title: 'HR-admin only', variant: 'destructive' });
+        setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: false });
+      } else {
+        toast({ title: 'Failed to load access log', description: e.message, variant: 'destructive' });
+        setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: true });
+      }
     }
   };
 
@@ -1135,6 +1153,9 @@ const HRDashboard = () => {
                                         <History className="h-4 w-4 mr-2 text-sky-400" /> Version history
                                       </DropdownMenuItem>
                                     )}
+                                    <DropdownMenuItem onClick={() => openDocAccessLog(d)} className="text-white/80">
+                                      <History className="h-4 w-4 mr-2 text-amber-400" /> Access log
+                                    </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => setDocDelete({ open: true, doc: d, loading: false })}
                                       className="text-rose-400 focus:text-rose-300">
@@ -1326,6 +1347,55 @@ const HRDashboard = () => {
                     )}
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setDocVersions({ open: false, doc: null, rows: [], loading: false })}>
+                        Close
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Document access log dialog — HR-admin only */}
+                <Dialog open={docAccess.open} onOpenChange={(open) => setDocAccess((s) => ({ ...s, open }))}>
+                  <DialogContent className="max-w-2xl max-h-[75vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Access log</DialogTitle>
+                      <DialogDescription>
+                        {docAccess.doc?.title} — who has read, summarized, or extracted this document.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {docAccess.loading ? (
+                      <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-white/40" /></div>
+                    ) : docAccess.rows.length === 0 ? (
+                      <div className="text-center text-sm text-white/55 py-6">No access yet.</div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-[10px] uppercase">When</TableHead>
+                            <TableHead className="text-[10px] uppercase">Who</TableHead>
+                            <TableHead className="text-[10px] uppercase">Action</TableHead>
+                            <TableHead className="text-[10px] uppercase">IP</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {docAccess.rows.map((r) => (
+                            <TableRow key={r.id}>
+                              <TableCell className="text-xs text-white/70 font-mono">
+                                {(r.created_at || '').slice(0, 19).replace('T', ' ')}
+                              </TableCell>
+                              <TableCell className="text-xs text-white/85">
+                                {r.actor_name || r.actor_email || `#${r.actor_id || '—'}`}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-[10px]">{r.action}</Badge>
+                              </TableCell>
+                              <TableCell className="text-[11px] text-white/50 font-mono">{r.ip_address || '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: true })}>
                         Close
                       </Button>
                     </DialogFooter>
