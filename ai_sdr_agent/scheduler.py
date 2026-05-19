@@ -57,6 +57,11 @@ def _auto_complete():
     return auto_pause_expired_campaigns_impl()
 
 
+def _send_meeting_reminders():
+    from ai_sdr_agent.tasks import send_meeting_reminders_impl
+    return send_meeting_reminders_impl()
+
+
 def start_scheduler():
     """Start the embedded scheduler. Idempotent — safe to call multiple times."""
     global _started
@@ -66,10 +71,11 @@ def start_scheduler():
         _started = True
 
     jobs = [
-        ('send_due_steps',   _send_due_steps, 300,  30),   # every 5 min,  first in 30s
-        ('check_inbox',      _check_inbox,    300,  60),   # every 5 min,  first in 60s
-        ('auto_start',       _auto_start,     900,  90),   # every 15 min, first in 90s
-        ('auto_complete',    _auto_complete,  3600, 120),  # every 60 min, first in 120s
+        ('send_due_steps',      _send_due_steps,          300,  30),   # every 5 min,  first in 30s
+        ('check_inbox',         _check_inbox,             300,  60),   # every 5 min,  first in 60s
+        ('auto_start',          _auto_start,              900,  90),   # every 15 min, first in 90s
+        ('auto_complete',       _auto_complete,           3600, 120),  # every 60 min, first in 120s
+        ('meeting_reminders',   _send_meeting_reminders,  3600, 150),  # every 60 min, first in 150s
     ]
 
     for name, fn, interval, delay in jobs:
@@ -80,5 +86,5 @@ def start_scheduler():
 
     logger.info(
         "SDR scheduler started — send_due_steps(5m), check_inbox(5m), "
-        "auto_start(15m), auto_complete(1h)"
+        "auto_start(15m), auto_complete(1h), meeting_reminders(1h)"
     )

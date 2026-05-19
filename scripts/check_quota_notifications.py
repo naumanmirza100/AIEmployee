@@ -1,0 +1,1 @@
+from core.models import AgentTokenQuota; from core.api_key_service import _check_quota_notifications; qs = list(AgentTokenQuota.objects.filter(used_tokens__gt=0).values_list('id','agent_name','used_tokens','included_tokens')); print(f"Checking {len(qs)} quotas"); [print(f"  {a}: {u}/{i} → calling check") or _check_quota_notifications(pk) for pk,a,u,i in qs]; print("Done")

@@ -782,17 +782,50 @@ class ReplyDraftAgent(MarketingBaseAgent):
         return self._re_prefix(subject), body, reasoning, interest_level, analysis
 
     @staticmethod
+    def _fix_literal_newlines(text):
+        """Escape literal CR/LF inside JSON string values.
+
+        Groq sometimes emits multi-line values without escaping the newlines,
+        producing invalid JSON like: "body": "line1\nline2" where \n is a real
+        line-feed, not the two-character escape sequence. Walk char-by-char,
+        tracking whether we're inside a string, and replace bare newlines.
+        """
+        result = []
+        in_string = False
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch == '\\' and in_string and i + 1 < len(text):
+                result.append(ch)
+                result.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = not in_string
+                result.append(ch)
+            elif in_string and ch == '\n':
+                result.append('\\n')
+            elif in_string and ch == '\r':
+                result.append('\\r')
+            else:
+                result.append(ch)
+            i += 1
+        return ''.join(result)
+
+    @staticmethod
     def _loose_json(raw):
         """Parse JSON tolerantly when the model wraps its output in prose / fences.
 
         Strategy:
           1. Try plain json.loads on the trimmed text.
-          2. Strip ```json … ``` / ``` … ``` fences — Groq frequently emits
+          2. Strip ```json ... ``` / ``` ... ``` fences — Groq frequently emits
              these even when the system prompt says "JSON only".
           3. Walk the string brace-by-brace and try every candidate object
              starting at each '{', returning the first one that parses.
              This survives a leading "Sure, here's your JSON:" preamble or
              a trailing "Hope that helps!" — both observed in the wild.
+          4. Fix literal newlines inside string values (Groq bug) and retry
+             all of the above.
         """
         if not raw:
             return None
@@ -823,6 +856,25 @@ class ReplyDraftAgent(MarketingBaseAgent):
                     return obj
             except ValueError:
                 continue
+
+        # Last resort: escape bare newlines inside string values and retry.
+        # Groq occasionally emits literal line-feeds inside JSON strings.
+        fixed = ReplyDraftAgent._fix_literal_newlines(text)
+        if fixed != text:
+            try:
+                return json.loads(fixed)
+            except (ValueError, TypeError):
+                pass
+            for i, ch in enumerate(fixed):
+                if ch != '{':
+                    continue
+                try:
+                    obj, _end = decoder.raw_decode(fixed[i:])
+                    if isinstance(obj, dict):
+                        return obj
+                except ValueError:
+                    continue
+
         return None
 
     @staticmethod

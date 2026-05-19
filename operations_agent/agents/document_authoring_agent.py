@@ -194,6 +194,9 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             }
 
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             logger.error(f'DocumentAuthoringAgent.generate error: {e}', exc_info=True)
             return {'success': False, 'error': str(e)}
 
@@ -315,6 +318,9 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             })
 
         except Exception as e:
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                raise
             logger.error(f'DocumentAuthoringAgent.generate_stream error: {e}', exc_info=True)
             yield ('error', {'message': str(e)})
 

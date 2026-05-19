@@ -361,12 +361,15 @@ const Documents = () => {
       setNotes('');
       setCampaignId('');
     } catch (err) {
+      const isQuota = err?.status === 402;
       const raw = err.message || 'Failed to generate document';
-      const msg = /429|rate limit/i.test(raw) 
-        ? 'The service is busy. Please try again in a moment.' 
-        : raw;
+      const msg = isQuota
+        ? (raw || 'Token quota exhausted. Add your own API key or request a managed key.')
+        : /429|rate limit/i.test(raw)
+          ? 'The service is busy. Please try again in a moment.'
+          : raw;
       setError(msg);
-      toast({ title: 'Error', description: msg, variant: 'destructive' });
+      toast({ title: isQuota ? 'Token Limit Reached' : 'Error', description: msg, variant: 'destructive' });
     } finally {
       setLoadingCreate(false);
     }

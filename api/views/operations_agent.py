@@ -1278,8 +1278,12 @@ def stream_generate_document(request):
             yield _emit('done', {'document': _serialize_generated(doc, include_content=True)})
 
         except Exception as e:
-            logger.error(f'stream_generate_document error: {e}', exc_info=True)
-            yield _emit('error', {'message': str(e)})
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+                yield _emit('error', {'message': e.user_message, 'error_code': e.reason})
+            else:
+                logger.error(f'stream_generate_document error: {e}', exc_info=True)
+                yield _emit('error', {'message': str(e)})
 
     response = StreamingHttpResponse(event_stream(), content_type='application/x-ndjson')
     response['Cache-Control'] = 'no-cache'

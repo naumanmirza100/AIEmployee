@@ -1237,6 +1237,8 @@ class Notification(models.Model):
         ('milestone_reached', 'Milestone Reached'),
         ('mention', 'Mention'),
         ('meeting_request', 'Meeting Request'),
+        ('quota_warning', 'Token Quota Warning'),
+        ('quota_exhausted', 'Token Quota Exhausted'),
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
@@ -1789,7 +1791,7 @@ PROVIDER_CHOICES = [
     ('grok', 'xAI Grok'),
 ]
 
-DEFAULT_FREE_TOKENS = 1_000_000
+DEFAULT_FREE_TOKENS = 10_000
 
 
 class CompanyAPIKey(models.Model):
@@ -1885,6 +1887,10 @@ class AgentTokenQuota(models.Model):
         default=0,
         help_text='Info-only counter of tokens spent via BYOK (not billable).',
     )
+    # Notification dedup flags — reset to False when quota is reset/topped-up
+    notified_80pct = models.BooleanField(default=False)
+    notified_90pct = models.BooleanField(default=False)
+    notified_100pct = models.BooleanField(default=False)
     last_reset_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1909,6 +1915,26 @@ class AgentTokenQuota(models.Model):
         return self.used_tokens >= self.included_tokens
 
 
+class AgentProviderUsage(models.Model):
+    """Per-provider token usage for one (company, agent) quota row.
+
+    One row per provider that has ever been called — created on first use.
+    Works for any provider in PROVIDER_CHOICES without schema changes.
+    """
+    quota = models.ForeignKey(
+        AgentTokenQuota, on_delete=models.CASCADE, related_name='provider_usage'
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
+    used_tokens = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['quota', 'provider']
+
+    def __str__(self):
+        return f"{self.quota} / {self.provider}: {self.used_tokens}"
+
+
 class KeyRequest(models.Model):
     """User → superadmin request to be assigned a managed key for an agent."""
     STATUS_CHOICES = [
@@ -1922,6 +1948,12 @@ class KeyRequest(models.Model):
     agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     note = models.TextField(blank=True)
+    key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    linked_key_id = models.BigIntegerField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    stripe_session_id = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     resolved_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -2041,5 +2073,6 @@ AGENT_DEFAULT_PROVIDER = {
     'project_manager_agent': 'groq',
     'frontline_agent': 'openai',
     'operations_agent': 'groq',
+    'reply_draft_agent': 'groq',
     'hr_agent': 'groq',
 }

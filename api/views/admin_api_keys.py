@@ -15,8 +15,10 @@ from rest_framework.response import Response
 from api.permissions import IsAdmin
 from core.models import (
     AGENT_CHOICES,
+    AGENT_DEFAULT_PROVIDER,
     PROVIDER_CHOICES,
     AdminPricingConfig,
+    AgentProviderUsage,
     AgentTokenQuota,
     Company,
     CompanyAPIKey,
@@ -101,6 +103,7 @@ def assign_managed_key(request):
     provider = (request.data.get('provider') or 'openai').strip()
     api_key = (request.data.get('api_key') or '').strip()
     request_id = request.data.get('request_id')
+    managed_token_limit = request.data.get('managed_token_limit')
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
@@ -114,6 +117,13 @@ def assign_managed_key(request):
         return Response({'status': 'error', 'message': 'Company not found'},
                         status=status.HTTP_404_NOT_FOUND)
 
+    try:
+        token_limit = int(managed_token_limit) if managed_token_limit not in (None, '') else 0
+        if token_limit < 0:
+            token_limit = 0
+    except (ValueError, TypeError):
+        token_limit = 0
+
     with transaction.atomic():
         key, _ = CompanyAPIKey.objects.get_or_create(
             company=company, agent_name=agent_name, mode='managed',
@@ -124,6 +134,14 @@ def assign_managed_key(request):
         key.set_plaintext_key(api_key)
         key.assigned_by = request.user
         key.save()
+
+        # Set managed token quota on the AgentTokenQuota row
+        from core.api_key_service import _ensure_quota
+        quota = _ensure_quota(company, agent_name)
+        AgentTokenQuota.objects.filter(pk=quota.pk).update(
+            managed_included_tokens=token_limit,
+            managed_used_tokens=0,
+        )
 
         approved_req = None
         if request_id:
@@ -222,6 +240,19 @@ def update_pricing(request, agent_name):
 # ----------------------------------------------------------------------------
 
 def _serialize_quota_admin(q: AgentTokenQuota):
+    provider_breakdown = {
+        row.provider: row.used_tokens
+        for row in q.provider_usage.all()
+    }
+    # For historical usage before AgentProviderUsage existed, fall back to
+    # default_provider so admin can still see which model this agent uses.
+    default_provider = AGENT_DEFAULT_PROVIDER.get(q.agent_name, 'openai')
+    if not provider_breakdown and q.used_tokens > 0:
+        provider_breakdown = {default_provider: q.used_tokens}
+    else:
+        untracked = q.used_tokens - sum(provider_breakdown.values())
+        if untracked > 0:
+            provider_breakdown[default_provider] = provider_breakdown.get(default_provider, 0) + untracked
     return {
         'id': q.id,
         'company_id': q.company_id,
@@ -233,6 +264,11 @@ def _serialize_quota_admin(q: AgentTokenQuota):
         'remaining': q.remaining,
         'is_exhausted': q.is_exhausted,
         'byok_tokens_info': q.byok_tokens_info,
+        'managed_included_tokens': q.managed_included_tokens,
+        'managed_used_tokens': q.managed_used_tokens,
+        'managed_is_exhausted': q.managed_included_tokens > 0 and q.managed_used_tokens >= q.managed_included_tokens,
+        'provider_breakdown': provider_breakdown,
+        'default_provider': default_provider,
         'updated_at': q.updated_at.isoformat(),
     }
 
@@ -240,7 +276,7 @@ def _serialize_quota_admin(q: AgentTokenQuota):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_quotas(request):
-    qs = AgentTokenQuota.objects.select_related('company').order_by('-updated_at')
+    qs = AgentTokenQuota.objects.select_related('company').prefetch_related('provider_usage').order_by('-updated_at')
     search = request.GET.get('search')
     if search:
         qs = qs.filter(company__name__icontains=search)
@@ -280,6 +316,9 @@ def adjust_quota(request, quota_id):
     try:
         if action == 'reset':
             q.used_tokens = 0
+            q.notified_80pct = False
+            q.notified_90pct = False
+            q.notified_100pct = False
         elif action == 'set_included':
             q.included_tokens = int(request.data.get('value'))
         elif action == 'add_tokens':
@@ -471,6 +510,11 @@ def admin_overview(request):
         total_used=Sum('used_tokens'),
         total_byok_info=Sum('byok_tokens_info'),
     )
+    # Per-provider aggregate across all companies
+    provider_totals = {
+        row['provider']: row['total']
+        for row in AgentProviderUsage.objects.values('provider').annotate(total=Sum('used_tokens'))
+    }
     stats = {
         'total_companies': Company.objects.count(),
         'total_purchases': CompanyModulePurchase.objects.filter(status='active').count(),
@@ -483,5 +527,6 @@ def admin_overview(request):
         'total_included_tokens': agg['total_included'] or 0,
         'total_used_tokens': agg['total_used'] or 0,
         'total_byok_info_tokens': agg['total_byok_info'] or 0,
+        'provider_totals': provider_totals,
     }
     return Response({'status': 'success', 'stats': stats})

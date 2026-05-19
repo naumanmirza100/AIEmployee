@@ -278,14 +278,15 @@ const DocumentAuthoring = () => {
               if (scrollRef.current) scrollRef.current.scrollTop = 0;
             });
           },
-          onError: (message) => {
+          onError: (message, meta) => {
             setIsStreaming(false);
             setStreamingContent('');
             setStreamingTitle('');
             setView('create');
+            const isQuota = meta?.status === 402 || meta?.error_code === 'quota_exhausted' || meta?.error_code === 'no_key';
             toast({
-              title: 'Generation failed',
-              description: message || 'Please try again.',
+              title: isQuota ? 'Token Limit Reached' : 'Generation failed',
+              description: message || (isQuota ? 'Token quota exhausted. Add your own API key or request a managed key.' : 'Please try again.'),
               variant: 'destructive',
             });
           },
@@ -297,9 +298,12 @@ const DocumentAuthoring = () => {
       setStreamingTitle('');
       setView('create');
       if (err?.name !== 'AbortError') {
+        const isQuota = err?.status === 402;
         toast({
-          title: 'Generation failed',
-          description: err?.message || 'Please try again.',
+          title: isQuota ? 'Token Limit Reached' : 'Generation failed',
+          description: isQuota
+            ? (err.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+            : (err?.message || 'Please try again.'),
           variant: 'destructive',
         });
       }

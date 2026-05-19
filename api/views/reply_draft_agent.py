@@ -1390,7 +1390,7 @@ def generate_draft(request):
         return Response({'status': 'error', 'message': 'Provide only one of original_email_id / inbox_email_id'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    agent = ReplyDraftAgent(user=user)
+    agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
     result = agent.generate_draft(
         original_email_id=original_email_id,
         inbox_email_id=inbox_email_id,
@@ -1565,7 +1565,7 @@ def regenerate_draft(request, draft_id):
     user = _get_or_create_user_for_company_user(request.user)
 
     payload = request.data or {}
-    agent = ReplyDraftAgent(user=user)
+    agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
     result = agent.regenerate_draft(
         draft_id=draft_id,
         new_instructions=payload.get('new_instructions', ''),

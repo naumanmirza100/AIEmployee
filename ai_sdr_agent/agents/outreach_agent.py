@@ -404,9 +404,21 @@ neutral = out of office / asking a question / unclear"""
                         if sender_email not in email_map:
                             continue
 
-                        # Deduplicate by Message-ID
+                        subject = msg.get('Subject', '')
+                        date_raw = msg.get('Date', '').strip()
                         message_id = msg.get('Message-ID', '').strip()
+
+                        logger.debug(
+                            "IMAP [candidate] msg_id=%s from=%s subject='%s' date=%s",
+                            message_id, sender_email, subject, date_raw,
+                        )
+
+                        # Deduplicate by Message-ID
                         if message_id and message_id in seen_message_ids:
+                            logger.warning(
+                                "IMAP [DEDUP-MSGID] SKIPPED duplicate Message-ID=%s from=%s",
+                                message_id, sender_email,
+                            )
                             continue
                         if message_id:
                             seen_message_ids.add(message_id)
@@ -414,10 +426,9 @@ neutral = out of office / asking a question / unclear"""
                         # ── Key guard: only accept email received AFTER our outreach ──
                         # Parse the Date header from the incoming email.
                         email_date = None
-                        date_str = msg.get('Date', '').strip()
-                        if date_str:
+                        if date_raw:
                             try:
-                                email_date = email.utils.parsedate_to_datetime(date_str)
+                                email_date = email.utils.parsedate_to_datetime(date_raw)
                                 # Ensure timezone-aware for comparison
                                 if email_date.tzinfo is None:
                                     import datetime
@@ -436,20 +447,38 @@ neutral = out of office / asking a question / unclear"""
                                 ot = _tz.make_aware(ot)
                             # Reject any email that arrived at or before our outreach
                             if email_date <= ot:
-                                logger.debug(
-                                    "IMAP: skipping pre-outreach email from %s "
-                                    "(email date %s <= outreach sent %s)",
-                                    sender_email, email_date, ot,
+                                logger.warning(
+                                    "IMAP [PRE-OUTREACH] SKIPPED from=%s subject='%s' — "
+                                    "email date %s <= outreach sent %s",
+                                    sender_email, subject, email_date, ot,
                                 )
                                 continue
+                            else:
+                                logger.info(
+                                    "IMAP [ACCEPTED] from=%s subject='%s' — "
+                                    "email date %s > outreach sent %s ✓",
+                                    sender_email, subject, email_date, ot,
+                                )
+                        elif not outreach_time:
+                            logger.warning(
+                                "IMAP [NO-OUTREACH-TIME] accepting from=%s subject='%s' — "
+                                "no outreach timestamp found, cannot filter by date",
+                                sender_email, subject,
+                            )
 
-                        body = _extract_email_body(msg)
                         enrollment = email_map[sender_email]
+                        body = _extract_email_body(msg)
+                        logger.info(
+                            "IMAP [REPLY-FOUND] enrollment=%d from=%s subject='%s' "
+                            "current_enrollment_status=%s body_preview='%s'",
+                            enrollment.id, sender_email, subject,
+                            enrollment.status, (body or '')[:120].replace('\n', ' '),
+                        )
                         found.append({
                             'enrollment': enrollment,
                             'reply_text': body,
                             'sender_email': sender_email,
-                            'subject': msg.get('Subject', ''),
+                            'subject': subject,
                         })
 
                     except Exception as exc:
@@ -466,31 +495,12 @@ neutral = out of office / asking a question / unclear"""
     # Scheduling agent handoff — send calendar invitation email
     # ------------------------------------------------------------------
 
-    def send_scheduling_email(self, campaign, lead, calendar_link: str = '') -> None:
-        """Send a scheduling email to a positively-replied lead."""
-        first_name = lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there')
-        sender = campaign.sender_name or campaign.sender_company or 'us'
-
-        if calendar_link:
-            body = (
-                f"Hi {first_name},\n\n"
-                f"Great to hear from you! I'd love to set up a quick call.\n\n"
-                f"You can book a time that works for you here: {calendar_link}\n\n"
-                f"Looking forward to connecting!\n\n"
-                f"Best,\n{sender}"
-            )
-        else:
-            body = (
-                f"Hi {first_name},\n\n"
-                f"Great to hear from you! I'd love to set up a quick call to learn more about your needs.\n\n"
-                f"What times work best for you this week? Happy to work around your schedule.\n\n"
-                f"Best,\n{sender}"
-            )
-
-        subject = f"Let's schedule a call, {first_name}!"
+    def send_scheduling_email(self, campaign, lead, calendar_link: str = '',
+                              meeting=None, prep_notes: dict = None) -> None:
+        """Send a professional scheduling email via MeetingSchedulingAgent."""
+        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
         try:
-            self.send_email(campaign, lead.email, subject, body)
-            logger.info("Scheduling email sent to %s", lead.email)
+            MeetingSchedulingAgent().send_scheduling_email(campaign, lead, meeting, prep_notes)
         except Exception as exc:
             logger.warning("Failed to send scheduling email to %s: %s", lead.email, exc)
 
@@ -572,7 +582,18 @@ neutral = out of office / asking a question / unclear"""
         lead = enrollment.lead
         steps = list(campaign.steps.filter(is_active=True).order_by('step_order'))
 
+        logger.info(
+            "SDR [process-enrollment] enrollment=%d lead=%s email=%s "
+            "campaign=%d (%s) current_step=%d total_steps=%d",
+            enrollment.id, lead.display_name, lead.email,
+            campaign.id, campaign.name, enrollment.current_step, len(steps),
+        )
+
         if not steps:
+            logger.warning(
+                "SDR [process-enrollment] enrollment=%d — NO STEPS in campaign %d",
+                enrollment.id, campaign.id,
+            )
             return {'status': 'no_steps', 'lead': lead.display_name}
 
         idx = enrollment.current_step
@@ -581,36 +602,55 @@ neutral = out of office / asking a question / unclear"""
                 enrollment.status = 'completed'
                 enrollment.completed_at = timezone.now()
                 enrollment.save()
+            logger.info(
+                "SDR [process-enrollment] enrollment=%d — all %d steps done → completed",
+                enrollment.id, len(steps),
+            )
             return {'status': 'already_completed', 'lead': lead.display_name}
 
         step = steps[idx]
+        logger.info(
+            "SDR [process-enrollment] enrollment=%d → step=%d type=%s delay_days=%d",
+            enrollment.id, step.step_order, step.step_type, step.delay_days,
+        )
 
         # Guard 0 — global rate-limit: never send to the same email address twice
         # within a 10-minute window across ANY campaign. This is the final safety net
         # that catches multi-campaign duplicates, exception-swallowed failures, and
         # any scenario where the in-memory sent_emails_this_run set was bypassed.
-        if step.step_type == 'email' and lead.email:
-            recent_send = SDROutreachLog.objects.filter(
-                enrollment__lead__email__iexact=lead.email,
+        _g0_email = (lead.email or '').strip()
+        if step.step_type == 'email' and _g0_email:
+            recent_log = SDROutreachLog.objects.filter(
+                enrollment__lead__email__iexact=_g0_email,
                 status='sent',
                 sent_at__gte=timezone.now() - timezone.timedelta(minutes=10),
-            ).exists()
-            if recent_send:
-                logger.info(
-                    "SDR: suppressing duplicate to %s — already sent within last 10 min",
-                    lead.email,
+            ).select_related('enrollment__campaign').first()
+            if recent_log:
+                logger.warning(
+                    "SDR [GUARD-0 RATE-LIMIT] enrollment=%d lead=%s email=%s — "
+                    "BLOCKED: already sent within last 10 min "
+                    "(log_id=%d sent_at=%s via campaign=%d enrollment=%d)",
+                    enrollment.id, lead.display_name, _g0_email,
+                    recent_log.id, recent_log.sent_at,
+                    recent_log.enrollment.campaign_id, recent_log.enrollment_id,
                 )
                 return {'status': 'rate_limited', 'lead': lead.display_name}
 
         # Guard 1 — enrollment-level idempotency:
         # If this enrollment's own log already has a 'sent' record for this step,
         # the email was already delivered (e.g. server crashed after send but before save).
-        already_sent = SDROutreachLog.objects.filter(
+        already_sent_log = SDROutreachLog.objects.filter(
             enrollment=enrollment,
             step_order=step.step_order,
             status='sent',
-        ).exists()
-        if already_sent:
+        ).first()
+        if already_sent_log:
+            logger.warning(
+                "SDR [GUARD-1 IDEMPOTENCY] enrollment=%d lead=%s email=%s step=%d — "
+                "BLOCKED: step already logged as sent (log_id=%d sent_at=%s)",
+                enrollment.id, lead.display_name, lead.email,
+                step.step_order, already_sent_log.id, already_sent_log.sent_at,
+            )
             enrollment.current_step = idx + 1
             remaining = steps[idx + 1:]
             if remaining:
@@ -632,22 +672,50 @@ neutral = out of office / asking a question / unclear"""
         # Guard 2 — cross-enrollment dedup (email-address level):
         # Within the same campaign, never send the same step to the same email address
         # even if there are multiple SDRLead records with the same email.
-        if step.step_type == 'email' and lead.email:
-            duplicate_send = SDROutreachLog.objects.filter(
+        # Strip whitespace before querying so "user@x.com " and "user@x.com" match.
+        _g2_email = (lead.email or '').strip()
+        if step.step_type == 'email' and _g2_email:
+            dup_log = SDROutreachLog.objects.filter(
                 enrollment__campaign=campaign,
-                enrollment__lead__email__iexact=lead.email,
+                enrollment__lead__email__iexact=_g2_email,
                 step_order=step.step_order,
                 status='sent',
-            ).exclude(enrollment=enrollment).exists()
-            if duplicate_send:
-                logger.info(
-                    "SDR: skipping step %s for %s — already sent to %s in this campaign",
-                    step.step_order, lead.display_name, lead.email,
+            ).exclude(enrollment=enrollment).select_related('enrollment').first()
+            if dup_log:
+                logger.warning(
+                    "SDR [GUARD-2 DEDUP] enrollment=%d lead=%s email=%s step=%d — "
+                    "BLOCKED: same step already sent to this email in this campaign "
+                    "(log_id=%d sent_at=%s other_enrollment=%d)",
+                    enrollment.id, lead.display_name, lead.email,
+                    step.step_order, dup_log.id, dup_log.sent_at, dup_log.enrollment_id,
                 )
                 enrollment.status = 'completed'
                 enrollment.completed_at = timezone.now()
                 enrollment.save()
                 return {'status': 'deduplicated', 'lead': lead.display_name}
+        # Atomic claim: only the FIRST concurrent caller can advance current_step.
+        # If two processes (scheduler + manual "Process" button) both reach this point
+        # before either writes a log, this UPDATE ensures only one proceeds.
+        # The condition `current_step=idx` fails for the second caller because the
+        # first caller already changed it to idx+1.
+        from ai_sdr_agent.models import SDRCampaignEnrollment
+        claimed = SDRCampaignEnrollment.objects.filter(
+            id=enrollment.id,
+            current_step=idx,   # still at the expected step (not yet advanced)
+            status='active',
+        ).update(current_step=idx + 1)
+
+        if claimed == 0:
+            logger.warning(
+                "SDR [GUARD-CONCURRENT] enrollment=%d lead=%s email=%s step=%d — "
+                "SKIPPED: step already claimed by a concurrent process",
+                enrollment.id, lead.display_name, lead.email, step.step_order,
+            )
+            return {'status': 'already_claimed', 'lead': lead.display_name}
+
+        # Refresh enrollment object to reflect the updated current_step
+        enrollment.current_step = idx + 1
+
         log_base = {
             'enrollment': enrollment,
             'step': step,
@@ -669,7 +737,18 @@ neutral = out of office / asking a question / unclear"""
             else:
                 try:
                     content = self.generate_personalized_email(lead, step, campaign)
+                    logger.info(
+                        "SDR [EMAIL-SEND] enrollment=%d lead=%s TO=%s "
+                        "step=%d subject='%s' — SENDING NOW via SMTP host=%s",
+                        enrollment.id, lead.display_name, lead.email,
+                        step.step_order, content['subject'],
+                        campaign.smtp_host or '(django default)',
+                    )
                     self.send_email(campaign, lead.email, content['subject'], content['body'])
+                    logger.info(
+                        "SDR [EMAIL-SEND] enrollment=%d lead=%s TO=%s step=%d — SUCCESS",
+                        enrollment.id, lead.display_name, lead.email, step.step_order,
+                    )
                     SDROutreachLog.objects.create(
                         **log_base, status='sent',
                         subject_sent=content['subject'],
@@ -683,7 +762,11 @@ neutral = out of office / asking a question / unclear"""
                     result_status = 'sent'
                 except Exception as exc:
                     error_message = str(exc)
-                    logger.error("Email send failed for lead %s: %s", lead.id, exc)
+                    logger.error(
+                        "SDR [EMAIL-FAIL] enrollment=%d lead=%s TO=%s step=%d — %s",
+                        enrollment.id, lead.display_name, lead.email, step.step_order, exc,
+                        exc_info=True,
+                    )
                     SDROutreachLog.objects.create(
                         **log_base, status='failed',
                         error_message=error_message,
@@ -694,17 +777,15 @@ neutral = out of office / asking a question / unclear"""
             SDROutreachLog.objects.create(**log_base, status='sent', body_sent=note)
             result_status = 'sent'
 
-        # Advance enrollment to next step
-        enrollment.current_step = idx + 1
+        # current_step was already atomically advanced above (via UPDATE).
+        # Now just set next_action_at (or mark completed) and save those fields only.
+        save_fields = ['next_action_at']
         remaining = steps[idx + 1:]
         if remaining:
             next_step = remaining[0]
-            # Primary: enrolled_at + (next_step.delay_days - 1) days (Day 1 = immediate)
             enrolled_at_based = enrollment.enrolled_at + timezone.timedelta(
                 days=max(0, next_step.delay_days - 1)
             )
-            # Safety: never let next_action_at fall in the past — always wait at least
-            # the gap between this step and the next (prevents cascade for old enrollments)
             gap_days = max(1, next_step.delay_days - step.delay_days)
             enrollment.next_action_at = max(
                 enrolled_at_based,
@@ -713,8 +794,9 @@ neutral = out of office / asking a question / unclear"""
         else:
             enrollment.status = 'completed'
             enrollment.completed_at = timezone.now()
+            save_fields = ['status', 'completed_at', 'next_action_at']
 
-        enrollment.save()
+        enrollment.save(update_fields=save_fields)
 
         result = {
             'status': result_status,

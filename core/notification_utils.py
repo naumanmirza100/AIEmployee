@@ -53,6 +53,43 @@ def notify_company_user(company_user, *, title, message, action_url=None,
         return None
 
 
+def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float = None):
+    """Send quota threshold notification to all owner/admin CompanyUsers via PMNotification."""
+    try:
+        from core.models import CompanyUser
+        from project_manager_agent.models import PMNotification
+
+        recipients = CompanyUser.objects.filter(
+            company=company, is_active=True
+        )
+        display_pct = actual_pct if actual_pct is not None else pct
+        if pct >= 100:
+            title = f"Token quota exhausted — {agent_label}"
+            message = (
+                f"Your {agent_label} has used {display_pct}% of its free tokens and is now blocked. "
+                f"Add your own API key (BYOK) or request a managed key to continue."
+            )
+            severity = 'critical'
+        else:
+            title = f"Token quota at {display_pct}% — {agent_label}"
+            message = (
+                f"Your {agent_label} has used {display_pct}% of its free tokens. "
+                f"Consider adding your own API key (BYOK) or requesting a managed key soon."
+            )
+            severity = 'warning'
+
+        for cu in recipients:
+            PMNotification.objects.create(
+                company_user=cu,
+                notification_type='custom',
+                severity=severity,
+                title=title,
+                message=message,
+            )
+    except Exception as exc:
+        logger.warning("Failed to send quota notification: %s", exc)
+
+
 def notify_admins(*, title, message, action_url=None, notification_type='admin_action'):
     """Broadcast to all staff/superuser Django Users. Used when a KeyRequest
     is raised so admins see it in their inbox without polling the dashboard."""

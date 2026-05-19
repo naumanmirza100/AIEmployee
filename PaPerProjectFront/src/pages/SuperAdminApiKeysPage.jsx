@@ -26,6 +26,7 @@ const ROW_CLASS = 'bg-[#0f0a20] border border-[#2d2342] hover:border-violet-500/
 
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'groq', label: 'Groq (Llama)' },
   { value: 'claude', label: 'Claude / Anthropic' },
   { value: 'gemini', label: 'Google Gemini' },
   { value: 'grok', label: 'xAI Grok' },
@@ -161,19 +162,36 @@ const OverviewTab = ({ stats }) => (
         </CardTitle>
         <CardDescription className="text-white/50">Aggregate token usage across all companies and agents.</CardDescription>
       </CardHeader>
-      <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-          <p className="text-xs text-white/40 uppercase mb-1">Included (managed)</p>
-          <p className="text-xl font-bold text-white">{formatTokens(stats.total_included_tokens)}</p>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <p className="text-xs text-white/40 uppercase mb-1">Total Included</p>
+            <p className="text-xl font-bold text-white">{formatTokens(stats.total_included_tokens)}</p>
+          </div>
+          <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <p className="text-xs text-white/40 uppercase mb-1">Total Used</p>
+            <p className="text-xl font-bold text-violet-300">{formatTokens(stats.total_used_tokens)}</p>
+          </div>
+          <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <p className="text-xs text-white/40 uppercase mb-1">BYOK (info only)</p>
+            <p className="text-xl font-bold text-blue-300">{formatTokens(stats.total_byok_info_tokens)}</p>
+          </div>
         </div>
-        <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-          <p className="text-xs text-white/40 uppercase mb-1">Used (managed)</p>
-          <p className="text-xl font-bold text-violet-300">{formatTokens(stats.total_used_tokens)}</p>
-        </div>
-        <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-          <p className="text-xs text-white/40 uppercase mb-1">BYOK info (non-billable)</p>
-          <p className="text-xl font-bold text-blue-300">{formatTokens(stats.total_byok_info_tokens)}</p>
-        </div>
+        {/* Per-provider breakdown */}
+        {stats.provider_totals && Object.keys(stats.provider_totals).length > 0 && (
+          <div>
+            <p className="text-xs text-white/40 uppercase mb-2">By Provider</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+              {Object.entries(stats.provider_totals).map(([provider, tokens]) => (
+                <div key={provider} className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg text-center hover:border-violet-500/30 transition-colors">
+                  <p className="text-[10px] uppercase font-semibold text-white/50 tracking-wider">{provider}</p>
+                  <p className="text-base font-bold text-white mt-1">{formatTokens(tokens)}</p>
+                  <p className="text-[10px] text-white/30 mt-0.5">tokens</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   </div>
@@ -379,9 +397,19 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
                   <p className="text-[10px] text-white/40">{pct.toFixed(1)}% used</p>
                 </div>
               </div>
-              <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342] mb-3">
+              <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342] mb-2">
                 <div className={`h-full bg-gradient-to-r ${bar}`} style={{ width: `${pct}%` }} />
               </div>
+              {q.provider_breakdown && Object.keys(q.provider_breakdown).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {Object.entries(q.provider_breakdown).map(([provider, tokens]) => (
+                    <span key={provider} className="text-[10px] px-2 py-0.5 rounded-full bg-[#1a1333] border border-[#2d2342] text-white/60">
+                      <span className="text-white/80 font-semibold uppercase">{provider}</span>
+                      {' '}{formatTokens(tokens)}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 justify-end">
                 <Button size="sm" variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={() => onAdjust(q, 'reset')}>
                   Reset used
@@ -544,7 +572,7 @@ const SuperAdminApiKeysPage = () => {
   const [requestFilter, setRequestFilter] = useState({});
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
-  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '' });
+  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', managed_token_limit: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
 
@@ -621,6 +649,7 @@ const SuperAdminApiKeysPage = () => {
         agent_name: prefill.agent_name,
         provider: prefill.provider || 'openai',
         api_key: '',
+        managed_token_limit: '',
       });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: prefill });
     } else if (existingOrRequest) {
@@ -629,10 +658,11 @@ const SuperAdminApiKeysPage = () => {
         agent_name: existingOrRequest.agent_name,
         provider: existingOrRequest.provider || 'openai',
         api_key: '',
+        managed_token_limit: '',
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', managed_token_limit: '' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -649,6 +679,7 @@ const SuperAdminApiKeysPage = () => {
         agent_name: assignForm.agent_name,
         provider: assignForm.provider,
         api_key: assignForm.api_key,
+        managed_token_limit: assignForm.managed_token_limit ? Number(assignForm.managed_token_limit) : 0,
       };
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
@@ -845,6 +876,15 @@ const SuperAdminApiKeysPage = () => {
                 className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
                 value={assignForm.api_key}
                 onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-sm">Token Limit <span className="text-white/40 font-normal">(0 = unlimited)</span></Label>
+              <Input
+                type="number" min="0" placeholder="e.g. 50000"
+                className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                value={assignForm.managed_token_limit}
+                onChange={(e) => setAssignForm({ ...assignForm, managed_token_limit: e.target.value })}
               />
             </div>
           </div>

@@ -48,11 +48,12 @@ export async function streamNdjsonPost({
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
+    let errorData = null;
     try {
-      const j = await response.json();
-      if (j?.message) detail = j.message;
+      errorData = await response.json();
+      if (errorData?.message) detail = errorData.message;
     } catch (_) { /* ignore */ }
-    onError(detail);
+    onError(detail, { status: response.status, data: errorData });
     return;
   }
 
@@ -85,7 +86,7 @@ export async function streamNdjsonPost({
         onDone(msg);
         break;
       case 'error':
-        onError(msg.message || 'Unknown error');
+        onError(msg.message || 'Unknown error', { error_code: msg.error_code });
         break;
       default:
         break;
