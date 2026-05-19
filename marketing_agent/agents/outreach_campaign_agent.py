@@ -909,9 +909,12 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error optimizing campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}
-    
+
     def schedule_campaign(self, campaign_id: int, user_id: int,
                         schedule_data: Optional[Dict] = None) -> Dict:
         """
@@ -966,6 +969,9 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error scheduling campaign", {"error": str(e)})
             return {'success': False, 'error': str(e)}
     
@@ -1145,6 +1151,9 @@ Focus ONLY on email marketing launch activities."""
                 'full_plan': launch_plan_text
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {'error': str(e), 'full_plan': 'Error generating launch plan'}
     
     def _extract_launch_sequence(self, text: str) -> List[Dict]:
@@ -1265,6 +1274,9 @@ Provide:
                 'priority_actions': self._extract_priority_actions(management_text)
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {'error': str(e), 'recommendations': []}
     
     def _extract_priority_actions(self, text: str) -> List[str]:
@@ -1307,6 +1319,9 @@ Assess:
                 'recommendations': self._extract_recommendations(consistency_text)
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {'error': str(e), 'is_consistent': True}
     
     def _check_campaign_timing(self, campaign: Campaign) -> Dict:
@@ -1367,6 +1382,9 @@ Provide optimization recommendations:
                 'priority_actions': self._extract_priority_actions(optimization_text)
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {'error': str(e), 'recommendations': []}
     
     def _generate_campaign_schedule(self, campaign: Campaign,
@@ -1403,6 +1421,9 @@ Ensure all channels are properly coordinated and timed."""
                 'milestones': self._extract_milestones(schedule_text)
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {'error': str(e), 'schedule': 'Error generating schedule'}
     
     def _extract_timeline(self, text: str) -> List[Dict]:

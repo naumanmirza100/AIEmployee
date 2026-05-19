@@ -104,6 +104,9 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
                 return 'research'
             return 'research'
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Intent classification failed, treating as research", {"error": str(e)})
             return 'research'
 
@@ -128,6 +131,9 @@ Reply only with the definition, no preamble."""
             if out and out.strip():
                 return out.strip()
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Short definition failed", {"error": str(e)})
         return (
             "This agent focuses on **market and competitive research**. For definitions, try a quick search. "

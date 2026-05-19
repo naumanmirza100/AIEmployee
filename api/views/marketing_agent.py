@@ -1116,10 +1116,7 @@ def marketing_qa(request):
     except Exception as e:
         from core.api_key_service import KeyServiceError
         if isinstance(e, KeyServiceError):
-            return Response(
-                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
+            raise
         logger.exception("marketing_qa failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1172,10 +1169,7 @@ def market_research(request):
     except Exception as e:
         from core.api_key_service import KeyServiceError
         if isinstance(e, KeyServiceError):
-            return Response(
-                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
+            raise
         logger.exception("market_research failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1258,10 +1252,7 @@ def outreach_campaign(request):
     except Exception as e:
         from core.api_key_service import KeyServiceError
         if isinstance(e, KeyServiceError):
-            return Response(
-                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
+            raise
         logger.exception("outreach_campaign failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1479,10 +1470,7 @@ def document_authoring(request):
     except Exception as e:
         from core.api_key_service import KeyServiceError
         if isinstance(e, KeyServiceError):
-            return Response(
-                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
+            raise
         logger.exception("document_authoring failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1578,10 +1566,7 @@ def proactive_notification_monitor(request):
     except Exception as e:
         from core.api_key_service import KeyServiceError
         if isinstance(e, KeyServiceError):
-            return Response(
-                {'status': 'error', 'message': e.user_message, 'error_code': e.reason},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
+            raise
         logger.exception("proactive_notification_monitor failed")
         return Response(
             {'status': 'error', 'message': 'Monitor failed', 'error': str(e)},

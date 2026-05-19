@@ -419,6 +419,9 @@ class MarketingQAAgent(MarketingBaseAgent):
                 max_tokens=300,
             )
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             answer = "I couldn't answer that right now. For definitions, try a search engine."
         return self._ok(answer, question)
 
@@ -1067,4 +1070,7 @@ class MarketingQAAgent(MarketingBaseAgent):
         except Campaign.DoesNotExist:
             return {'success': False, 'error': 'Campaign not found'}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {'success': False, 'error': str(e)}

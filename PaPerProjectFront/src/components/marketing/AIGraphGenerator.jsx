@@ -386,7 +386,14 @@ const AIGraphGenerator = () => {
       } else throw new Error(response.message || 'Failed to generate graph');
     } catch (error) {
       console.error('Error generating graph:', error);
-      toast({ title: 'Generation failed', description: error.message || 'Failed to generate graph. Please try a different prompt.', variant: 'destructive' });
+      const isHardBlock = error?.status === 402 || error?.status === 403 || error?.data?.hard_block;
+      toast({
+        title: isHardBlock ? 'Generation blocked' : 'Generation failed',
+        description: isHardBlock
+          ? (error?.data?.message || error?.message || 'API key or token quota issue. Check your API Keys settings.')
+          : (error?.message || 'Failed to generate graph. Please try a different prompt.'),
+        variant: 'destructive'
+      });
     } finally {
       setGenerating(false);
     }

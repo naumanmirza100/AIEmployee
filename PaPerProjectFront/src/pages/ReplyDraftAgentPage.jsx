@@ -704,7 +704,7 @@ const ReplyDraftAgentPage = () => {
       const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
       toast({
         title: isHardBlock ? 'Generation blocked' : 'Could not generate draft',
-        description: isHardBlock ? (e?.message || 'API key or quota issue.') : humanizeAiError(e?.message),
+        description: isHardBlock ? (e?.data?.message || e?.message || 'API key or quota issue. Check your API Keys settings.') : humanizeAiError(e?.message),
         variant: 'destructive',
       });
     } finally {
@@ -750,7 +750,7 @@ const ReplyDraftAgentPage = () => {
       const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
       toast({
         title: isHardBlock ? 'Generation blocked' : 'Could not regenerate draft',
-        description: isHardBlock ? (e?.message || 'API key or quota issue.') : humanizeAiError(e?.message),
+        description: isHardBlock ? (e?.data?.message || e?.message || 'API key or quota issue. Check your API Keys settings.') : humanizeAiError(e?.message),
         variant: 'destructive',
       });
     } finally {

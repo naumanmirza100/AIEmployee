@@ -333,6 +333,9 @@ Respond with ONLY the type name (one word, lowercase). Nothing else."""
                 doc_type = 'other'
             return {'document_type': doc_type}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.warning(f'Classification failed, defaulting to other: {e}')
             return {'document_type': 'other'}
 
@@ -368,6 +371,9 @@ Return ONLY valid JSON. No explanation."""
             entities = json.loads(cleaned)
             return {'entities': entities}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.warning(f'Entity extraction failed: {e}')
             return {'entities': {}}
 
@@ -408,5 +414,8 @@ No explanation outside the JSON."""
                 'key_insights': parsed.get('key_insights', []),
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.warning(f'Summary generation failed: {e}')
             return {'summary': '', 'key_insights': []}
