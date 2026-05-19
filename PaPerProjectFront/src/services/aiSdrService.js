@@ -433,3 +433,54 @@ export const confirmBooking = async (token, scheduledAt) => {
   if (!resp.ok) throw data;
   return data;
 };
+
+// --------------------------------------------------------------------------
+// CRM Sync
+// --------------------------------------------------------------------------
+export const listCrmIntegrations = async () => {
+  try { return await companyApi.get('/crm-sync/integrations/'); }
+  catch (e) { console.error('CRM list error:', e); throw e; }
+};
+
+export const createCrmIntegration = async (data) => {
+  try { return await companyApi.post('/crm-sync/integrations/', data); }
+  catch (e) { console.error('CRM create error:', e); throw e; }
+};
+
+export const updateCrmIntegration = async (id, data) => {
+  try { return await companyApi.patch(`/crm-sync/integrations/${id}/`, data); }
+  catch (e) { console.error('CRM update error:', e); throw e; }
+};
+
+export const deleteCrmIntegration = async (id) => {
+  try { return await companyApi.delete(`/crm-sync/integrations/${id}/`); }
+  catch (e) { console.error('CRM delete error:', e); throw e; }
+};
+
+export const pingCrmIntegration = async (id) => {
+  try { return await companyApi.post(`/crm-sync/integrations/${id}/ping/`); }
+  catch (e) { console.error('CRM ping error:', e); throw e; }
+};
+
+export const syncCrmLeads = async (id) => {
+  try { return await companyApi.post(`/crm-sync/integrations/${id}/sync-leads/`); }
+  catch (e) { console.error('CRM sync error:', e); throw e; }
+};
+
+export const getCrmQueueStatus = async () => {
+  try { return await companyApi.get('/crm-sync/queue/'); }
+  catch (e) { console.error('CRM queue error:', e); throw e; }
+};
+
+export const getCrmSyncLogs = async (params = {}) => {
+  try {
+    const qs = new URLSearchParams(params).toString();
+    return await companyApi.get(`/crm-sync/logs/${qs ? '?' + qs : ''}`);
+  }
+  catch (e) { console.error('CRM logs error:', e); throw e; }
+};
+
+export const retryCrmFailed = async () => {
+  try { return await companyApi.post('/crm-sync/queue/retry/'); }
+  catch (e) { console.error('CRM retry error:', e); throw e; }
+};

@@ -169,10 +169,19 @@ def check_inbox_replies_impl():
                     lead_email, subject, enrollment.id, enrollment.status,
                 )
 
-                if enrollment.status == 'replied':
-                    logger.warning(
+                # Skip only when scheduling email has already been sent — this lets us
+                # retry if the email failed in a previous cycle while still preventing
+                # true duplicates.
+                existing_meeting = SDRMeeting.objects.filter(enrollment=enrollment).first()
+                already_done = (
+                    enrollment.status == 'replied'
+                    and existing_meeting is not None
+                    and existing_meeting.scheduling_email_sent_at is not None
+                )
+                if already_done:
+                    logger.info(
                         "SDR [DEDUP-REPLY] enrollment=%d lead=%s — "
-                        "SKIPPED: enrollment already marked replied (would have sent duplicate)",
+                        "SKIPPED: already replied and scheduling email sent",
                         enrollment.id, lead_email,
                     )
                     continue
@@ -189,11 +198,12 @@ def check_inbox_replies_impl():
                     is_interested, sentiment_result.get('reason', ''),
                 )
 
-                enrollment.status = 'replied'
-                enrollment.replied_at = timezone.now()
-                enrollment.reply_content = reply_text[:2000]
-                enrollment.reply_sentiment = sentiment
-                enrollment.save()
+                if enrollment.status != 'replied':
+                    enrollment.status = 'replied'
+                    enrollment.replied_at = timezone.now()
+                    enrollment.reply_content = reply_text[:2000]
+                    enrollment.reply_sentiment = sentiment
+                    enrollment.save()
 
                 campaign.replies_received = (campaign.replies_received or 0) + 1
                 total_replies += 1
@@ -202,50 +212,54 @@ def check_inbox_replies_impl():
                     enrollment.lead.status = 'replied'
                     enrollment.lead.save(update_fields=['status'])
 
-                    meeting, created = SDRMeeting.objects.get_or_create(
-                        enrollment=enrollment,
-                        defaults={
-                            'company_user': campaign.company_user,
-                            'lead': enrollment.lead,
-                            'title': f'Discovery Call with {enrollment.lead.display_name}',
-                            'reply_snippet': reply_text[:500],
-                            'calendar_link': campaign.calendar_link or '',
-                            'status': 'pending',
-                        }
-                    )
+                    if existing_meeting:
+                        meeting = existing_meeting
+                        created = False
+                    else:
+                        meeting, created = SDRMeeting.objects.get_or_create(
+                            enrollment=enrollment,
+                            defaults={
+                                'company_user': campaign.company_user,
+                                'lead': enrollment.lead,
+                                'title': f'Discovery Call with {enrollment.lead.display_name}',
+                                'reply_snippet': reply_text[:500],
+                                'calendar_link': campaign.calendar_link or '',
+                                'status': 'pending',
+                            }
+                        )
 
                     if created:
                         total_meetings += 1
                         campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
-                        logger.info(
-                            "SDR [check-inbox] NEW meeting created for enrollment=%d lead=%s — "
-                            "sending scheduling email",
-                            enrollment.id, lead_email,
+
+                    try:
+                        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                        sched_agent = MeetingSchedulingAgent()
+                        prep_notes = sched_agent.generate_prep_notes(
+                            enrollment.lead, enrollment, reply_text
                         )
-                        try:
-                            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                            sched_agent = MeetingSchedulingAgent()
-                            prep_notes = sched_agent.generate_prep_notes(
-                                enrollment.lead, enrollment, reply_text
+                        # send_scheduling_email_once is atomic — only one caller ever sends
+                        sent = sched_agent.send_scheduling_email_once(
+                            campaign, enrollment.lead, meeting, prep_notes
+                        )
+                        if sent:
+                            logger.info(
+                                "SDR [check-inbox] scheduling email SENT for "
+                                "enrollment=%d lead=%s meeting=%d",
+                                enrollment.id, lead_email, meeting.id,
                             )
-                            # send_scheduling_email_once is atomic — only one caller sends
-                            sent = sched_agent.send_scheduling_email_once(
-                                campaign, enrollment.lead, meeting, prep_notes
+                            meeting.prep_notes = prep_notes
+                            meeting.save(update_fields=['prep_notes'])
+                        else:
+                            logger.info(
+                                "SDR [check-inbox] scheduling email already sent "
+                                "(atomic guard) for enrollment=%d lead=%s meeting=%d",
+                                enrollment.id, lead_email, meeting.id,
                             )
-                            if sent:
-                                meeting.prep_notes = prep_notes
-                                meeting.save(update_fields=['prep_notes'])
-                        except Exception as exc:
-                            logger.warning(
-                                "SDR [check-inbox] scheduling email FAILED for %s: %s",
-                                lead_email, exc,
-                            )
-                    else:
+                    except Exception as exc:
                         logger.warning(
-                            "SDR [DEDUP-MEETING] enrollment=%d lead=%s — "
-                            "meeting already existed (id=%d, status=%s) — "
-                            "scheduling email NOT sent again",
-                            enrollment.id, lead_email, meeting.id, meeting.status,
+                            "SDR [check-inbox] scheduling email FAILED for %s: %s",
+                            lead_email, exc,
                         )
 
             campaign.last_replies_checked_at = timezone.now()

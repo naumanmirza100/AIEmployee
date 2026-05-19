@@ -299,6 +299,7 @@ INSTALLED_APPS = [
     'operations_agent.apps.OperationsAgentConfig',  # Operations / Analyst Agent app
     'api',  # API app
     'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
+    'crm_sync_agent.apps.CRMSyncAgentConfig',  # CRM & System Sync Agent
     'whitenoise.runserver_nostatic',
 ]
 
@@ -870,6 +871,26 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'hr_agent.tasks.accrue_leave_balances',
         'schedule': 86400.0,
         'options': {'expires': 172800},
+    },
+
+    # ----- CRM & System Sync Agent -----
+    # Process pending CRM sync queue items — every 2 minutes.
+    'crm-process-sync-queue': {
+        'task': 'crm_sync_agent.tasks.process_crm_sync_queue',
+        'schedule': 120.0,
+        'options': {'expires': 240},
+    },
+    # Re-schedule failed items whose back-off window has expired — every 30 minutes.
+    'crm-retry-failed-syncs': {
+        'task': 'crm_sync_agent.tasks.retry_failed_crm_syncs',
+        'schedule': 1800.0,
+        'options': {'expires': 3600},
+    },
+    # Health-check all active CRM integrations — every hour.
+    'crm-ping-integrations': {
+        'task': 'crm_sync_agent.tasks.ping_crm_integrations',
+        'schedule': 3600.0,
+        'options': {'expires': 7200},
     },
 }
 

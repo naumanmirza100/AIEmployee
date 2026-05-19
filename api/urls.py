@@ -40,6 +40,7 @@ from api.views import company_api_keys
 from api.views import admin_api_keys
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
+from api.views import crm_sync_agent as crm_api
 from api.views.health import health_check
 
 app_name = 'api'
@@ -702,6 +703,17 @@ urlpatterns = [
 
     # Audit log (HR-admin only)
     re_path(r'^hr/audit-log/?$', hr_agent.list_hr_audit_log, name='hr_audit_log'),  # GET
+
+    # -------------------------------------------------------------------------
+    # CRM & System Sync Agent
+    # -------------------------------------------------------------------------
+    re_path(r'^crm-sync/integrations/?$', crm_api.integrations_list, name='crm_integrations_list'),  # GET, POST
+    re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/?$', crm_api.integration_detail, name='crm_integration_detail'),  # GET, PUT, DELETE
+    re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/ping/?$', crm_api.integration_ping, name='crm_integration_ping'),  # POST
+    re_path(r'^crm-sync/integrations/(?P<integration_id>\d+)/sync-leads/?$', crm_api.integration_sync_leads, name='crm_integration_sync_leads'),  # POST
+    re_path(r'^crm-sync/logs/?$', crm_api.sync_logs, name='crm_sync_logs'),  # GET
+    re_path(r'^crm-sync/queue/?$', crm_api.queue_status, name='crm_queue_status'),  # GET
+    re_path(r'^crm-sync/queue/retry/?$', crm_api.retry_failed, name='crm_queue_retry'),  # POST
 ]
 
 
