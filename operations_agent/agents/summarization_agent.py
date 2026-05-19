@@ -37,6 +37,9 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
         try:
             return handler(**kwargs)
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f'{self.agent_name} error: {e}', exc_info=True)
             return {'success': False, 'error': str(e)}
 

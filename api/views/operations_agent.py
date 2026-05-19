@@ -84,6 +84,8 @@ def upload_document(request):
         # Process with agent
         from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
         agent = DocumentProcessingAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
         result = agent.process(
             action='process_file',
             file_path=str(file_path),
@@ -107,6 +109,9 @@ def upload_document(request):
         }, status=status.HTTP_201_CREATED)
 
     except Exception as e:
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
+            raise
         logger.error(f'Upload document error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -292,6 +297,8 @@ def upload_and_summarize(request):
         # Process with summarization agent
         from operations_agent.agents.summarization_agent import DocumentSummarizationAgent
         agent = DocumentSummarizationAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
         result = agent.process(
             action='summarize_file',
             file_path=str(temp_path),
@@ -317,6 +324,9 @@ def upload_and_summarize(request):
         }, status=status.HTTP_201_CREATED)
 
     except Exception as e:
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
+            raise
         logger.error(f'Upload and summarize error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -773,6 +783,9 @@ def ask_qa_question(request):
         })
 
     except Exception as e:
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
+            raise
         logger.error(f'ask_qa_question error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
@@ -853,6 +866,8 @@ def generate_document(request):
 
         from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
         agent = DocumentAuthoringAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
         result = agent.generate(
             company_id=company.id,
             prompt=prompt,
@@ -891,6 +906,9 @@ def generate_document(request):
         )
 
     except Exception as e:
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
+            raise
         logger.error(f'generate_document error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
@@ -1074,6 +1092,8 @@ def regenerate_document(request, doc_id):
 
         from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
         agent = DocumentAuthoringAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
         result = agent.generate(
             company_id=company.id,
             prompt=prompt,
@@ -1112,6 +1132,9 @@ def regenerate_document(request, doc_id):
         return Response({'status': 'success', 'document': _serialize_generated(doc)})
 
     except Exception as e:
+        from core.api_key_service import KeyServiceError
+        if isinstance(e, KeyServiceError):
+            raise
         logger.error(f'regenerate_document error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
@@ -1230,6 +1253,8 @@ def stream_generate_document(request):
         try:
             from operations_agent.agents.document_authoring_agent import DocumentAuthoringAgent
             agent = DocumentAuthoringAgent()
+            agent.company_id = company.id
+            agent.agent_key_name = 'operations_agent'
 
             final_payload = None
 
