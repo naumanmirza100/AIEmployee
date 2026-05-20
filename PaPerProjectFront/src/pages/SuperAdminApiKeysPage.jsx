@@ -611,15 +611,17 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
                   Set
                 </Button>
                 </div>
-                <div className="flex items-center gap-2">
-                <span className="text-[10px] text-white/25 ml-2">Managed:</span>
-                <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'set_managed')}>
-                  Set tokens
-                </Button>
-                <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'reset_managed')}>
-                  Reset used
-                </Button>
-                </div>
+                {q.managed_key_status !== 'revoked' && q.managed_included_tokens > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-white/25 ml-2">Managed:</span>
+                    <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'set_managed')}>
+                      Set tokens
+                    </Button>
+                    <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'reset_managed')}>
+                      Reset used
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -973,7 +975,7 @@ const SuperAdminApiKeysPage = () => {
   const [requestFilter, setRequestFilter] = useState({});
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
-  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true });
+  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '' });
   const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', admin_note: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
@@ -1053,6 +1055,7 @@ const SuperAdminApiKeysPage = () => {
         provider: prefill.provider || 'openai',
         api_key: '',
         reset_tokens: true,
+        managed_tokens: '',
       });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: prefill });
     } else if (existingOrRequest) {
@@ -1062,11 +1065,14 @@ const SuperAdminApiKeysPage = () => {
         agent_name: existingOrRequest.agent_name,
         provider: existingOrRequest.provider || 'openai',
         api_key: '',
-        reset_tokens: !hasUsage, // default: reset only if no prior usage to preserve
+        reset_tokens: !hasUsage,
+        managed_tokens: existingOrRequest.quota?.managed_included_tokens > 0
+          ? String(existingOrRequest.quota.managed_included_tokens)
+          : '',
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -1085,6 +1091,7 @@ const SuperAdminApiKeysPage = () => {
         api_key: assignForm.api_key,
         reset_tokens: assignForm.reset_tokens,
       };
+      if (assignForm.managed_tokens.trim() !== '') payload.managed_tokens = assignForm.managed_tokens;
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
       toast({ title: 'Key assigned', description: 'Company can now use this managed key.' });
@@ -1366,32 +1373,51 @@ const SuperAdminApiKeysPage = () => {
                 </p>
               </div>
               {assignModal.replacingKey && (
-                <div
-                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
-                    assignForm.reset_tokens
-                      ? 'border-amber-500/40 bg-amber-500/8'
-                      : 'border-white/10 bg-white/3 hover:border-white/20'
-                  }`}
-                  onClick={() => setAssignForm((f) => ({ ...f, reset_tokens: !f.reset_tokens }))}
-                >
-                  <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                    assignForm.reset_tokens ? 'bg-amber-500 border-amber-500' : 'border-white/30'
-                  }`}>
-                    {assignForm.reset_tokens && (
-                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12">
-                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    )}
+                <>
+                  <div
+                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      assignForm.reset_tokens
+                        ? 'border-amber-500/40 bg-amber-500/8'
+                        : 'border-white/10 bg-white/3 hover:border-white/20'
+                    }`}
+                    onClick={() => setAssignForm((f) => ({ ...f, reset_tokens: !f.reset_tokens }))}
+                  >
+                    <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                      assignForm.reset_tokens ? 'bg-amber-500 border-amber-500' : 'border-white/30'
+                    }`}>
+                      {assignForm.reset_tokens && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12">
+                          <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm text-white font-medium">Reset token usage to 0</p>
+                      <p className="text-xs text-white/50 mt-0.5">
+                        {assignModal.replacingKey.quota?.managed_used_tokens > 0
+                          ? `Currently ${formatTokens(assignModal.replacingKey.quota.managed_used_tokens)} used — uncheck to keep history.`
+                          : 'No tokens used yet.'}
+                      </p>
+                    </div>
                   </div>
                   <div>
-                    <p className="text-sm text-white font-medium">Reset token usage to 0</p>
-                    <p className="text-xs text-white/50 mt-0.5">
-                      {assignModal.replacingKey.quota?.managed_used_tokens > 0
-                        ? `Currently ${formatTokens(assignModal.replacingKey.quota.managed_used_tokens)} used — uncheck to keep history.`
-                        : 'No tokens used yet.'}
-                    </p>
+                    <Label className="text-white/60 text-xs uppercase tracking-wider">
+                      Managed token limit <span className="text-white/30 normal-case">(leave blank to use pricing default)</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      placeholder={`Default from pricing: ${formatTokens(pricing.find(p => p.agent_name === assignForm.agent_name)?.managed_key_tokens ?? 0)}`}
+                      className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                      value={assignForm.managed_tokens}
+                      onChange={(e) => setAssignForm((f) => ({ ...f, managed_tokens: e.target.value }))}
+                    />
+                    {assignForm.managed_tokens && !isNaN(parseInt(assignForm.managed_tokens)) && (
+                      <p className="text-[10px] text-violet-300/70 mt-1">
+                        Will grant: {formatTokens(parseInt(assignForm.managed_tokens))} tokens
+                      </p>
+                    )}
                   </div>
-                </div>
+                </>
               )}
             </div>
           </div>

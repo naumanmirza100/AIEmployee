@@ -330,25 +330,20 @@ def list_key_requests(request):
     company = request.user.company
     reqs = KeyRequest.objects.filter(company=company).select_related('requested_by', 'resolved_by').order_by('-created_at')
 
-    # Agents whose managed key is currently revoked — used to override 'approved'
-    # requests that predate the revocation (handles existing DB rows).
-    revoked_agents = set(
-        CompanyAPIKey.objects.filter(company=company, mode='managed', status='revoked')
-        .values_list('agent_name', flat=True)
-    )
-
     data = []
     for r in reqs:
-        status = r.status
-        if status == 'approved' and r.agent_name in revoked_agents:
-            status = 'revoked'
+        # was_assigned: record was once key_assigned/approved then revoked.
+        # Frontend splits it into two timeline nodes (Assigned → Revoked).
+        was_assigned = r.status == 'revoked' and r.resolved_at is not None
         data.append({
             'id': r.id,
             'agent_name': r.agent_name,
             'agent_label': r.get_agent_name_display(),
             'provider': r.provider,
             'note': r.note,
-            'status': status,
+            'status': r.status,
+            'was_assigned': was_assigned,
+            'revoked_at': r.updated_at.isoformat() if was_assigned else None,
             'admin_note': r.admin_note,
             'requested_by': r.requested_by.email if r.requested_by else None,
             'resolved_by': r.resolved_by.username if r.resolved_by else None,

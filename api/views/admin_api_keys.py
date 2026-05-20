@@ -142,7 +142,15 @@ def assign_managed_key(request):
                         status=status.HTTP_404_NOT_FOUND)
 
     pricing_conf = AdminPricingConfig.objects.filter(agent_name=agent_name).first()
-    token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
+    # Allow caller to override the token limit; fall back to pricing config
+    managed_tokens_override = request.data.get('managed_tokens')
+    if managed_tokens_override is not None and str(managed_tokens_override).strip() != '':
+        try:
+            token_limit = max(0, int(managed_tokens_override))
+        except (ValueError, TypeError):
+            token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
+    else:
+        token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
 
     with transaction.atomic():
         key, _ = CompanyAPIKey.objects.get_or_create(
@@ -374,14 +382,30 @@ def list_quotas(request):
     limit = min(int(request.GET.get('limit', 50)), 200)
     total = qs.count()
     start = (page - 1) * limit
-    items = qs[start:start + limit]
+    items = list(qs[start:start + limit])
+
+    # Build (company_id, agent_name) -> managed key status map in one query
+    pairs = [(q.company_id, q.agent_name) for q in items]
+    managed_status_map = {}
+    if pairs:
+        from django.db.models import Q as DQ
+        q_filter = DQ()
+        for cid, an in pairs:
+            q_filter |= DQ(company_id=cid, agent_name=an)
+        for k in CompanyAPIKey.objects.filter(q_filter, mode='managed').only('company_id', 'agent_name', 'status'):
+            managed_status_map[(k.company_id, k.agent_name)] = k.status
+
+    def _serialize_with_key_status(q):
+        data = _serialize_quota_admin(q)
+        data['managed_key_status'] = managed_status_map.get((q.company_id, q.agent_name))
+        return data
 
     return Response({
         'status': 'success',
         'total': total,
         'page': page,
         'limit': limit,
-        'quotas': [_serialize_quota_admin(q) for q in items],
+        'quotas': [_serialize_with_key_status(q) for q in items],
     })
 
 

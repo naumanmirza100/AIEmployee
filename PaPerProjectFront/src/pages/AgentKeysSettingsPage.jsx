@@ -42,9 +42,9 @@ const modeBadge = (a) => {
   else active = a.managed ? 'managed' : 'platform';
 
   if (active === 'byok') return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
+  if (active === 'free') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
   if (a.managed?.status === 'revoked') return { label: 'Key Revoked', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'managed') return { label: 'Managed Active', class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
-  if (active === 'free') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
   return { label: 'No key', class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
 };
 
@@ -484,81 +484,142 @@ const RequestTimeline = ({ r }) => {
   );
 };
 
-const RequestRow = ({ r, onPay, paying }) => {
-  const [expanded, setExpanded] = useState(false);
+// Expand requests: split was_assigned records into (Key Assigned) + (Revoked) nodes
+function expandRequestEntries(requests) {
+  const entries = [];
+  for (const r of requests) {
+    if (r.was_assigned) {
+      entries.push({ ...r, status: 'key_assigned', _ts: r.resolved_at });
+      entries.push({ ...r, _syntheticId: `${r.id}_revoked`, status: 'revoked', _ts: r.revoked_at, _synthetic: true });
+    } else {
+      entries.push(r);
+    }
+  }
+  return entries;
+}
+
+// Single timeline node for company-side request history
+const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
   const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
   const { Icon } = meta;
   const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
-  const showFlow = r.status in FLOW_ORDER;
+  const displayTime = r._ts || r.resolved_at || r.created_at;
+  const isActive = r.status === 'key_assigned' && !r._synthetic;
+  const isNegative = ['rejected', 'revoked'].includes(r.status);
+  const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
+  const dotColor = isActive
+    ? 'bg-emerald-500 border-emerald-400 shadow-emerald-500/40'
+    : isNegative
+    ? 'bg-orange-500 border-orange-400 shadow-orange-500/40'
+    : isPending
+    ? 'bg-amber-500 border-amber-400 shadow-amber-500/40 animate-pulse'
+    : 'bg-white/20 border-white/20';
 
   return (
-    <div className="bg-[#0f0a20] border border-[#2d2342] rounded-lg overflow-hidden hover:border-violet-500/30 transition-colors">
-      <button
-        className="w-full flex items-center justify-between p-3 text-left"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="text-sm text-white font-medium truncate">{r.agent_label}</p>
-            <span className="text-xs text-white/40 uppercase">{r.provider}</span>
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center shrink-0">
+        <div className={`w-3 h-3 rounded-full border-2 shadow-sm mt-1 ${dotColor}`} />
+        {!isLast && <div className="w-px flex-1 bg-[#2d2342] mt-1" />}
+      </div>
+      <div className="flex-1 pb-4 min-w-0">
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${meta.cls}`}>
+                <Icon className="w-3 h-3" />{meta.label}
+              </span>
+              <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
+              {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
+            </div>
+
+            {!r._synthetic && r.note && <p className="text-xs text-white/50 mt-1 italic">Your note: "{r.note}"</p>}
+            {!r._synthetic && r.admin_note && <p className="text-xs text-violet-300 mt-1">Admin: "{r.admin_note}"</p>}
+
+            {!r._synthetic && r.status === 'payment_pending' && total > 0 && (
+              <div className="mt-1 space-y-0.5 text-[10px] text-white/50">
+                <div className="flex gap-3"><span>Key cost</span><span>${(r.key_cost_snapshot ?? 0).toFixed(2)}</span></div>
+                <div className="flex gap-3"><span>Service charge</span><span>${(r.service_charge_snapshot ?? 0).toFixed(2)}</span></div>
+                <div className="flex gap-3 text-yellow-300 font-semibold"><span>Total due</span><span>${total.toFixed(2)}</span></div>
+              </div>
+            )}
+            {!r._synthetic && r.status === 'payment_received' && r.amount_paid != null && (
+              <p className="text-xs text-blue-300 mt-1">
+                Paid ${r.amount_paid.toFixed(2)} — waiting for key assignment
+              </p>
+            )}
+
+            <p className="text-[10px] text-white/25 mt-1">
+              {r._synthetic
+                ? <span className="italic text-orange-300/50">Key revoked by admin</span>
+                : new Date(displayTime).toLocaleString()
+              }
+            </p>
           </div>
-          <p className="text-xs text-white/40 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
-          {r.status === 'payment_pending' && (
+
+          {!r._synthetic && r.status === 'payment_pending' && (
             <Button
               size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white h-7 text-xs px-3"
-              onClick={(e) => { e.stopPropagation(); onPay(r); }}
+              className="bg-amber-600 hover:bg-amber-700 text-white h-7 text-xs px-3 shrink-0"
+              onClick={() => onPay(r)}
               disabled={paying}
             >
               {paying ? <Loader2 className="w-3 h-3 animate-spin" /> : <DollarSign className="w-3 h-3 mr-1" />}
               Pay {total > 0 ? `$${total.toFixed(2)}` : 'Now'}
             </Button>
           )}
-          <span className={`flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full border font-medium ${meta.cls}`}>
-            <Icon className="w-3 h-3" />{meta.label}
-          </span>
-          {expanded ? <ChevronDown className="w-4 h-4 text-white/30" /> : <ChevronRight className="w-4 h-4 text-white/30" />}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Grouped card: one card per agent showing full timeline of requests
+const AgentRequestGroupCard = ({ group, onPay, payingId }) => {
+  const entries = useMemo(() => expandRequestEntries(group.requests), [group.requests]);
+  const hasPending = group.requests.some(r => ['pending', 'payment_pending', 'payment_received'].includes(r.status));
+  const [expanded, setExpanded] = useState(hasPending);
+
+  const latest = entries[entries.length - 1];
+  const latestMeta = REQUEST_STATUS_META[latest.status] || REQUEST_STATUS_META.pending;
+  const { Icon: LatestIcon } = latestMeta;
+  const isActive = latest.status === 'key_assigned' && !latest._synthetic;
+
+  return (
+    <div className="bg-[#0f0a20] border border-[#2d2342] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors">
+      <button
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-white font-semibold">{group.agent_label}</span>
+            <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${latestMeta.cls}`}>
+              <LatestIcon className="w-3 h-3" />{latestMeta.label}
+            </span>
+            {isActive && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">Active</span>
+            )}
+          </div>
+          <p className="text-[10px] text-white/30 mt-0.5">
+            {entries.length} event{entries.length > 1 ? 's' : ''} · Latest {new Date(latest._ts || latest.resolved_at || latest.created_at).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="shrink-0 text-white/30">
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </div>
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 border-t border-[#2d2342] pt-3 space-y-3">
-          {r.note && <p className="text-xs text-white/60 italic">Your note: "{r.note}"</p>}
-          {r.admin_note && <p className="text-xs text-violet-300">Admin: {r.admin_note}</p>}
-
-          {r.status === 'payment_pending' && (
-            <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 space-y-2">
-              <p className="text-xs text-amber-300 font-semibold">Payment required to receive key</p>
-              <div className="space-y-1 text-xs text-white/70">
-                <div className="flex justify-between"><span>Key cost</span><span>${(r.key_cost_snapshot ?? 0).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Service charge</span><span>${(r.service_charge_snapshot ?? 0).toFixed(2)}</span></div>
-                {total > 0 && (
-                  <div className="flex justify-between text-white font-semibold pt-1 border-t border-amber-500/20">
-                    <span>Total due</span><span>${total.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-              {/* <Button
-                size="sm"
-                className="w-full bg-amber-600 hover:bg-amber-700 text-white mt-1"
-                onClick={() => onPay(r)}
-                disabled={paying}
-              >
-                {paying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <DollarSign className="w-4 h-4 mr-2" />}
-                Confirm Payment{total > 0 ? ` — $${total.toFixed(2)}` : ''}
-              </Button> */}
-            </div>
-          )}
-
-          {r.status === 'payment_received' && r.amount_paid != null && (
-            <p className="text-xs text-blue-300">
-              Paid ${r.amount_paid.toFixed(2)} — waiting for admin to assign the key.
-            </p>
-          )}
-
-          {showFlow && <RequestTimeline r={r} />}
+        <div className="px-4 pb-2 pt-1 border-t border-[#2d2342]">
+          {entries.map((r, i) => (
+            <CompanyTimelineEntry
+              key={r._syntheticId || r.id}
+              r={r}
+              isLast={i === entries.length - 1}
+              onPay={onPay}
+              paying={payingId === r.id}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -843,31 +904,41 @@ const AgentKeysSettingsPage = () => {
             </div>
           )}
 
-          {/* Requests history */}
-          {requests.length > 0 && (
-            <Card className="bg-[#120d22] border border-[#2d2342] mt-6">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <Send className="w-5 h-5 text-violet-400" /> Key Requests
-                </CardTitle>
-                <CardDescription className="text-white/50">
-                  {stats.pendingReqs > 0
-                    ? `${stats.pendingReqs} active request${stats.pendingReqs > 1 ? 's' : ''} in progress.`
-                    : 'No active requests.'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {requests.map(r => (
-                  <RequestRow
-                    key={r.id}
-                    r={r}
-                    onPay={(req) => setPayModal({ open: true, request: req })}
-                    paying={paying && payModal.request?.id === r.id}
-                  />
-                ))}
-              </CardContent>
-            </Card>
-          )}
+          {/* Requests history — grouped timeline per agent */}
+          {requests.length > 0 && (() => {
+            // Group by agent_name, sort oldest→newest within each group
+            const groupMap = {};
+            requests.forEach(r => {
+              if (!groupMap[r.agent_name]) groupMap[r.agent_name] = { agent_name: r.agent_name, agent_label: r.agent_label, requests: [] };
+              groupMap[r.agent_name].requests.push(r);
+            });
+            Object.values(groupMap).forEach(g => g.requests.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+            const groups = Object.values(groupMap);
+            return (
+              <Card className="bg-[#120d22] border border-[#2d2342] mt-6">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Send className="w-5 h-5 text-violet-400" /> Key Requests
+                  </CardTitle>
+                  <CardDescription className="text-white/50">
+                    {stats.pendingReqs > 0
+                      ? `${stats.pendingReqs} active request${stats.pendingReqs > 1 ? 's' : ''} in progress.`
+                      : 'No active requests.'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {groups.map(g => (
+                    <AgentRequestGroupCard
+                      key={g.agent_name}
+                      group={g}
+                      onPay={(req) => setPayModal({ open: true, request: req })}
+                      payingId={paying ? payModal.request?.id : null}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            );
+          })()}
         </div>
       </div>
 
