@@ -140,6 +140,9 @@ export const listHRDocuments = async (params = {}) => {
   try {
     const q = new URLSearchParams();
     if (params.document_type) q.set('document_type', params.document_type);
+    if (params.q) q.set('q', params.q);
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
     const qs = q.toString();
     const response = await companyApi.get(`/hr/documents${qs ? `?${qs}` : ''}`);
     return response;
@@ -579,13 +582,40 @@ export const deleteCompensation = async (compId) => {
   }
 };
 
-// ---------- Employee detail ----------
+// ---------- Employee detail + edit ----------
 export const getHREmployeeDetail = async (employeeId) => {
   try {
     const response = await companyApi.get(`/hr/employees/${employeeId}`);
     return response;
   } catch (error) {
     console.error('Get HR employee detail error:', error);
+    throw error;
+  }
+};
+
+export const updateHREmployee = async (employeeId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/employees/${employeeId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR employee error:', error);
+    throw error;
+  }
+};
+
+// ---------- Audit log (HR-admin only) ----------
+export const listHRAuditLog = async (params = {}) => {
+  try {
+    const q = new URLSearchParams();
+    if (params.target_type) q.set('target_type', params.target_type);
+    if (params.target_id != null) q.set('target_id', String(params.target_id));
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    const response = await companyApi.get(`/hr/audit-log${qs ? `?${qs}` : ''}`);
+    return response;
+  } catch (error) {
+    console.error('List HR audit log error:', error);
     throw error;
   }
 };
@@ -680,6 +710,16 @@ export const submitLeaveRequest = async (payload) => {
   }
 };
 
+export const updateLeaveRequest = async (requestId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/leave-requests/${requestId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update leave request error:', error);
+    throw error;
+  }
+};
+
 export const decideLeaveRequest = async (requestId, action, note = '') => {
   try {
     const response = await companyApi.post(`/hr/leave-requests/${requestId}/decide`, { action, note });
@@ -740,6 +780,7 @@ export default {
   createHRMeeting,
   checkHRMeetingAvailability,
   submitLeaveRequest,
+  updateLeaveRequest,
   decideLeaveRequest,
   listLeaveRequests,
   getHREmployeeDetail,
@@ -752,4 +793,6 @@ export default {
   listCompensationHistory,
   createCompensation,
   deleteCompensation,
+  updateHREmployee,
+  listHRAuditLog,
 };

@@ -132,42 +132,50 @@ def process_hr_document(self, document_id):
         # `Article X`, `Section X.Y`, `4.2 Title`) so citations point at a
         # whole section rather than a sentence fragment. Falls back to fixed
         # chunks when no headings exist. Other doc types use the naive split.
+        # chunk_pairs is a list of (chunk_text, section_heading) tuples.
+        # For section-aware types, heading is the detected section marker;
+        # for other types heading is always ''.
         from hr_agent.chunking import chunk_with_headings, SECTION_AWARE_TYPES
         if document.document_type in SECTION_AWARE_TYPES:
-            chunks = chunk_with_headings(
+            chunk_pairs = chunk_with_headings(
                 text_to_chunk, max_chunk_size=chunk_size, overlap=overlap,
             )
-            logger.info("process_hr_document: doc %s chunked section-aware (%d sections)",
-                        document_id, len(chunks))
+            logger.info("process_hr_document: doc %s chunked section-aware (%d chunks)",
+                        document_id, len(chunk_pairs))
         else:
-            chunks = []
+            chunk_pairs = []
             start = 0
             step = max(1, chunk_size - overlap)
             while start < len(text_to_chunk):
-                chunks.append(text_to_chunk[start:start + chunk_size])
+                chunk_pairs.append((text_to_chunk[start:start + chunk_size], ''))
                 start += step
 
-        document.chunks_total = len(chunks)
+        document.chunks_total = len(chunk_pairs)
         document.save(update_fields=['document_content', 'file_hash',
                                      'chunks_total', 'updated_at'])
 
         embedding_service = EmbeddingService()
         has_embeddings = embedding_service.is_available()
         batch_size = 20
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            embeddings = embedding_service.generate_embeddings_batch(batch) if has_embeddings else [None] * len(batch)
+        # Extract plain texts for embedding generation (embeddings API takes strings).
+        chunk_texts = [ct for ct, _ in chunk_pairs]
+        for i in range(0, len(chunk_pairs), batch_size):
+            batch_pairs = chunk_pairs[i:i + batch_size]
+            batch_texts = chunk_texts[i:i + batch_size]
+            embeddings = (embedding_service.generate_embeddings_batch(batch_texts)
+                          if has_embeddings else [None] * len(batch_texts))
             rows = [
                 HRDocumentChunk(
                     document=document,
                     chunk_index=i + j,
                     chunk_text=chunk_text,
+                    section_heading=(heading or '')[:300],
                     embedding=(json.dumps(emb) if emb else None),
                 )
-                for j, (chunk_text, emb) in enumerate(zip(batch, embeddings))
+                for j, ((chunk_text, heading), emb) in enumerate(zip(batch_pairs, embeddings))
             ]
             HRDocumentChunk.objects.bulk_create(rows)
-            document.chunks_processed = i + len(batch)
+            document.chunks_processed = i + len(batch_pairs)
             document.save(update_fields=['chunks_processed', 'updated_at'])
 
         document.processing_status = 'ready'
@@ -630,9 +638,18 @@ def send_hr_meeting_reminders():
 
     def _send(m, label):
         subject = f"Reminder ({label}): {m.title}"
-        when = m.scheduled_at.isoformat() if m.scheduled_at else '(unknown)'
+        if m.scheduled_at:
+            tz_name = (m.timezone_name or '').strip()
+            try:
+                from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+                local_dt = m.scheduled_at.astimezone(ZoneInfo(tz_name)) if tz_name else m.scheduled_at
+                when = local_dt.strftime('%Y-%m-%d %H:%M') + (f' {tz_name}' if tz_name else ' UTC')
+            except Exception:
+                when = m.scheduled_at.isoformat() + (f' ({tz_name})' if tz_name else '')
+        else:
+            when = '(unknown)'
         parts = [
-            f"This is a reminder that '{m.title}' is scheduled for {when} ({m.timezone_name}).",
+            f"This is a reminder that '{m.title}' is scheduled for {when}.",
             f"Type: {m.get_meeting_type_display()}.",
             f"Duration: {m.duration_minutes} minutes.",
         ]

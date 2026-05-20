@@ -601,6 +601,17 @@ urlpatterns = [
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
     re_path(r'^sdr/meetings/?$', sdr_api.sdr_meetings_list, name='sdr_meetings_list'),  # GET, POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/?$', sdr_api.sdr_meeting_detail, name='sdr_meeting_detail'),  # GET, PUT, DELETE
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/confirm/?$', sdr_api.sdr_confirm_meeting, name='sdr_confirm_meeting'),  # POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/send-reminder/?$', sdr_api.sdr_send_meeting_reminder, name='sdr_send_meeting_reminder'),  # POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/generate-prep/?$', sdr_api.sdr_generate_meeting_prep, name='sdr_generate_meeting_prep'),  # POST
+    re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/resend-scheduling/?$', sdr_api.sdr_resend_scheduling_email, name='sdr_resend_scheduling_email'),  # POST
+    re_path(r'^sdr/check-all-replies/?$', sdr_api.sdr_check_all_replies, name='sdr_check_all_replies'),  # POST
+    # Google Calendar OAuth (one-time setup)
+    re_path(r'^sdr/google-auth/?$', sdr_api.sdr_google_auth_start, name='sdr_google_auth_start'),
+    re_path(r'^sdr/google-auth/callback/?$', sdr_api.sdr_google_auth_callback, name='sdr_google_auth_callback'),
+    # Public booking endpoints (no auth — token in URL)
+    re_path(r'^sdr/book/(?P<token>[0-9a-f-]+)/?$', sdr_api.sdr_booking_info, name='sdr_booking_info'),   # GET
+    re_path(r'^sdr/book/(?P<token>[0-9a-f-]+)/confirm/?$', sdr_api.sdr_booking_confirm, name='sdr_booking_confirm'),  # POST
     # ---------------------------------------------------------------------
     # HR Support Agent
     # ---------------------------------------------------------------------
@@ -665,6 +676,7 @@ urlpatterns = [
     # Leave requests
     re_path(r'^hr/leave-requests/?$', hr_agent.list_leave_requests, name='hr_list_leave_requests'),  # GET
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/update/?$', hr_agent.update_leave_request, name='hr_update_leave_request'),  # PATCH
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
 
     # Holiday calendar
@@ -677,8 +689,9 @@ urlpatterns = [
     re_path(r'^hr/leave-accrual-policies/upsert/?$', hr_agent.upsert_accrual_policy, name='hr_upsert_accrual_policy'),  # POST
     re_path(r'^hr/leave-accrual-policies/(?P<policy_id>\d+)/delete/?$', hr_agent.delete_accrual_policy, name='hr_delete_accrual_policy'),  # DELETE
 
-    # Employee detail bundle
+    # Employee detail bundle + edit
     re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/update/?$', hr_agent.update_employee, name='hr_update_employee'),  # PATCH/POST
 
     # Compensation history (HR-admin only)
     re_path(r'^hr/employees/(?P<employee_id>\d+)/compensation/?$', hr_agent.list_compensation_history, name='hr_list_compensation'),  # GET
@@ -692,6 +705,9 @@ urlpatterns = [
     re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/delete/?$', hr_agent.delete_review_cycle, name='hr_delete_review_cycle'),  # POST/DELETE
     re_path(r'^hr/employees/(?P<employee_id>\d+)/reviews/?$', hr_agent.list_employee_reviews, name='hr_list_employee_reviews'),  # GET
     re_path(r'^hr/reviews/(?P<review_id>\d+)/update/?$', hr_agent.update_perf_review, name='hr_update_perf_review'),  # POST/PATCH
+
+    # Audit log (HR-admin only)
+    re_path(r'^hr/audit-log/?$', hr_agent.list_hr_audit_log, name='hr_audit_log'),  # GET
 ]
 
 

@@ -86,6 +86,7 @@ class HRKnowledgeService:
         citations = [{
             'type': 'hr_document',
             'title': r.get('title'),
+            'section_heading': r.get('section_heading') or '',
             'document_id': r.get('document_id'),
             'chunk_id': r.get('chunk_id'),
             'score': round(float(r['semantic_score']), 3) if r.get('semantic_score') is not None else None,
@@ -156,10 +157,15 @@ class HRKnowledgeService:
                 semantic_hits.sort(key=lambda x: x[1], reverse=True)
                 semantic_hits = semantic_hits[:50]
 
-        # Keyword fallback (cheap)
+        # Keyword fallback (cheap) — searches both body text AND the section
+        # heading so queries like "LEAVE POLICY" or "Article 4" hit chunks
+        # whose heading matches even if the body text doesn't.
+        from django.db.models import Q as _Q
         keyword_hits: list[int] = list(
-            chunks.filter(chunk_text__icontains=query[:80])
-            .values_list('id', flat=True)[:50]
+            chunks.filter(
+                _Q(chunk_text__icontains=query[:80])
+                | _Q(section_heading__icontains=query[:80])
+            ).values_list('id', flat=True)[:50]
         )
 
         # Cheap RRF merge (k=60)
@@ -181,10 +187,13 @@ class HRKnowledgeService:
             c = chunk_map.get(cid)
             if not c:
                 continue
+            heading = getattr(c, 'section_heading', '') or ''
             out.append({
                 'chunk_id': c.id,
                 'document_id': c.document_id,
-                'title': f"{c.document.title} (Chunk {c.chunk_index})",
+                'title': (f"{c.document.title} — {heading}" if heading
+                          else f"{c.document.title} (Chunk {c.chunk_index})"),
+                'section_heading': heading,
                 'content': c.chunk_text,
                 'semantic_score': sem_score.get(cid),
             })

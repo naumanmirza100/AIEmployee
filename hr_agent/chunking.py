@@ -12,13 +12,14 @@ section, if the section is longer than ``max_chunk_size``, we sub-split on
 paragraph boundaries with ``overlap`` characters of context.
 
 Public entry point: :func:`chunk_with_headings(text, *, max_chunk_size,
-overlap)` returning a list of ``str`` chunks. Falls back to fixed-size
-chunking when no headings are detected, so it's safe to use for any text.
+overlap)` returning a list of ``(chunk_text, section_heading)`` tuples.
+Falls back to fixed-size chunking when no headings are detected, so it's
+safe to use for any text (heading will be ``""`` for unheaded chunks).
 """
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import List, Tuple
 
 
 # A line is a heading if it matches any of these patterns (whole-line).
@@ -42,26 +43,34 @@ def _is_heading(line: str) -> bool:
     return False
 
 
-def _split_into_sections(text: str) -> List[str]:
-    """Split ``text`` into section blocks separated by detected heading
-    lines. The heading line itself is kept at the top of each section so
-    citations can reference it. If no headings are found, returns a single
-    section (the entire text)."""
+def _split_into_sections(text: str) -> List[Tuple[str, str]]:
+    """Split ``text`` into ``(heading, section_text)`` pairs.
+
+    The heading line itself is kept at the top of ``section_text`` so the
+    full chunk is self-contained for embedding, while ``heading`` is stored
+    separately on the chunk row for citation display.
+
+    If no headings are detected, returns a single ``("", text)`` pair.
+    """
     if not text:
         return []
     lines = text.splitlines()
-    sections: List[List[str]] = []
-    current: List[str] = []
+    sections: List[Tuple[str, List[str]]] = []
+    current_heading: str = ''
+    current_lines: List[str] = []
     for line in lines:
         if _is_heading(line):
-            if current and any(s.strip() for s in current):
-                sections.append(current)
-            current = [line]
+            if current_lines and any(s.strip() for s in current_lines):
+                sections.append((current_heading, current_lines))
+            current_heading = line.strip()
+            current_lines = [line]
         else:
-            current.append(line)
-    if current and any(s.strip() for s in current):
-        sections.append(current)
-    return ['\n'.join(s).strip() for s in sections] or [text]
+            current_lines.append(line)
+    if current_lines and any(s.strip() for s in current_lines):
+        sections.append((current_heading, current_lines))
+    if not sections:
+        return [('', text)]
+    return [(h, '\n'.join(ls).strip()) for h, ls in sections]
 
 
 def _split_long_section(section: str, max_size: int, overlap: int) -> List[str]:
@@ -108,17 +117,24 @@ def _split_long_section(section: str, max_size: int, overlap: int) -> List[str]:
 
 
 def chunk_with_headings(text: str, *, max_chunk_size: int = 4000,
-                       overlap: int = 200) -> List[str]:
+                        overlap: int = 200) -> List[Tuple[str, str]]:
     """Top-level chunker. Detects sections, then sub-splits long ones.
-    Returns a flat list of text chunks (each ≤ max_chunk_size)."""
+
+    Returns a flat list of ``(chunk_text, section_heading)`` tuples where
+    ``section_heading`` is the detected heading that opened the section
+    (empty string for preamble text or non-section-aware doc types).
+    Each chunk text is ≤ ``max_chunk_size`` characters.
+    """
     if not text:
         return []
     sections = _split_into_sections(text)
-    out: List[str] = []
-    for s in sections:
-        out.extend(_split_long_section(s, max_chunk_size, overlap))
-    # Drop empties + trim whitespace.
-    return [c.strip() for c in out if c and c.strip()]
+    out: List[Tuple[str, str]] = []
+    for heading, section_text in sections:
+        for chunk in _split_long_section(section_text, max_chunk_size, overlap):
+            chunk = chunk.strip()
+            if chunk:
+                out.append((chunk, heading))
+    return out
 
 
 # Document types that benefit most from heading-aware chunking. Other types

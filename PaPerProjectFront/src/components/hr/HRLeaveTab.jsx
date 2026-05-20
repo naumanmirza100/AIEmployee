@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  Loader2, Plus, RefreshCw, Check, X, ClipboardList,
+  Loader2, Plus, RefreshCw, Check, X, ClipboardList, Pencil,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -54,6 +54,7 @@ export default function HRLeaveTab() {
   const [submitting, setSubmitting] = useState(false);
 
   const [decideDialog, setDecideDialog] = useState({ open: false, lr: null, action: 'approve', note: '' });
+  const [editDialog, setEditDialog] = useState({ open: false, saving: false, lr: null, form: {} });
 
   const load = async () => {
     setLoading(true);
@@ -115,6 +116,26 @@ export default function HRLeaveTab() {
   };
 
   const openDecide = (lr, action) => setDecideDialog({ open: true, lr, action, note: '' });
+
+  const openEdit = (lr) => setEditDialog({
+    open: true, saving: false, lr,
+    form: { leave_type: lr.leave_type, start_date: lr.start_date, end_date: lr.end_date, reason: lr.reason || '' },
+  });
+
+  const handleEditSave = async () => {
+    const { lr, form } = editDialog;
+    if (!lr) return;
+    setEditDialog((s) => ({ ...s, saving: true }));
+    try {
+      await hrAgentService.updateLeaveRequest(lr.id, form);
+      toast({ title: 'Leave request updated' });
+      setEditDialog({ open: false, saving: false, lr: null, form: {} });
+      load();
+    } catch (e) {
+      toast({ title: 'Update failed', description: e.message, variant: 'destructive' });
+      setEditDialog((s) => ({ ...s, saving: false }));
+    }
+  };
 
   const handleDecide = async () => {
     const { lr, action, note } = decideDialog;
@@ -207,7 +228,13 @@ export default function HRLeaveTab() {
                       </TableCell>
                       <TableCell className="text-right">
                         {lr.status === 'pending' ? (
-                          <div className="flex gap-1 justify-end">
+                          <div className="flex gap-1 justify-end flex-wrap">
+                            {view === 'mine' && (
+                              <Button variant="outline" size="sm" className="h-7 text-xs text-sky-300 hover:text-sky-200"
+                                onClick={() => openEdit(lr)}>
+                                <Pencil className="h-3 w-3 mr-1" /> Edit
+                              </Button>
+                            )}
                             <Button variant="outline" size="sm" className="h-7 text-xs text-emerald-300 hover:text-emerald-200"
                               onClick={() => openDecide(lr, 'approve')}>
                               <Check className="h-3 w-3 mr-1" /> Approve
@@ -289,6 +316,57 @@ export default function HRLeaveTab() {
             <Button variant="outline" onClick={() => setSubmitOpen(false)} disabled={submitting}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Submit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* EDIT DIALOG — submitter can fix a pending request */}
+      <Dialog open={editDialog.open} onOpenChange={(open) => setEditDialog((s) => ({ ...s, open }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit leave request</DialogTitle>
+            <DialogDescription>You can only edit requests that are still pending.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Leave type</Label>
+              <Select value={editDialog.form.leave_type || 'vacation'}
+                onValueChange={(v) => setEditDialog((s) => ({ ...s, form: { ...s.form, leave_type: v } }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vacation">Vacation / PTO</SelectItem>
+                  <SelectItem value="sick">Sick</SelectItem>
+                  <SelectItem value="parental">Parental</SelectItem>
+                  <SelectItem value="bereavement">Bereavement</SelectItem>
+                  <SelectItem value="unpaid">Unpaid</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Start date</Label>
+                <Input type="date" value={editDialog.form.start_date || ''}
+                  onChange={(e) => setEditDialog((s) => ({ ...s, form: { ...s.form, start_date: e.target.value } }))} />
+              </div>
+              <div>
+                <Label>End date</Label>
+                <Input type="date" value={editDialog.form.end_date || ''}
+                  onChange={(e) => setEditDialog((s) => ({ ...s, form: { ...s.form, end_date: e.target.value } }))} />
+              </div>
+            </div>
+            <div>
+              <Label>Reason</Label>
+              <Textarea rows={2} value={editDialog.form.reason || ''}
+                onChange={(e) => setEditDialog((s) => ({ ...s, form: { ...s.form, reason: e.target.value } }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialog({ open: false, saving: false, lr: null, form: {} })}
+              disabled={editDialog.saving}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={editDialog.saving}>
+              {editDialog.saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Save
             </Button>
           </DialogFooter>
         </DialogContent>
