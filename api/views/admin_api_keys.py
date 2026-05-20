@@ -179,6 +179,19 @@ def assign_managed_key(request):
                 approved_req = req
             except KeyRequest.DoesNotExist:
                 pass
+        else:
+            # Direct admin assignment (no request) — create a paper-trail record so it
+            # appears in the requests tab with status key_assigned.
+            approved_req = KeyRequest.objects.create(
+                company=company,
+                agent_name=agent_name,
+                provider=provider,
+                requested_by=None,
+                resolved_by=request.user,
+                resolved_at=timezone.now(),
+                status='key_assigned',
+                linked_key_id=key.id,
+            )
 
     # Notify the requester — outside the transaction so a notification failure
     # can never roll back the key assignment.
@@ -418,7 +431,7 @@ def adjust_quota(request, quota_id):
 
 def _serialize_request_admin(r: KeyRequest, revoked_keys: set = None):
     status = r.status
-    if status == 'approved' and revoked_keys and (r.company_id, r.agent_name) in revoked_keys:
+    if status in ('approved', 'key_assigned') and revoked_keys and (r.company_id, r.agent_name) in revoked_keys:
         status = 'revoked'
     return {
         'id': r.id,

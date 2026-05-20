@@ -96,12 +96,13 @@ class MarketingBaseAgent:
         self.last_token_usage = None
         self.last_llm_used = False
 
-    def _resolve_company_client(self, wanted_provider='groq'):
+    def _resolve_company_client(self):
         """Opt-in per-company key + quota routing. Subclass instances can set
         `self.company_id` and `self.agent_key_name` (e.g. 'marketing_agent') to
         enable the BYOK / platform-key flow. Returns (client, ctx) or (None,
         None) when no routing applies. Hard-blocks (QuotaExhausted,
-        NoKeyAvailable) propagate."""
+        NoKeyAvailable) propagate. Never falls back to env key when company_id
+        is set — raises ValueError for unsupported providers."""
         company_id = getattr(self, 'company_id', None)
         agent_key_name = getattr(self, 'agent_key_name', None)
         if not company_id or not agent_key_name:
@@ -110,18 +111,13 @@ class MarketingBaseAgent:
         from core.api_key_service import resolve_for_call
         company = Company.objects.get(pk=company_id)
         ctx = resolve_for_call(company, agent_key_name)
-        try:
-            if ctx.provider == 'groq':
-                from groq import Groq
-                return Groq(api_key=ctx.api_key), ctx
-            if ctx.provider == 'openai' and wanted_provider == 'openai':
-                from openai import OpenAI
-                return OpenAI(api_key=ctx.api_key), ctx
-            logger.warning("marketing agent got %s key but wanted %s — using env fallback", ctx.provider, wanted_provider)
-            return None, None
-        except Exception as e:
-            logger.warning("Failed to build resolved client: %s", e)
-            return None, None
+        if ctx.provider == 'groq':
+            from groq import Groq
+            return Groq(api_key=ctx.api_key), ctx
+        if ctx.provider == 'openai':
+            from openai import OpenAI
+            return OpenAI(api_key=ctx.api_key), ctx
+        raise ValueError(f"Unsupported provider '{ctx.provider}' configured for company key")
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
@@ -137,12 +133,13 @@ class MarketingBaseAgent:
         Returns:
             str: LLM response text
         """
-        # If OpenAI is available and GPT model specified, use it; otherwise use Groq
-        if self.openai_client and model and 'gpt' in model.lower():
+        # Route through _call_groq_qa which handles provider-agnostic resolution.
+        # _call_openai is only used when caller explicitly requests a GPT model
+        # AND no company key overrides the provider choice.
+        company_id = getattr(self, 'company_id', None)
+        if not company_id and self.openai_client and model and 'gpt' in model.lower():
             return self._call_openai(prompt, system_prompt, temperature, max_tokens, model)
-        else:
-            # Default to Groq for Q&A
-            return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens)
+        return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens)
     
     def _call_openai(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
@@ -158,8 +155,16 @@ class MarketingBaseAgent:
         Returns:
             str: LLM response text
         """
-        resolved_client, key_ctx = self._resolve_company_client(wanted_provider='openai')
-        call_client = resolved_client or self.openai_client
+        resolved_client, key_ctx = self._resolve_company_client()
+        if resolved_client is not None:
+            call_client = resolved_client
+            if key_ctx.provider == 'groq':
+                model_to_use = model or self.model or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+            else:
+                model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
+        else:
+            call_client = self.openai_client
+            model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
         if not call_client:
             raise ValueError("OpenAI client not available. Please set OPENAI_API_KEY in .env file.")
 
@@ -176,9 +181,6 @@ class MarketingBaseAgent:
                 "role": "user",
                 "content": prompt
             })
-
-            # Use specified model or default
-            model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
 
             response = call_client.chat.completions.create(
                 model=model_to_use,
@@ -214,7 +216,7 @@ class MarketingBaseAgent:
                 total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
 
             self.last_token_usage = {
-                'provider': 'openai',
+                'provider': key_ctx.provider if key_ctx else 'openai',
                 'model': model_to_use,
                 'prompt_tokens': prompt_tokens,
                 'completion_tokens': completion_tokens,
@@ -247,17 +249,26 @@ class MarketingBaseAgent:
         Returns:
             list: Embedding vectors
         """
-        if not self.openai_client:
+        resolved_client, key_ctx = self._resolve_company_client()
+        if resolved_client is not None:
+            if key_ctx.provider != 'openai':
+                raise ValueError(
+                    f"Embeddings require an OpenAI key; company has '{key_ctx.provider}' key configured."
+                )
+            emb_client = resolved_client
+        else:
+            emb_client = self.openai_client
+        if not emb_client:
             raise ValueError("OpenAI client not available for embeddings. Please set OPENAI_API_KEY in .env file.")
-        
+
         try:
             model_to_use = model or self.embedding_model or 'text-embedding-3-large'
-            
+
             # Handle both single text and list of texts
             if isinstance(text, str):
                 text = [text]
-            
-            response = self.openai_client.embeddings.create(
+
+            response = emb_client.embeddings.create(
                 model=model_to_use,
                 input=text
             )
@@ -303,8 +314,16 @@ class MarketingBaseAgent:
         Returns:
             str: LLM response text
         """
-        resolved_client, key_ctx = self._resolve_company_client(wanted_provider='groq')
-        call_client = resolved_client or self.groq_client
+        resolved_client, key_ctx = self._resolve_company_client()
+        if resolved_client is not None:
+            call_client = resolved_client
+            if key_ctx.provider == 'openai':
+                effective_model = getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+            else:
+                effective_model = self.model
+        else:
+            call_client = self.groq_client
+            effective_model = self.model
         if not call_client:
             raise ValueError(
                 "GROQ_API_KEY or GROQ_REC_API_KEY not found in environment variables. "
@@ -320,7 +339,7 @@ class MarketingBaseAgent:
         for attempt in range(max_retries + 1):
             try:
                 response = call_client.chat.completions.create(
-                    model=self.model,
+                    model=effective_model,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens
@@ -352,8 +371,8 @@ class MarketingBaseAgent:
                     total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
 
                 self.last_token_usage = {
-                    'provider': 'groq',
-                    'model': self.model,
+                    'provider': key_ctx.provider if key_ctx else 'groq',
+                    'model': effective_model,
                     'prompt_tokens': prompt_tokens,
                     'completion_tokens': completion_tokens,
                     'total_tokens': total_tokens,

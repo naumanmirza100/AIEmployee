@@ -1965,7 +1965,7 @@ class KeyRequest(models.Model):
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
-    requested_by = models.ForeignKey(CompanyUser, on_delete=models.CASCADE, related_name='key_requests')
+    requested_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='key_requests')
     agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     note = models.TextField(blank=True)

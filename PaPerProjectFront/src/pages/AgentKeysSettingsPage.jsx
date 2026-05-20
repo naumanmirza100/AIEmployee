@@ -30,9 +30,21 @@ const formatTokens = (n) => {
 };
 
 const modeBadge = (a) => {
-  if (a.byok) return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
+  const q = a.quota;
+  const p = q?.preferred_pool;
+
+  // Compute which pool is actually in use (mirrors actualPool in AgentCard)
+  let active;
+  if (p === 'free') active = 'free';
+  else if (p === 'managed') active = 'managed';
+  else if (a.byok) active = 'byok';
+  else if (q?.managed_is_exhausted) active = 'free';
+  else active = a.managed ? 'managed' : 'platform';
+
   if (a.managed?.status === 'revoked') return { label: 'Key Revoked', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
-  if (a.managed) return { label: 'Managed Active', class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
+  if (active === 'byok') return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
+  if (active === 'managed') return { label: 'Managed Active', class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
+  if (active === 'free') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
   return { label: 'No key', class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
 };
 
@@ -251,7 +263,10 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                 <div className="flex justify-between text-[10px] text-white/40 mb-1">
                   <span className="uppercase tracking-wide">Your key (BYOK)</span>
                   {q.byok_token_limit > 0
-                    ? <span>{formatTokens(Math.min(q.byok_tokens_info, q.byok_token_limit))} / {formatTokens(q.byok_token_limit)} cap · {byokPct.toFixed(0)}%</span>
+                    ? <span className="flex items-center gap-1.5">
+                        {formatTokens(Math.min(q.byok_tokens_info, q.byok_token_limit))} / {formatTokens(q.byok_token_limit)} cap · {byokPct.toFixed(0)}%
+                        {byokPct >= 100 && <button onClick={() => onSetByokLimit(agent)} className="text-amber-400/80 hover:text-amber-300 transition-colors">↑ increase cap</button>}
+                      </span>
                     : <span className="flex items-center gap-1.5">{formatTokens(q.byok_tokens_info)} used <button onClick={() => onSetByokLimit(agent)} className="text-violet-400/70 hover:text-violet-300 transition-colors">+ set cap</button></span>}
                 </div>
                 {q.byok_token_limit > 0 ? (

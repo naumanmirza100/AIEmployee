@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
-  Send, Trash2, ChevronLeft, RefreshCw, DollarSign, Gauge,
+  Send, Trash2, ChevronLeft, ChevronRight, ChevronDown, RefreshCw, DollarSign, Gauge,
   Inbox, Building2, Sparkles, Save, Plus, Info, Settings, Globe, Search, Clock, CreditCard
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
@@ -640,109 +640,237 @@ const REQUEST_STATUS_META = {
   revoked:          { label: 'Revoked',           cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30',  Icon: XCircle },
 };
 
-const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFilter, onRefresh, loading, pricing }) => (
-  <div className="space-y-4">
-    <div className="flex items-center gap-2 flex-wrap">
-      <Select value={filter.status || 'all'} onValueChange={(v) => setFilter({ ...filter, status: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-48 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All statuses" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-          <SelectItem value="all">All statuses</SelectItem>
-          <SelectItem value="pending">Pending</SelectItem>
-          <SelectItem value="payment_pending">Payment Required</SelectItem>
-          <SelectItem value="payment_received">Payment Received</SelectItem>
-          <SelectItem value="key_assigned">Key Assigned</SelectItem>
-          <SelectItem value="approved">Approved (legacy)</SelectItem>
-          <SelectItem value="rejected">Rejected</SelectItem>
-          <SelectItem value="revoked">Revoked</SelectItem>
-        </SelectContent>
-      </Select>
-      <Input
-        placeholder="Search company..."
-        value={filter.search || ''}
-        onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-        className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
-      />
-      <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
-        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh
-      </Button>
-    </div>
-    {requests.length === 0 ? (
-      <Card className={CARD_CLASS}>
-        <CardContent className="p-12 text-center text-white/50">
-          <Inbox className="w-10 h-10 text-white/20 mx-auto mb-2" /> No requests.
-        </CardContent>
-      </Card>
-    ) : (
-      <div className="space-y-2">
-        {requests.map(r => {
-          const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
-          const { Icon } = meta;
-          const total = ((r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0));
-          const agentPricing = pricing?.find(p => p.agent_name === r.agent_name);
-          return (
-            <div key={r.id} className={`${ROW_CLASS} rounded-lg p-4`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-white font-semibold">{r.company_name}</p>
-                    <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${meta.cls}`}>
-                      <Icon className="w-3 h-3" />{meta.label}
-                    </span>
-                  </div>
-                  <p className="text-xs text-white/60 mt-0.5">{r.agent_label} — <span className="uppercase">{r.provider}</span></p>
-                  {r.note && <p className="text-xs text-white/60 mt-1 italic">"{r.note}"</p>}
-                  {r.admin_note && <p className="text-xs text-violet-300 mt-1">Note: {r.admin_note}</p>}
-                  {r.status === 'payment_pending' && total > 0 && (
-                    <p className="text-xs text-yellow-300 mt-1">
-                      Amount due: <span className="font-semibold">${total.toFixed(2)}</span>
-                      <span className="text-white/40 ml-1">(key ${(r.key_cost_snapshot ?? 0).toFixed(2)} + service ${(r.service_charge_snapshot ?? 0).toFixed(2)})</span>
-                    </p>
-                  )}
-                  {r.status === 'payment_received' && r.amount_paid != null && (
-                    <p className="text-xs text-blue-300 mt-1">
-                      Payment confirmed: <span className="font-semibold">${r.amount_paid.toFixed(2)}</span>
-                      {r.paid_at && <span className="text-white/40 ml-1">• {new Date(r.paid_at).toLocaleString()}</span>}
-                    </p>
-                  )}
-                  {agentPricing && agentPricing.managed_key_tokens > 0 && ['payment_pending', 'payment_received', 'key_assigned'].includes(r.status) && (
-                    <p className="text-xs text-violet-300 mt-1">
-                      <span className="text-white/40">Managed key tokens:</span>{' '}
-                      <span className="font-semibold">{formatTokens(agentPricing.managed_key_tokens)}</span>
-                      {' '}<span className="text-white/30">will be granted on key assignment</span>
-                    </p>
-                  )}
-                  <p className="text-[10px] text-white/30 mt-1">
-                    {r.requested_by} • {new Date(r.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {r.status === 'pending' && (
-                    <>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => onApprove(r)}>
-                        <CheckCircle2 className="w-4 h-4 mr-1" /> Approve
-                      </Button>
-                      <Button size="sm" variant="outline" className="border-red-500/40 text-red-300 hover:bg-red-500/10" onClick={() => onReject(r)}>
-                        <XCircle className="w-4 h-4 mr-1" /> Reject
-                      </Button>
-                    </>
-                  )}
-                  {r.status === 'payment_pending' && (
-                    <span className="text-[10px] text-yellow-300/70 italic">Awaiting payment</span>
-                  )}
-                  {r.status === 'payment_received' && (
-                    <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssignKey(r)}>
-                      <Key className="w-4 h-4 mr-1" /> Assign Key
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+// Single timeline entry for one KeyRequest record
+const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing }) => {
+  const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
+  const { Icon } = meta;
+  const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
+  const agentPricing = pricing?.find(p => p.agent_name === r.agent_name);
+  const isActive = ['key_assigned', 'approved'].includes(r.status);
+  const isNegative = ['rejected', 'revoked'].includes(r.status);
+  const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
+
+  const dotColor = isActive
+    ? 'bg-emerald-500 border-emerald-400 shadow-emerald-500/40'
+    : isNegative
+    ? 'bg-orange-500 border-orange-400 shadow-orange-500/40'
+    : isPending
+    ? 'bg-amber-500 border-amber-400 shadow-amber-500/40 animate-pulse'
+    : 'bg-white/20 border-white/20';
+
+  return (
+    <div className="flex gap-3">
+      {/* Dot + line */}
+      <div className="flex flex-col items-center shrink-0">
+        <div className={`w-3 h-3 rounded-full border-2 shadow-sm mt-1 ${dotColor}`} />
+        {!isLast && <div className="w-px flex-1 bg-[#2d2342] mt-1 mb-0" />}
       </div>
-    )}
-  </div>
-);
+
+      {/* Content */}
+      <div className={`flex-1 pb-4 min-w-0 ${isLast ? '' : ''}`}>
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${meta.cls}`}>
+                <Icon className="w-3 h-3" />{meta.label}
+              </span>
+              <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
+              {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
+            </div>
+
+            {r.note && <p className="text-xs text-white/50 mt-1 italic">User note: "{r.note}"</p>}
+            {r.admin_note && <p className="text-xs text-violet-300 mt-1">Admin: "{r.admin_note}"</p>}
+
+            {r.status === 'payment_pending' && total > 0 && (
+              <p className="text-xs text-yellow-300 mt-1">
+                Amount due: <span className="font-semibold">${total.toFixed(2)}</span>
+                <span className="text-white/40 ml-1">(key ${(r.key_cost_snapshot ?? 0).toFixed(2)} + svc ${(r.service_charge_snapshot ?? 0).toFixed(2)})</span>
+              </p>
+            )}
+            {r.status === 'payment_received' && r.amount_paid != null && (
+              <p className="text-xs text-blue-300 mt-1">
+                Paid: <span className="font-semibold">${r.amount_paid.toFixed(2)}</span>
+                {r.paid_at && <span className="text-white/40 ml-1">• {new Date(r.paid_at).toLocaleString()}</span>}
+              </p>
+            )}
+            {agentPricing && agentPricing.managed_key_tokens > 0 && ['payment_pending', 'payment_received', 'key_assigned'].includes(r.status) && (
+              <p className="text-[10px] text-violet-300/80 mt-1">
+                {formatTokens(agentPricing.managed_key_tokens)} tokens {r.status === 'key_assigned' ? 'granted' : 'will be granted'}
+              </p>
+            )}
+
+            <p className="text-[10px] text-white/25 mt-1">
+              {r.requested_by
+                ? <><span className="text-white/40">{r.requested_by}</span> requested</>
+                : <span className="italic">Direct admin assignment</span>
+              }
+              {r.resolved_by && <> · resolved by <span className="text-white/40">{r.resolved_by}</span></>}
+              {' · '}{new Date(r.resolved_at || r.created_at).toLocaleString()}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {r.status === 'pending' && (
+              <>
+                <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2" onClick={() => onApprove(r)}>
+                  <CheckCircle2 className="w-3 h-3 mr-1" />Approve
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 border-red-500/40 text-red-300 hover:bg-red-500/10 text-xs px-2" onClick={() => onReject(r)}>
+                  <XCircle className="w-3 h-3 mr-1" />Reject
+                </Button>
+              </>
+            )}
+            {r.status === 'payment_pending' && (
+              <span className="text-[10px] text-yellow-300/70 italic">Awaiting payment</span>
+            )}
+            {r.status === 'payment_received' && (
+              <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-white text-xs px-2" onClick={() => onAssignKey(r)}>
+                <Key className="w-3 h-3 mr-1" />Assign Key
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Grouped card: one card per (company, agent) showing full timeline
+const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) => {
+  const [expanded, setExpanded] = useState(group.hasAction);
+  const latest = group.requests[group.requests.length - 1];
+  const latestMeta = REQUEST_STATUS_META[latest.status] || REQUEST_STATUS_META.pending;
+  const { Icon: LatestIcon } = latestMeta;
+  const isCurrentlyActive = ['key_assigned', 'approved'].includes(latest.status);
+
+  return (
+    <div className={`${ROW_CLASS} rounded-xl overflow-hidden`}>
+      {/* Header */}
+      <button
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-white font-semibold text-sm">{group.company_name}</span>
+            <span className="text-xs text-white/40">{group.agent_label}</span>
+            <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${latestMeta.cls}`}>
+              <LatestIcon className="w-3 h-3" />{latestMeta.label}
+            </span>
+            {isCurrentlyActive && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">Active key</span>
+            )}
+          </div>
+          <p className="text-[10px] text-white/30 mt-0.5">
+            {group.requests.length} event{group.requests.length > 1 ? 's' : ''} · Latest {new Date(latest.resolved_at || latest.created_at).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="shrink-0 text-white/30">
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </div>
+      </button>
+
+      {/* Timeline */}
+      {expanded && (
+        <div className="px-4 pb-2 pt-1 border-t border-[#2d2342]">
+          {group.requests.map((r, i) => (
+            <TimelineEntry
+              key={r.id}
+              r={r}
+              isLast={i === group.requests.length - 1}
+              onApprove={onApprove}
+              onAssignKey={onAssignKey}
+              onReject={onReject}
+              pricing={pricing}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFilter, onRefresh, loading, pricing }) => {
+  // Group by (company_id + agent_name), sorted oldest→newest within each group
+  const groups = React.useMemo(() => {
+    const map = {};
+    requests.forEach(r => {
+      const key = `${r.company_id}__${r.agent_name}`;
+      if (!map[key]) map[key] = {
+        key,
+        company_id: r.company_id,
+        company_name: r.company_name,
+        agent_name: r.agent_name,
+        agent_label: r.agent_label,
+        requests: [],
+        hasAction: false,
+      };
+      map[key].requests.push(r);
+      if (['pending', 'payment_received'].includes(r.status)) map[key].hasAction = true;
+    });
+    // Sort each group oldest→newest so timeline reads top-to-bottom
+    Object.values(map).forEach(g => g.requests.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+    // Sort groups: action-needed first, then by latest event desc
+    return Object.values(map).sort((a, b) => {
+      if (a.hasAction !== b.hasAction) return a.hasAction ? -1 : 1;
+      const aLatest = new Date(a.requests[a.requests.length - 1].created_at);
+      const bLatest = new Date(b.requests[b.requests.length - 1].created_at);
+      return bLatest - aLatest;
+    });
+  }, [requests]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Select value={filter.status || 'all'} onValueChange={(v) => setFilter({ ...filter, status: v === 'all' ? '' : v })}>
+          <SelectTrigger className="w-48 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All statuses" /></SelectTrigger>
+          <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="payment_pending">Payment Required</SelectItem>
+            <SelectItem value="payment_received">Payment Received</SelectItem>
+            <SelectItem value="key_assigned">Key Assigned</SelectItem>
+            <SelectItem value="approved">Approved (legacy)</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
+            <SelectItem value="revoked">Revoked</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          placeholder="Search company..."
+          value={filter.search || ''}
+          onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+          className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
+        />
+        <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh
+        </Button>
+        {groups.length > 0 && (
+          <span className="text-xs text-white/30 ml-1">{groups.length} company{groups.length > 1 ? '/agent pairs' : '/agent pair'} · {requests.length} total events</span>
+        )}
+      </div>
+      {groups.length === 0 ? (
+        <Card className={CARD_CLASS}>
+          <CardContent className="p-12 text-center text-white/50">
+            <Inbox className="w-10 h-10 text-white/20 mx-auto mb-2" /> No requests.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {groups.map(g => (
+            <RequestGroupCard
+              key={g.key}
+              group={g}
+              onApprove={onApprove}
+              onAssignKey={onAssignKey}
+              onReject={onReject}
+              pricing={pricing}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // -------------------- Company Picker (searchable) --------------------
 const CompanyPicker = ({ value, onChange, disabled, lockedLabel }) => {
