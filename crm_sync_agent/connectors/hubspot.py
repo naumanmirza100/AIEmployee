@@ -71,18 +71,45 @@ class HubSpotConnector(BaseCRMConnector):
                     'value': email.lower().strip(),
                 }],
             }],
-            'properties': ['email', 'firstname', 'lastname', 'phone', 'hs_object_id'],
+            'properties': ['email', 'firstname', 'lastname', 'phone', 'hs_object_id', 'hs_linkedin_url'],
             'limit': 1,
         }
         resp = self._post('/crm/v3/objects/contacts/search', json=body)
         results = (resp.json() or {}).get('results') or []
         return results[0] if results else None
 
-    def upsert_contact(self, email: str, properties: dict) -> str:
-        if not email:
-            raise CRMError('email required for HubSpot upsert', retriable=False)
+    def find_contact_by_linkedin(self, linkedin_url: str) -> Optional[dict]:
+        """Search HubSpot contacts by LinkedIn URL (fallback when no email)."""
+        if not linkedin_url:
+            return None
+        body = {
+            'filterGroups': [{
+                'filters': [{
+                    'propertyName': 'hs_linkedin_url',
+                    'operator': 'EQ',
+                    'value': linkedin_url.strip(),
+                }],
+            }],
+            'properties': ['email', 'firstname', 'lastname', 'hs_object_id', 'hs_linkedin_url'],
+            'limit': 1,
+        }
+        try:
+            resp = self._post('/crm/v3/objects/contacts/search', json=body)
+            results = (resp.json() or {}).get('results') or []
+            return results[0] if results else None
+        except CRMError:
+            return None
 
-        existing = self.find_contact_by_email(email)
+    def upsert_contact(self, email: str, properties: dict) -> str:
+        linkedin_url = properties.get('linkedin_url', '')
+
+        # Try to find existing contact by email first, then by LinkedIn URL
+        existing = None
+        if email:
+            existing = self.find_contact_by_email(email)
+        if not existing and linkedin_url:
+            existing = self.find_contact_by_linkedin(linkedin_url)
+
         hs_props = self._build_contact_props(email, properties)
 
         if existing:
@@ -175,7 +202,9 @@ class HubSpotConnector(BaseCRMConnector):
 
     @staticmethod
     def _build_contact_props(email: str, props: dict) -> dict:
-        out: dict = {'email': email.lower().strip()}
+        out: dict = {}
+        if email:
+            out['email'] = email.lower().strip()
         first = props.get('first_name', '') or ''
         last = props.get('last_name', '') or ''
         if not first and not last:

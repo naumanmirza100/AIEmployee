@@ -45,7 +45,9 @@ def _company_from_lead(lead):
 @receiver(post_save, sender='ai_sdr_agent.SDRLead')
 def on_sdr_lead_saved(sender, instance, created, **kwargs):
     try:
-        if not instance.email:
+        # Sync leads that have at least some identifying info (email OR linkedin OR name)
+        has_identity = instance.email or instance.linkedin_url or instance.full_name or instance.first_name
+        if not has_identity:
             return
         company = _company_from_lead(instance)
         if not company:

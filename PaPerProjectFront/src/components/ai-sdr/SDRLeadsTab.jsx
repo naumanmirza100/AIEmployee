@@ -3,7 +3,7 @@ import {
   Users, Search, Plus, Upload, Brain,
   Flame, Thermometer, Snowflake, ExternalLink, Linkedin, Globe,
   MapPin, Briefcase, Phone, Mail, TrendingUp, RefreshCw, X,
-  Loader2, Trash2,
+  Loader2, Trash2, Zap, ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,6 +12,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
+  researchLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -27,7 +28,7 @@ const SCORE_COLOR = (s) =>
   s >= 70 ? '#f43f5e' : s >= 40 ? '#f59e0b' : '#60a5fa';
 
 const SOURCE_LABELS = {
-  apollo: 'Apollo.io', ai_generated: 'AI', csv_import: 'CSV', manual: 'Manual',
+  apollo: 'Apollo.io', apify: 'Apify', ai_generated: 'AI', csv_import: 'CSV', manual: 'Manual',
 };
 
 const BLANK_LEAD = {
@@ -67,6 +68,101 @@ const inputStyle = {
 };
 
 // --------------------------------------------------------------------------
+// ICP Profile Panel
+// --------------------------------------------------------------------------
+const BLANK_ICP = { name: 'Default ICP', industries: '', job_titles: '', locations: '', keywords: '', company_size_min: '', company_size_max: '' };
+
+const ICPProfilePanel = ({ onSaved }) => {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [icp, setIcp] = useState(null);
+  const [form, setForm] = useState(BLANK_ICP);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getIcpProfile().then(res => {
+      const data = res?.data?.data || res?.data || null;
+      if (data) { setIcp(data); setForm({ name: data.name || '', industries: (data.industries || []).join(', '), job_titles: (data.job_titles || []).join(', '), locations: (data.locations || []).join(', '), keywords: (data.keywords || []).join(', '), company_size_min: data.company_size_min || '', company_size_max: data.company_size_max || '' }); }
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const toArr = v => v.split(',').map(s => s.trim()).filter(Boolean);
+      await saveIcpProfile({ name: form.name, industries: toArr(form.industries), job_titles: toArr(form.job_titles), locations: toArr(form.locations), keywords: toArr(form.keywords), company_size_min: form.company_size_min ? parseInt(form.company_size_min) : null, company_size_max: form.company_size_max ? parseInt(form.company_size_max) : null });
+      toast({ title: 'ICP Profile saved!' });
+      const res = await getIcpProfile();
+      setIcp(res?.data?.data || res?.data || null);
+      setOpen(false);
+      onSaved?.();
+    } catch (e) { toast({ title: 'Save failed', description: e.message, variant: 'destructive' }); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ ...cardStyle, padding: '14px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Brain size={16} color="#a855f7" />
+          <span style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 14 }}>ICP Profile</span>
+          {icp ? (
+            <span style={{ color: '#10b981', fontSize: 12, padding: '2px 8px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
+              {icp.name}
+            </span>
+          ) : (
+            <span style={{ color: '#f59e0b', fontSize: 12 }}>Not set up yet</span>
+          )}
+        </div>
+        <button onClick={() => setOpen(!open)} style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 8, padding: '5px 12px', color: '#a855f7', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <ChevronDown size={13} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
+          {icp ? 'Edit' : 'Setup'}
+        </button>
+      </div>
+
+      {icp && !open && (
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {[...(icp.industries||[]), ...(icp.job_titles||[])].slice(0,6).map(t => (
+            <span key={t} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: '#c4b5fd' }}>{t}</span>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {[
+            { k: 'name',           l: 'Profile Name',             p: 'Default ICP' },
+            { k: 'industries',     l: 'Industries (comma-sep)',    p: 'SaaS, FinTech, E-commerce' },
+            { k: 'job_titles',     l: 'Job Titles (comma-sep)',    p: 'CEO, VP Sales, CTO' },
+            { k: 'locations',      l: 'Locations (comma-sep)',     p: 'United States, UK' },
+            { k: 'keywords',       l: 'Keywords (comma-sep)',      p: 'B2B, startup, Series A' },
+          ].map(({ k, l, p }) => (
+            <div key={k}>
+              <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
+              <input style={inputStyle} placeholder={p} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
+            </div>
+          ))}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {[{ k: 'company_size_min', l: 'Min Employees', p: '10' }, { k: 'company_size_max', l: 'Max Employees', p: '500' }].map(({ k, l, p }) => (
+              <div key={k}>
+                <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
+                <input style={inputStyle} type="number" placeholder={p} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={() => setOpen(false)} style={{ background: 'none', border: '1px solid #2d1f4a', borderRadius: 8, padding: '7px 16px', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {saving ? <Loader2 size={12} className="animate-spin" /> : null} Save ICP
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --------------------------------------------------------------------------
 // Main Component
 // --------------------------------------------------------------------------
 const SDRLeadsTab = () => {
@@ -85,6 +181,14 @@ const SDRLeadsTab = () => {
 
   const [search, setSearch] = useState('');
   const [filterTemp, setFilterTemp] = useState('');
+
+  // Generate leads modal
+  const [showGenModal, setShowGenModal] = useState(false);
+  const [genSource, setGenSource] = useState('apify');
+  const [genCount, setGenCount] = useState(10);
+  const [genIcpId, setGenIcpId] = useState('');
+  const [icpProfiles, setIcpProfiles] = useState([]);
+  const [generating, setGenerating] = useState(false);
 
   // ── Load ──────────────────────────────────────────────────────────────
   const loadLeads = useCallback(async () => {
@@ -105,6 +209,26 @@ const SDRLeadsTab = () => {
   }, []);
 
   useEffect(() => { if (!loading) loadLeads(); }, [search, filterTemp]);
+
+  const openGenModal = async () => {
+    const profiles = await listIcpProfiles();
+    setIcpProfiles(profiles);
+    if (profiles.length > 0) setGenIcpId(profiles.find(p => p.is_active)?.id || profiles[0].id);
+    setShowGenModal(true);
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const resp = await researchLeads({ count: genCount, source: genSource, icp_id: genIcpId || undefined });
+      const created = resp?.data?.leads_created ?? resp?.leads_created ?? '?';
+      toast({ title: `${created} leads generated!`, description: `Source: ${genSource.toUpperCase()}` });
+      setShowGenModal(false);
+      await loadLeads();
+    } catch (e) {
+      toast({ title: 'Generate failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally { setGenerating(false); }
+  };
 
   // ── Delete ────────────────────────────────────────────────────────────
   const handleDelete = async (lead) => {
@@ -163,6 +287,9 @@ const SDRLeadsTab = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+      {/* ICP Profile Panel */}
+      <ICPProfilePanel onSaved={openGenModal} />
+
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
         {[
@@ -191,6 +318,16 @@ const SDRLeadsTab = () => {
             display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
           }}>
             <Plus size={15} /> Add Lead
+          </Button>
+
+          <div style={{ width: 1, height: 28, background: '#2d1f4a' }} />
+
+          <Button onClick={openGenModal} style={{
+            background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 100%)',
+            color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+          }}>
+            <Zap size={15} /> Generate Leads
           </Button>
 
           <div style={{ width: 1, height: 28, background: '#2d1f4a' }} />
@@ -514,6 +651,100 @@ const SDRLeadsTab = () => {
             <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {addingLead ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
               Add Lead
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Generate Leads Modal */}
+      <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 480 }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: '#e2d9f3', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Zap size={18} color="#a855f7" /> Generate Leads Automatically
+            </DialogTitle>
+          </DialogHeader>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 0' }}>
+
+            {/* Source selector */}
+            <div>
+              <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 8 }}>Source</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[
+                  { key: 'apify',  label: '⚡ Apify',     desc: 'Real leads from web scraping', color: '#a855f7' },
+                  { key: 'apollo', label: '🚀 Apollo.io',  desc: 'Verified B2B contact database', color: '#3b82f6' },
+                ].map(s => (
+                  <button key={s.key} onClick={() => setGenSource(s.key)} style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                    background: genSource === s.key ? `${s.color}22` : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${genSource === s.key ? s.color : '#2d1f4a'}`,
+                    transition: 'all 0.2s',
+                  }}>
+                    <div style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 14 }}>{s.label}</div>
+                    <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{s.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {genSource === 'apollo' && (
+                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)', color: '#fcd34d', fontSize: 12 }}>
+                  ⚠️ Apollo People Search requires a paid Apollo plan. Free accounts may get a 403 error — use <strong>Apify</strong> for free lead generation.
+                </div>
+              )}
+            </div>
+
+            {/* ICP Profile selector */}
+            {icpProfiles.length > 1 && (
+              <div>
+                <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
+                <select
+                  value={genIcpId}
+                  onChange={e => setGenIcpId(e.target.value)}
+                  style={{ ...inputStyle, background: 'rgba(30,10,50,0.6)', border: '1px solid #2d1f4a' }}
+                >
+                  {icpProfiles.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}{p.is_active ? ' (Active)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {icpProfiles.length === 1 && (
+              <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid #2d1f4a' }}>
+                <span style={{ color: '#9ca3af', fontSize: 12 }}>ICP: </span>
+                <span style={{ color: '#e2d9f3', fontSize: 13, fontWeight: 600 }}>{icpProfiles[0].name}</span>
+              </div>
+            )}
+            {icpProfiles.length === 0 && (
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)', color: '#f87171', fontSize: 13 }}>
+                No ICP profile found. Set up your ICP profile first.
+              </div>
+            )}
+
+            {/* Count */}
+            <div>
+              <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>
+                Number of Leads: <span style={{ color: '#a855f7', fontWeight: 700 }}>{genCount}</span>
+              </label>
+              <input
+                type="range" min={5} max={50} step={5}
+                value={genCount} onChange={e => setGenCount(Number(e.target.value))}
+                style={{ width: '100%', accentColor: '#a855f7' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563', fontSize: 11, marginTop: 2 }}>
+                <span>5</span><span>50</span>
+              </div>
+            </div>
+
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{
+              background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff',
+              border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+              {generating ? 'Generating...' : `Generate ${genCount} Leads`}
             </Button>
           </DialogFooter>
         </DialogContent>

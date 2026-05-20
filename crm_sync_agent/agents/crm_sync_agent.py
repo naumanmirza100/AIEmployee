@@ -259,8 +259,10 @@ class CRMSyncAgent:
         self, connector: BaseCRMConnector, item: CRMSyncQueue, p: dict
     ) -> Optional[str]:
         email = p.get('email', '')
-        if not email:
-            raise CRMError('No email in contact payload', retriable=False)
+        linkedin_url = p.get('linkedin_url', '')
+        name = p.get('name') or f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+        if not email and not linkedin_url and not name:
+            raise CRMError('Contact has no email, linkedin_url, or name — cannot sync', retriable=False)
 
         crm_id = connector.upsert_contact(email, p)
 
@@ -367,32 +369,47 @@ class CRMSyncAgent:
         """
         Look up the CRM contact ID from the mapping table.
         If not found, attempt a just-in-time upsert and persist the mapping.
+        Works for leads with email OR linkedin_url (Apify leads often have no email).
         """
+        from ai_sdr_agent.models import SDRLead
+
         # Try mapping table first (fast path — no API call)
         try:
-            from ai_sdr_agent.models import SDRLead
-            lead_qs = SDRLead.objects.filter(
-                company_user__company=self.company, email__iexact=email
-            ).values_list('pk', flat=True)[:1]
-            if lead_qs:
+            lead = None
+            if email:
+                lead = SDRLead.objects.filter(
+                    company_user__company=self.company, email__iexact=email
+                ).first()
+            if not lead and props.get('linkedin_url'):
+                lead = SDRLead.objects.filter(
+                    company_user__company=self.company,
+                    linkedin_url=props['linkedin_url'],
+                ).first()
+            if lead:
                 mapping = CRMContactMapping.objects.filter(
                     integration=integration,
                     source_type=source_type,
-                    source_id=lead_qs[0],
+                    source_id=lead.pk,
                 ).first()
                 if mapping:
                     return mapping.crm_contact_id
         except Exception:
             pass
 
-        # Fall back: search in CRM by email and upsert
+        # Fall back: upsert in CRM (handles email or linkedin_url as identifier)
         crm_id = connector.upsert_contact(email, props)
         if crm_id:
             try:
-                from ai_sdr_agent.models import SDRLead
-                lead = SDRLead.objects.filter(
-                    company_user__company=self.company, email__iexact=email
-                ).first()
+                lead = None
+                if email:
+                    lead = SDRLead.objects.filter(
+                        company_user__company=self.company, email__iexact=email
+                    ).first()
+                if not lead and props.get('linkedin_url'):
+                    lead = SDRLead.objects.filter(
+                        company_user__company=self.company,
+                        linkedin_url=props['linkedin_url'],
+                    ).first()
                 if lead:
                     CRMContactMapping.objects.update_or_create(
                         integration=integration,

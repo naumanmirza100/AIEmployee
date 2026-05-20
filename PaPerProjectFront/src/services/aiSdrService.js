@@ -24,6 +24,16 @@ export const getIcpProfile = async () => {
   }
 };
 
+export const listIcpProfiles = async () => {
+  try {
+    const res = await companyApi.get('/sdr/icp/');
+    return res?.data?.all || res?.all || [];
+  } catch (error) {
+    console.error('List ICP profiles error:', error);
+    return [];
+  }
+};
+
 export const saveIcpProfile = async (data) => {
   try {
     return await companyApi.post('/sdr/icp/', data);
@@ -110,11 +120,20 @@ export const qualifyAllLeads = async () => {
 // --------------------------------------------------------------------------
 // Research (Apollo.io or AI generation)
 // --------------------------------------------------------------------------
-export const researchLeads = async ({ count = 20 } = {}) => {
+export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {
   try {
-    return await companyApi.post('/sdr/leads/research/', { count });
+    return await companyApi.post('/sdr/leads/research/', { count, source });
   } catch (error) {
     console.error('Research leads error:', error);
+    throw error;
+  }
+};
+
+export const getResearchSources = async () => {
+  try {
+    return await companyApi.get('/sdr/leads/research/sources/');
+  } catch (error) {
+    console.error('Get research sources error:', error);
     throw error;
   }
 };

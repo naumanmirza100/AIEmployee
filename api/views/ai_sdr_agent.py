@@ -132,13 +132,19 @@ def _lead_stats(company_user) -> dict:
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def icp_profile(request):
-    """GET → return active ICP. POST → upsert ICP."""
+    """GET → return all ICPs (list). POST → upsert ICP."""
     company_user = request.user
 
     if request.method == 'GET':
         try:
-            icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
-            return Response({'status': 'success', 'data': _serialize_icp(icp) if icp else None})
+            icps = SDRIcpProfile.objects.filter(company_user=company_user).order_by('-is_active', '-updated_at')
+            if not icps.exists():
+                return Response({'status': 'success', 'data': None, 'all': []})
+            return Response({
+                'status': 'success',
+                'data': _serialize_icp(icps.filter(is_active=True).first()),
+                'all': [_serialize_icp(i) for i in icps],
+            })
         except Exception as exc:
             logger.error("Get ICP error: %s", exc)
             return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -351,6 +357,19 @@ def qualify_all_leads(request):
 # Research (find new leads)
 # ==========================================================================
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_sources(request):
+    """Return available lead research sources based on configured API keys."""
+    researcher = _get_research_agent()
+    return Response({
+        'sources': researcher.available_sources,
+        'default': researcher.source_label,
+        'apify_actor': researcher.apify_actor if researcher.apify_token else None,
+    })
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -362,7 +381,12 @@ def research_leads(request):
     company_user = request.user
     try:
         count = min(int(request.data.get('count', 20)), 50)
-        icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+        source = request.data.get('source', 'auto')
+        icp_id = request.data.get('icp_id')
+        if icp_id:
+            icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=icp_id).first()
+        else:
+            icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
@@ -370,13 +394,13 @@ def research_leads(request):
             company_user=company_user,
             icp_profile=icp,
             status='running',
-            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count},
+            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source},
             started_at=timezone.now(),
         )
 
         try:
             researcher = _get_research_agent()
-            raw_leads = researcher.search_leads(icp, count=count)
+            raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
             for ld in raw_leads:

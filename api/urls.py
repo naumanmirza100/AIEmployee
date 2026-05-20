@@ -576,6 +576,7 @@ urlpatterns = [
     re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET
     re_path(r'^sdr/icp/?$', sdr_api.icp_profile, name='sdr_icp_profile'),  # GET, POST
     re_path(r'^sdr/leads/?$', sdr_api.leads_list, name='sdr_leads_list'),  # GET, POST
+    re_path(r'^sdr/leads/research/sources/?$', sdr_api.research_sources, name='sdr_research_sources'),  # GET
     re_path(r'^sdr/leads/research/?$', sdr_api.research_leads, name='sdr_research_leads'),  # POST
     re_path(r'^sdr/leads/import/?$', sdr_api.import_leads_csv, name='sdr_import_leads_csv'),  # POST
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
