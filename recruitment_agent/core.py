@@ -201,3 +201,39 @@ class GroqClient:
             raise GroqClientError("Unable to read Groq response") from None
 
 
+import logging as _logging
+_core_logger = _logging.getLogger(__name__)
+
+
+class QuotaAwareGroqClient(GroqClient):
+    """GroqClient that automatically records token usage against a company quota
+    after every LLM call. Pass the CallContext returned by resolve_for_call().
+
+    Usage:
+        ctx = resolve_for_call(company, 'recruitment_agent')
+        client = QuotaAwareGroqClient(api_key=ctx.api_key, key_ctx=ctx)
+    """
+
+    def __init__(self, api_key: str, key_ctx, **kwargs):
+        super().__init__(api_key=api_key, **kwargs)
+        self._key_ctx = key_ctx
+
+    def _record_after_call(self) -> None:
+        usage = self.last_token_usage or {}
+        total = int(usage.get('total_tokens', 0))
+        if total > 0 and self._key_ctx:
+            try:
+                from core.api_key_service import record_usage
+                record_usage(self._key_ctx, total)
+            except Exception as exc:
+                _core_logger.warning("Recruitment quota decrement failed: %s", exc)
+
+    def send_prompt(self, system_prompt: str, text: str, max_retries: int = 3):
+        result = super().send_prompt(system_prompt, text, max_retries)
+        self._record_after_call()
+        return result
+
+    def send_prompt_text(self, system_prompt: str, text: str, max_retries: int = 3):
+        result = super().send_prompt_text(system_prompt, text, max_retries)
+        self._record_after_call()
+        return result

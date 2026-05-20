@@ -12,7 +12,7 @@ from api.serializers.career import JobDescriptionSerializer, CareerApplicationSe
 from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
 from core.models import CompanyUser, Company
-from api.views.recruitment_agent import get_agents
+from api.views.recruitment_agent import _make_agents
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +49,10 @@ def create_company_job(request):
             keywords_json = None
             if parse_keywords and job.description:
                 try:
-                    agents = get_agents()
+                    agents = _make_agents(company)
                     job_desc_agent = agents['job_desc_agent']
                     log_service = agents['log_service']
-                    
+
                     logger.info(f"Parsing keywords for company job: {job.title}")
                     parsed = job_desc_agent.parse_text(job.description)
                     keywords_json = json.dumps(parsed)
@@ -148,10 +148,10 @@ def update_company_job(request, id):
             
             if description_changed and job.description:
                 try:
-                    agents = get_agents()
+                    agents = _make_agents(company)
                     job_desc_agent = agents['job_desc_agent']
                     log_service = agents['log_service']
-                    
+
                     logger.info(f"Parsing keywords for company job update: {job.id}")
                     parsed = job_desc_agent.parse_text(job.description)
                     keywords_json = json.dumps(parsed)

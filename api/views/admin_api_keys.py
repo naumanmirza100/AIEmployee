@@ -228,11 +228,15 @@ def revoke_key(request, key_id):
     key.status = 'revoked'
     key.save(update_fields=['status', 'updated_at'])
 
-    # Mark the most-recent approved/key_assigned KeyRequest as revoked
+    # Mark the most-recent approved/key_assigned KeyRequest as revoked.
+    # Use individual save() so updated_at captures the exact revocation time
+    # (bulk .update() bypasses auto_now and loses the timestamp).
     if was_managed_active:
-        KeyRequest.objects.filter(
+        for req in KeyRequest.objects.filter(
             company=key.company, agent_name=key.agent_name, status__in=['approved', 'key_assigned']
-        ).update(status='revoked')
+        ):
+            req.status = 'revoked'
+            req.save(update_fields=['status', 'updated_at'])
 
     if was_managed_active:
         try:
@@ -429,10 +433,12 @@ def adjust_quota(request, quota_id):
 # Key Requests
 # ----------------------------------------------------------------------------
 
-def _serialize_request_admin(r: KeyRequest, revoked_keys: set = None):
-    status = r.status
-    if status in ('approved', 'key_assigned') and revoked_keys and (r.company_id, r.agent_name) in revoked_keys:
-        status = 'revoked'
+def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None):
+    # was_assigned: True when status='revoked' but resolved_at is set, meaning this
+    # record was once key_assigned/approved and was later revoked.  The frontend
+    # splits it into two timeline nodes: one "Assigned" and one "Revoked".
+    # revoked_at comes from updated_at (set by individual .save() in revoke_key).
+    was_assigned = r.status == 'revoked' and r.resolved_at is not None
     return {
         'id': r.id,
         'company_id': r.company_id,
@@ -440,7 +446,9 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: set = None):
         'agent_name': r.agent_name,
         'agent_label': r.get_agent_name_display(),
         'provider': r.provider,
-        'status': status,
+        'status': r.status,
+        'was_assigned': was_assigned,
+        'revoked_at': r.updated_at.isoformat() if was_assigned else None,
         'note': r.note,
         'admin_note': r.admin_note,
         'requested_by': r.requested_by.email if r.requested_by else None,
@@ -471,18 +479,12 @@ def list_requests(request):
     start = (page - 1) * limit
     items = list(qs[start:start + limit])
 
-    # Build set of (company_id, agent_name) pairs whose managed key is revoked
-    revoked_keys = set(
-        CompanyAPIKey.objects.filter(mode='managed', status='revoked')
-        .values_list('company_id', 'agent_name')
-    )
-
     return Response({
         'status': 'success',
         'total': total,
         'page': page,
         'limit': limit,
-        'requests': [_serialize_request_admin(r, revoked_keys) for r in items],
+        'requests': [_serialize_request_admin(r) for r in items],
     })
 
 

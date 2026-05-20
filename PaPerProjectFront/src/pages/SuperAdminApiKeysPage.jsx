@@ -640,15 +640,17 @@ const REQUEST_STATUS_META = {
   revoked:          { label: 'Revoked',           cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30',  Icon: XCircle },
 };
 
-// Single timeline entry for one KeyRequest record
+// Single timeline entry for one KeyRequest record (or a synthetic revocation node)
 const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing }) => {
   const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
   const { Icon } = meta;
   const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
   const agentPricing = pricing?.find(p => p.agent_name === r.agent_name);
-  const isActive = ['key_assigned', 'approved'].includes(r.status);
+  const isActive = ['key_assigned', 'approved'].includes(r.status) && !r._synthetic;
   const isNegative = ['rejected', 'revoked'].includes(r.status);
   const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
+  // _ts is set on synthetic revocation nodes; otherwise use resolved_at or created_at
+  const displayTime = r._ts || r.resolved_at || r.created_at;
 
   const dotColor = isActive
     ? 'bg-emerald-500 border-emerald-400 shadow-emerald-500/40'
@@ -700,17 +702,19 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing })
             )}
 
             <p className="text-[10px] text-white/25 mt-1">
-              {r.requested_by
-                ? <><span className="text-white/40">{r.requested_by}</span> requested</>
-                : <span className="italic">Direct admin assignment</span>
+              {r._synthetic
+                ? <span className="italic text-orange-300/50">Key revoked</span>
+                : r.requested_by
+                  ? <><span className="text-white/40">{r.requested_by}</span> requested</>
+                  : <span className="italic">Direct admin assignment</span>
               }
-              {r.resolved_by && <> · resolved by <span className="text-white/40">{r.resolved_by}</span></>}
-              {' · '}{new Date(r.resolved_at || r.created_at).toLocaleString()}
+              {!r._synthetic && r.resolved_by && <> · resolved by <span className="text-white/40">{r.resolved_by}</span></>}
+              {' · '}{new Date(displayTime).toLocaleString()}
             </p>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {r.status === 'pending' && (
+            {!r._synthetic && r.status === 'pending' && (
               <>
                 <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2" onClick={() => onApprove(r)}>
                   <CheckCircle2 className="w-3 h-3 mr-1" />Approve
@@ -720,10 +724,10 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing })
                 </Button>
               </>
             )}
-            {r.status === 'payment_pending' && (
+            {!r._synthetic && r.status === 'payment_pending' && (
               <span className="text-[10px] text-yellow-300/70 italic">Awaiting payment</span>
             )}
-            {r.status === 'payment_received' && (
+            {!r._synthetic && r.status === 'payment_received' && (
               <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-white text-xs px-2" onClick={() => onAssignKey(r)}>
                 <Key className="w-3 h-3 mr-1" />Assign Key
               </Button>
@@ -735,13 +739,40 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing })
   );
 };
 
+// Expand a request list into timeline entries, splitting assigned-then-revoked
+// records into two nodes: one "Key Assigned" (green) and one "Revoked" (orange).
+function expandEntries(requests) {
+  const entries = [];
+  for (const r of requests) {
+    if (r.was_assigned) {
+      // First node: the original assignment (green)
+      entries.push({ ...r, status: 'key_assigned', _ts: r.resolved_at });
+      // Second node: the revocation (orange, synthetic — no action buttons)
+      entries.push({
+        ...r,
+        _syntheticId: `${r.id}_revoked`,
+        status: 'revoked',
+        _ts: r.revoked_at,
+        _synthetic: true,
+      });
+    } else {
+      entries.push(r);
+    }
+  }
+  return entries;
+}
+
 // Grouped card: one card per (company, agent) showing full timeline
 const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) => {
   const [expanded, setExpanded] = useState(group.hasAction);
-  const latest = group.requests[group.requests.length - 1];
+
+  // Expand revoked-assignment records into two timeline nodes each
+  const entries = React.useMemo(() => expandEntries(group.requests), [group.requests]);
+
+  const latest = entries[entries.length - 1];
   const latestMeta = REQUEST_STATUS_META[latest.status] || REQUEST_STATUS_META.pending;
   const { Icon: LatestIcon } = latestMeta;
-  const isCurrentlyActive = ['key_assigned', 'approved'].includes(latest.status);
+  const isCurrentlyActive = ['key_assigned', 'approved'].includes(latest.status) && !latest._synthetic;
 
   return (
     <div className={`${ROW_CLASS} rounded-xl overflow-hidden`}>
@@ -762,7 +793,7 @@ const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) 
             )}
           </div>
           <p className="text-[10px] text-white/30 mt-0.5">
-            {group.requests.length} event{group.requests.length > 1 ? 's' : ''} · Latest {new Date(latest.resolved_at || latest.created_at).toLocaleDateString()}
+            {entries.length} event{entries.length > 1 ? 's' : ''} · Latest {new Date(latest._ts || latest.resolved_at || latest.created_at).toLocaleDateString()}
           </p>
         </div>
         <div className="shrink-0 text-white/30">
@@ -773,11 +804,11 @@ const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) 
       {/* Timeline */}
       {expanded && (
         <div className="px-4 pb-2 pt-1 border-t border-[#2d2342]">
-          {group.requests.map((r, i) => (
+          {entries.map((r, i) => (
             <TimelineEntry
-              key={r.id}
+              key={r._syntheticId || r.id}
               r={r}
-              isLast={i === group.requests.length - 1}
+              isLast={i === entries.length - 1}
               onApprove={onApprove}
               onAssignKey={onAssignKey}
               onReject={onReject}
