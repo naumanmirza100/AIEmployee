@@ -34,6 +34,7 @@ from urllib.error import URLError, HTTPError
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
+from core.api_key_service import KeyServiceError
 from Frontline_agent.models import (
     Document, Ticket, TicketNote, TicketMessage, TicketAttachment,
     KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
@@ -124,6 +125,8 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
                     f"Notification trigger: deduped — pending id={existing_id} "
                     f"already covers template={t.id} ticket={ticket.id} recipient={recipient_email}"
                 )
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("_run_notification_triggers failed: %s", e)
 
@@ -233,6 +236,8 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
                         logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
             except Exception as e:
                 logger.exception("Workflow trigger: execution failed for workflow %s (ticket %s): %s", w.id, ticket.id, e)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("_run_workflow_triggers failed: %s", e)
 
@@ -333,6 +338,8 @@ def _should_send_notification_to_recipient(company_id, recipient_email, channel,
         if channel == 'in_app':
             return prefs.in_app_enabled
         return True
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.warning("_should_send_notification_to_recipient check failed: %s", e)
         return True
@@ -403,6 +410,8 @@ def frontline_dashboard(request):
             }
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_dashboard failed")
         return Response(
@@ -433,6 +442,8 @@ def frontline_widget_config(request):
                 'hcaptcha_site_key': (getattr(settings, 'HCAPTCHA_SITE_KEY', '') or None),
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_widget_config failed")
         return Response(
@@ -471,6 +482,8 @@ def update_frontline_widget_config(request):
             'allowed_origins': company.frontline_allowed_origins,
             'config': resolved_widget_config(company),
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_frontline_widget_config failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -505,6 +518,8 @@ def public_widget_config(request):
             'max_attachment_bytes': cfg.get('max_attachment_bytes'),
             'allowed_attachment_mime': cfg.get('allowed_attachment_mime'),
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("public_widget_config failed")
         return Response({'status': 'error', 'message': 'Failed to load widget config'},
@@ -573,6 +588,8 @@ def list_documents(request):
             }
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_documents failed")
         return Response(
@@ -771,6 +788,8 @@ def upload_document(request):
             },
         }, status=status.HTTP_202_ACCEPTED)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("upload_document failed")
         return Response(
@@ -806,6 +825,8 @@ def document_processing_status(request, document_id):
             'visibility': d.visibility,
             'retention_days': d.retention_days,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("document_processing_status failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -860,6 +881,8 @@ def update_document_metadata(request, document_id):
             'retention_days': d.retention_days,
             'allowed_user_ids': list(d.allowed_users.values_list('id', flat=True)),
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_document_metadata failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -893,6 +916,8 @@ def get_document(request, document_id):
             }
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_document failed")
         return Response(
@@ -935,6 +960,8 @@ def summarize_document(request, document_id):
                 'summary': result.get('summary'),
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("summarize_document failed")
         return Response(
@@ -976,6 +1003,8 @@ def extract_document(request, document_id):
                 'extracted': result.get('data'),
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("extract_document failed")
         return Response(
@@ -1008,6 +1037,8 @@ def delete_document(request, document_id):
             'message': 'Document deleted successfully'
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_document failed")
         return Response(
@@ -1216,6 +1247,8 @@ def public_qa(request):
             'status': 'success',
             'data': result
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("public_qa failed")
         return Response(
@@ -1327,6 +1360,8 @@ def public_submit(request):
             'message': 'Submitted successfully. We will get back to you soon.',
             'data': {'ticket_id': ticket.id, 'attachment': attachment_info},
         }, status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("public_submit failed")
         return Response(
@@ -1443,6 +1478,8 @@ def knowledge_qa(request):
             'data': result
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("knowledge_qa failed")
         return Response(
@@ -1476,6 +1513,8 @@ def knowledge_feedback(request):
             document=doc,
         )
         return Response({'status': 'success', 'message': 'Feedback recorded'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("knowledge_feedback failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1521,6 +1560,8 @@ def search_knowledge(request):
             'data': result
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("search_knowledge failed")
         return Response(
@@ -1554,6 +1595,8 @@ def list_ticket_tasks(request):
             for t in tickets
         ]
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_ticket_tasks failed")
         return Response(
@@ -1669,6 +1712,8 @@ def list_tickets(request):
                 'total_pages': total_pages,
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_tickets failed")
         return Response(
@@ -1704,6 +1749,8 @@ def list_tickets_aging(request):
             'count_at_risk': len(at_risk),
         }
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_tickets_aging failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1748,6 +1795,8 @@ def update_ticket_task(request, ticket_id):
                 'updated_at': ticket.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_ticket_task failed")
         return Response(
@@ -1794,6 +1843,8 @@ def list_ticket_notes(request, ticket_id):
             return err
         notes = ticket.notes.select_related('author').all()
         return Response({'status': 'success', 'data': [_serialize_note(n) for n in notes]})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_ticket_notes failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1820,6 +1871,8 @@ def create_ticket_note(request, ticket_id):
             is_internal=bool(data.get('is_internal', True)),
         )
         return Response({'status': 'success', 'data': _serialize_note(note)}, status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_ticket_note failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1853,6 +1906,8 @@ def update_or_delete_ticket_note(request, ticket_id, note_id):
             note.is_internal = bool(data['is_internal'])
         note.save(update_fields=['body', 'is_internal', 'updated_at'])
         return Response({'status': 'success', 'data': _serialize_note(note)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_or_delete_ticket_note failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1903,6 +1958,8 @@ def snooze_ticket(request, ticket_id):
         return Response({'status': 'success', 'data': {
             'id': ticket.id, 'snoozed_until': ticket.snoozed_until.isoformat(),
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("snooze_ticket failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1920,6 +1977,8 @@ def unsnooze_ticket(request, ticket_id):
         ticket.snoozed_until = None
         ticket.save(update_fields=['snoozed_until', 'updated_at'])
         return Response({'status': 'success', 'data': {'id': ticket.id, 'snoozed_until': None}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("unsnooze_ticket failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1942,6 +2001,8 @@ def pause_ticket_sla(request, ticket_id):
             'sla_paused_at': ticket.sla_paused_at.isoformat() if ticket.sla_paused_at else None,
             'sla_paused_accumulated_seconds': ticket.sla_paused_accumulated_seconds,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("pause_ticket_sla failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1979,6 +2040,8 @@ def resume_ticket_sla(request, ticket_id):
             'sla_due_at': ticket.sla_due_at.isoformat() if ticket.sla_due_at else None,
             'paused_for_seconds': paused_for,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("resume_ticket_sla failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2038,6 +2101,8 @@ def retriage_ticket(request, ticket_id):
             'entities': ticket.entities,
             'last_triaged_at': ticket.last_triaged_at.isoformat(),
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("retriage_ticket failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2087,6 +2152,8 @@ def create_ticket(request):
             'data': result
         }, status=status.HTTP_201_CREATED)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_ticket failed")
         return Response(
@@ -2121,6 +2188,8 @@ def list_qa_chats(request):
                 'timestamp': chat.updated_at.isoformat(),
             })
         return Response({'status': 'success', 'data': result})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_qa_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2161,6 +2230,8 @@ def create_qa_chat(request):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2206,6 +2277,8 @@ def update_qa_chat(request, chat_id):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2223,6 +2296,8 @@ def delete_qa_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2251,6 +2326,8 @@ def _generate_llm_notification_body(template, context, company_id):
         agent = FrontlineAgent(company_id=company_id)
         result = agent.generate_notification_body(context, template_body_hint=template.body)
         return result
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.warning("LLM notification body generation failed: %s", e)
         return None
@@ -2268,6 +2345,8 @@ def _send_notification_email(recipient_email, subject, body):
             fail_silently=False,
         )
         return True
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("Send notification email failed: %s", e)
         return False
@@ -2294,6 +2373,8 @@ def list_notification_templates(request):
         qs = NotificationTemplate.objects.filter(company=company).order_by('-updated_at')
         data = [{'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'trigger_config': getattr(t, 'trigger_config', {}), 'use_llm_personalization': getattr(t, 'use_llm_personalization', False), 'created_at': t.created_at.isoformat(), 'updated_at': t.updated_at.isoformat()} for t in qs]
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_notification_templates failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2320,6 +2401,8 @@ def create_notification_template(request):
             use_llm_personalization=bool(data.get('use_llm_personalization', False)),
         )
         return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'use_llm_personalization': t.use_llm_personalization}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_notification_template failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2336,6 +2419,8 @@ def get_notification_template(request, template_id):
         if not t:
             return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'notification_type': t.notification_type, 'channel': t.channel, 'trigger_config': getattr(t, 'trigger_config', {}), 'use_llm_personalization': getattr(t, 'use_llm_personalization', False)}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -2365,6 +2450,8 @@ def update_notification_template(request, template_id):
             t.use_llm_personalization = bool(data['use_llm_personalization'])
         t.save()
         return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name, 'subject': t.subject, 'body': t.body, 'use_llm_personalization': t.use_llm_personalization}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -2381,6 +2468,8 @@ def delete_notification_template(request, template_id):
             return Response({'status': 'error', 'message': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
         t.delete()
         return Response({'status': 'success', 'message': 'Template deleted'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -2417,6 +2506,8 @@ def get_notification_preferences(request):
             'updated_at': prefs.updated_at.isoformat(),
         }
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_notification_preferences failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2480,6 +2571,8 @@ def update_notification_preferences(request):
                 'updated_at': prefs.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_notification_preferences failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2507,6 +2600,8 @@ def list_scheduled_notifications(request):
                 'created_at': n.created_at.isoformat(),
             })
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_scheduled_notifications failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2549,6 +2644,8 @@ def schedule_notification(request):
             recipient_email=recipient_email or '', related_ticket=related_ticket, context=context,
         )
         return Response({'status': 'success', 'data': {'id': n.id, 'scheduled_at': n.scheduled_at.isoformat(), 'status': n.status}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("schedule_notification failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2629,6 +2726,8 @@ def send_notification_now(request):
             recipient_email=recipient_email, related_ticket=related_ticket, context=context, error_message='Send failed',
         )
         return Response({'status': 'error', 'message': 'Failed to send email'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("send_notification_now failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2667,6 +2766,8 @@ def preview_notification_template(request, template_id):
             'channel': template.channel,
             'context_used': context,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("preview_notification_template failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2702,6 +2803,8 @@ def list_dead_lettered_notifications(request):
             'page': page, 'limit': limit, 'total': total,
             'total_pages': (total + limit - 1) // limit if limit else 1,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_dead_lettered_notifications failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2729,6 +2832,8 @@ def retry_dead_lettered_notification(request, notification_id):
         n.save(update_fields=['status', 'attempts', 'next_retry_at',
                               'dead_lettered_at', 'last_error', 'deferred_reason'])
         return Response({'status': 'success', 'data': {'id': n.id, 'status': n.status}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("retry_dead_lettered_notification failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2783,6 +2888,8 @@ def public_unsubscribe(request):
             'email_enabled': prefs.email_enabled,
             'message': 'You have been unsubscribed. It may take a few minutes for in-flight messages to stop.',
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("public_unsubscribe failed")
         return Response({'status': 'error', 'message': 'Failed to process unsubscribe'},
@@ -2913,6 +3020,8 @@ def list_meetings(request):
             'page': page, 'limit': limit, 'total': total,
             'total_pages': (total + limit - 1) // limit if limit else 1,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_meetings failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2980,6 +3089,8 @@ def create_meeting(request):
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)},
                         status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_meeting failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2995,6 +3106,8 @@ def get_meeting(request, meeting_id):
         if err:
             return err
         return Response({'status': 'success', 'data': _serialize_meeting(m, include_transcript=True)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_meeting failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3066,6 +3179,8 @@ def update_meeting(request, meeting_id):
             m.participants.set(_User.objects.filter(id__in=set(user_ids)))
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_meeting failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3082,6 +3197,8 @@ def delete_meeting(request, meeting_id):
             return err
         m.delete()
         return Response({'status': 'success'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_meeting failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3153,6 +3270,8 @@ def check_meeting_availability(request):
             'available': not conflicts,
             'conflicts': conflicts,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("check_meeting_availability failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3247,6 +3366,8 @@ def extract_meeting_action_items(request, meeting_id):
             'count': len(items),
             'created_ticket_ids': created_ticket_ids,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("extract_meeting_action_items failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3644,6 +3765,8 @@ def list_workflows(request):
             'created_at': w.created_at.isoformat(), 'updated_at': w.updated_at.isoformat(),
         } for w in qs]
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_workflows failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3665,6 +3788,8 @@ def create_workflow(request):
             trigger_conditions=data.get('trigger_conditions') or {}, steps=data.get('steps') or [], is_active=data.get('is_active', True),
         )
         return Response({'status': 'success', 'data': {'id': w.id, 'name': w.name, 'steps': w.steps}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_workflow failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3688,6 +3813,8 @@ def get_workflow(request, workflow_id):
             'timeout_seconds': getattr(w, 'timeout_seconds', 0) or 0,
             'version': w.version,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -3750,6 +3877,8 @@ def update_workflow(request, workflow_id):
         return Response({'status': 'success', 'data': {
             'id': w.id, 'name': w.name, 'version': w.version,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -3773,6 +3902,8 @@ def list_workflow_versions(request, workflow_id):
             'saved_by_name': (v.saved_by.get_full_name() or v.saved_by.username) if v.saved_by else None,
             'snapshot': v.snapshot,
         } for v in versions]})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_workflow_versions failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3807,6 +3938,8 @@ def rollback_workflow(request, workflow_id, version):
         return Response({'status': 'success', 'data': {
             'id': w.id, 'version': w.version, 'rolled_back_to_version': v.version,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("rollback_workflow failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3832,6 +3965,8 @@ def dry_run_workflow(request, workflow_id):
             'workflow_id': w.id, 'simulated': True,
             'success': success, 'error': err, 'result_data': result_data,
         }})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("dry_run_workflow failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3849,6 +3984,8 @@ def delete_workflow(request, workflow_id):
             return Response({'status': 'error', 'message': 'Workflow not found'}, status=status.HTTP_404_NOT_FOUND)
         w.delete()
         return Response({'status': 'success', 'message': 'Workflow deleted'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -3889,6 +4026,8 @@ def execute_workflow(request, workflow_id):
         exec_obj.completed_at = timezone.now()
         exec_obj.save()
         return Response({'status': 'success', 'data': {'execution_id': exec_obj.id, 'status': exec_obj.status, 'result_data': result_data}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("execute_workflow failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3908,6 +4047,8 @@ def list_workflow_executions(request):
         qs = qs[:50]
         data = [{'id': e.id, 'workflow_id': e.workflow_id, 'workflow_name': e.workflow_name, 'status': e.status, 'started_at': e.started_at.isoformat(), 'completed_at': e.completed_at.isoformat() if e.completed_at else None, 'error_message': e.error_message} for e in qs]
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_workflow_executions failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3960,6 +4101,8 @@ def approve_workflow_execution(request, execution_id):
         else:
             return Response({'status': 'error', 'message': 'Invalid action. Must be approve or reject'}, status=status.HTTP_400_BAD_REQUEST)
             
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("approve_workflow_execution failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3975,6 +4118,8 @@ def list_workflow_company_users(request):
         qs = CompanyUser.objects.filter(company=company, is_active=True).order_by('full_name', 'email')
         data = [{'id': cu.id, 'full_name': cu.full_name or '', 'email': cu.email or ''} for cu in qs]
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_workflow_company_users failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4062,6 +4207,8 @@ def frontline_nl_analytics(request):
                 'analytics_data': analytics_data,
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_nl_analytics failed")
         return Response(
@@ -4097,6 +4244,8 @@ def frontline_generate_graph(request):
                 'insights': result.get('insights', ''),
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_generate_graph failed")
         return Response(
@@ -4124,6 +4273,8 @@ def frontline_graph_prompts_list(request):
             'updated_at': p.updated_at.isoformat(),
         } for p in prompts]
         return Response({'status': 'success', 'data': data})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_graph_prompts_list failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4166,6 +4317,8 @@ def frontline_graph_prompts_save(request):
                 'created_at': saved.created_at.isoformat(),
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_graph_prompts_save failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4183,6 +4336,8 @@ def frontline_graph_prompts_delete(request, prompt_id):
             return Response({'status': 'error', 'message': 'Prompt not found.'}, status=status.HTTP_404_NOT_FOUND)
         prompt.delete()
         return Response({'status': 'success', 'message': 'Prompt deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_graph_prompts_delete failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4204,6 +4359,8 @@ def frontline_graph_prompts_favorite(request, prompt_id):
             prompt.is_favorite = bool(is_fav)
             prompt.save(update_fields=['is_favorite', 'updated_at'])
         return Response({'status': 'success', 'data': {'id': prompt.id, 'is_favorite': prompt.is_favorite}})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_graph_prompts_favorite failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4232,6 +4389,8 @@ def frontline_analytics(request):
             'status': 'success',
             'data': data,
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_analytics failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4326,6 +4485,8 @@ def frontline_analytics_export(request):
                 notes_map.get(t.id, 0),
             ])
         return response
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_analytics_export failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4404,6 +4565,8 @@ def frontline_agent_performance(request):
             })
         rows.sort(key=lambda r: r['tickets_assigned'], reverse=True)
         return Response({'status': 'success', 'data': rows})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("frontline_agent_performance failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -22,6 +22,8 @@ from operations_agent.models import (
     OperationsNotification,
 )
 
+from core.api_key_service import KeyServiceError
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,10 +110,9 @@ def upload_document(request):
             'document': result['document'],
         }, status=status.HTTP_201_CREATED)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.error(f'Upload document error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -182,6 +183,8 @@ def list_documents(request):
             'total_pages': total_pages,
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'List documents error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -225,6 +228,8 @@ def get_document(request, document_id):
             },
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'Get document error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -257,6 +262,8 @@ def delete_document(request, document_id):
             'message': f'Document "{title}" deleted successfully',
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'Delete document error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -323,10 +330,9 @@ def upload_and_summarize(request):
             'summary': result['summary'],
         }, status=status.HTTP_201_CREATED)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.error(f'Upload and summarize error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -399,6 +405,8 @@ def list_summaries(request):
             'total_pages': total_pages,
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'List summaries error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -443,6 +451,8 @@ def get_summary(request, summary_id):
             },
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'Get summary error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -467,6 +477,8 @@ def delete_summary(request, summary_id):
             'message': f'Summary for "{filename}" deleted',
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'Delete summary error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -518,6 +530,8 @@ def dashboard_stats(request):
             },
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'Dashboard stats error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -567,6 +581,8 @@ def list_qa_chats(request):
             'status': 'success',
             'chats': [_serialize_chat(c) for c in chats],
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'list_qa_chats error: {e}', exc_info=True)
         return Response(
@@ -590,6 +606,8 @@ def create_qa_chat(request):
             {'status': 'success', 'chat': _serialize_chat(chat, include_messages=True)},
             status=status.HTTP_201_CREATED,
         )
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'create_qa_chat error: {e}', exc_info=True)
         return Response(
@@ -617,6 +635,8 @@ def get_qa_chat(request, chat_id):
             'status': 'success',
             'chat': _serialize_chat(chat, include_messages=True),
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'get_qa_chat error: {e}', exc_info=True)
         return Response(
@@ -649,6 +669,8 @@ def rename_qa_chat(request, chat_id):
         chat.title = title
         chat.save(update_fields=['title', 'updated_at'])
         return Response({'status': 'success', 'chat': _serialize_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'rename_qa_chat error: {e}', exc_info=True)
         return Response(
@@ -674,6 +696,8 @@ def delete_qa_chat(request, chat_id):
             )
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'delete_qa_chat error: {e}', exc_info=True)
         return Response(
@@ -782,10 +806,9 @@ def ask_qa_question(request):
             'error': result.get('error'),
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.error(f'ask_qa_question error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
@@ -905,10 +928,9 @@ def generate_document(request):
             status=status.HTTP_201_CREATED,
         )
 
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.error(f'generate_document error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
@@ -948,6 +970,8 @@ def list_generated_documents(request):
             'page_size': page_size,
             'total_pages': total_pages,
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'list_generated_documents error: {e}', exc_info=True)
         return Response(
@@ -970,6 +994,8 @@ def get_generated_document(request, doc_id):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response({'status': 'success', 'document': _serialize_generated(doc)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'get_generated_document error: {e}', exc_info=True)
         return Response(
@@ -1021,6 +1047,8 @@ def update_generated_document(request, doc_id):
             doc.save()
 
         return Response({'status': 'success', 'document': _serialize_generated(doc)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'update_generated_document error: {e}', exc_info=True)
         return Response(
@@ -1045,6 +1073,8 @@ def delete_generated_document(request, doc_id):
         title = doc.title
         doc.delete()
         return Response({'status': 'success', 'message': f'Deleted "{title}"'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'delete_generated_document error: {e}', exc_info=True)
         return Response(
@@ -1131,10 +1161,9 @@ def regenerate_document(request, doc_id):
 
         return Response({'status': 'success', 'document': _serialize_generated(doc)})
 
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.error(f'regenerate_document error: {e}', exc_info=True)
         return Response(
             {'status': 'error', 'message': str(e)},
@@ -1178,6 +1207,8 @@ def export_generated_document_pdf(request, doc_id):
         response['Content-Length'] = str(len(pdf_bytes))
         return response
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'export_generated_document_pdf error: {e}', exc_info=True)
         return Response(
@@ -1557,6 +1588,8 @@ def operations_analytics(request):
             'template_usage': template_breakdown,
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'operations_analytics error: {e}', exc_info=True)
         return Response(
@@ -1624,6 +1657,8 @@ def list_notifications(request):
             'total_pages': total_pages,
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'list_notifications error: {e}', exc_info=True)
         return Response(
@@ -1642,6 +1677,8 @@ def unread_notifications_count(request):
             company=request.user.company, is_read=False,
         ).count()
         return Response({'status': 'success', 'unread_count': count})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'unread_notifications_count error: {e}', exc_info=True)
         return Response(
@@ -1669,6 +1706,8 @@ def mark_notification_read(request, notification_id):
             n.is_read = True
             n.save(update_fields=['is_read'])
         return Response({'status': 'success', 'notification': _serialize_notification(n)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'mark_notification_read error: {e}', exc_info=True)
         return Response(
@@ -1687,6 +1726,8 @@ def mark_all_notifications_read(request):
             company=request.user.company, is_read=False,
         ).update(is_read=True)
         return Response({'status': 'success', 'updated': updated})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'mark_all_notifications_read error: {e}', exc_info=True)
         return Response(
@@ -1712,6 +1753,8 @@ def delete_notification(request, notification_id):
             )
         n.delete()
         return Response({'status': 'success', 'message': 'Notification deleted'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'delete_notification error: {e}', exc_info=True)
         return Response(
@@ -1732,6 +1775,8 @@ def clear_all_notifications(request):
             qs = qs.filter(is_read=True)
         deleted, _ = qs.delete()
         return Response({'status': 'success', 'deleted': deleted})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f'clear_all_notifications error: {e}', exc_info=True)
         return Response(
