@@ -38,11 +38,11 @@ export const uploadDocument = async (file, title = '', tags = '') => {
     });
 
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.message || data.error || `HTTP ${response.status}`);
-    }
-    if (data.status === 'error') {
-      throw new Error(data.message || data.error || 'Upload failed');
+    if (!response.ok || data.status === 'error') {
+      const err = new Error(data.message || data.error || `HTTP ${response.status}`);
+      err.status = response.status;
+      err.data = data;
+      throw err;
     }
     return data;
   } catch (error) {
@@ -117,11 +117,11 @@ export const uploadAndSummarize = async (file) => {
     });
 
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.message || `HTTP ${response.status}`);
-    }
-    if (data.status === 'error') {
-      throw new Error(data.message || 'Summarization failed');
+    if (!response.ok || data.status === 'error') {
+      const err = new Error(data.message || `HTTP ${response.status}`);
+      err.status = response.status;
+      err.data = data;
+      throw err;
     }
     return data;
   } catch (error) {

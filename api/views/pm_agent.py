@@ -1228,6 +1228,8 @@ def task_prioritization(request):
         company = company_user.company
 
         agent = AgentRegistry.get_agent("task_prioritization")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
 
         if project_id:
             project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
@@ -1441,7 +1443,9 @@ def generate_subtasks(request):
             )
 
         agent = AgentRegistry.get_agent("subtask_generation")
-        
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
+
         # Get company from company_user
         company = company_user.company
         
@@ -1647,7 +1651,9 @@ def timeline_gantt(request):
         }
 
         agent = AgentRegistry.get_agent("timeline_gantt")
-        
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
+
         # Extract action-specific options from request.data, excluding action and project_id
         options = {k: v for k, v in request.data.items() 
                    if k not in ['action', 'project_id']}
@@ -2128,7 +2134,7 @@ def _pm_build_analytics_data(company_user, project_id=None):
     }
 
 
-def _pm_generate_chart_from_prompt(prompt: str, analytics_data: dict):
+def _pm_generate_chart_from_prompt(prompt: str, analytics_data: dict, company_user=None):
     system = f"""You are a data visualization assistant.
 
 Return ONLY a single, valid JSON object (no prose, no markdown, no code fences).
@@ -2190,6 +2196,8 @@ Rules:
 """
 
     agent = BaseAgent()
+    agent.company_id = getattr(company_user, 'company_id', None) if company_user else None
+    agent.agent_key_name = 'project_manager_agent'
     raw = agent._call_llm(
         prompt=f"Generate a chart for: {prompt}",
         system_prompt=system + "\n\nAvailable data:\n" + data_summary,
@@ -2261,7 +2269,7 @@ def pm_generate_graph(request):
                 project_id = None
 
         analytics_data = _pm_build_analytics_data(company_user, project_id=project_id)
-        result = _pm_generate_chart_from_prompt(prompt, analytics_data)
+        result = _pm_generate_chart_from_prompt(prompt, analytics_data, company_user=company_user)
 
         return Response({
             'status': 'success',
@@ -3614,6 +3622,8 @@ def daily_standup(request):
             pass
 
         agent = AgentRegistry.get_agent("daily_standup")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action=action,
             tasks=tasks_data,
@@ -3654,6 +3664,8 @@ def project_health_score(request):
             return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         agent = AgentRegistry.get_agent("analytics_dashboard")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action=action,
             project_id=project_id,
@@ -3690,6 +3702,8 @@ def project_status_report(request):
             return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         agent = AgentRegistry.get_agent("analytics_dashboard")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action="report",
             project_id=project_id,
@@ -3755,6 +3769,8 @@ def meeting_notes(request):
                 pass
 
         agent = AgentRegistry.get_agent("meeting_notetaker")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action=action,
             meeting_text=meeting_text,
@@ -3815,6 +3831,8 @@ def workflow_suggest(request):
         } for t in tasks]
 
         agent = AgentRegistry.get_agent("workflow_sop")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action=action,
             project_info=project_info,
@@ -3874,6 +3892,8 @@ def calendar_schedule(request):
         available_users = _build_available_users(company_user=company_user)
 
         agent = AgentRegistry.get_agent("calendar_planner")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action=action,
             tasks=tasks_data,
@@ -3917,6 +3937,8 @@ def scan_notifications(request):
 
         all_notifications = []
         agent = AgentRegistry.get_agent("smart_notifications")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         available_users = _build_available_users(company_user=company_user)
 
         for project in projects:
@@ -4056,6 +4078,8 @@ def team_performance(request):
             return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         agent = AgentRegistry.get_agent("analytics_dashboard")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action="productivity",
             project_id=project_id,
@@ -4120,6 +4144,8 @@ def time_estimation(request):
         available_users = _build_available_users(company_user=company_user)
 
         agent = AgentRegistry.get_agent("time_estimation")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         result = agent.process(
             action="estimate",
             tasks=tasks_data,
@@ -4285,6 +4311,8 @@ def meeting_schedule(request):
 
         # Use the AI agent to parse the request
         agent = AgentRegistry.get_agent("meeting_scheduler")
+        agent.company_id = getattr(company_user, 'company_id', None)
+        agent.agent_key_name = 'project_manager_agent'
         current_time = timezone.now().isoformat()
         result = agent.process(
             message=message,

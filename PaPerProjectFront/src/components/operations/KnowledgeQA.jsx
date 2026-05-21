@@ -298,19 +298,24 @@ const KnowledgeQA = () => {
       }
     } catch (err) {
       console.error('Ask question failed:', err);
+      const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
       setMessages((prev) => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: `**Something went wrong.**\n\n${err?.message || 'Please try again in a moment.'}`,
+          content: isHardBlock
+            ? `**Generation blocked.**\n\n${err?.message || 'API key or token quota issue. Check your API Keys settings.'}`
+            : `**Something went wrong.**\n\n${err?.message || 'Please try again in a moment.'}`,
           sources: [],
           created_at: new Date().toISOString(),
         },
       ]);
       toast({
-        title: 'Error',
-        description: err?.message || 'Something went wrong. Please try again.',
+        title: isHardBlock ? 'Generation blocked' : 'Error',
+        description: isHardBlock
+          ? (err?.message || 'API key or token quota issue. Check your API Keys settings.')
+          : (err?.message || 'Something went wrong. Please try again.'),
         variant: 'destructive',
       });
     } finally {

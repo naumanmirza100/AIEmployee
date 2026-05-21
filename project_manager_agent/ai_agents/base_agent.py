@@ -120,16 +120,14 @@ class BaseAgent:
     
     def _resolve_company_client(self):
         """If the agent has a company_id + agent_key_name set, route through
-        the key/quota resolver. Returns (client, ctx) or (None, None) to fall
-        back to the default Groq env-key client.
+        the key/quota resolver. Returns (client, ctx) or (None, None) only
+        when no company key is configured (free / platform-key tier).
 
         Exceptions:
           - QuotaExhausted: propagates — hard cap is intentional.
-          - NoKeyAvailable / Company.DoesNotExist / misc: we fall back to the
-            env-level client rather than hard-failing the whole LLM call. That
-            preserves the tenant-key infrastructure for tenants that DO set up
-            keys, without breaking agents on a fresh deployment that hasn't
-            provisioned a PlatformAPIKey row yet.
+          - NoKeyAvailable: company has no key yet → fall back to platform key.
+          - Unsupported provider: raises ValueError — never silently uses env
+            when a company key IS configured but the provider is unrecognised.
         """
         company_id = getattr(self, 'company_id', None)
         agent_key_name = getattr(self, 'agent_key_name', None)
@@ -143,29 +141,25 @@ class BaseAgent:
             company = Company.objects.get(pk=company_id)
             ctx = resolve_for_call(company, agent_key_name)
         except QuotaExhausted:
-            # Hard cap — surface to the view so it can return 402/403.
             raise
         except NoKeyAvailable:
             logger.info(
                 "No per-company key configured for agent=%s company=%s; "
-                "falling back to env-level client.",
+                "using platform key.",
                 agent_key_name, company_id,
             )
             return None, None
         except Exception as e:
-            logger.warning("Per-company key resolution failed (%s); using env fallback", e)
+            logger.warning("Per-company key resolution failed (%s); using platform key", e)
             return None, None
-        try:
-            if ctx.provider == 'groq':
-                from groq import Groq
-                return Groq(api_key=ctx.api_key), ctx
-            # Provider mismatch (e.g. admin set an openai key but agent speaks groq):
-            # fall back to env so we don't silently use a wrong-protocol client.
-            logger.warning("PM agent got non-groq key (%s); falling back to env", ctx.provider)
-            return None, None
-        except Exception as e:
-            logger.warning("Failed to build client from resolved key: %s — using env fallback", e)
-            return None, None
+
+        if ctx.provider == 'groq':
+            from groq import Groq
+            return Groq(api_key=ctx.api_key), ctx
+        if ctx.provider == 'openai':
+            from openai import OpenAI
+            return OpenAI(api_key=ctx.api_key), ctx
+        raise ValueError(f"Unsupported provider '{ctx.provider}' configured for company key")
 
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024):
         """
@@ -183,7 +177,16 @@ class BaseAgent:
         import time as _time
         _start = _time.time()
         client, key_ctx = self._resolve_company_client()
-        call_client = client or self.client
+        if client is not None:
+            call_client = client
+            effective_model = (
+                getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+                if key_ctx.provider == 'openai'
+                else self.model
+            )
+        else:
+            call_client = self.client
+            effective_model = self.model
         try:
             messages = []
 
@@ -199,7 +202,7 @@ class BaseAgent:
             })
 
             response = call_client.chat.completions.create(
-                model=self.model,
+                model=effective_model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens
@@ -241,7 +244,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
-                model=self.model,
+                model=effective_model,
                 usage_dict=usage_dict,
                 duration_ms=int((_time.time() - _start) * 1000),
                 success=True,
@@ -262,14 +265,14 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
-                model=self.model,
+                model=effective_model,
                 usage_dict=None,
                 duration_ms=int((_time.time() - _start) * 1000),
                 success=False,
             )
             # Try fallback model if primary fails
-            if self.fallback_model and self.fallback_model != self.model:
-                logger.warning(f"{self.agent_name}: Primary model '{self.model}' failed ({e}), trying fallback '{self.fallback_model}'")
+            if self.fallback_model and self.fallback_model != effective_model:
+                logger.warning(f"{self.agent_name}: Primary model '{effective_model}' failed ({e}), trying fallback '{self.fallback_model}'")
                 _fallback_start = _time.time()
                 try:
                     response = call_client.chat.completions.create(
@@ -315,8 +318,12 @@ class BaseAgent:
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
                         success=False,
                     )
+                    from core.api_key_service import raise_if_auth_error
+                    raise_if_auth_error(fallback_err, key_ctx)
                     raise
             logger.error(f"Error in {self.agent_name} LLM call: {str(e)}")
+            from core.api_key_service import raise_if_auth_error
+            raise_if_auth_error(e, key_ctx)
             raise
     
     def log_action(self, action, details=None):
