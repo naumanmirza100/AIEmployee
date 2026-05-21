@@ -871,6 +871,14 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 86400.0,
         'options': {'expires': 172800},
     },
+
+    # Audit log retention — weekly purge of rows older than the configured
+    # window (default 730 days). Prevents unbounded growth.
+    'hr-purge-audit-log': {
+        'task': 'hr_agent.tasks.purge_hr_audit_log',
+        'schedule': 86400.0 * 7,
+        'options': {'expires': 86400.0 * 14},
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
