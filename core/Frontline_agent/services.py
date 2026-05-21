@@ -368,29 +368,49 @@ Query: {query}
 Chunks:
 {chunks_text}
 """
-            import openai
             from django.conf import settings
 
-            # Route through company subscription system if company_id is set.
-            # Only an OpenAI key can power this reranker (gpt-4o-mini).
-            # If the company has a Groq key or no key, fall back to platform key.
-            openai_api_key = getattr(settings, 'OPENAI_API_KEY', None)
-            key_ctx = None
-            if self.company_id:
-                try:
-                    from core.models import Company
-                    from core.api_key_service import resolve_for_call, NoKeyAvailable
-                    company = Company.objects.get(pk=self.company_id)
-                    ctx = resolve_for_call(company, 'frontline_agent')
-                    if ctx.provider == 'openai':
-                        openai_api_key = ctx.api_key
-                        key_ctx = ctx
-                except Exception:
-                    pass  # no company key or Groq key → use platform key
+            # All key resolution goes through the subscription system — no direct
+            # env access. resolve_for_call() already returns the platform key when
+            # the company has free-tier quota remaining.
+            if not self.company_id:
+                logger.info("No company_id on KnowledgeService; skipping LLM rerank.")
+                return candidates[:top_k]
 
-            client = openai.OpenAI(api_key=openai_api_key)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
+            key_ctx = None
+            provider = None
+            api_key = None
+            rerank_model_openai = 'gpt-4o-mini'
+            rerank_model_groq = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+
+            try:
+                from core.models import Company
+                from core.api_key_service import resolve_for_call, NoKeyAvailable
+                company = Company.objects.get(pk=self.company_id)
+                ctx = resolve_for_call(company, 'frontline_agent')
+                if ctx.provider in ('openai', 'groq'):
+                    provider = ctx.provider
+                    api_key = ctx.api_key
+                    key_ctx = ctx
+            except Exception:
+                # NoKeyAvailable, QuotaExhausted, or any other issue → skip rerank
+                logger.info("No key available via subscription system for reranking; skipping.")
+                return candidates[:top_k]
+
+            if not api_key:
+                return candidates[:top_k]
+
+            if provider == 'groq':
+                from groq import Groq as _Groq
+                llm_client = _Groq(api_key=api_key)
+                rerank_model = rerank_model_groq
+            else:
+                import openai as _openai
+                llm_client = _openai.OpenAI(api_key=api_key)
+                rerank_model = rerank_model_openai
+
+            response = llm_client.chat.completions.create(
+                model=rerank_model,
                 messages=[
                     {"role": "system", "content": "You are a precise document retrieval evaluator. Output ONLY a valid JSON list of integers."},
                     {"role": "user", "content": prompt}

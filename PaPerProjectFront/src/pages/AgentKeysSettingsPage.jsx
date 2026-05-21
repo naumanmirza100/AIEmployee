@@ -731,11 +731,18 @@ const AgentKeysSettingsPage = () => {
   };
 
   const setPool = async (agentName, preferred_pool) => {
+    // Optimistic update — reflect the switch instantly before the API responds
+    setAgents(prev => prev.map(a =>
+      a.agent_name === agentName
+        ? { ...a, quota: { ...a.quota, preferred_pool } }
+        : a
+    ));
     try {
       await agentKeysService.setTokenPool({ agent_name: agentName, preferred_pool });
-      toast({ title: preferred_pool === 'free' ? 'Using free tokens' : 'Using managed key tokens' });
       loadData({ silent: true });
     } catch (e) {
+      // Roll back on failure
+      loadData({ silent: true });
       toast({ title: 'Failed to switch pool', description: String(e.message || e), variant: 'destructive' });
     }
   };
