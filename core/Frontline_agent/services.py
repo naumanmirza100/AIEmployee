@@ -347,15 +347,18 @@ class KnowledgeService:
     def _llm_rerank(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
         """
         Use LLM cross-encoding logic to re-rank retrieved candidate chunks.
+        Routes through the company subscription system when company_id is set:
+        uses the company's OpenAI BYOK/managed key and decrements quota.
+        Falls back to the platform key when no company key is configured.
         """
         try:
             if not candidates:
                 return candidates
-                
+
             chunks_text = ""
             for i, cand in enumerate(candidates):
                 chunks_text += f"\n--- Chunk {i} ---\n{cand['content'][:1000]}\n"
-                
+
             prompt = f"""Given the user query, evaluate the following document chunks.
 For each chunk, score it from 0 to 10 on how well it directly answers or contains information highly relevant to the query.
 Return ONLY a JSON list of integers representing the scores in the exact order of the chunks. E.g. [8, 0, 5, 2]
@@ -367,7 +370,25 @@ Chunks:
 """
             import openai
             from django.conf import settings
-            client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+
+            # Route through company subscription system if company_id is set.
+            # Only an OpenAI key can power this reranker (gpt-4o-mini).
+            # If the company has a Groq key or no key, fall back to platform key.
+            openai_api_key = getattr(settings, 'OPENAI_API_KEY', None)
+            key_ctx = None
+            if self.company_id:
+                try:
+                    from core.models import Company
+                    from core.api_key_service import resolve_for_call, NoKeyAvailable
+                    company = Company.objects.get(pk=self.company_id)
+                    ctx = resolve_for_call(company, 'frontline_agent')
+                    if ctx.provider == 'openai':
+                        openai_api_key = ctx.api_key
+                        key_ctx = ctx
+                except Exception:
+                    pass  # no company key or Groq key → use platform key
+
+            client = openai.OpenAI(api_key=openai_api_key)
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -376,6 +397,18 @@ Chunks:
                 ],
                 temperature=0.0
             )
+
+            # Decrement company quota for this rerank call
+            if key_ctx:
+                try:
+                    usage = getattr(response, 'usage', None)
+                    total = int(getattr(usage, 'total_tokens', 0) or 0)
+                    if total:
+                        from core.api_key_service import record_usage
+                        record_usage(key_ctx, total)
+                except Exception as exc:
+                    logger.warning("Frontline rerank quota decrement failed: %s", exc)
+
             raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -383,13 +416,12 @@ Chunks:
                     raw = raw[4:]
             import json
             scores = json.loads(raw.strip())
-            
-            # Apply rerank scores if the lists match in size
+
             if len(scores) == len(candidates):
                 for cand, score in zip(candidates, scores):
                     cand['rerank_score'] = cand['similarity_score'] + (score / 10.0)
                 candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
-                
+
             return candidates[:top_k]
         except Exception as e:
             logger.warning(f"LLM reranking failed: {e}")
