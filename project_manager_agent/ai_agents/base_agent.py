@@ -136,12 +136,10 @@ class BaseAgent:
             return None, None
         try:
             from core.models import Company
-            from core.api_key_service import (
-                resolve_for_call, QuotaExhausted, NoKeyAvailable, InvalidAgent,
-            )
+            from core.api_key_service import resolve_for_call, KeyServiceError
             company = Company.objects.get(pk=company_id)
             ctx = resolve_for_call(company, agent_key_name)
-        except (QuotaExhausted, NoKeyAvailable):
+        except KeyServiceError:
             raise  # propagate → global DRF handler → 402 / 403
         except Exception as e:
             logger.warning("Per-company key resolution failed (%s); using platform key", e)
