@@ -103,9 +103,15 @@ def _company_employee_or_404(request, employee_id):
 
 
 def _resolve_asker_role(company_user: CompanyUser) -> str:
-    """Map a CompanyUser.role to a knowledge confidentiality bucket."""
+    """Map a CompanyUser.role to a knowledge confidentiality bucket.
+
+    ``company_user`` is the default dashboard-login role — those are operators
+    of the tenant, not workforce — so it maps to 'hr' for retrieval gating.
+    Workforce uses `Employee` rows (with an optional CompanyUser link).
+    Explicit ``employee`` / ``manager`` roles override the default.
+    """
     role = (company_user.role or '').lower()
-    if role in ('owner', 'admin', 'hr_agent'):
+    if role in ('owner', 'admin', 'hr_agent', 'company_user'):
         return 'hr'
     if role == 'manager':
         return 'manager'
@@ -2543,10 +2549,6 @@ def delete_accrual_policy(request, policy_id):
 # Employee detail (for the drawer UI)
 # ============================================================================
 
-@api_view(['GET'])
-@authentication_classes([CompanyUserTokenAuthentication])
-@permission_classes([IsCompanyUserOnly])
-@throttle_classes([HRCRUDThrottle])
 def _build_employee_bundle(emp: Employee, company) -> dict:
     """Common bundle used by both ``get_employee_detail`` and the self-service
     ``/hr/me`` endpoint — profile, manager chain, balances, docs, leaves, meetings."""
@@ -2619,6 +2621,10 @@ def _build_employee_bundle(emp: Employee, company) -> dict:
     }
 
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
 def get_employee_detail(request, employee_id):
     """Bundle every relevant view of one employee for the drawer:
     profile, manager chain, leave balances, personal documents, recent
@@ -2665,8 +2671,17 @@ def get_my_hr_profile(request):
 # ============================================================================
 
 def _is_hr_admin(company_user) -> bool:
-    """`hr_only` reads are restricted to roles in this set."""
-    return (company_user.role or '').lower() in ('hr_agent', 'owner', 'admin')
+    """`hr_only` reads are restricted to roles in this set.
+
+    ``company_user`` is the default role for dashboard logins — these are
+    operators, not workforce. Workforce is modeled as the `Employee` row.
+    So unless the CompanyUser is explicitly tagged as a non-admin role
+    (e.g. ``'employee'`` or ``'manager'`` if a tenant chooses to use those),
+    dashboard logins get HR-admin access for their own company.
+    """
+    return (company_user.role or '').lower() in (
+        'hr_agent', 'owner', 'admin', 'company_user',
+    )
 
 
 def _write_audit_log(actor_cu, company, action: str, target_type: str, target_id: int,
@@ -3647,7 +3662,7 @@ def org_chart(request):
                        .select_related('head'))
     employees = list(Employee.objects.filter(
         company=company, employment_status__in=['active', 'on_leave', 'probation']
-    ).only('id', 'full_name', 'job_title', 'manager_id', 'department', 'department_id'))
+    ).only('id', 'full_name', 'job_title', 'manager_id', 'department', 'department_obj_id'))
 
     # Group employees by department FK (or string fallback for legacy rows).
     emp_by_dept_id: dict[int, list[dict]] = {}
@@ -3656,8 +3671,8 @@ def org_chart(request):
     for e in employees:
         wire = {'id': e.id, 'full_name': e.full_name,
                 'job_title': e.job_title, 'manager_id': e.manager_id}
-        if getattr(e, 'department_id', None):
-            emp_by_dept_id.setdefault(e.department_id, []).append(wire)
+        if e.department_obj_id:
+            emp_by_dept_id.setdefault(e.department_obj_id, []).append(wire)
         elif e.department and e.department.lower() in dept_name_to_id:
             emp_by_dept_id.setdefault(dept_name_to_id[e.department.lower()], []).append(wire)
         else:
@@ -3864,7 +3879,7 @@ def list_hr_document_access_log(request, document_id):
         'action': r.action,
         'actor_id': r.actor_id,
         'actor_email': r.actor.email if r.actor_id else None,
-        'actor_name': (r.actor.first_name + ' ' + r.actor.last_name).strip() if r.actor_id else None,
+        'actor_name': r.actor.full_name if r.actor_id else None,
         'ip_address': r.ip_address,
         'user_agent': r.user_agent,
         'created_at': r.created_at.isoformat() if r.created_at else None,
