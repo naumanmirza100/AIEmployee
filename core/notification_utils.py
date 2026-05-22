@@ -53,29 +53,48 @@ def notify_company_user(company_user, *, title, message, action_url=None,
         return None
 
 
-def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float = None):
-    """Send quota threshold notification to all owner/admin CompanyUsers via PMNotification."""
+def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float = None, pool: str = 'free'):
+    """Send quota threshold notification to all CompanyUsers via PMNotification.
+
+    pool: 'free' | 'managed' | 'byok'
+    """
     try:
         from core.models import CompanyUser
         from project_manager_agent.models import PMNotification
 
-        recipients = CompanyUser.objects.filter(
-            company=company, is_active=True
-        )
+        recipients = CompanyUser.objects.filter(company=company, is_active=True)
         display_pct = actual_pct if actual_pct is not None else pct
-        if pct >= 100:
-            title = f"Token quota exhausted — {agent_label}"
-            message = (
-                f"Your {agent_label} has used {display_pct}% of its free tokens and is now blocked. "
-                f"Add your own API key (BYOK) or request a managed key to continue."
-            )
-            severity = 'critical'
+
+        if pool == 'managed':
+            pool_label = 'managed key tokens'
+        elif pool == 'byok':
+            pool_label = 'BYOK token cap'
         else:
-            title = f"Token quota at {display_pct}% — {agent_label}"
-            message = (
-                f"Your {agent_label} has used {display_pct}% of its free tokens. "
-                f"Consider adding your own API key (BYOK) or requesting a managed key soon."
-            )
+            pool_label = 'free platform tokens'
+
+        if pct >= 100:
+            if pool == 'managed':
+                title = f"Managed key quota exhausted — {agent_label}"
+                action_hint = "Contact your admin to increase the managed key token limit."
+            elif pool == 'byok':
+                title = f"BYOK token cap reached — {agent_label}"
+                action_hint = "Your BYOK key will keep working, but you have reached the soft cap you set. Update the cap in API Keys settings if needed."
+            else:
+                title = f"Free token quota exhausted — {agent_label}"
+                action_hint = "Add your own API key (BYOK) or request a managed key to continue."
+            message = f"Your {agent_label} has used {display_pct}% of its {pool_label}. {action_hint}"
+            severity = 'critical' if pool != 'byok' else 'warning'
+        else:
+            if pool == 'managed':
+                title = f"Managed key quota at {display_pct}% — {agent_label}"
+                action_hint = "Contact your admin soon to increase the managed key token limit."
+            elif pool == 'byok':
+                title = f"BYOK token cap at {display_pct}% — {agent_label}"
+                action_hint = "You are approaching the soft cap you set. Update it in API Keys settings if needed."
+            else:
+                title = f"Token quota at {display_pct}% — {agent_label}"
+                action_hint = "Consider adding your own API key (BYOK) or requesting a managed key soon."
+            message = f"Your {agent_label} has used {display_pct}% of its {pool_label}. {action_hint}"
             severity = 'warning'
 
         for cu in recipients:

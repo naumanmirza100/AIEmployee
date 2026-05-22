@@ -199,6 +199,9 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             }
 
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f'OperationsKnowledgeQAAgent.answer error: {e}', exc_info=True)
             return {
                 'success': False,

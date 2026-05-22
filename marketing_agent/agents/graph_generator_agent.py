@@ -1096,6 +1096,9 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
                 return self._single_campaign_fallback(specific_campaign, prompt)
             return self._generate_fallback_chart(prompt, marketing_data)
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.exception(f"Error generating marketing graph: {e}")
             if specific_campaign:
                 return self._single_campaign_fallback(specific_campaign, prompt)

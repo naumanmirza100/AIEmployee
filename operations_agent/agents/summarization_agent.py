@@ -37,6 +37,9 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
         try:
             return handler(**kwargs)
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f'{self.agent_name} error: {e}', exc_info=True)
             return {'success': False, 'error': str(e)}
 
@@ -229,6 +232,9 @@ Rules:
             logger.warning(f'Failed to parse insights JSON: {e}')
             return {}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f'Insights extraction failed: {e}', exc_info=True)
             return {}
 
@@ -297,6 +303,9 @@ IMPORTANT:
                 'action_items': action_items,
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f'Single-pass summarization failed: {e}', exc_info=True)
             return {'success': False, 'error': str(e)}
 
@@ -330,6 +339,9 @@ Provide a detailed bullet-point summary. Be thorough and specific."""
                 if result and result.strip():
                     chunk_summaries.append(f"**Section {i + 1}:**\n{result.strip()}")
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 logger.warning(f'Chunk {i + 1} summarization failed: {e}')
 
         if not chunk_summaries:
@@ -386,6 +398,9 @@ Be thorough, use proper markdown, include all significant details. Return ONLY t
                 'action_items': action_items,
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f'Large doc summarization failed: {e}', exc_info=True)
             return {'success': False, 'error': str(e)}
 

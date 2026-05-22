@@ -2817,13 +2817,13 @@ const MarketingQA = () => {
       // Run comparison in background (no await - non-blocking)
       compareResponses(q, inputMode).catch(err => console.error('Comparison failed:', err));
     } catch (error) {
-      const isQuota = error?.status === 402;
+      const isHardBlock = error?.status === 402 || error?.status === 403 || error?.data?.hard_block;
       toast({
-        title: isQuota ? 'Token Limit Reached' : 'Warning',
-        description: isQuota
-          ? (error.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+        title: isHardBlock ? 'Request blocked' : 'Warning',
+        description: isHardBlock
+          ? (error?.data?.message || error?.message || 'API key or token quota issue. Check your API Keys settings.')
           : 'Please try again.',
-        variant: isQuota ? 'destructive' : 'default'
+        variant: 'destructive'
       });
     } finally {
       setLoading(false);
