@@ -398,7 +398,7 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   )}
-                  {q && (
+                  {q && k.status !== 'revoked' && (
                     <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjustQuota(q, k)}>
                        Edit tokens
                     </Button>
@@ -611,7 +611,7 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
                   Set
                 </Button>
                 </div>
-                {q.managed_key_status !== 'revoked' && q.managed_included_tokens > 0 && (
+                {q.managed_key_status !== 'revoked' && (
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-white/25 ml-2">Managed:</span>
                     <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'set_managed')}>
@@ -695,11 +695,6 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing })
               <p className="text-xs text-blue-300 mt-1">
                 Paid: <span className="font-semibold">${r.amount_paid.toFixed(2)}</span>
                 {r.paid_at && <span className="text-white/40 ml-1">• {new Date(r.paid_at).toLocaleString()}</span>}
-              </p>
-            )}
-            {agentPricing && agentPricing.managed_key_tokens > 0 && ['payment_pending', 'payment_received', 'key_assigned'].includes(r.status) && (
-              <p className="text-[10px] text-violet-300/80 mt-1">
-                {formatTokens(agentPricing.managed_key_tokens)} tokens {r.status === 'key_assigned' ? 'granted' : 'will be granted'}
               </p>
             )}
 
@@ -1316,11 +1311,6 @@ const SuperAdminApiKeysPage = () => {
                     lockedLabel={(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
                   />
                 </div>
-                {(assignModal.replacingKey || assignModal.prefillRequest) && (
-                  <p className="text-[10px] text-white/35 mt-1">
-                    Locked: {(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
-                  </p>
-                )}
               </div>
               <div>
                 <Label className="text-white/60 text-xs uppercase tracking-wider">Agent</Label>
@@ -1357,7 +1347,7 @@ const SuperAdminApiKeysPage = () => {
                   onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
                 />
               </div>
-              <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
+              {/* <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
                 <Info className="w-3.5 h-3.5 text-violet-300 mt-0.5 shrink-0" />
                 <p className="text-xs text-white/55">
                   Free tokens applied from{' '}
@@ -1371,7 +1361,7 @@ const SuperAdminApiKeysPage = () => {
                     ) : null;
                   })()}
                 </p>
-              </div>
+              </div> */}
               {assignModal.replacingKey && (
                 <>
                   <div
@@ -1402,7 +1392,7 @@ const SuperAdminApiKeysPage = () => {
                   </div>
                   <div>
                     <Label className="text-white/60 text-xs uppercase tracking-wider">
-                      Managed token limit <span className="text-white/30 normal-case">(leave blank to use pricing default)</span>
+                      Managed token limit <span className="text-white/30 normal-case"></span>
                     </Label>
                     <Input
                       type="number"

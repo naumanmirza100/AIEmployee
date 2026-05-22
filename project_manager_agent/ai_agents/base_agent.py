@@ -121,34 +121,26 @@ class BaseAgent:
     def _resolve_company_client(self):
         """If the agent has a company_id + agent_key_name set, route through
         the key/quota resolver. Returns (client, ctx) or (None, None) only
-        when no company key is configured (free / platform-key tier).
+        when company_id is not set (internal/admin calls with no company context).
 
         Exceptions:
-          - QuotaExhausted: propagates — hard cap is intentional.
-          - NoKeyAvailable: company has no key yet → fall back to platform key.
-          - Unsupported provider: raises ValueError — never silently uses env
-            when a company key IS configured but the provider is unrecognised.
+          - QuotaExhausted: propagates — hard cap → 402.
+          - NoKeyAvailable: company has no key configured → propagates → 403.
+            Env key is NEVER used as a silent fallback when company_id is set.
+          - Unsupported provider: raises ValueError.
         """
         company_id = getattr(self, 'company_id', None)
         agent_key_name = getattr(self, 'agent_key_name', None)
         if not company_id or not agent_key_name:
+            # No company context (admin/internal call) → use platform env key
             return None, None
         try:
             from core.models import Company
-            from core.api_key_service import (
-                resolve_for_call, QuotaExhausted, NoKeyAvailable, InvalidAgent,
-            )
+            from core.api_key_service import resolve_for_call, KeyServiceError
             company = Company.objects.get(pk=company_id)
             ctx = resolve_for_call(company, agent_key_name)
-        except QuotaExhausted:
-            raise
-        except NoKeyAvailable:
-            logger.info(
-                "No per-company key configured for agent=%s company=%s; "
-                "using platform key.",
-                agent_key_name, company_id,
-            )
-            return None, None
+        except KeyServiceError:
+            raise  # propagate → global DRF handler → 402 / 403
         except Exception as e:
             logger.warning("Per-company key resolution failed (%s); using platform key", e)
             return None, None
