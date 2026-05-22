@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  Loader2, Plus, RefreshCw, Check, X, ClipboardList, Pencil,
+  Loader2, Plus, RefreshCw, Check, X, ClipboardList, Pencil, Ban,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -121,6 +121,17 @@ export default function HRLeaveTab() {
     open: true, saving: false, lr,
     form: { leave_type: lr.leave_type, start_date: lr.start_date, end_date: lr.end_date, reason: lr.reason || '' },
   });
+
+  const handleCancel = async (lr) => {
+    if (!confirm(`Withdraw your leave request for ${lr.start_date} → ${lr.end_date}? This is different from a rejection — the audit trail will show "cancelled".`)) return;
+    try {
+      await hrAgentService.cancelLeaveRequest(lr.id);
+      toast({ title: 'Leave request cancelled' });
+      load();
+    } catch (e) {
+      toast({ title: 'Cancel failed', description: e.message, variant: 'destructive' });
+    }
+  };
 
   const handleEditSave = async () => {
     const { lr, form } = editDialog;
@@ -230,10 +241,16 @@ export default function HRLeaveTab() {
                         {lr.status === 'pending' ? (
                           <div className="flex gap-1 justify-end flex-wrap">
                             {view === 'mine' && (
-                              <Button variant="outline" size="sm" className="h-7 text-xs text-sky-300 hover:text-sky-200"
-                                onClick={() => openEdit(lr)}>
-                                <Pencil className="h-3 w-3 mr-1" /> Edit
-                              </Button>
+                              <>
+                                <Button variant="outline" size="sm" className="h-7 text-xs text-sky-300 hover:text-sky-200"
+                                  onClick={() => openEdit(lr)}>
+                                  <Pencil className="h-3 w-3 mr-1" /> Edit
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 text-xs text-amber-300 hover:text-amber-200"
+                                  onClick={() => handleCancel(lr)}>
+                                  <Ban className="h-3 w-3 mr-1" /> Cancel
+                                </Button>
+                              </>
                             )}
                             <Button variant="outline" size="sm" className="h-7 text-xs text-emerald-300 hover:text-emerald-200"
                               onClick={() => openDecide(lr, 'approve')}>
