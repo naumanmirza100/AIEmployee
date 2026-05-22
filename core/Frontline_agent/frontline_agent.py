@@ -52,6 +52,7 @@ class FrontlineAgent(BaseAgent):
         max_results: int = 5,
         enable_rewrite: bool = False,
         company_user_id: Optional[int] = None,
+        history: Optional[List[Dict]] = None,
     ) -> Dict:
         """
         Answer a question using only verified knowledge base information.
@@ -62,15 +63,33 @@ class FrontlineAgent(BaseAgent):
         max_results: number of top chunks fed to the LLM.
         enable_rewrite: if True and original retrieval is weak, call LLM to rewrite
                         the query and retry once. Costs an extra cheap LLM call.
+        history: optional list of prior turns ``[{'role': 'user'|'assistant', 'content': '…'}, …]``.
+                 When present, a follow-up like "what about international orders?" is
+                 first contextualised against the conversation so retrieval has a
+                 standalone query to embed. Stateless chat is fine; this fixes
+                 follow-up turns that depended on prior context.
         """
         logger.info(f"Processing question: {question[:100]} (company_id: {company_id})")
 
         # Use provided company_id or instance company_id
         search_company_id = company_id or self.company_id
 
+        # Contextualise follow-up turns against the conversation before retrieval.
+        # Without this, "what about international ones?" embeds with no notion of
+        # "ones what?" and retrieval flails. We only call the LLM when there's
+        # actually prior history — first-turn questions skip the cost entirely.
+        retrieval_question = question
+        contextualised = None
+        if history:
+            contextualised = self._contextualise_with_history(question, history)
+            if contextualised and contextualised.strip().lower() != question.strip().lower():
+                logger.info("Contextualised follow-up via history: %r → %r",
+                            question[:80], contextualised[:80])
+                retrieval_question = contextualised
+
         # Search knowledge base (with optional scope + filters)
         knowledge_result = self.knowledge_service.get_answer(
-            question,
+            retrieval_question,
             company_id=search_company_id,
             scope_document_type=scope_document_type,
             scope_document_ids=scope_document_ids,
@@ -190,6 +209,58 @@ class FrontlineAgent(BaseAgent):
                 'document_id': knowledge_result.get('document_id'),
                 'citations': knowledge_result.get('citations', []),
             }
+
+    def _contextualise_with_history(self, question: str,
+                                    history: List[Dict]) -> Optional[str]:
+        """Rewrite a follow-up question into a standalone one using the prior
+        conversation. Cheap LLM call. Returns the original question if the LLM
+        decides the question is already self-contained, or on any failure path.
+
+        Only the last 6 turns are included so the prompt stays small. Long
+        runaway threads don't help retrieval anyway.
+        """
+        try:
+            q = (question or '').strip()
+            if not q:
+                return None
+            # Trim history to the last 6 turns and skip empty content
+            recent = [h for h in (history or [])[-6:]
+                      if isinstance(h, dict) and h.get('content')]
+            if not recent:
+                return q
+            # Build a tight conversation transcript
+            lines = []
+            for h in recent:
+                role = (h.get('role') or 'user').lower()
+                role_label = 'User' if role == 'user' else 'Assistant'
+                content = str(h.get('content') or '').strip()
+                if content:
+                    lines.append(f"{role_label}: {content[:500]}")
+            convo = '\n'.join(lines)
+            prompt = (
+                "Given the conversation history, rewrite the user's latest message "
+                "as a STANDALONE search query. Resolve pronouns (it/that/those), "
+                "expand short follow-ups by carrying forward the topic from earlier "
+                "turns. If the message is already standalone, return it unchanged. "
+                "Output ONLY the rewritten query, one line, no preface.\n\n"
+                f"<conversation>\n{convo}\n</conversation>\n\n"
+                f"Latest message: {q}\nStandalone query:"
+            )
+            out = self._call_llm(
+                prompt=prompt,
+                system_prompt="You rewrite follow-up questions into standalone queries for retrieval. Output one line only.",
+                temperature=0.0,
+                max_tokens=120,
+            )
+            if not out:
+                return q
+            rewritten = out.strip().splitlines()[0].strip().strip('"').strip("'")
+            if not rewritten or len(rewritten) > 400:
+                return q
+            return rewritten
+        except Exception as exc:
+            logger.warning("Contextualise-with-history failed: %s", exc)
+            return question
 
     def _rewrite_query(self, question: str) -> Optional[str]:
         """Ask the LLM to expand/rewrite a vague or short user query for better retrieval.

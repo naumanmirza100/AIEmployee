@@ -380,6 +380,54 @@ urlpatterns = [
     re_path(r'^frontline/qa/chats/create/?$', frontline_agent.create_qa_chat, name='frontline_qa_chats_create'),  # POST
     re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/update/?$', frontline_agent.update_qa_chat, name='frontline_qa_chats_update'),  # PATCH/PUT
     re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/delete/?$', frontline_agent.delete_qa_chat, name='frontline_qa_chats_delete'),  # DELETE
+    re_path(r'^frontline/audit-log/?$', frontline_agent.list_frontline_audit_log, name='frontline_list_audit_log'),  # GET
+
+    # Saved replies / macros (F1)
+    re_path(r'^frontline/macros/?$', frontline_agent.list_ticket_macros, name='frontline_list_macros'),  # GET
+    re_path(r'^frontline/macros/create/?$', frontline_agent.create_ticket_macro, name='frontline_create_macro'),  # POST
+    re_path(r'^frontline/macros/(?P<macro_id>\d+)/update/?$', frontline_agent.update_ticket_macro, name='frontline_update_macro'),  # POST/PATCH
+    re_path(r'^frontline/macros/(?P<macro_id>\d+)/delete/?$', frontline_agent.delete_ticket_macro, name='frontline_delete_macro'),  # POST/DELETE
+    re_path(r'^frontline/macros/(?P<macro_id>\d+)/bump/?$', frontline_agent.bump_ticket_macro_usage, name='frontline_bump_macro'),  # POST
+
+    # Bulk ticket ops (F3)
+    re_path(r'^frontline/tickets/bulk-update/?$', frontline_agent.bulk_update_tickets, name='frontline_bulk_update_tickets'),  # POST
+
+    # Dead letter queue (F5)
+    re_path(r'^frontline/dead-letters/?$', frontline_agent.list_dead_letters, name='frontline_list_dead_letters'),  # GET
+    re_path(r'^frontline/dead-letters/(?P<dlq_id>\d+)/resolve/?$', frontline_agent.resolve_dead_letter, name='frontline_resolve_dead_letter'),  # POST
+
+    # CSAT (F2)
+    re_path(r'^frontline/csat/submit/?$', frontline_agent.submit_satisfaction, name='frontline_submit_satisfaction'),  # POST (public)
+    re_path(r'^frontline/csat/summary/?$', frontline_agent.satisfaction_summary, name='frontline_satisfaction_summary'),  # GET
+
+    # KB coverage + SLA dashboard (KB-C1, S4)
+    re_path(r'^frontline/kb-coverage/?$', frontline_agent.kb_coverage_report, name='frontline_kb_coverage'),  # GET
+    re_path(r'^frontline/sla/dashboard/?$', frontline_agent.sla_dashboard, name='frontline_sla_dashboard'),  # GET
+
+    # Document soft-deprecation (D-O2)
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/mark-outdated/?$', frontline_agent.mark_document_outdated, name='frontline_mark_document_outdated'),  # POST
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/unmark-outdated/?$', frontline_agent.unmark_document_outdated, name='frontline_unmark_document_outdated'),  # POST
+
+    # Document re-ingest (D-O3)
+    re_path(r'^frontline/documents/(?P<document_id>\d+)/reingest/?$', frontline_agent.reingest_document, name='frontline_reingest_document'),  # POST
+
+    # Ticket links (T3)
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/links/?$', frontline_agent.list_ticket_links, name='frontline_list_ticket_links'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/links/create/?$', frontline_agent.create_ticket_link, name='frontline_create_ticket_link'),  # POST
+    re_path(r'^frontline/ticket-links/(?P<link_id>\d+)/delete/?$', frontline_agent.delete_ticket_link, name='frontline_delete_ticket_link'),  # POST/DELETE
+
+    # Contact notes (C-N1)
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/notes/?$', frontline_agent.list_contact_notes, name='frontline_list_contact_notes'),  # GET
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/notes/create/?$', frontline_agent.create_contact_note, name='frontline_create_contact_note'),  # POST
+    re_path(r'^frontline/contact-notes/(?P<note_id>\d+)/update/?$', frontline_agent.update_contact_note, name='frontline_update_contact_note'),  # POST/PATCH
+    re_path(r'^frontline/contact-notes/(?P<note_id>\d+)/delete/?$', frontline_agent.delete_contact_note, name='frontline_delete_contact_note'),  # POST/DELETE
+
+    # Contact merge (C-N2)
+    re_path(r'^frontline/contacts/merge/?$', frontline_agent.merge_contacts, name='frontline_merge_contacts'),  # POST
+
+    # Handoff release (H1)
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/release-handoff/?$', frontline_agent.release_handoff, name='frontline_release_handoff'),  # POST
+
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
     re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET
     re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
@@ -742,6 +790,12 @@ urlpatterns = [
 
     # Compliance — GDPR + document access log
     re_path(r'^hr/employees/(?P<employee_id>\d+)/anonymize/?$', hr_agent.anonymize_employee, name='hr_anonymize_employee'),  # POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/export/?$', hr_agent.export_employee_data, name='hr_export_employee_data'),  # GET (GDPR Article 15/20)
+
+    # D-F2 / D-F3 — HR document soft-deprecation + re-ingest
+    re_path(r'^hr/documents/(?P<document_id>\d+)/mark-outdated/?$', hr_agent.mark_hr_document_outdated, name='hr_mark_document_outdated'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/unmark-outdated/?$', hr_agent.unmark_hr_document_outdated, name='hr_unmark_document_outdated'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/reingest/?$', hr_agent.reingest_hr_document, name='hr_reingest_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/access-log/?$', hr_agent.list_hr_document_access_log, name='hr_list_document_access_log'),  # GET
 ]
 

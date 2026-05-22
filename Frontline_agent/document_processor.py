@@ -199,7 +199,14 @@ class DocumentProcessor:
     
     @staticmethod
     def _extract_pdf(file_path: str) -> Tuple[bool, str, Optional[str]]:
-        """Extract text from PDF file - extracts ALL pages (up to 100+ pages)"""
+        """Extract text from PDF file - extracts ALL pages (up to 100+ pages).
+
+        Falls back to OCR (Tesseract via pdf2image+pytesseract) when the text
+        layer is empty or suspiciously thin — that's the symptom of a scanned
+        / image-only PDF. Before OCR was wired, those PDFs got indexed as zero-
+        text docs with no warning, breaking retrieval silently.
+        """
+        total_pages = 0
         # Try pdfplumber first (better for large/complex PDFs)
         try:
             import pdfplumber
@@ -207,15 +214,19 @@ class DocumentProcessor:
             with pdfplumber.open(file_path) as pdf:
                 total_pages = len(pdf.pages)
                 logger.info(f"Using pdfplumber to extract text from PDF with {total_pages} pages")
-                
+
                 # Explicitly iterate through ALL pages - no limits
                 for page_num in range(1, total_pages + 1):
                     try:
                         page = pdf.pages[page_num - 1]  # 0-indexed
                         page_text = page.extract_text()
                         if page_text:
-                            text_parts.append(page_text)
-                        
+                            # Embed a page marker so the chunker can later track
+                            # which page each chunk belongs to. The marker uses
+                            # form-feed (\x0c) which is rare in real text; the
+                            # chunker strips it before storage.
+                            text_parts.append(f"\x0c__PAGE_{page_num}__\n{page_text}")
+
                         # Log progress every 10 pages and at milestones
                         if page_num % 10 == 0 or page_num == total_pages:
                             logger.info(f"Extracted {page_num}/{total_pages} pages ({len(''.join(text_parts))} chars so far)")
@@ -223,19 +234,22 @@ class DocumentProcessor:
                         logger.warning(f"Error extracting page {page_num}/{total_pages}: {page_error}, continuing...")
                         # Continue with other pages even if one fails
                         continue
-                
+
                 full_text = "\n".join(text_parts)
                 logger.info(f"PDF extraction complete (pdfplumber): {len(full_text)} characters from {len(text_parts)}/{total_pages} pages")
-                
+
                 if len(text_parts) < total_pages:
                     logger.warning(f"Only extracted {len(text_parts)} out of {total_pages} pages. Some pages may have failed.")
-                
-                return True, full_text.strip(), None
+
+                final_text, source = DocumentProcessor._maybe_ocr_pdf_fallback(
+                    file_path, full_text, total_pages,
+                )
+                return True, final_text.strip(), None if source == 'text' else f'ocr_used={source}'
         except ImportError:
             logger.info("pdfplumber not available, trying PyPDF2...")
         except Exception as e:
             logger.warning(f"pdfplumber extraction failed: {e}, trying PyPDF2...")
-        
+
         # Fallback to PyPDF2
         try:
             import PyPDF2
@@ -244,7 +258,7 @@ class DocumentProcessor:
                 pdf_reader = PyPDF2.PdfReader(f)
                 total_pages = len(pdf_reader.pages)
                 logger.info(f"Using PyPDF2 to extract text from PDF with {total_pages} pages")
-                
+
                 # Explicitly iterate through ALL pages - no limits
                 for page_num in range(1, total_pages + 1):
                     try:
@@ -252,7 +266,7 @@ class DocumentProcessor:
                         page_text = page.extract_text()
                         if page_text:
                             text_parts.append(page_text)
-                        
+
                         # Log progress every 10 pages and at milestones
                         if page_num % 10 == 0 or page_num == total_pages:
                             logger.info(f"Extracted {page_num}/{total_pages} pages ({len(''.join(text_parts))} chars so far)")
@@ -260,19 +274,92 @@ class DocumentProcessor:
                         logger.warning(f"Error extracting page {page_num}/{total_pages}: {page_error}, continuing...")
                         # Continue with other pages even if one fails
                         continue
-                
+
                 full_text = "\n".join(text_parts)
                 logger.info(f"PDF extraction complete (PyPDF2): {len(full_text)} characters from {len(text_parts)}/{total_pages} pages")
-                
+
                 if len(text_parts) < total_pages:
                     logger.warning(f"Only extracted {len(text_parts)} out of {total_pages} pages. Some pages may have failed.")
-                
-                return True, full_text.strip(), None
+
+                final_text, source = DocumentProcessor._maybe_ocr_pdf_fallback(
+                    file_path, full_text, total_pages,
+                )
+                return True, final_text.strip(), None if source == 'text' else f'ocr_used={source}'
         except ImportError:
             return False, '', "Neither pdfplumber nor PyPDF2 library installed. Install with: pip install pdfplumber PyPDF2"
         except Exception as e:
             logger.error(f"Error extracting PDF with PyPDF2: {e}", exc_info=True)
             return False, '', f"Error extracting PDF: {str(e)}"
+
+    @staticmethod
+    def _maybe_ocr_pdf_fallback(file_path: str, current_text: str,
+                                total_pages: int) -> Tuple[str, str]:
+        """If the text layer is thin or empty, attempt OCR and return whichever
+        result is longer. Returns ``(text, source)`` where source is
+        ``'text'`` (no OCR ran or OCR didn't help), ``'ocr'`` (OCR text wins),
+        or ``'unavailable'`` (OCR was needed but libraries aren't installed).
+
+        Heuristic: OCR is attempted when the average page yields fewer than 30
+        characters of text. That's far below any real document and the standard
+        symptom of a scanned PDF. Skipped entirely when ``total_pages == 0``
+        (parser failure — OCR won't help) or when the deployment opts out via
+        ``settings.FRONTLINE_PDF_OCR_ENABLED = False``.
+        """
+        try:
+            from django.conf import settings as _settings
+            if not getattr(_settings, 'FRONTLINE_PDF_OCR_ENABLED', True):
+                return current_text, 'text'
+        except Exception:
+            pass
+
+        cur_len = len(current_text or '')
+        threshold = max(100, int(total_pages) * 30)
+        if total_pages <= 0 or cur_len >= threshold:
+            return current_text, 'text'
+
+        logger.info(
+            "PDF text layer is thin (%d chars / %d pages, threshold %d) — attempting OCR fallback",
+            cur_len, total_pages, threshold,
+        )
+        try:
+            from pdf2image import convert_from_path  # type: ignore
+            import pytesseract  # type: ignore
+        except ImportError:
+            logger.warning(
+                "OCR fallback not available — install `pdf2image` + `pytesseract` "
+                "(and Tesseract + Poppler at OS level) to enable scanned-PDF support. "
+                "Returning %d chars of best-effort text-layer extraction.",
+                cur_len,
+            )
+            return current_text, 'unavailable'
+
+        try:
+            ocr_parts: list[str] = []
+            images = convert_from_path(file_path, dpi=200)
+            for idx, image in enumerate(images, start=1):
+                try:
+                    page_text = pytesseract.image_to_string(image) or ''
+                    if page_text.strip():
+                        ocr_parts.append(page_text)
+                    if idx % 5 == 0 or idx == len(images):
+                        logger.info("OCR progress: %d/%d pages (%d chars so far)",
+                                    idx, len(images), sum(len(p) for p in ocr_parts))
+                except Exception as page_err:
+                    logger.warning("OCR failed on page %d: %s — skipping", idx, page_err)
+                    continue
+            ocr_text = '\n'.join(ocr_parts).strip()
+        except Exception as exc:
+            logger.warning("OCR fallback failed entirely: %s — keeping text-layer extraction", exc)
+            return current_text, 'text'
+
+        # Only swap to OCR text if it's substantially better than what we had.
+        if len(ocr_text) > max(cur_len * 2, threshold):
+            logger.info("OCR fallback won: %d chars (text-layer was %d) — using OCR result",
+                        len(ocr_text), cur_len)
+            return ocr_text, 'ocr'
+        logger.info("OCR ran but didn't beat the text layer (%d vs %d) — keeping original",
+                    len(ocr_text), cur_len)
+        return current_text, 'text'
     
     @staticmethod
     def _extract_docx(file_path: str) -> Tuple[bool, str, Optional[str]]:
