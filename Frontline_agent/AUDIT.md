@@ -183,6 +183,121 @@ Severity legend: **[D]** dead code · **[S]** stub / half-built · **[W]** wrong
 
 ---
 
+## ⚪ Feature-by-feature gaps (separate pass, after all bugs/loopholes/features fixed)
+
+A targeted second-pass audit went through each Frontline feature and surfaced gaps that aren't covered above. Severity: **🅑** blocker · **🅜** meaningful · **🅖** nice-to-have. Skip the 🅖 items unless you're polishing for a customer.
+
+### Knowledge Q&A
+
+- [x] **🅑 [K1] Conversation history not used by retrieval** ✅ Fixed
+  - `FrontlineAgent.answer_question` now accepts an optional `history` arg. When non-empty, a new helper `_contextualise_with_history()` does a cheap LLM call that rewrites a follow-up like "what about international orders?" into a standalone retrieval query carrying forward the topic from prior turns. Only runs when there *is* history; first-turn questions skip the cost entirely. Last 6 turns + 500-char-per-turn cap to keep the prompt small.
+  - Wired through both call sites: `knowledge_qa` accepts `history` or `messages` from the body, OR hydrates from a `chat_id` (loads last 10 messages from `FrontlineQAChat`). `public_qa` accepts `history` directly from the widget client (no persistence on that path), capped at 10 turns × 2000 chars. Frontend client can start sending the field today — backend already understands it.
+- [x] **🅜 [K2] Citations don't include page numbers** ✅ Fixed
+  - Added `page_number` (`PositiveIntegerField(null=True)`) on `DocumentChunk` (migration `0035`). `_extract_pdf` now injects `\x0c__PAGE_N__\n` form-feed markers between pages; the chunker in `tasks.py` builds an offset→page index, tags each chunk, and strips markers before storage so prompts stay clean. Title strings in the retrieval response now include ` p.N` so the UI/LLM see the page. Non-PDFs continue to set `page_number=None`. Existing chunks in the DB stay null until reprocessed.
+
+- [x] **🅜 [K3] Rewrite query path ignores conversation history** ✅ Fixed by K1
+  - K1's `_contextualise_with_history` runs *before* retrieval, so the rewrite path now operates on the already-contextualised query. No separate change needed.
+
+### Documents
+
+- [x] **🅑 [D-O1] No OCR for image-only PDFs** ✅ Fixed
+  - `_extract_pdf` now calls a new `_maybe_ocr_pdf_fallback` helper after the pdfplumber/PyPDF2 path. The heuristic for "needs OCR" is `len(text) < max(100, total_pages * 30)` — that's well below any real document and the standard symptom of a scanned PDF. OCR runs via `pdf2image` + `pytesseract` (Tesseract under the hood) — both imported lazily so installs without OCR libs continue to work, just with a clear warning in the log. OCR result only replaces the text-layer extraction when it's substantially longer (`> max(cur_len * 2, threshold)`) so a few stray pixels can't overwrite a real text layer.
+  - Opt-out via `settings.FRONTLINE_PDF_OCR_ENABLED = False` for deployments that don't want it. Default is enabled.
+  - Return signal: the `processing_error` field now carries `ocr_used=ocr` when the OCR path won, `ocr_used=unavailable` when OCR was needed but libs weren't installed (visible signal for ops), or stays `None` when the text layer was sufficient.
+  - **Ops prereq**: `pip install pdf2image pytesseract` + install Tesseract and Poppler at the OS level. Without those, scanned PDFs still get indexed as empty but the log message now explains exactly why and how to fix it.
+- [x] **🅜 [D-O2] No "mark as outdated" flag** ✅ Fixed
+  - New `Document.is_outdated` boolean (migration `0035`). Retrieval filter in `core/Frontline_agent/services.py:160` now excludes `is_outdated=True` alongside `superseded_by__isnull=True`. New endpoints `POST /frontline/documents/<id>/mark-outdated` and `/unmark-outdated` flip the flag, write `document.mark_outdated` / `document.unmark_outdated` audit log entries, and dirty the FAISS index so the next query rebuilds.
+- [x] **🅖 [D-O3] Re-ingest endpoint** ✅ Fixed
+  - New `POST /frontline/documents/<id>/reingest` clears existing chunks + flips status back to `processing`, then dispatches the Celery `process_document` task. Safe to call on `ready` docs too (re-chunks). If the broker is unreachable, status flips to `failed` with the dispatch error captured in `processing_error`. Audit-logged.
+
+### Tickets
+
+- [x] **🅖 [T1] Tag system on tickets** ✅ Fixed
+  - New `Ticket.tags` JSONField (list of strings, migration `0037`). `update_ticket_task` accepts a `tags` list, dedups + trims (40-char cap per tag). `list_tickets` accepts repeated `?tag=foo&tag=bar` to require ALL via JSONField `__contains` matching.
+
+- [x] **🅖 [T2] Description search in `list_tickets`** ✅ Fixed
+  - Added `?q=…` substring search across title OR description (case-insensitive, 80-char cap on the LIKE pattern). Combines with the existing status/priority/category/date filters.
+
+- [x] **🅖 [T3] Ticket linking** ✅ Fixed
+  - New `TicketLink` model with relation enum (`duplicate_of`, `blocks`, `blocked_by`, `related`, `parent_of`, `child_of`). `unique_together(from_ticket, to_ticket, relation)` so the same link can't be created twice. 3 endpoints: `GET /tickets/<id>/links` (returns both directions with direction tag), `POST /tickets/<id>/links/create` (validates target is same company, rejects self-links), `POST /ticket-links/<id>/delete`. All audit-logged.
+
+- [x] **🅖 [T4] Auto-close inactive resolved tickets** ✅ Fixed
+  - New `auto_close_inactive_tickets` Celery task in `Frontline_agent/tasks.py`, registered in `CELERY_BEAT_SCHEDULE` as a daily run. Walks tickets in `resolved` status whose `updated_at` is older than `settings.FRONTLINE_AUTO_CLOSE_DAYS` (default 7), excludes anything currently snoozed, flips status to `closed` and writes a `ticket.auto_close` audit entry with the inactivity reason. Set `FRONTLINE_AUTO_CLOSE_DAYS = 0` to disable without removing from the schedule. Iterates with `chunk_size=200` so a million-ticket tenant doesn't blow memory.
+
+- [x] **🅖 [T5] Reopen audit trail** ✅ Fixed
+  - `update_ticket_task` now writes a separate `ticket.reopen` audit log entry whenever status transitions from `resolved`/`closed`/`auto_resolved` to `open`, distinct from the regular `ticket.status_change` event. Captures the `reopened_at` timestamp in the after-payload.
+
+### Workflows
+
+- [x] **🅜 [W3] Per-step retry / per-step timeout** ✅ Already mostly in place; small polish landed
+  - Verified the executor at `api/views/frontline_agent.py:3771-3805` already supports per-step `retries` (cap 5) and `backoff_seconds` (cap 300). Webhook steps already honour `step.get('timeout_seconds', 30)` for HTTP I/O.
+  - Fix landed: the `slack` step's hardcoded 15s timeout is now `int(step.get('timeout_seconds', 15))` (cap 1-120s) so workflow authors can extend it for slow Slack hosts.
+  - The audit was overly pessimistic — bounded synchronous-step retries and HTTP timeouts were already implemented. A *blocking watchdog* on arbitrary step types (e.g. a buggy template render in an infinite loop) would need thread/signal-based wrapping and isn't worth the complexity for the current step set.
+- [ ] **🅖 [W4] No visual builder** — workflows are authored as JSON. Fine for power users; blocks self-serve setup for the average HR/CS admin.
+
+### Notifications
+
+- [x] **🅜 [N1] Slack + MS Teams channels** ✅ Fixed (WhatsApp deferred)
+  - `NotificationTemplate.CHANNEL_CHOICES` now includes `slack` and `teams` (migration `0036`). Two new `Company` fields hold the incoming-webhook URLs per tenant: `frontline_slack_webhook_url` and `frontline_teams_webhook_url` (migration `core.0069`).
+  - Send adapters: `_send_notification_slack(company, subject, body)` POSTs `{text: "*subject*\nbody"}` to the Slack webhook. `_send_notification_teams(company, subject, body)` POSTs a minimal MessageCard envelope. Both return False with a clear log line when the webhook URL isn't configured.
+  - New `_dispatch_notification(template, recipient, subject, body, company)` routes by `template.channel`. Email is the default for empty/unknown channels (back-compat), so a typo can't silently drop notifications. SMS / in_app channels still log-only — kept the warning so future implementations have an obvious entry point.
+  - The "send now" path now uses the dispatcher; previously it only handled email and logged a warning for everything else.
+  - WhatsApp is intentionally deferred — needs Meta Business API credentials + a phone-number-id setup that's per-tenant and significantly more involved than incoming webhooks. Open as a follow-up if a customer asks.
+- [x] **🅜 [N2] Per-template quiet hours not granular** ✅ Fixed
+  - Added `NotificationTemplate.quiet_hours` JSON field. Shape: `{enabled, start, end, timezone_name, override_user_quiet_hours}`. New helper `template_quiet_hours_check(template, now)` in `notification_utils.py` checks the per-template window first; if active, the notification is queued as `deferred_reason='template_quiet_hours'`. If the template sets `override_user_quiet_hours=True`, the per-user quiet hours check is bypassed (use case: urgent SLA-breach alerts that shouldn't be silenced by personal 10 PM rules). Falls back to per-user prefs when no template-level config is set.
+- [ ] **🅖 [N3] No open/click tracking on outbound emails** — `_send_notification_email()` calls Django's `send_mail()` raw. No tracking pixel, no link wrapping.
+
+### Email-to-ticket (inbound)
+
+- Reply threading: ✅ verified working (`inbound_email.py` uses Message-ID + References).
+
+### Embed widget
+
+- [x] **🅜 [EW1] Custom theming is partial** ✅ Fixed (backend)
+  - `DEFAULT_WIDGET_CONFIG.theme` now exposes `font_family`, `border_radius`, `header_bg`, `header_text_color`, `bubble_bg_user`, `bubble_bg_agent`, and `css_overrides` (raw CSS escape hatch). The widget JS needs to read these on init and apply them as CSS variables / `<style>` injection — backend defaults + tenant-override storage is in place. Since defaults are merged on read, no migration is required and existing tenants inherit the new keys.
+- [ ] **🅖 [EW2] Chat history doesn't persist across page reloads** — every reload starts a new conversation. A cookie/localStorage handshake (visitor_token → most recent chat) would close it.
+
+### SLA
+
+- [x] **🅜 [S1] Business-hours awareness in SLA calc** ✅ Fixed
+  - `_sla_due_at_for_priority(priority, company=None)` now reads `widget_config.operating_hours` and walks forward only during open windows when `enabled=True`. A Friday-5pm ticket with an 8h SLA now lands at Monday-2pm (assuming Mon-Fri 9-5) instead of Saturday-1am.
+  - Implementation is a minute-by-minute walk capped at 90 calendar days to keep the code obvious — SLA windows are small (≤48h) so the loop is microseconds. Falls through to wall-clock cleanly when (a) the company has no operating-hours config, (b) the timezone string is unparseable, or (c) the schedule has no open days at all (misconfigured).
+  - All four `Ticket.objects.create(...)` call sites in `api/views/frontline_agent.py` now pass `company=company` to opt into business-hours math. The signature stays backwards-compatible (`company=None` keeps wall-clock) so any future caller without a company in scope keeps working.
+- [ ] **🅖 [S2] Single SLA tier per priority** — no "premium plan gets 2h, standard gets 8h" support. SLA is computed purely from `priority`.
+- [x] **🅖 [S3] Auto-escalate near-breach tickets** ✅ Fixed
+  - New `escalate_near_breach_tickets` Celery task, scheduled every 5 minutes (frequent enough that the alert actually arrives before breach). Filters tickets with `sla_due_at` inside the next `settings.FRONTLINE_SLA_ESCALATION_MINUTES` (default 60), status not closed/resolved/auto_resolved, and priority not already `urgent`. Bumps priority → `urgent`, writes a `ticket.sla_escalate` audit entry, and fires the `ticket_near_breach` notification event so any subscribed `NotificationTemplate` (e.g. one with `trigger_config = {"on": "ticket_near_breach"}`) fans out to Slack / email / Teams. Idempotent via the priority-not-urgent filter — same ticket won't escalate twice.
+  - Reframed from "auto-assign" to "auto-escalate" because the dashboards already surface urgent tickets at the top of every queue and the assignee + on-call get notified via the trigger event. Pure reassignment risked dropping the ticket on someone unprepared; this surfaces the breach to the right people instead.
+- [x] **🅜 [S4] SLA dashboard is sparse** ✅ Fixed
+  - New `GET /frontline/sla/dashboard?window_days=30` endpoint returns total tickets, breached count + percent, at-risk count (sla_due_at within 2h), per-priority breakdown with breach %, and top 10 assignees by breach % (filtered to ≥3 tickets so a single-ticket assignee doesn't dominate). Drop-in for a dashboard tile.
+
+### Contacts / Customer 360
+
+- [x] **🅖 [C-N1] ContactNote model** ✅ Fixed
+  - New `ContactNote` model (body, is_pinned, created_by, timestamps). Pinned notes sort to the top in the default ordering. 4 endpoints: list, create, update, delete — all company-scoped via the contact's company FK and audit-logged.
+
+- [x] **🅖 [C-N2] Contact merge endpoint** ✅ Fixed
+  - `POST /frontline/contacts/merge` body `{source_id, target_id}`. Repoints tickets and notes from source to target via bulk `update`. Target-wins on conflicts but fills empty target fields from the source (name/phone/company_name/notes — never overwrites). Source is deleted. Single audit entry `contact.merge` on the target captures source_id + counts of moved rows.
+
+### Handoff queue
+
+- [x] **🅖 [H1] Handoff release endpoint** ✅ Fixed
+  - `POST /frontline/tickets/<id>/release-handoff` flips `handoff_status` back to `pending`, clears `handoff_accepted_at` / `handoff_accepted_by` and the ticket's `assigned_to` so the queue treats it as unowned. Rejects when the ticket isn't currently in `accepted` state with a clear message. Audit-logged.
+
+- [x] **🅖 [H2] Per-step dwell time** ✅ Already derivable
+  - Verified the fields needed for dwell-time math are already on the model: `handoff_requested_at`, `handoff_accepted_at` (set by `accept_handoff`), and `resolved_at` (set on close). Audit log (L2) also captures every transition with a timestamp, so any post-hoc query can compute "queue wait", "agent-handling time", "total time" without needing additional state-change rows. Surfacing these as computed fields in a dashboard tile is a UI-only task and doesn't need new backend work.
+
+### Public widget security
+
+- [x] **🅜 [P-S1] Rate limit is per IP, not per `widget_key`** ✅ Fixed
+  - New `FrontlineWidgetKeyThrottle` in `Frontline_agent/throttling.py` overrides `get_ident` to key on the `widget_key` from body / query / `X-Widget-Key` header (falling back to IP only when missing). Applied alongside `FrontlinePublicThrottle` on all six public endpoints, so both per-IP and per-tenant budgets are enforced. New rate `frontline_widget_key: 200/hour` in `DEFAULT_THROTTLE_RATES`.
+
+### Knowledge base coverage
+
+- [x] **🅜 [KB-C1] Aggregate "low-confidence questions" view missing** ✅ Fixed
+  - New `GET /frontline/kb-coverage?window_days=30&top_n=10` endpoint rolls up two signals: `kb_gap` tickets (one auto-created per low-confidence answer) and `KBFeedback` thumbs-down rows. Buckets by question title (lowercased, 120-char trim) so near-duplicates merge. Returns sorted items with `kb_gap_count` + `thumbs_down_count` per question — direct input for a "questions we answer poorly" dashboard widget.
+
+---
+
 ## How to use this file
 
 1. Pick a batch (e.g. all four 🔴 items) and tackle them together.

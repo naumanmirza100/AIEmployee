@@ -21,6 +21,7 @@ the same Employee row; without a guard we'd loop. Reuses Frontline's
 import logging
 
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -167,11 +168,29 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
             continue
 
         try:
+            # W-F1 — idempotency. A webhook redelivery would otherwise fire a
+            # second execution; the partial unique constraint on
+            # (workflow, idempotency_key) turns the second into a no-op via
+            # the IntegrityError handler below.
+            import hashlib as _hashlib
+            target_pk = context.get('employee_id') or context.get('leave_request_id') or 'na'
+            idem_key = _hashlib.sha256(
+                f"wf={w.id}|evt={event}|tgt={target_pk}".encode()
+            ).hexdigest()
+            if HRWorkflowExecution.objects.filter(
+                workflow=w, idempotency_key=idem_key,
+            ).exists():
+                logger.info(
+                    "HR workflow trigger: skipping duplicate (workflow=%s event=%s target=%s) — already executed",
+                    w.id, event, target_pk,
+                )
+                continue
             exec_obj = HRWorkflowExecution.objects.create(
                 workflow=w, workflow_name=w.name, executed_by=user,
                 employee_id=context.get('employee_id') or None,
                 status='awaiting_approval' if w.requires_approval else 'in_progress',
                 context_data=context,
+                idempotency_key=idem_key,
             )
             if w.requires_approval:
                 logger.info("HR workflow %s awaiting approval (event=%s)", w.id, event)
@@ -192,6 +211,14 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
             exec_obj.save()
             logger.info("HR workflow %s ran for event=%s, status=%s",
                         w.id, event, exec_obj.status)
+        except IntegrityError:
+            # Lost the idempotency race — concurrent signal fired the same
+            # event for the same target. The other call's execution is
+            # authoritative; drop this one silently.
+            logger.info(
+                "HR workflow trigger: idempotency-key collision for workflow=%s event=%s — skipped",
+                w.id, event,
+            )
         except Exception:
             logger.exception("HR workflow %s failed for event=%s", w.id, event)
 

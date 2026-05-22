@@ -71,6 +71,45 @@ def in_quiet_hours(prefs, now=None):
     return cur >= start or cur < end
 
 
+def template_quiet_hours_check(template, now=None):
+    """Per-template quiet-hours gate. Returns ``(in_quiet, next_send_utc)``.
+
+    Template quiet_hours JSON shape:
+        {"enabled": bool, "start": "HH:MM", "end": "HH:MM",
+         "timezone_name": "UTC", "override_user_quiet_hours": bool}
+
+    Distinct from the per-user `in_quiet_hours`. The caller's pattern:
+      1. If template has its own quiet hours configured → use those.
+      2. Else fall back to recipient prefs.
+      3. ``override_user_quiet_hours=True`` lets an *urgent* template bypass
+         the recipient's per-user quiet hours entirely (e.g. SLA-breach alerts).
+    """
+    cfg = (getattr(template, 'quiet_hours', None) or {}) if template else {}
+    if not cfg or not cfg.get('enabled'):
+        return False, None
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    tz_name = (cfg.get('timezone_name') or 'UTC').strip() or 'UTC'
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, Exception):
+        tz = timezone.utc
+    now = now or timezone.now()
+    local = now.astimezone(tz)
+    start = _parse_hhmm(cfg.get('start') or '22:00', time(22, 0))
+    end = _parse_hhmm(cfg.get('end') or '08:00', time(8, 0))
+    cur = local.time()
+    if start <= end:
+        in_quiet = start <= cur < end
+    else:
+        in_quiet = cur >= start or cur < end
+    if not in_quiet:
+        return False, None
+    target_local = datetime.combine(local.date(), end, tzinfo=local.tzinfo)
+    if target_local <= local:
+        target_local = target_local + timedelta(days=1)
+    return True, target_local.astimezone(timezone.utc)
+
+
 def next_allowed_send_time(prefs, now=None):
     """Return the next UTC datetime at which sending is allowed given quiet hours.
     If not currently in quiet hours, returns `now`."""

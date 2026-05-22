@@ -158,6 +158,7 @@ class KnowledgeService:
                 is_indexed=True,
                 processed=True,
                 superseded_by__isnull=True,          # skip old revisions
+                is_outdated=False,                   # skip soft-deprecated docs
                 processing_status='ready',           # skip in-flight / failed docs
             )
             # Visibility gate: 'company' docs are available to any company user.
@@ -206,14 +207,16 @@ class KnowledgeService:
             keyword_results = []
             matching_chunks = all_chunks.filter(chunk_text__icontains=query)[:50]
             for chunk in matching_chunks:
+                page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
                 keyword_results.append({
                     'chunk_id': chunk.id,
                     'document_id': chunk.document_id,
                     'score': 1.0, # Base keyword score
                     'content': chunk.chunk_text,
-                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
                     'file_format': chunk.document.file_format,
-                    'document_type': chunk.document.document_type
+                    'document_type': chunk.document.document_type,
+                    'page_number': chunk.page_number,
                 })
                 
             # 3. Reciprocal Rank Fusion (RRF)
@@ -310,14 +313,16 @@ class KnowledgeService:
                         c = chunk_map.get(cid)
                         if c is None:
                             continue
+                        page_label = f" p.{c.page_number}" if c.page_number else ""
                         out.append({
                             'chunk_id': c.id,
                             'document_id': c.document_id,
                             'score': float(score),
                             'content': c.chunk_text,
-                            'title': f"{c.document.title} (Chunk {c.chunk_index})",
+                            'title': f"{c.document.title} (Chunk {c.chunk_index}{page_label})",
                             'file_format': c.document.file_format,
                             'document_type': c.document.document_type,
+                            'page_number': c.page_number,
                         })
                     return out
 
@@ -330,14 +335,16 @@ class KnowledgeService:
             try:
                 chunk_emb = _json.loads(chunk.embedding) if isinstance(chunk.embedding, str) else chunk.embedding
                 similarity = self.embedding_service.cosine_similarity(query_embedding, chunk_emb)
+                page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
                 semantic_results.append({
                     'chunk_id': chunk.id,
                     'document_id': chunk.document_id,
                     'score': similarity,
                     'content': chunk.chunk_text,
-                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
                     'file_format': chunk.document.file_format,
                     'document_type': chunk.document.document_type,
+                    'page_number': chunk.page_number,
                 })
             except Exception:
                 pass

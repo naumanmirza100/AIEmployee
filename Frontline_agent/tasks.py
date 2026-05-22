@@ -72,11 +72,35 @@ def process_document(self, document_id):
         overlap = max(0, min(overlap, max(0, chunk_size - 1)))
 
         text_to_chunk = f"{document.title}\n{document.description}\n{extracted_text}".strip()
+
+        # K2 — page markers inserted by `_extract_pdf` look like ``\x0c__PAGE_N__\n``.
+        # Build an index of (offset_in_raw_text, page_number) so each chunk can be
+        # tagged with the page it came from. Then we strip the markers from the
+        # actual chunk text before storage.
+        import re as _re
+        _PAGE_MARKER_RE = _re.compile(r'\x0c__PAGE_(\d+)__\n')
+        page_positions = [(m.start(), int(m.group(1)))
+                          for m in _PAGE_MARKER_RE.finditer(text_to_chunk)]
+
+        def _page_for_offset(offset: int):
+            page = None
+            for off, p in page_positions:
+                if off <= offset:
+                    page = p
+                else:
+                    break
+            return page
+
         chunks = []
         start = 0
         step = max(1, chunk_size - overlap)
         while start < len(text_to_chunk):
-            chunks.append(text_to_chunk[start:start + chunk_size])
+            raw_chunk = text_to_chunk[start:start + chunk_size]
+            chunk_page = _page_for_offset(start)
+            # Strip page markers from the stored text so they don't pollute
+            # retrieval or LLM prompts.
+            clean_chunk = _PAGE_MARKER_RE.sub('', raw_chunk)
+            chunks.append((clean_chunk, chunk_page))
             start += step
 
         document.chunks_total = len(chunks)
@@ -87,19 +111,21 @@ def process_document(self, document_id):
         has_embeddings = embedding_service.is_available()
         batch_size = 20
         for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            embeddings = embedding_service.generate_embeddings_batch(batch) if has_embeddings else [None] * len(batch)
+            batch_pairs = chunks[i:i + batch_size]
+            batch_texts = [c for c, _p in batch_pairs]
+            embeddings = embedding_service.generate_embeddings_batch(batch_texts) if has_embeddings else [None] * len(batch_pairs)
             rows = [
                 DocumentChunk(
                     document=document,
                     chunk_index=i + j,
                     chunk_text=chunk_text,
+                    page_number=page_num,
                     embedding=(json.dumps(emb) if emb else None),
                 )
-                for j, (chunk_text, emb) in enumerate(zip(batch, embeddings))
+                for j, ((chunk_text, page_num), emb) in enumerate(zip(batch_pairs, embeddings))
             ]
             DocumentChunk.objects.bulk_create(rows)
-            document.chunks_processed = i + len(batch)
+            document.chunks_processed = i + len(batch_pairs)
             document.save(update_fields=['chunks_processed', 'updated_at'])
 
         document.processing_status = 'ready'
@@ -870,3 +896,126 @@ def hubspot_sync_all_contacts(company_id: int, batch_size: int = 200):
         for cid in ids[i:i + batch_size]:
             sync_contact_to_hubspot.delay(cid)
     return {'enqueued': len(ids), 'company_id': company_id}
+
+
+# ---------- Auto-close inactive tickets (T4) ----------
+
+@shared_task(name='Frontline_agent.tasks.auto_close_inactive_tickets')
+def auto_close_inactive_tickets():
+    """Close tickets that have been ``resolved`` for ``inactivity_days`` without
+    activity. Standard SaaS pattern — once a customer hasn't replied for a
+    week, the ticket is effectively done.
+
+    Skipped:
+      * already-closed tickets (idempotent)
+      * snoozed tickets (Celery's `wake_snoozed_tickets` will handle them when the
+        snooze ends and a fresh inactivity clock starts then)
+      * tickets that were resolved AND already had `resolved_at` set within the
+        window — guards against rows that flipped to `resolved` only this minute
+
+    Inactivity window: ``settings.FRONTLINE_AUTO_CLOSE_DAYS`` (default 7). Set to
+    0 or negative to disable the task without removing it from the beat schedule.
+    """
+    from Frontline_agent.models import Ticket, FrontlineAuditLog
+    inactivity_days = int(getattr(settings, 'FRONTLINE_AUTO_CLOSE_DAYS', 7))
+    if inactivity_days <= 0:
+        logger.info("auto_close_inactive_tickets: disabled (FRONTLINE_AUTO_CLOSE_DAYS=%d)", inactivity_days)
+        return {'closed': 0, 'disabled': True}
+    cutoff = timezone.now() - timedelta(days=inactivity_days)
+    qs = Ticket.objects.filter(
+        status='resolved',
+        updated_at__lt=cutoff,
+    ).exclude(snoozed_until__gt=timezone.now())
+
+    closed = 0
+    for ticket in qs.iterator(chunk_size=200):
+        old_status = ticket.status
+        try:
+            ticket.status = 'closed'
+            ticket.save(update_fields=['status', 'updated_at'])
+        except Exception:
+            logger.exception("auto_close_inactive_tickets: save failed for ticket %s", ticket.id)
+            continue
+        try:
+            FrontlineAuditLog.objects.create(
+                company_id=ticket.company_id, actor=None,
+                action='ticket.auto_close', target_type='ticket', target_id=ticket.id,
+                diff={
+                    'before': {'status': old_status},
+                    'after': {'status': 'closed',
+                              'reason': 'inactive_for_days',
+                              'inactivity_days': inactivity_days},
+                },
+            )
+        except Exception:
+            logger.exception("auto_close_inactive_tickets: audit log write failed for ticket %s", ticket.id)
+        closed += 1
+    if closed:
+        logger.info("auto_close_inactive_tickets: closed %d tickets (cutoff=%s)", closed, cutoff.isoformat())
+    return {'closed': closed, 'cutoff': cutoff.isoformat(), 'inactivity_days': inactivity_days}
+
+
+# ---------- Escalate near-breach tickets (S3) ----------
+
+@shared_task(name='Frontline_agent.tasks.escalate_near_breach_tickets')
+def escalate_near_breach_tickets():
+    """Find tickets within ``escalation_window_minutes`` of SLA breach + status
+    not closed/resolved, bump their priority to ``urgent`` so they surface at
+    the top of dashboards + assignment queues, and fire the
+    ``ticket_near_breach`` notification event so subscribed templates can alert
+    the assignee or HR.
+
+    Idempotent: tickets already at ``urgent`` are skipped (no double-bump, no
+    duplicate notifications). Escalation window: ``settings.FRONTLINE_SLA_ESCALATION_MINUTES``
+    (default 60). Set to 0 or negative to disable.
+    """
+    from Frontline_agent.models import Ticket, FrontlineAuditLog
+    window_minutes = int(getattr(settings, 'FRONTLINE_SLA_ESCALATION_MINUTES', 60))
+    if window_minutes <= 0:
+        logger.info("escalate_near_breach_tickets: disabled (window=%d)", window_minutes)
+        return {'escalated': 0, 'disabled': True}
+    now = timezone.now()
+    deadline = now + timedelta(minutes=window_minutes)
+    qs = Ticket.objects.filter(
+        sla_due_at__gt=now,
+        sla_due_at__lte=deadline,
+    ).exclude(
+        status__in=['resolved', 'closed', 'auto_resolved'],
+    ).exclude(priority='urgent')
+
+    escalated = 0
+    for ticket in qs.iterator(chunk_size=200):
+        old_priority = ticket.priority
+        try:
+            ticket.priority = 'urgent'
+            ticket.save(update_fields=['priority', 'updated_at'])
+        except Exception:
+            logger.exception("escalate_near_breach_tickets: save failed for ticket %s", ticket.id)
+            continue
+        try:
+            FrontlineAuditLog.objects.create(
+                company_id=ticket.company_id, actor=None,
+                action='ticket.sla_escalate', target_type='ticket', target_id=ticket.id,
+                diff={
+                    'before': {'priority': old_priority},
+                    'after': {'priority': 'urgent',
+                              'sla_due_at': ticket.sla_due_at.isoformat() if ticket.sla_due_at else None,
+                              'window_minutes': window_minutes},
+                },
+            )
+        except Exception:
+            logger.exception("escalate_near_breach_tickets: audit log write failed for ticket %s", ticket.id)
+        # Fire the notification trigger so any template subscribed to
+        # ``ticket_near_breach`` fans out (e.g. "Slack the on-call channel"
+        # or "email the manager"). Best-effort; failure here doesn't undo
+        # the escalation itself.
+        try:
+            from api.views.frontline_agent import _run_notification_triggers
+            _run_notification_triggers(ticket.company_id, 'ticket_near_breach', ticket)
+        except Exception:
+            logger.exception("escalate_near_breach_tickets: notification trigger failed for ticket %s", ticket.id)
+        escalated += 1
+    if escalated:
+        logger.info("escalate_near_breach_tickets: escalated %d tickets (window=%dm)", escalated, window_minutes)
+    return {'escalated': escalated, 'window_minutes': window_minutes,
+            'deadline': deadline.isoformat()}
