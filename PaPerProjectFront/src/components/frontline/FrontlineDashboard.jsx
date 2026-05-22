@@ -1745,6 +1745,8 @@ const FrontlineDashboard = () => {
   // Chat widget tab
   const [widgetKey, setWidgetKey] = useState('');
   const [widgetConfigLoading, setWidgetConfigLoading] = useState(false);
+  const [allowedOrigins, setAllowedOrigins] = useState('');
+  const [allowedOriginsSaving, setAllowedOriginsSaving] = useState(false);
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
@@ -1811,12 +1813,33 @@ const FrontlineDashboard = () => {
     setWidgetConfigLoading(true);
     frontlineAgentService.getFrontlineWidgetConfig()
       .then((res) => {
-        if (!cancelled && res?.status === 'success' && res?.data?.widget_key) setWidgetKey(res.data.widget_key);
+        if (cancelled || res?.status !== 'success') return;
+        if (res?.data?.widget_key) setWidgetKey(res.data.widget_key);
+        setAllowedOrigins(res?.data?.allowed_origins || '');
       })
-      .catch(() => { if (!cancelled) setWidgetKey(''); })
+      .catch(() => { if (!cancelled) { setWidgetKey(''); setAllowedOrigins(''); } })
       .finally(() => { if (!cancelled) setWidgetConfigLoading(false); });
     return () => { cancelled = true; };
   }, [activeTab]);
+
+  const handleSaveAllowedOrigins = async () => {
+    setAllowedOriginsSaving(true);
+    try {
+      const res = await frontlineAgentService.updateFrontlineWidgetConfig({
+        allowedOrigins: allowedOrigins.trim(),
+      });
+      if (res?.status === 'success') {
+        setAllowedOrigins(res?.data?.allowed_origins ?? allowedOrigins.trim());
+        toast({ title: 'Allowed origins saved' });
+      } else {
+        throw new Error(res?.message || 'Save failed');
+      }
+    } catch (e) {
+      toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setAllowedOriginsSaving(false);
+    }
+  };
 
   // Load document list for Q&A scope when user selects "Specific documents"
   useEffect(() => {
@@ -3419,6 +3442,27 @@ const FrontlineDashboard = () => {
                         }}
                       >
                         <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-muted-foreground">Allowed origins</Label>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      Comma-separated list of domains permitted to use this widget key (e.g.
+                      <code className="mx-1 px-1 rounded bg-muted text-[10px]">https://example.com,https://app.example.com</code>).
+                      Leave blank to accept any origin — best for testing, risky for prod.
+                      Requests from other origins are rejected with 403.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={allowedOrigins}
+                        onChange={(e) => setAllowedOrigins(e.target.value)}
+                        placeholder="https://example.com, https://app.example.com"
+                        className="flex-1"
+                      />
+                      <Button onClick={handleSaveAllowedOrigins} disabled={allowedOriginsSaving}>
+                        {allowedOriginsSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                        Save
                       </Button>
                     </div>
                   </div>

@@ -516,12 +516,25 @@ class FrontlineWorkflowExecution(models.Model):
     pause_state = models.JSONField(default=dict, blank=True,
                                    help_text='Serialized remaining-work snapshot for a paused execution.')
 
+    # Idempotency — webhook providers (SendGrid, Mailgun, Stripe…) commonly
+    # deliver the same event twice. The key is set at creation to a stable
+    # digest of (workflow, event_kind, target_pk); a unique constraint turns
+    # the second arrival into a 200 no-op instead of a duplicate execution.
+    idempotency_key = models.CharField(max_length=128, blank=True, default='', db_index=True)
+
     class Meta:
         app_label = 'Frontline_agent'
         ordering = ['-started_at']
         indexes = [
             models.Index(fields=['status', 'started_at']),
             models.Index(fields=['executed_by']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workflow', 'idempotency_key'],
+                condition=models.Q(idempotency_key__gt=''),
+                name='frontline_workflow_exec_idem_uniq',
+            ),
         ]
 
     def __str__(self):
@@ -901,3 +914,173 @@ class LLMUsage(models.Model):
 
     def __str__(self):
         return f"{self.agent_name}/{self.model} · {self.total_tokens}tok · ${self.estimated_cost_usd}"
+
+
+class FrontlineAuditLog(models.Model):
+    """Append-only audit trail for Frontline mutations.
+
+    Mirrors the HR agent's ``HRAuditLog`` shape so the two agents share the
+    same compliance pattern. Records *writes* (status changes, assignments,
+    notes, knowledge edits) — not reads. ``diff`` carries one of three shapes:
+
+        {'before': {...}, 'after': {...}}   # update
+        {'created': {...}}                  # insert
+        {'deleted': {...}}                  # hard-delete
+
+    Stored on the company so a tenant's audit history is queryable in one go.
+    Never updated, never deleted by application code; a separate retention
+    task may drop very old rows.
+    """
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE,
+        related_name='frontline_audit_logs',
+    )
+    actor = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='frontline_audit_actions',
+        help_text='CompanyUser who initiated the action. Null for system / workflow runs.',
+    )
+    action = models.CharField(
+        max_length=80,
+        help_text='Verb identifier, e.g. "ticket.status_change", "ticket.assign", "document.delete".',
+    )
+    target_type = models.CharField(
+        max_length=40,
+        help_text='Model name in lowercase, e.g. "ticket", "document", "notification_template".',
+    )
+    target_id = models.IntegerField(
+        help_text='PK of the target row. May reference a deleted row — joins must use SET_NULL semantics on the consumer side.',
+    )
+    diff = models.JSONField(
+        default=dict, blank=True,
+        help_text='{"before": {...}, "after": {...}} | {"created": {...}} | {"deleted": {...}}.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', '-created_at']),
+            models.Index(fields=['target_type', 'target_id']),
+            models.Index(fields=['actor']),
+        ]
+
+    def __str__(self):
+        return f"{self.action} by actor={self.actor_id} on {self.target_type}:{self.target_id}"
+
+
+class TicketMacro(models.Model):
+    """Saved reply / macro — quick-insertable response template for agents.
+
+    Distinct from `NotificationTemplate` (which is outbound, scheduled, and
+    targets customers). A macro is just a snippet an agent can paste into a
+    ticket reply. Per-company scope so different teams can keep their own
+    libraries.
+    """
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE,
+        related_name='frontline_ticket_macros',
+    )
+    name = models.CharField(max_length=120,
+                            help_text='Short label shown in the picker.')
+    body = models.TextField(help_text='The reply text. Plain text, no templating.')
+    created_by = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='frontline_macros_created',
+    )
+    is_active = models.BooleanField(default=True)
+    times_used = models.PositiveIntegerField(
+        default=0,
+        help_text='Bumped each time a macro is inserted, for "most used" sorting.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-times_used', 'name']
+        unique_together = [('company', 'name')]
+        indexes = [
+            models.Index(fields=['company', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.company_id})"
+
+
+class FrontlineDeadLetter(models.Model):
+    """Final-state failure record for Celery tasks. Written by the on_failure
+    handler so an ops dashboard can surface "what's been failing".
+
+    Append-only by application code; ``resolved_at`` is set when an operator
+    re-queues the work or decides to drop it.
+    """
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE,
+        related_name='frontline_dead_letters', null=True, blank=True,
+        help_text='Best-effort — set when the task payload makes the company recoverable.',
+    )
+    task_name = models.CharField(max_length=200,
+                                 help_text='Dotted task name, e.g. "Frontline_agent.tasks.send_notification".')
+    task_id = models.CharField(max_length=64, blank=True, default='',
+                               help_text='Celery task UUID — lets ops cross-reference broker logs.')
+    args_json = models.JSONField(default=list, blank=True,
+                                 help_text='Positional task arguments at the time of failure.')
+    kwargs_json = models.JSONField(default=dict, blank=True,
+                                   help_text='Keyword task arguments at the time of failure.')
+    error_type = models.CharField(max_length=120, blank=True, default='')
+    error_message = models.TextField(blank=True, default='')
+    traceback = models.TextField(blank=True, default='')
+    retry_count = models.PositiveIntegerField(default=0)
+    first_failed_at = models.DateTimeField(auto_now_add=True)
+    last_failed_at = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True,
+                                       help_text='Set by ops when this DLQ entry has been handled (re-run, ignored, etc.).')
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-last_failed_at']
+        indexes = [
+            models.Index(fields=['task_name', '-last_failed_at']),
+            models.Index(fields=['company', '-last_failed_at']),
+            models.Index(fields=['resolved_at']),
+        ]
+
+    def __str__(self):
+        return f"DLQ[{self.task_name}] {self.error_type}: {self.error_message[:60]}"
+
+
+class TicketSatisfaction(models.Model):
+    """One-question CSAT survey response tied to a ticket.
+
+    Surveys are scheduled on ticket close (auto). The recipient gets an email
+    with a tokenised link; the token authenticates the submit POST without
+    needing a login. One survey row per ticket — duplicate submits update the
+    existing row rather than creating a new one.
+    """
+    ticket = models.OneToOneField(
+        'Ticket', on_delete=models.CASCADE,
+        related_name='satisfaction',
+    )
+    token = models.CharField(max_length=64, unique=True,
+                             help_text='URL-safe random token for the public submit endpoint.')
+    rating = models.PositiveSmallIntegerField(null=True, blank=True,
+                                              help_text='1–5 stars. Null until the recipient submits.')
+    comment = models.TextField(blank=True, default='')
+    sent_at = models.DateTimeField(null=True, blank=True,
+                                   help_text='When the survey email was dispatched.')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['submitted_at']),
+        ]
+
+    def __str__(self):
+        if self.rating is None:
+            return f"CSAT pending for ticket #{self.ticket_id}"
+        return f"CSAT {self.rating}/5 for ticket #{self.ticket_id}"

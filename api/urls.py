@@ -379,6 +379,26 @@ urlpatterns = [
     re_path(r'^frontline/qa/chats/create/?$', frontline_agent.create_qa_chat, name='frontline_qa_chats_create'),  # POST
     re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/update/?$', frontline_agent.update_qa_chat, name='frontline_qa_chats_update'),  # PATCH/PUT
     re_path(r'^frontline/qa/chats/(?P<chat_id>\d+)/delete/?$', frontline_agent.delete_qa_chat, name='frontline_qa_chats_delete'),  # DELETE
+    re_path(r'^frontline/audit-log/?$', frontline_agent.list_frontline_audit_log, name='frontline_list_audit_log'),  # GET
+
+    # Saved replies / macros (F1)
+    re_path(r'^frontline/macros/?$', frontline_agent.list_ticket_macros, name='frontline_list_macros'),  # GET
+    re_path(r'^frontline/macros/create/?$', frontline_agent.create_ticket_macro, name='frontline_create_macro'),  # POST
+    re_path(r'^frontline/macros/(?P<macro_id>\d+)/update/?$', frontline_agent.update_ticket_macro, name='frontline_update_macro'),  # POST/PATCH
+    re_path(r'^frontline/macros/(?P<macro_id>\d+)/delete/?$', frontline_agent.delete_ticket_macro, name='frontline_delete_macro'),  # POST/DELETE
+    re_path(r'^frontline/macros/(?P<macro_id>\d+)/bump/?$', frontline_agent.bump_ticket_macro_usage, name='frontline_bump_macro'),  # POST
+
+    # Bulk ticket ops (F3)
+    re_path(r'^frontline/tickets/bulk-update/?$', frontline_agent.bulk_update_tickets, name='frontline_bulk_update_tickets'),  # POST
+
+    # Dead letter queue (F5)
+    re_path(r'^frontline/dead-letters/?$', frontline_agent.list_dead_letters, name='frontline_list_dead_letters'),  # GET
+    re_path(r'^frontline/dead-letters/(?P<dlq_id>\d+)/resolve/?$', frontline_agent.resolve_dead_letter, name='frontline_resolve_dead_letter'),  # POST
+
+    # CSAT (F2)
+    re_path(r'^frontline/csat/submit/?$', frontline_agent.submit_satisfaction, name='frontline_submit_satisfaction'),  # POST (public)
+    re_path(r'^frontline/csat/summary/?$', frontline_agent.satisfaction_summary, name='frontline_satisfaction_summary'),  # GET
+
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
     re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET
     re_path(r'^frontline/tickets/create/?$', frontline_agent.create_ticket, name='frontline_create_ticket'),  # POST
