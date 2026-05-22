@@ -380,6 +380,7 @@ neutral = out of office / asking a question / unclear"""
 
         found = []
         seen_message_ids = set()   # deduplicate by Message-ID header
+        seen_senders = set()       # only keep the most-recent reply per sender
 
         try:
             with imaplib.IMAP4_SSL(imap_host, imap_port) as imap:
@@ -392,8 +393,25 @@ neutral = out of office / asking a question / unclear"""
                 logger.info("IMAP: checking %d messages since %s for campaign %s",
                             len(ids), since_date, campaign.id)
 
-                for mid in ids[-100:]:  # cap at last 100
+                # Process newest-first so the most recent reply from each sender
+                # is always accepted and older duplicates are discarded.
+                for mid in reversed(ids[-100:]):
                     try:
+                        # Fetch INTERNALDATE (mail-server timestamp) — always correct
+                        # regardless of the sender's local clock or draft save time.
+                        import datetime as _dt
+                        internal_date = None
+                        try:
+                            _, meta_data = imap.fetch(mid, '(INTERNALDATE)')
+                            if meta_data and meta_data[0]:
+                                parsed = imaplib.Internaldate2tuple(meta_data[0])
+                                if parsed:
+                                    internal_date = _dt.datetime(
+                                        *parsed[:6], tzinfo=_dt.timezone.utc
+                                    )
+                        except Exception:
+                            pass
+
                         _, msg_data = imap.fetch(mid, '(RFC822)')
                         raw = msg_data[0][1]
                         msg = email_lib.message_from_bytes(raw)
@@ -409,8 +427,9 @@ neutral = out of office / asking a question / unclear"""
                         message_id = msg.get('Message-ID', '').strip()
 
                         logger.debug(
-                            "IMAP [candidate] msg_id=%s from=%s subject='%s' date=%s",
-                            message_id, sender_email, subject, date_raw,
+                            "IMAP [candidate] msg_id=%s from=%s subject='%s' "
+                            "internaldate=%s date_header=%s",
+                            message_id, sender_email, subject, internal_date, date_raw,
                         )
 
                         # Deduplicate by Message-ID
@@ -423,40 +442,37 @@ neutral = out of office / asking a question / unclear"""
                         if message_id:
                             seen_message_ids.add(message_id)
 
-                        # ── Key guard: only accept email received AFTER our outreach ──
-                        # Parse the Date header from the incoming email.
-                        email_date = None
-                        if date_raw:
+                        # ── Key guard: only accept email RECEIVED after our outreach ──
+                        # Use INTERNALDATE (server-side) as primary. Fall back to Date
+                        # header only when INTERNALDATE is unavailable.
+                        email_date = internal_date
+                        if email_date is None and date_raw:
                             try:
                                 email_date = email.utils.parsedate_to_datetime(date_raw)
-                                # Ensure timezone-aware for comparison
                                 if email_date.tzinfo is None:
-                                    import datetime
                                     email_date = email_date.replace(
-                                        tzinfo=datetime.timezone.utc
+                                        tzinfo=_dt.timezone.utc
                                     )
                             except Exception:
                                 pass
 
                         outreach_time = outreach_sent_map.get(sender_email)
                         if email_date and outreach_time:
-                            # Convert outreach_time to the same timezone for comparison
                             from django.utils import timezone as _tz
                             ot = outreach_time
                             if hasattr(ot, 'tzinfo') and ot.tzinfo is None:
                                 ot = _tz.make_aware(ot)
-                            # Reject any email that arrived at or before our outreach
                             if email_date <= ot:
                                 logger.warning(
                                     "IMAP [PRE-OUTREACH] SKIPPED from=%s subject='%s' — "
-                                    "email date %s <= outreach sent %s",
+                                    "internaldate %s <= outreach sent %s",
                                     sender_email, subject, email_date, ot,
                                 )
                                 continue
                             else:
                                 logger.info(
                                     "IMAP [ACCEPTED] from=%s subject='%s' — "
-                                    "email date %s > outreach sent %s ✓",
+                                    "internaldate %s > outreach sent %s ✓",
                                     sender_email, subject, email_date, ot,
                                 )
                         elif not outreach_time:
@@ -465,6 +481,16 @@ neutral = out of office / asking a question / unclear"""
                                 "no outreach timestamp found, cannot filter by date",
                                 sender_email, subject,
                             )
+
+                        # Only take the most-recent reply per sender (we iterate newest-first)
+                        if sender_email in seen_senders:
+                            logger.debug(
+                                "IMAP [SKIP-OLDER] from=%s subject='%s' — "
+                                "already captured a newer reply from this sender",
+                                sender_email, subject,
+                            )
+                            continue
+                        seen_senders.add(sender_email)
 
                         enrollment = email_map[sender_email]
                         body = _extract_email_body(msg)
