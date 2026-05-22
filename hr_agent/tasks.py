@@ -518,9 +518,25 @@ def walk_hr_time_based_events():
 
     from django.db.models import Q
 
-    for tpl in HRNotificationTemplate.objects.all():
+    # Dedup: at most ONE template per (company, event) fires. If HR has both a
+    # "legacy" and "new" probation_ending template, the most recently updated
+    # one wins. Older ones are silently skipped so employees don't get duplicate
+    # emails for the same event. To intentionally run two flows for the same
+    # event, encode them under different `on` values.
+    seen_event_winner: dict[tuple, int] = {}
+    templates = list(HRNotificationTemplate.objects.all().order_by('-updated_at', '-id'))
+
+    for tpl in templates:
         cfg = tpl.trigger_config or {}
         event = cfg.get('on') or tpl.notification_type
+        key = (tpl.company_id, event)
+        if key in seen_event_winner:
+            logger.info(
+                "walk_hr_time_based_events: skipping template %s — template %s already wins for (company=%s, event=%s)",
+                tpl.id, seen_event_winner[key], tpl.company_id, event,
+            )
+            continue
+        seen_event_winner[key] = tpl.id
         days_before = int(cfg.get('days_before') or 0)
         target_date = today + timedelta(days=days_before) if days_before else today
 
@@ -577,8 +593,54 @@ def walk_hr_time_based_events():
                         related_document_id=d.id,
                     )
 
+        elif event == 'review_due':
+            # Find active cycles whose self_review_due or manager_review_due
+            # lands on target_date, then nudge every employee with a still-open
+            # review in that cycle. ``role`` in cfg picks which sub-deadline to
+            # fire on (default 'manager').
+            from hr_agent.models import PerformanceReviewCycle, PerformanceReview
+            role = (cfg.get('role') or 'manager').lower()
+            cycles = PerformanceReviewCycle.objects.filter(
+                company_id=tpl.company_id, status='active',
+            )
+            for cyc in cycles:
+                due = cyc.manager_review_due if role == 'manager' else cyc.self_review_due
+                if not due or due != target_date:
+                    continue
+                # Open = anything that isn't closed or skipped — both reviewer
+                # and reviewee can act on it.
+                open_reviews = PerformanceReview.objects.filter(
+                    cycle=cyc,
+                ).exclude(status__in=['closed', 'skipped']).select_related('employee')
+                for r in open_reviews:
+                    created_total += _ensure_scheduled(
+                        tpl, r.employee, due,
+                        context={'event_date': due.isoformat(),
+                                 'cycle_name': cyc.name,
+                                 'review_id': r.id,
+                                 'employee_name': r.employee.full_name,
+                                 'role': role},
+                    )
+
     logger.info("walk_hr_time_based_events: scheduled %d notifications", created_total)
     return {'scheduled': created_total}
+
+
+@shared_task(name='hr_agent.tasks.purge_hr_audit_log')
+def purge_hr_audit_log(retention_days: int = 730):
+    """Trim HRAuditLog rows older than ``retention_days`` (default 2 years).
+
+    Audit log entries are write-only and grow unboundedly otherwise — every
+    employee edit, compensation row, leave decision, document upload writes
+    one. 2 years is a common SOX-style retention window. Override per-deployment
+    via ``settings.HR_AUDIT_LOG_RETENTION_DAYS`` if your jurisdiction needs more.
+    """
+    from hr_agent.models import HRAuditLog
+    retention = int(getattr(settings, 'HR_AUDIT_LOG_RETENTION_DAYS', retention_days))
+    cutoff = timezone.now() - timedelta(days=retention)
+    deleted, _ = HRAuditLog.objects.filter(created_at__lt=cutoff).delete()
+    logger.info("purge_hr_audit_log: deleted %d rows older than %s", deleted, cutoff.isoformat())
+    return {'deleted': deleted, 'cutoff': cutoff.isoformat(), 'retention_days': retention}
 
 
 def _ensure_scheduled(template, employee, when, *, context=None, related_document_id=None):

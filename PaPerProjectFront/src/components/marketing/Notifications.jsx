@@ -381,12 +381,12 @@ const Notifications = ({ onUnreadCountChange }) => {
       }
     } catch (err) {
       if (!isConnectionError(err)) {
-        const isQuota = err?.status === 402;
+        const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
         toast({
-          title: isQuota ? 'Token Limit Reached' : 'Error',
-          description: isQuota
-            ? (err.message || 'Token quota exhausted. Add your own API key or request a managed key.')
-            : (err.message || 'Monitor failed'),
+          title: isHardBlock ? 'Monitor blocked' : 'Error',
+          description: isHardBlock
+            ? (err?.data?.message || err?.message || 'API key or token quota issue. Check your API Keys settings.')
+            : (err?.message || 'Monitor failed'),
           variant: 'destructive'
         });
       }

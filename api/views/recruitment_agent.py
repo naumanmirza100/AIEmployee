@@ -23,7 +23,7 @@ from recruitment_agent.agents.lead_qualification import LeadQualificationAgent
 from recruitment_agent.agents.job_description_parser import JobDescriptionParserAgent
 from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAgent
 from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
-from recruitment_agent.core import GroqClient
+from recruitment_agent.core import GroqClient, QuotaAwareGroqClient
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
 from recruitment_agent.models import (
@@ -43,31 +43,38 @@ from core.models import CompanyUser
 
 logger = logging.getLogger(__name__)
 
-# Initialize agents (singleton pattern for efficiency)
-_agents_cache = None
+def _make_agents(company):
+    """Per-request agent factory. Resolves the company's LLM key via the
+    subscription system and creates fresh agent instances for this request.
 
-def get_agents():
-    """Get initialized agents (singleton pattern)"""
-    global _agents_cache
-    
-    if _agents_cache is None:
-        log_service = LogService()
+    - If company has BYOK or admin-assigned key → QuotaAwareGroqClient (usage tracked).
+    - If no key configured anywhere (NoKeyAvailable) → plain GroqClient with env key.
+    - QuotaExhausted / ManagedQuotaExhausted / ByokCapReached propagate to the
+      global DRF handler (core/drf_exceptions.py) which returns 402/403 JSON.
+    """
+    from core.api_key_service import resolve_for_call, NoKeyAvailable
+
+    try:
+        ctx = resolve_for_call(company, 'recruitment_agent')
+        groq_client = QuotaAwareGroqClient(api_key=ctx.api_key, key_ctx=ctx)
+    except NoKeyAvailable:
+        # No key configured anywhere — fall back to platform env key (free tier)
         groq_client = GroqClient()
-        django_repo = DjangoRepository()
-        
-        _agents_cache = {
-            'log_service': log_service,
-            'groq_client': groq_client,
-            'cv_agent': CVParserAgent(groq_client=groq_client, log_service=log_service),
-            'sum_agent': SummarizationAgent(groq_client=groq_client, log_service=log_service),
-            'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=django_repo),
-            'qualify_agent': LeadQualificationAgent(log_service=log_service, sql_repository=django_repo),
-            'job_desc_agent': JobDescriptionParserAgent(groq_client=groq_client, log_service=log_service),
-            'interview_agent': InterviewSchedulingAgent(log_service=log_service),
-            'django_repo': django_repo,
-        }
-    
-    return _agents_cache
+    # QuotaExhausted / ManagedQuotaExhausted / ByokCapReached propagate up
+
+    log_service = LogService()
+    django_repo = DjangoRepository()
+    return {
+        'log_service': log_service,
+        'groq_client': groq_client,
+        'cv_agent': CVParserAgent(groq_client=groq_client, log_service=log_service),
+        'sum_agent': SummarizationAgent(groq_client=groq_client, log_service=log_service),
+        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=django_repo),
+        'qualify_agent': LeadQualificationAgent(log_service=log_service, sql_repository=django_repo),
+        'job_desc_agent': JobDescriptionParserAgent(groq_client=groq_client, log_service=log_service),
+        'interview_agent': InterviewSchedulingAgent(log_service=log_service),
+        'django_repo': django_repo,
+    }
 
 
 @api_view(['POST'])
@@ -79,7 +86,7 @@ def process_cvs(request):
         company_user = request.user
         company = company_user.company
         
-        agents = get_agents()
+        agents = _make_agents(company)
         cv_agent = agents['cv_agent']
         sum_agent = agents['sum_agent']
         enrich_agent = agents['enrich_agent']
@@ -537,6 +544,7 @@ def _parse_generated_job_text(raw: str) -> Dict[str, str]:
 def generate_job_description(request):
     """Generate job title and description from a user prompt (fills form; user saves to create)."""
     try:
+        company_user = request.user
         prompt = (request.data.get('prompt') or '').strip()
         if not prompt:
             return Response({
@@ -544,7 +552,7 @@ def generate_job_description(request):
                 'message': 'Prompt is required'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         groq_client = agents['job_desc_agent'].groq_client
         raw_text = groq_client.send_prompt_text(GENERATE_JOB_SYSTEM_PROMPT, prompt)
         parsed = _parse_generated_job_text(raw_text)
@@ -627,10 +635,10 @@ def create_job_description(request):
         company_user = request.user
         company = company_user.company
         
-        agents = get_agents()
+        agents = _make_agents(company)
         job_desc_agent = agents['job_desc_agent']
         log_service = agents['log_service']
-        
+
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
         parse_keywords = request.data.get('parse_keywords', True)
@@ -746,10 +754,10 @@ def update_job_description(request, job_description_id):
                 'message': 'Job description not found'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         job_desc_agent = agents['job_desc_agent']
         log_service = agents['log_service']
-        
+
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
         is_active = request.data.get('is_active', job_desc.is_active)
@@ -1028,8 +1036,7 @@ def get_reschedule_slots(request, interview_id):
                 'message': 'Interview not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        agents = get_agents()
-        interview_agent = agents['interview_agent']
+        interview_agent = InterviewSchedulingAgent(log_service=LogService())
         result = interview_agent.get_reschedule_slots(interview_id)
 
         if not result.get('success'):
@@ -1078,8 +1085,7 @@ def reschedule_interview(request, interview_id):
                 'message': 'new_slot_datetime is required (ISO format)'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        agents = get_agents()
-        interview_agent = agents['interview_agent']
+        interview_agent = InterviewSchedulingAgent(log_service=LogService())
         result = interview_agent.reschedule_interview(interview_id, new_slot_datetime)
 
         if not result.get('success'):
@@ -1113,10 +1119,9 @@ def schedule_interview(request):
     try:
         company_user = request.user
         
-        agents = get_agents()
-        interview_agent = agents['interview_agent']
-        log_service = agents['log_service']
-        
+        log_service = LogService()
+        interview_agent = InterviewSchedulingAgent(log_service=log_service)
+
         candidate_name = request.data.get('candidate_name', '').strip()
         candidate_email = request.data.get('candidate_email', '').strip()
         job_role = request.data.get('job_role', '').strip()
@@ -1245,9 +1250,7 @@ def get_interview_details(request, interview_id):
                 'message': 'Interview not found'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        agents = get_agents()
-        interview_agent = agents['interview_agent']
-        
+        interview_agent = InterviewSchedulingAgent(log_service=LogService())
         details = interview_agent.get_interview_details(interview_id)
         
         if not details:
@@ -1487,9 +1490,8 @@ def bulk_update_cv_records(request):
         skip_reasons = {}
         if decision == 'INTERVIEW' and updated_count > 0:
             try:
-                agents = get_agents()
-                interview_agent = agents.get('interview_agent')
-                log_service = agents.get('log_service')
+                log_service = LogService()
+                interview_agent = InterviewSchedulingAgent(log_service=log_service)
                 email_settings = None
                 try:
                     email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
@@ -2478,7 +2480,7 @@ def suggest_interview_questions(request):
 
         user_prompt = f"## Candidate profile\n{candidate_text}\n\n## Job description\n{job_text}"
 
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         groq_client = agents.get('groq_client')
         if not groq_client:
             return Response({'status': 'error', 'message': 'AI service not available.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -2518,7 +2520,7 @@ def recruitment_qa(request):
                 'message': 'question is required.',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         groq_client = agents.get('groq_client')
         if not groq_client:
             return Response({
@@ -2527,8 +2529,6 @@ def recruitment_qa(request):
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         qa_agent = RecruitmentQAAgent(groq_client=groq_client)
-        qa_agent.company_id = getattr(company_user, 'company_id', None)
-        qa_agent.agent_key_name = 'recruitment_agent'
         result = qa_agent.process(question=question, company_user=company_user)
         return Response({
             'status': 'success',
@@ -2699,7 +2699,7 @@ def api_cv_parse(request):
     """
     try:
         company_user = request.user
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         cv_agent = agents['cv_agent']
         # Option 1: Uploaded file
         file = request.FILES.get('file')
@@ -2747,7 +2747,7 @@ def api_cv_summarize(request):
     """
     try:
         company_user = request.user
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         sum_agent = agents['sum_agent']
         data = request.data if isinstance(request.data, dict) else {}
         parsed = None
@@ -2785,7 +2785,7 @@ def api_cv_enrich(request):
     """
     try:
         company_user = request.user
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         enrich_agent = agents['enrich_agent']
         data = request.data if isinstance(request.data, dict) else {}
         parsed = None
@@ -2825,7 +2825,7 @@ def api_cv_qualify(request):
     """
     try:
         company_user = request.user
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         qualify_agent = agents['qualify_agent']
         data = request.data if isinstance(request.data, dict) else {}
         parsed = None
@@ -2894,7 +2894,7 @@ def api_job_description_parse(request):
     """
     try:
         company_user = request.user
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         job_desc_agent = agents['job_desc_agent']
         file = request.FILES.get('file')
         if file:
@@ -2957,9 +2957,9 @@ def api_generate_graph(request):
         # Use AI Graph Generator Agent
         from recruitment_agent.agents.graph_generator_agent import GraphGeneratorAgent
         
-        agents = get_agents()
+        agents = _make_agents(company_user.company)
         groq_client = agents['groq_client']
-        
+
         graph_agent = GraphGeneratorAgent(groq_client, company_user)
         result = graph_agent.generate_graph(prompt)
         

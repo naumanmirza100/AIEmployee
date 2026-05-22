@@ -162,7 +162,14 @@ const DocumentProcessing = () => {
       setUploadTags('');
       fetchDocuments();
     } catch (e) {
-      toast({ title: 'Upload Failed', description: e.message || 'Something went wrong', variant: 'destructive' });
+      const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
+      toast({
+        title: isHardBlock ? 'Upload blocked' : 'Upload Failed',
+        description: isHardBlock
+          ? (e?.message || 'API key or token quota issue. Check your API Keys settings.')
+          : (e?.message || 'Something went wrong'),
+        variant: 'destructive',
+      });
     } finally {
       setUploading(false);
     }

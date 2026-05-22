@@ -34,7 +34,7 @@ import {
   Loader2, LayoutDashboard, MessageSquare, Users, FileText, GitBranch,
   CalendarClock, Plus, Upload, Menu, Check, UserCheck, Clock, AlertTriangle,
   PlaneTakeoff, ClipboardList, MoreHorizontal, Trash2, FileSearch, ListChecks,
-  Play, Power, Pencil, History,
+  Play, Power, Pencil, History, Network, BookTemplate, User,
 } from 'lucide-react';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import hrAgentService from '@/services/hrAgentService';
@@ -43,12 +43,16 @@ import HRMeetingScheduler from './HRMeetingScheduler';
 import HRNotificationsTab from './HRNotificationsTab';
 import HRLeaveTab from './HRLeaveTab';
 import HREmployeeDetailDrawer from './HREmployeeDetailDrawer';
+import HRManagerTeamTab from './HRManagerTeamTab';
+import HROrgChartTab from './HROrgChartTab';
 
 // ---------- Tab metadata ----------
 const HR_TAB_ITEMS = [
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
   { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare },
   { value: 'employees', label: 'Employees', icon: Users },
+  { value: 'my_team', label: 'My team', icon: UserCheck },
+  { value: 'org_chart', label: 'Org chart', icon: Network },
   { value: 'documents', label: 'Documents', icon: FileText },
   { value: 'workflows', label: 'Workflows', icon: GitBranch },
   { value: 'meetings', label: 'Meetings', icon: CalendarClock },
@@ -112,6 +116,8 @@ const HRDashboard = () => {
     open: false, type: null, title: '', loading: false, content: null, error: null,
   });
   const [docDelete, setDocDelete] = useState({ open: false, doc: null, loading: false });
+  const [docVersions, setDocVersions] = useState({ open: false, doc: null, rows: [], loading: false });
+  const [docAccess, setDocAccess] = useState({ open: false, doc: null, rows: [], loading: false, allowed: true });
 
   // Workflows
   const [workflows, setWorkflows] = useState([]);
@@ -120,6 +126,9 @@ const HRDashboard = () => {
   const [wfDelete, setWfDelete] = useState({ open: false, wf: null, loading: false });
   const [wfHistory, setWfHistory] = useState({ open: false, wf: null, loading: false, rows: [] });
   const [wfBusyId, setWfBusyId] = useState(null);
+  const [wfTemplateDialog, setWfTemplateDialog] = useState({
+    open: false, loading: false, templates: [], selectedKey: '', name: '',
+  });
 
   // ---------- Loaders ----------
   const loadStats = async () => {
@@ -360,6 +369,34 @@ const HRDashboard = () => {
     }
   };
 
+  const openDocVersions = async (d) => {
+    setDocVersions({ open: true, doc: d, rows: [], loading: true });
+    try {
+      const res = await hrAgentService.listHRDocumentVersions(d.id);
+      setDocVersions({ open: true, doc: d, rows: res?.data || [], loading: false });
+    } catch (e) {
+      toast({ title: 'Failed to load versions', description: e.message, variant: 'destructive' });
+      setDocVersions({ open: false, doc: null, rows: [], loading: false });
+    }
+  };
+
+  const openDocAccessLog = async (d) => {
+    setDocAccess({ open: true, doc: d, rows: [], loading: true, allowed: true });
+    try {
+      const res = await hrAgentService.listHRDocumentAccessLog(d.id, { limit: 100 });
+      setDocAccess({ open: true, doc: d, rows: res?.data || [], loading: false, allowed: true });
+    } catch (e) {
+      const restricted = /HR-admin/i.test(e.message || '') || /403/.test(e.message || '');
+      if (restricted) {
+        toast({ title: 'HR-admin only', variant: 'destructive' });
+        setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: false });
+      } else {
+        toast({ title: 'Failed to load access log', description: e.message, variant: 'destructive' });
+        setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: true });
+      }
+    }
+  };
+
   const handleDeleteDoc = async () => {
     const d = docDelete.doc;
     if (!d) return;
@@ -499,6 +536,38 @@ const HRDashboard = () => {
     }
   };
 
+  const openWfTemplateDialog = async () => {
+    setWfTemplateDialog({ open: true, loading: true, templates: [], selectedKey: '', name: '' });
+    try {
+      const res = await hrAgentService.listWorkflowTemplates();
+      setWfTemplateDialog((s) => ({ ...s, loading: false, templates: res?.data || [] }));
+    } catch (e) {
+      toast({ title: 'Failed to load templates', description: e.message, variant: 'destructive' });
+      setWfTemplateDialog({ open: false, loading: false, templates: [], selectedKey: '', name: '' });
+    }
+  };
+
+  const handleCloneTemplate = async () => {
+    const { selectedKey, name } = wfTemplateDialog;
+    if (!selectedKey) {
+      toast({ title: 'Pick a template first', variant: 'destructive' });
+      return;
+    }
+    setWfTemplateDialog((s) => ({ ...s, loading: true }));
+    try {
+      const res = await hrAgentService.createWorkflowFromTemplate({
+        template_key: selectedKey,
+        name: name || undefined,
+      });
+      toast({ title: 'Workflow created from template', description: res?.data?.name || '' });
+      setWfTemplateDialog({ open: false, loading: false, templates: [], selectedKey: '', name: '' });
+      loadWorkflows();
+    } catch (e) {
+      toast({ title: 'Clone failed', description: e.message, variant: 'destructive' });
+      setWfTemplateDialog((s) => ({ ...s, loading: false }));
+    }
+  };
+
   const handleApproveExecution = async (row) => {
     const comment = window.prompt('Optional approval comment:') || '';
     try {
@@ -606,6 +675,12 @@ const HRDashboard = () => {
               <span className="text-sm text-white/50">Loading HR overview...</span>
             </div>
           ) : (
+            <>
+            <div className="flex justify-end mb-2">
+              <Button asChild variant="outline" size="sm" className="h-8 text-xs">
+                <a href="/hr/me"><User className="h-3.5 w-3.5 mr-1" /> My profile</a>
+              </Button>
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 w-full">
               {statCards.map((card) => {
                 const Icon = card.icon;
@@ -632,6 +707,7 @@ const HRDashboard = () => {
                 );
               })}
             </div>
+            </>
           )}
 
           {/* Tabs */}
@@ -995,6 +1071,22 @@ const HRDashboard = () => {
               </ErrorBoundary>
             </TabsContent>
 
+            {/* MY TEAM — manager rollup */}
+            <TabsContent value="my_team" className="mt-6">
+              <ErrorBoundary>
+                <HRManagerTeamTab
+                  onOpenEmployee={(id) => setEmployeeDrawer({ open: true, id })} />
+              </ErrorBoundary>
+            </TabsContent>
+
+            {/* ORG CHART */}
+            <TabsContent value="org_chart" className="mt-6">
+              <ErrorBoundary>
+                <HROrgChartTab
+                  onOpenEmployee={(id) => setEmployeeDrawer({ open: true, id })} />
+              </ErrorBoundary>
+            </TabsContent>
+
             {/* DOCUMENTS */}
             <TabsContent value="documents" className="mt-6">
               <ErrorBoundary>
@@ -1017,69 +1109,122 @@ const HRDashboard = () => {
                       <EmptyState icon={FileText} title="No documents uploaded yet"
                         sub="Click Upload to add your first HR document — handbook, policy, contract." />
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                         {documents.map((d) => {
                           const fmt = (d.file_format || 'other').toLowerCase();
-                          const fmtPalette = { pdf: STAT_PALETTE.rose, docx: STAT_PALETTE.sky, doc: STAT_PALETTE.sky,
-                                                txt: STAT_PALETTE.violet, md: STAT_PALETTE.emerald,
-                                                html: STAT_PALETTE.amber }[fmt] || STAT_PALETTE.violet;
-                          const psBadge = {
-                            ready: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
-                            processing: 'bg-sky-500/10 text-sky-300 border-sky-400/30',
-                            pending: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
-                            failed: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
-                          }[d.processing_status] || 'bg-white/[0.04] text-white/70';
+                          const fmtColor = {
+                            pdf: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
+                            docx: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
+                            doc: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
+                            txt: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                            md: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
+                            html: 'bg-amber-500/15 text-amber-400 border-amber-400/30',
+                          }[fmt] || 'bg-violet-500/15 text-violet-400 border-violet-400/30';
+                          const sizeKB = d.file_size ? Math.max(1, Math.round(d.file_size / 1024)) : null;
+                          const sizeDisplay = sizeKB && sizeKB >= 1024
+                            ? `${(sizeKB / 1024).toFixed(1)} MB`
+                            : (sizeKB ? `${sizeKB} KB` : null);
+                          const procStatus = d.processing_status || (d.is_indexed ? 'ready' : 'pending');
+                          const procLabel = {
+                            ready: 'Indexed', processing: 'Processing',
+                            pending: 'Queued', failed: 'Failed',
+                          }[procStatus] || procStatus;
+                          const procColor = {
+                            ready: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
+                            processing: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
+                            pending: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                            failed: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
+                          }[procStatus] || 'bg-slate-500/15 text-slate-300 border-slate-400/30';
+                          const hasVersionChain = d.version > 1 || d.parent_document_id || d.superseded_by_id;
+
                           return (
                             <div key={d.id}
-                                 className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 transition-all hover:bg-white/[0.06] hover:border-violet-400/30 flex flex-col">
-                              <div className="flex items-start gap-3">
-                                <div className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center"
-                                     style={{ backgroundColor: fmtPalette.bg }}>
-                                  <FileText className="h-5 w-5" style={{ color: fmtPalette.color }} />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="font-medium truncate text-white/95">{d.title}</div>
-                                  <div className="text-xs text-white/50 truncate">
-                                    {fmt.toUpperCase()}{d.document_type ? ` · ${d.document_type.replace(/_/g, ' ')}` : ''}
+                              className="group flex flex-col rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.04] to-white/[0.01] hover:border-violet-400/40 hover:shadow-[0_0_0_1px_rgba(139,92,246,0.15),0_8px_32px_-8px_rgba(139,92,246,0.25)] transition-all duration-200 overflow-hidden">
+                              {/* Header: icon + title + meta */}
+                              <div className="p-4 pb-3">
+                                <div className="flex items-start gap-3">
+                                  <div className={`shrink-0 h-10 w-10 rounded-lg border flex items-center justify-center ${fmtColor}`}>
+                                    <FileText className="h-5 w-5" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-medium truncate text-sm text-white/95" title={d.title}>{d.title}</div>
+                                    <div className="mt-0.5 text-xs text-white/50 truncate">
+                                      {fmt.toUpperCase()}
+                                      {d.document_type ? ` • ${d.document_type.replace(/_/g, ' ')}` : ''}
+                                      {sizeDisplay ? ` • ${sizeDisplay}` : ''}
+                                    </div>
                                   </div>
                                 </div>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" title="Actions">
-                                      <MoreHorizontal className="h-4 w-4 text-white/60" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="border-[#3a295a] bg-[#161630]">
-                                    <DropdownMenuItem onClick={() => handleSummarizeDoc(d)} className="text-white/80">
-                                      <FileSearch className="h-4 w-4 mr-2 text-violet-400" /> Summarize
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleExtractDoc(d)} className="text-white/80">
-                                      <ListChecks className="h-4 w-4 mr-2 text-emerald-400" /> Extract fields
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => setDocDelete({ open: true, doc: d, loading: false })}
-                                      className="text-rose-400 focus:text-rose-300">
-                                      <Trash2 className="h-4 w-4 mr-2" /> Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                              <div className="mt-3 flex flex-wrap gap-1">
-                                <Badge variant="outline" className={`text-[10px] ${psBadge}`}>
-                                  {d.processing_status || 'pending'}
-                                </Badge>
-                                <Badge variant="outline" className="text-[10px]">{d.confidentiality}</Badge>
-                                {d.chunks_total > 0 && (
-                                  <Badge variant="outline" className="text-[10px] bg-white/[0.04]">
-                                    {d.chunks_processed}/{d.chunks_total} chunks
+                                {/* Status + confidentiality + version badges */}
+                                <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${procColor}`}>
+                                    {procLabel}
                                   </Badge>
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">{d.confidentiality}</Badge>
+                                  {d.version > 1 && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-sky-500/10 text-sky-300 border-sky-400/30">
+                                      v{d.version}
+                                    </Badge>
+                                  )}
+                                  {d.superseded_by_id && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-300 border-amber-400/30">
+                                      superseded
+                                    </Badge>
+                                  )}
+                                  {d.chunks_total > 0 && procStatus !== 'ready' && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-white/[0.04]">
+                                      {d.chunks_processed}/{d.chunks_total} chunks
+                                    </Badge>
+                                  )}
+                                  {d.created_at && (
+                                    <span className="text-[10px] text-white/45">
+                                      {new Date(d.created_at).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                                {d.processing_error && (
+                                  <div className="mt-2 text-[11px] text-rose-300/80 line-clamp-2" title={d.processing_error}>
+                                    {d.processing_error}
+                                  </div>
                                 )}
                               </div>
-                              {d.processing_error && (
-                                <div className="mt-2 text-[11px] text-rose-300/80 line-clamp-2" title={d.processing_error}>
-                                  {d.processing_error}
+
+                              {/* Action bar */}
+                              <div className="mt-auto border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
+                                <div className="flex items-center">
+                                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
+                                    onClick={() => handleSummarizeDoc(d)} title="Summarize">
+                                    <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
+                                    onClick={() => handleExtractDoc(d)} title="Extract structured fields">
+                                    <ListChecks className="h-3.5 w-3.5 mr-1" /> Extract
+                                  </Button>
                                 </div>
-                              )}
+                                <div className="flex items-center gap-0.5">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-white/60" title="More">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="border-[#3a295a] bg-[#161630]">
+                                      {hasVersionChain && (
+                                        <DropdownMenuItem onClick={() => openDocVersions(d)} className="text-white/80">
+                                          <History className="h-4 w-4 mr-2 text-sky-400" /> Version history
+                                        </DropdownMenuItem>
+                                      )}
+                                      <DropdownMenuItem onClick={() => openDocAccessLog(d)} className="text-white/80">
+                                        <History className="h-4 w-4 mr-2 text-amber-400" /> Access log
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-white/60 hover:text-rose-400"
+                                    onClick={() => setDocDelete({ open: true, doc: d, loading: false })} title="Delete">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
                           );
                         })}
@@ -1190,6 +1335,108 @@ const HRDashboard = () => {
                   </DialogContent>
                 </Dialog>
 
+                {/* Document version chain dialog */}
+                <Dialog open={docVersions.open} onOpenChange={(open) => setDocVersions((s) => ({ ...s, open }))}>
+                  <DialogContent className="max-w-lg max-h-[70vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Version history</DialogTitle>
+                      <DialogDescription>
+                        {docVersions.doc?.title} — full chain, oldest → newest.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {docVersions.loading ? (
+                      <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-white/40" /></div>
+                    ) : docVersions.rows.length === 0 ? (
+                      <div className="text-center text-sm text-white/55 py-6">No version history.</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {docVersions.rows.map((r) => (
+                          <div key={r.id} className={`rounded-lg border p-2.5 ${
+                            r.is_current
+                              ? 'border-emerald-400/40 bg-emerald-500/5'
+                              : 'border-white/[0.08] bg-white/[0.02]'
+                          }`}>
+                            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                              <div className="flex items-baseline gap-2 min-w-0">
+                                <Badge variant="outline" className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-400/30">
+                                  v{r.version}
+                                </Badge>
+                                <span className="text-white/90 text-sm truncate">{r.title}</span>
+                              </div>
+                              {r.is_current ? (
+                                <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-400/30">
+                                  Current
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] text-white/55">
+                                  Superseded
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-white/45 mt-1">
+                              {r.document_type} · {r.confidentiality} · uploaded {r.created_at?.slice(0, 10)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setDocVersions({ open: false, doc: null, rows: [], loading: false })}>
+                        Close
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Document access log dialog — HR-admin only */}
+                <Dialog open={docAccess.open} onOpenChange={(open) => setDocAccess((s) => ({ ...s, open }))}>
+                  <DialogContent className="max-w-2xl max-h-[75vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Access log</DialogTitle>
+                      <DialogDescription>
+                        {docAccess.doc?.title} — who has read, summarized, or extracted this document.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {docAccess.loading ? (
+                      <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-white/40" /></div>
+                    ) : docAccess.rows.length === 0 ? (
+                      <div className="text-center text-sm text-white/55 py-6">No access yet.</div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-[10px] uppercase">When</TableHead>
+                            <TableHead className="text-[10px] uppercase">Who</TableHead>
+                            <TableHead className="text-[10px] uppercase">Action</TableHead>
+                            <TableHead className="text-[10px] uppercase">IP</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {docAccess.rows.map((r) => (
+                            <TableRow key={r.id}>
+                              <TableCell className="text-xs text-white/70 font-mono">
+                                {(r.created_at || '').slice(0, 19).replace('T', ' ')}
+                              </TableCell>
+                              <TableCell className="text-xs text-white/85">
+                                {r.actor_name || r.actor_email || `#${r.actor_id || '—'}`}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-[10px]">{r.action}</Badge>
+                              </TableCell>
+                              <TableCell className="text-[11px] text-white/50 font-mono">{r.ip_address || '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: true })}>
+                        Close
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
                 {/* Document delete-confirm dialog */}
                 <Dialog open={docDelete.open} onOpenChange={(open) => setDocDelete((s) => ({ ...s, open }))}>
                   <DialogContent className="max-w-sm">
@@ -1224,9 +1471,14 @@ const HRDashboard = () => {
                       </CardTitle>
                       <CardDescription>Onboarding · offboarding · approvals · reminders. Triggers fire on lifecycle events.</CardDescription>
                     </div>
-                    <Button onClick={openCreateWorkflow}>
-                      <Plus className="h-4 w-4 mr-1" /> New workflow
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={openWfTemplateDialog}>
+                        <BookTemplate className="h-4 w-4 mr-1" /> From template
+                      </Button>
+                      <Button onClick={openCreateWorkflow}>
+                        <Plus className="h-4 w-4 mr-1" /> New workflow
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {wfLoading ? (
@@ -1439,6 +1691,70 @@ const HRDashboard = () => {
                       <Button onClick={handleDeleteWorkflow} disabled={wfDelete.loading} className="bg-rose-600 hover:bg-rose-500">
                         {wfDelete.loading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}
                         Delete
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Workflow template picker */}
+                <Dialog open={wfTemplateDialog.open}
+                  onOpenChange={(open) => setWfTemplateDialog((s) => ({ ...s, open }))}>
+                  <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Clone a workflow template</DialogTitle>
+                      <DialogDescription>
+                        Built-in flows you can clone and customise. The clone becomes an editable workflow in your company.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {wfTemplateDialog.loading && wfTemplateDialog.templates.length === 0 ? (
+                      <Spinner />
+                    ) : (
+                      <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                        {wfTemplateDialog.templates.map((t) => (
+                          <button key={t.key}
+                            onClick={() => setWfTemplateDialog((s) => ({ ...s, selectedKey: t.key, name: t.name }))}
+                            className={`w-full text-left rounded-lg border p-3 transition-colors ${
+                              wfTemplateDialog.selectedKey === t.key
+                                ? 'border-violet-400/60 bg-violet-500/10'
+                                : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'
+                            }`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-white text-sm">{t.name}</span>
+                              <Badge variant="outline" className="text-[10px]">
+                                {t.step_count} step{t.step_count === 1 ? '' : 's'}
+                              </Badge>
+                              {t.trigger_event && (
+                                <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">
+                                  on: {t.trigger_event}
+                                </Badge>
+                              )}
+                              {t.requires_approval && (
+                                <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-400/30">
+                                  Requires approval
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-white/65">{t.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {wfTemplateDialog.selectedKey && (
+                      <div className="mt-2">
+                        <Label className="text-xs">Custom name (optional)</Label>
+                        <Input value={wfTemplateDialog.name}
+                          onChange={(e) => setWfTemplateDialog((s) => ({ ...s, name: e.target.value }))}
+                          placeholder="Defaults to template name" />
+                      </div>
+                    )}
+                    <DialogFooter>
+                      <Button variant="outline"
+                        onClick={() => setWfTemplateDialog({ open: false, loading: false, templates: [], selectedKey: '', name: '' })}
+                        disabled={wfTemplateDialog.loading}>Cancel</Button>
+                      <Button onClick={handleCloneTemplate}
+                        disabled={wfTemplateDialog.loading || !wfTemplateDialog.selectedKey}>
+                        {wfTemplateDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                        Clone
                       </Button>
                     </DialogFooter>
                   </DialogContent>

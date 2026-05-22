@@ -549,8 +549,13 @@ urlpatterns = [
     re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET
     re_path(r'^company/agent-keys/byok/?$', company_api_keys.upsert_byok_key, name='upsert_byok_key'),  # POST
     re_path(r'^company/agent-keys/byok/(?P<agent_name>[a-z_]+)/?$', company_api_keys.revoke_byok_key, name='revoke_byok_key'),  # DELETE
+    re_path(r'^company/agent-keys/pool/?$', company_api_keys.set_token_pool, name='set_token_pool'),  # POST
+    re_path(r'^company/agent-keys/byok-limit/?$', company_api_keys.set_byok_limit, name='set_byok_limit'),  # POST
     re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
     re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
+    re_path(r'^company/key-requests/(?P<request_id>\d+)/pay/?$', company_api_keys.pay_for_key_request, name='pay_for_key_request'),  # POST
+    re_path(r'^company/key-requests/(?P<request_id>\d+)/checkout/?$', company_api_keys.create_key_checkout_session, name='create_key_checkout_session'),  # POST
+    re_path(r'^company/key-requests/verify-session/(?P<session_id>[^/]+)/?$', company_api_keys.verify_key_session, name='verify_key_session'),  # GET
 
     # Super Admin — API keys, pricing, quotas, requests
     re_path(r'^admin/api-keys/overview/?$', admin_api_keys.admin_overview, name='admin_overview'),  # GET
@@ -562,6 +567,7 @@ urlpatterns = [
     re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
     re_path(r'^admin/token-quotas/(?P<quota_id>\d+)/?$', admin_api_keys.adjust_quota, name='admin_adjust_quota'),  # PATCH
     re_path(r'^admin/key-requests/?$', admin_api_keys.list_requests, name='admin_list_requests'),  # GET
+    re_path(r'^admin/key-requests/(?P<request_id>\d+)/approve/?$', admin_api_keys.approve_key_request, name='admin_approve_request'),  # POST
     re_path(r'^admin/key-requests/(?P<request_id>\d+)/reject/?$', admin_api_keys.reject_request, name='admin_reject_request'),  # POST
 
     # Platform keys (shared default keys, one per provider)
@@ -673,6 +679,7 @@ urlpatterns = [
     re_path(r'^hr/leave-requests/?$', hr_agent.list_leave_requests, name='hr_list_leave_requests'),  # GET
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/update/?$', hr_agent.update_leave_request, name='hr_update_leave_request'),  # PATCH
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/cancel/?$', hr_agent.cancel_leave_request, name='hr_cancel_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
 
     # Holiday calendar
@@ -715,6 +722,27 @@ urlpatterns = [
     re_path(r'^crm-sync/logs/?$', crm_api.sync_logs, name='crm_sync_logs'),  # GET
     re_path(r'^crm-sync/queue/?$', crm_api.queue_status, name='crm_queue_status'),  # GET
     re_path(r'^crm-sync/queue/retry/?$', crm_api.retry_failed, name='crm_queue_retry'),  # POST
+    # Built-in workflow templates — clone-to-instantiate
+    re_path(r'^hr/workflow-templates/?$', hr_agent.list_workflow_templates, name='hr_list_workflow_templates'),  # GET
+    re_path(r'^hr/workflows/from-template/?$', hr_agent.create_workflow_from_template, name='hr_create_workflow_from_template'),  # POST
+
+    # Performance goals / OKRs
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/goals/?$', hr_agent.list_employee_goals, name='hr_list_employee_goals'),  # GET
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/goals/create/?$', hr_agent.create_employee_goal, name='hr_create_employee_goal'),  # POST
+    re_path(r'^hr/goals/(?P<goal_id>\d+)/update/?$', hr_agent.update_employee_goal, name='hr_update_employee_goal'),  # POST/PATCH
+    re_path(r'^hr/goals/(?P<goal_id>\d+)/delete/?$', hr_agent.delete_employee_goal, name='hr_delete_employee_goal'),  # POST/DELETE
+
+    # Manager portal + org chart
+    re_path(r'^hr/manager/team/?$', hr_agent.manager_team_summary, name='hr_manager_team'),  # GET
+    re_path(r'^hr/org-chart/?$', hr_agent.org_chart, name='hr_org_chart'),  # GET
+
+    # Self-service + document versions
+    re_path(r'^hr/me/?$', hr_agent.get_my_hr_profile, name='hr_get_my_profile'),  # GET
+    re_path(r'^hr/documents/(?P<document_id>\d+)/versions/?$', hr_agent.list_hr_document_versions, name='hr_list_document_versions'),  # GET
+
+    # Compliance — GDPR + document access log
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/anonymize/?$', hr_agent.anonymize_employee, name='hr_anonymize_employee'),  # POST
+    re_path(r'^hr/documents/(?P<document_id>\d+)/access-log/?$', hr_agent.list_hr_document_access_log, name='hr_list_document_access_log'),  # GET
 ]
 
 

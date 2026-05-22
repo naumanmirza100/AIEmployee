@@ -7,12 +7,19 @@ the frontend can show the hard-block UI without each view catching explicitly.
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
-from core.api_key_service import KeyServiceError, ManagedQuotaExhausted, NoKeyAvailable, QuotaExhausted
+from core.api_key_service import BadAPIKey, ByokCapReached, KeyServiceError, ManagedQuotaExhausted, NoKeyAvailable, QuotaExhausted
 
 
 def key_service_exception_handler(exc, context):
     if isinstance(exc, KeyServiceError):
-        http_status = 402 if isinstance(exc, (QuotaExhausted, ManagedQuotaExhausted)) else 403 if isinstance(exc, NoKeyAvailable) else 400
+        if isinstance(exc, (QuotaExhausted, ManagedQuotaExhausted, ByokCapReached)):
+            http_status = 402
+        elif isinstance(exc, NoKeyAvailable):
+            http_status = 403
+        elif isinstance(exc, BadAPIKey):
+            http_status = 400
+        else:
+            http_status = 400
         return Response({
             'status': 'error',
             'code': exc.reason,
