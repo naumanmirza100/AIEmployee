@@ -421,6 +421,15 @@ export const getSdrAnalytics = async () => {
   }
 };
 
+export const sendSdrDailySummary = async () => {
+  try {
+    return await companyApi.post('/sdr/analytics/send-summary/');
+  } catch (error) {
+    console.error('SDR send summary error:', error);
+    throw error;
+  }
+};
+
 export const generatePersonalizedEmail = async (data) => {
   try {
     return await companyApi.post('/sdr/emails/generate/', data);

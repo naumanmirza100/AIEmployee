@@ -17,6 +17,7 @@ import logging
 import os
 import smtplib
 import ssl
+from datetime import timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -178,53 +179,25 @@ Rules:
             subject = subject.replace('{' + key + '}', str(val))
             body = body.replace('{' + key + '}', str(val))
 
-        if not step.ai_personalize or not self.groq_client:
+        if not step.ai_personalize:
             return {'subject': subject, 'body': body}
 
-        signals = (lead.buying_signals or [])[:2]
-        news_title = (lead.recent_news or [{}])[0].get('title', '') if lead.recent_news else ''
-        if not signals and not news_title:
-            return {'subject': subject, 'body': body}
-
+        # Delegate to EmailAssistantAgent for consistent, high-quality personalisation
         try:
-            ctx_str = ''
-            if news_title:
-                ctx_str += f'Recent news about their company: "{news_title}". '
-            if signals:
-                ctx_str += f'Buying signals: {", ".join(signals)}.'
-
-            prompt = f"""Personalise this B2B outreach email using the context. Keep it 3-5 sentences.
-
-Lead: {lead.display_name}, {lead.job_title} at {lead.company_name}
-Context: {ctx_str}
-
-Original subject: {subject}
-Original body: {body}
-
-Return JSON: {{"subject":"...","body":"..."}}"""
-
-            resp = self.groq_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.4,
-                max_tokens=350,
+            from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+            improved = EmailAssistantAgent().improve_email(
+                subject=subject,
+                body=body,
+                lead=lead,
+                campaign_context={
+                    'sender_name': campaign.sender_name,
+                    'sender_title': campaign.sender_title,
+                    'sender_company': campaign.sender_company,
+                },
             )
-            raw = resp.choices[0].message.content.strip()
-            if "```" in raw:
-                for part in raw.split("```"):
-                    if "{" in part:
-                        raw = part.lstrip("json").strip()
-                        break
-            result = json.loads(raw)
-            return {
-                'subject': result.get('subject', subject),
-                'body': result.get('body', body),
-            }
+            return improved
         except Exception as exc:
-            logger.warning("AI personalisation failed for lead %s: %s", lead.id, exc)
+            logger.warning("EmailAssistantAgent.improve_email failed lead=%s: %s", lead.id, exc)
             return {'subject': subject, 'body': body}
 
     # ------------------------------------------------------------------
@@ -233,81 +206,31 @@ Return JSON: {{"subject":"...","body":"..."}}"""
 
     def analyze_reply_sentiment(self, reply_text: str) -> dict:
         """
-        Classify a reply email as positive/negative/neutral using AI.
-        Returns: {'sentiment': str, 'is_interested': bool, 'reason': str}
+        Classify a reply. Delegates to EmailAssistantAgent for full classification.
+        Returns backward-compatible dict + extended 'category' and 'action' keys.
         """
-        if not reply_text or not reply_text.strip():
-            return {'sentiment': 'neutral', 'is_interested': False, 'reason': 'Empty reply'}
+        from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent, CAT_POSITIVE, CAT_WANTS_MORE
+        result = EmailAssistantAgent().classify_reply(reply_text)
 
-        # Fast keyword pre-check before calling AI
-        lower = reply_text.lower()
-        positive_keywords = [
-            'interested', 'tell me more', 'sounds good', 'yes', 'sure', 'absolutely',
-            'would love', 'great', 'let\'s', 'lets', 'schedule', 'meeting', 'call',
-            'demo', 'when can', 'available', 'book', 'connect', 'love to',
-        ]
-        negative_keywords = [
-            'not interested', 'unsubscribe', 'remove', 'stop', 'no thanks',
-            'don\'t contact', 'do not contact', 'not relevant', 'not right now',
-        ]
-
-        for kw in negative_keywords:
-            if kw in lower:
-                return {'sentiment': 'negative', 'is_interested': False, 'reason': f'Contains "{kw}"'}
-
-        keyword_positive = any(kw in lower for kw in positive_keywords)
-
-        if not self.groq_client:
-            sentiment = 'positive' if keyword_positive else 'neutral'
-            return {
-                'sentiment': sentiment,
-                'is_interested': keyword_positive,
-                'reason': 'Keyword match (no AI)',
-            }
-
-        try:
-            prompt = f"""Classify this sales reply email. Return ONLY JSON.
-
-Reply text:
-\"\"\"
-{reply_text[:800]}
-\"\"\"
-
-Return: {{"sentiment":"positive"|"negative"|"neutral","is_interested":true|false,"reason":"one sentence"}}
-
-positive = wants to learn more / book a call / interested
-negative = unsubscribe / not interested / stop emailing
-neutral = out of office / asking a question / unclear"""
-
-            resp = self.groq_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You classify email reply sentiment. Return ONLY valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=120,
-            )
-            raw = resp.choices[0].message.content.strip()
-            if "```" in raw:
-                for part in raw.split("```"):
-                    if "{" in part:
-                        raw = part.lstrip("json").strip()
-                        break
-            result = json.loads(raw)
-            return {
-                'sentiment': result.get('sentiment', 'neutral'),
-                'is_interested': bool(result.get('is_interested', False)),
-                'reason': result.get('reason', ''),
-            }
-        except Exception as exc:
-            logger.warning("Sentiment analysis failed: %s", exc)
-            sentiment = 'positive' if keyword_positive else 'neutral'
-            return {
-                'sentiment': sentiment,
-                'is_interested': keyword_positive,
-                'reason': 'Keyword match (AI failed)',
-            }
+        # Map category → legacy sentiment for backward-compat callers
+        cat = result['category']
+        sentiment_map = {
+            'out_of_office':   'neutral',
+            'not_interested':  'negative',
+            'wants_more_info': 'positive',
+            'positive_interest': 'positive',
+            'neutral':         'neutral',
+        }
+        return {
+            'sentiment':     sentiment_map.get(cat, 'neutral'),
+            'is_interested': result['is_interested'],
+            'reason':        result['reason'],
+            # Extended keys used by new reply handlers
+            'category':      cat,
+            'action':        result['action'],
+            'label':         result['label'],
+            'resume_date':   result.get('resume_date'),
+        }
 
     # ------------------------------------------------------------------
     # IMAP inbox polling — detect incoming replies
@@ -374,9 +297,9 @@ neutral = out of office / asking a question / unclear"""
         # This narrows the search window as much as possible.
         if outreach_sent_map:
             earliest_sent = min(outreach_sent_map.values())
-            since_date = (earliest_sent - timezone.timedelta(days=1)).strftime('%d-%b-%Y')
+            since_date = (earliest_sent - timedelta(days=1)).strftime('%d-%b-%Y')
         else:
-            since_date = (timezone.now() - timezone.timedelta(days=7)).strftime('%d-%b-%Y')
+            since_date = (timezone.now() - timedelta(days=7)).strftime('%d-%b-%Y')
 
         found = []
         seen_message_ids = set()   # deduplicate by Message-ID header
@@ -649,7 +572,7 @@ neutral = out of office / asking a question / unclear"""
             recent_log = SDROutreachLog.objects.filter(
                 enrollment__lead__email__iexact=_g0_email,
                 status='sent',
-                sent_at__gte=timezone.now() - timezone.timedelta(minutes=10),
+                sent_at__gte=timezone.now() - timedelta(minutes=10),
             ).select_related('enrollment__campaign').first()
             if recent_log:
                 logger.warning(
@@ -681,13 +604,13 @@ neutral = out of office / asking a question / unclear"""
             remaining = steps[idx + 1:]
             if remaining:
                 next_step = remaining[0]
-                enrolled_at_based = enrollment.enrolled_at + timezone.timedelta(
+                enrolled_at_based = enrollment.enrolled_at + timedelta(
                     days=max(0, next_step.delay_days - 1)
                 )
                 gap_days = max(1, next_step.delay_days - step.delay_days)
                 enrollment.next_action_at = max(
                     enrolled_at_based,
-                    timezone.now() + timezone.timedelta(days=gap_days),
+                    timezone.now() + timedelta(days=gap_days),
                 )
             else:
                 enrollment.status = 'completed'
@@ -798,6 +721,26 @@ neutral = out of office / asking a question / unclear"""
                         error_message=error_message,
                     )
                     result_status = 'failed'
+
+                    # Roll back current_step so the scheduler retries this step next cycle.
+                    # Without this, current_step stays at idx+1 and Step N is permanently skipped.
+                    from ai_sdr_agent.models import SDRCampaignEnrollment as _Enr
+                    _Enr.objects.filter(id=enrollment.id).update(current_step=idx)
+                    enrollment.current_step = idx
+                    enrollment.next_action_at = timezone.now() + timedelta(minutes=30)
+                    enrollment.save(update_fields=['next_action_at'])
+                    logger.warning(
+                        "SDR [EMAIL-FAIL] enrollment=%d step=%d rolled back — "
+                        "will retry in 30 min",
+                        enrollment.id, step.step_order,
+                    )
+                    return {
+                        'status': 'failed',
+                        'step_type': step.step_type,
+                        'step_order': step.step_order,
+                        'lead': lead.display_name,
+                        'error': error_message,
+                    }
         else:
             note = step.body_template or f"Send LinkedIn connection to {lead.display_name} ({lead.linkedin_url or 'no URL'})"
             SDROutreachLog.objects.create(**log_base, status='sent', body_sent=note)
@@ -809,13 +752,13 @@ neutral = out of office / asking a question / unclear"""
         remaining = steps[idx + 1:]
         if remaining:
             next_step = remaining[0]
-            enrolled_at_based = enrollment.enrolled_at + timezone.timedelta(
+            enrolled_at_based = enrollment.enrolled_at + timedelta(
                 days=max(0, next_step.delay_days - 1)
             )
             gap_days = max(1, next_step.delay_days - step.delay_days)
             enrollment.next_action_at = max(
                 enrolled_at_based,
-                timezone.now() + timezone.timedelta(days=gap_days),
+                timezone.now() + timedelta(days=gap_days),
             )
         else:
             enrollment.status = 'completed'

@@ -7,6 +7,7 @@ The Celery shared_tasks simply delegate to those _impl functions.
 """
 
 import logging
+from datetime import timedelta
 
 from celery import shared_task
 from django.db.models import Q
@@ -121,8 +122,10 @@ def check_inbox_replies_impl():
     """Poll IMAP inbox for replies on every active campaign with auto_check_replies=True."""
     from ai_sdr_agent.models import SDRCampaign, SDRMeeting
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+    from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
 
     agent = OutreachAgent()
+    email_agent = EmailAssistantAgent()
     campaigns = SDRCampaign.objects.filter(status='active', auto_check_replies=True)
 
     total_replies = 0
@@ -135,11 +138,9 @@ def check_inbox_replies_impl():
 
     for campaign in campaigns:
         try:
-            # Include all non-replied enrollments that have a lead email — even step 0
-            # (reply could arrive before the second scheduler cycle advances the step)
             enrollments = list(
                 campaign.enrollments
-                .filter(status__in=['active', 'completed'])
+                .filter(status__in=['active', 'paused', 'completed', 'replied'])
                 .exclude(lead__email='')
                 .select_related('lead')
                 .prefetch_related('logs')
@@ -160,107 +161,108 @@ def check_inbox_replies_impl():
 
             for r in replies:
                 enrollment = r['enrollment']
+                reply_text = r['reply_text']
+                lead = enrollment.lead
                 lead_email = r['sender_email']
-                subject = r.get('subject', '')
 
-                logger.info(
-                    "SDR [check-inbox] processing reply from=%s subject='%s' "
-                    "enrollment=%d current_status=%s",
-                    lead_email, subject, enrollment.id, enrollment.status,
-                )
-
-                # Skip only when scheduling email has already been sent — this lets us
-                # retry if the email failed in a previous cycle while still preventing
-                # true duplicates.
-                existing_meeting = SDRMeeting.objects.filter(enrollment=enrollment).first()
-                already_done = (
-                    enrollment.status == 'replied'
-                    and existing_meeting is not None
-                    and existing_meeting.scheduling_email_sent_at is not None
-                )
-                if already_done:
-                    logger.info(
-                        "SDR [DEDUP-REPLY] enrollment=%d lead=%s — "
-                        "SKIPPED: already replied and scheduling email sent",
-                        enrollment.id, lead_email,
-                    )
+                # Skip already-unsubscribed enrollments
+                if enrollment.status == 'unsubscribed':
                     continue
 
-                reply_text = r['reply_text']
-                sentiment_result = agent.analyze_reply_sentiment(reply_text)
-                sentiment = sentiment_result['sentiment']
-                is_interested = sentiment_result['is_interested']
+                # Skip 'replied' enrollments that already have a meeting booked
+                already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
+                if enrollment.status == 'replied' and already_has_meeting:
+                    continue
+
+                classification = email_agent.classify_reply(reply_text)
+                action = classification['action']
+                category = classification['category']
+                resume_date = classification.get('resume_date')
 
                 logger.info(
-                    "SDR [check-inbox] enrollment=%d lead=%s sentiment=%s "
-                    "is_interested=%s reason='%s'",
-                    enrollment.id, lead_email, sentiment,
-                    is_interested, sentiment_result.get('reason', ''),
+                    "SDR [check-inbox] enrollment=%d lead=%s → category=%s action=%s",
+                    enrollment.id, lead_email, category, action,
                 )
 
-                if enrollment.status != 'replied':
-                    enrollment.status = 'replied'
+                if action == 'pause':
+                    enrollment.status = 'paused'
                     enrollment.replied_at = timezone.now()
                     enrollment.reply_content = reply_text[:2000]
-                    enrollment.reply_sentiment = sentiment
+                    enrollment.reply_sentiment = 'out_of_office'
+                    enrollment.next_action_at = resume_date or (timezone.now() + timedelta(days=5))
                     enrollment.save()
+                    logger.info('SDR [OOO] enrollment=%d paused until %s', enrollment.id, enrollment.next_action_at)
 
-                campaign.replies_received = (campaign.replies_received or 0) + 1
-                total_replies += 1
+                elif action == 'stop':
+                    enrollment.status = 'unsubscribed'
+                    enrollment.replied_at = timezone.now()
+                    enrollment.reply_content = reply_text[:2000]
+                    enrollment.reply_sentiment = 'not_interested'
+                    enrollment.save()
+                    lead.status = 'disqualified'
+                    lead.save(update_fields=['status'])
+                    total_replies += 1
+                    logger.info('SDR [NOT-INTERESTED] enrollment=%d unsubscribed, lead=%s disqualified', enrollment.id, lead.display_name)
 
-                if is_interested:
-                    enrollment.lead.status = 'replied'
-                    enrollment.lead.save(update_fields=['status'])
+                elif action == 'send_info':
+                    if enrollment.status != 'replied':
+                        enrollment.status = 'replied'
+                        enrollment.replied_at = timezone.now()
+                        enrollment.reply_content = reply_text[:2000]
+                        enrollment.reply_sentiment = 'wants_more_info'
+                        enrollment.save()
+                    lead.status = 'replied'
+                    lead.save(update_fields=['status'])
+                    campaign.replies_received = (campaign.replies_received or 0) + 1
+                    total_replies += 1
+                    try:
+                        info_email = email_agent.generate_more_info_email(lead, campaign, reply_text)
+                        agent.send_email(campaign, lead.email, info_email['subject'], info_email['body'])
+                        logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+                    except Exception as exc:
+                        logger.warning('SDR [MORE-INFO] email failed for %s: %s', lead.email, exc)
 
-                    if existing_meeting:
-                        meeting = existing_meeting
-                        created = False
-                    else:
-                        meeting, created = SDRMeeting.objects.get_or_create(
-                            enrollment=enrollment,
-                            defaults={
-                                'company_user': campaign.company_user,
-                                'lead': enrollment.lead,
-                                'title': f'Discovery Call with {enrollment.lead.display_name}',
-                                'reply_snippet': reply_text[:500],
-                                'calendar_link': campaign.calendar_link or '',
-                                'status': 'pending',
-                            }
-                        )
+                elif action == 'book_meeting':
+                    if enrollment.status != 'replied':
+                        enrollment.status = 'replied'
+                        enrollment.replied_at = timezone.now()
+                        enrollment.reply_content = reply_text[:2000]
+                        enrollment.reply_sentiment = 'positive'
+                        enrollment.save()
+                    lead.status = 'replied'
+                    lead.save(update_fields=['status'])
+                    campaign.replies_received = (campaign.replies_received or 0) + 1
+                    total_replies += 1
 
+                    meeting, created = SDRMeeting.objects.get_or_create(
+                        enrollment=enrollment,
+                        defaults={
+                            'company_user': campaign.company_user,
+                            'lead': lead,
+                            'title': f'Discovery Call with {lead.display_name}',
+                            'reply_snippet': reply_text[:500],
+                            'calendar_link': campaign.calendar_link or '',
+                            'status': 'pending',
+                        },
+                    )
                     if created:
                         total_meetings += 1
                         campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
+                        try:
+                            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                            sched_agent = MeetingSchedulingAgent()
+                            prep_notes = sched_agent.generate_prep_notes(lead, enrollment, reply_text)
+                            sent = sched_agent.send_scheduling_email_once(campaign, lead, meeting, prep_notes)
+                            if sent:
+                                meeting.prep_notes = prep_notes
+                                meeting.save(update_fields=['prep_notes'])
+                        except Exception as exc:
+                            logger.warning('SDR [MEETING] scheduling email FAILED for %s: %s', lead.email, exc)
 
-                    try:
-                        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                        sched_agent = MeetingSchedulingAgent()
-                        prep_notes = sched_agent.generate_prep_notes(
-                            enrollment.lead, enrollment, reply_text
-                        )
-                        # send_scheduling_email_once is atomic — only one caller ever sends
-                        sent = sched_agent.send_scheduling_email_once(
-                            campaign, enrollment.lead, meeting, prep_notes
-                        )
-                        if sent:
-                            logger.info(
-                                "SDR [check-inbox] scheduling email SENT for "
-                                "enrollment=%d lead=%s meeting=%d",
-                                enrollment.id, lead_email, meeting.id,
-                            )
-                            meeting.prep_notes = prep_notes
-                            meeting.save(update_fields=['prep_notes'])
-                        else:
-                            logger.info(
-                                "SDR [check-inbox] scheduling email already sent "
-                                "(atomic guard) for enrollment=%d lead=%s meeting=%d",
-                                enrollment.id, lead_email, meeting.id,
-                            )
-                    except Exception as exc:
-                        logger.warning(
-                            "SDR [check-inbox] scheduling email FAILED for %s: %s",
-                            lead_email, exc,
-                        )
+                else:  # wait / neutral
+                    enrollment.reply_content = reply_text[:2000]
+                    enrollment.reply_sentiment = 'neutral'
+                    enrollment.save(update_fields=['reply_content', 'reply_sentiment'])
 
             campaign.last_replies_checked_at = timezone.now()
             campaign.save(update_fields=['replies_received', 'meetings_booked', 'last_replies_checked_at'])
@@ -340,8 +342,8 @@ def send_meeting_reminders_impl():
 
     agent = MeetingSchedulingAgent()
     now = timezone.now()
-    window_start = now + timezone.timedelta(hours=24)
-    window_end = now + timezone.timedelta(hours=26)
+    window_start = now + timedelta(hours=24)
+    window_end = now + timedelta(hours=26)
 
     due = SDRMeeting.objects.filter(
         status='scheduled',
@@ -367,6 +369,63 @@ def send_meeting_reminders_impl():
 
     logger.info("SDR meeting-reminders: sent=%d failed=%d", sent, failed)
     return {'sent': sent, 'failed': failed}
+
+
+# ---------------------------------------------------------------------------
+# Analytics — daily summary + low-meetings alert
+# ---------------------------------------------------------------------------
+
+def send_daily_analytics_impl():
+    """
+    Send daily summary email + low-meetings alert to every company user
+    who has at least one active SDR campaign.
+    Runs once per day via the scheduler.
+    """
+    from ai_sdr_agent.models import SDRCampaign
+    from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent, MEETINGS_ALERT_THRESHOLD
+
+    agent = AnalyticsAgent()
+    processed = 0
+    alerts_sent = 0
+
+    # Find distinct company users with at least one active campaign
+    company_user_ids = (
+        SDRCampaign.objects.filter(status='active')
+        .values_list('company_user_id', flat=True)
+        .distinct()
+    )
+
+    logger.info('SDR [daily-analytics] sending summaries to %d company users', len(company_user_ids))
+
+    for cu_id in company_user_ids:
+        try:
+            from core.models import CompanyUser
+            company_user = CompanyUser.objects.get(pk=cu_id)
+        except Exception as exc:
+            logger.error('SDR [daily-analytics] cannot load company_user=%d: %s', cu_id, exc)
+            continue
+
+        try:
+            sent = agent.send_daily_summary(company_user)
+            if sent:
+                processed += 1
+
+            # Check low-meetings alert
+            metrics = agent.compute_metrics(company_user)
+            if metrics['low_meetings_alert']:
+                alert_sent = agent.send_low_meetings_alert(company_user, metrics['meetings_week'])
+                if alert_sent:
+                    alerts_sent += 1
+                    logger.warning(
+                        'SDR [daily-analytics] LOW-MEETINGS ALERT sent to company_user=%d '
+                        '(meetings_week=%d < threshold=%d)',
+                        cu_id, metrics['meetings_week'], MEETINGS_ALERT_THRESHOLD,
+                    )
+        except Exception as exc:
+            logger.error('SDR [daily-analytics] failed for company_user=%d: %s', cu_id, exc, exc_info=True)
+
+    logger.info('SDR [daily-analytics] done — summaries=%d alerts=%d', processed, alerts_sent)
+    return {'summaries_sent': processed, 'alerts_sent': alerts_sent}
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +460,11 @@ def sdr_auto_complete_campaigns_task(self):
              max_retries=2, default_retry_delay=600)
 def sdr_send_meeting_reminders_task(self):
     return send_meeting_reminders_impl()
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.sdr_daily_analytics_task', max_retries=1)
+def sdr_daily_analytics_task(self):
+    return send_daily_analytics_impl()
 
 
 # ---------------------------------------------------------------------------
