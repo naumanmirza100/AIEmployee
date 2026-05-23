@@ -87,8 +87,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             else:
                 return {'success': False, 'error': f'Unknown action: {action}'}
         except Exception as e:
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, (QuotaExhausted, NoKeyAvailable)):
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
                 raise
             logger.error(f"Error in DocumentAuthoringAgent.process: {str(e)}", exc_info=True)
             return {'success': False, 'error': str(e)}

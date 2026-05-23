@@ -283,10 +283,11 @@ const DocumentAuthoring = () => {
             setStreamingContent('');
             setStreamingTitle('');
             setView('create');
-            const isQuota = meta?.status === 402 || meta?.error_code === 'quota_exhausted' || meta?.error_code === 'no_key';
+            const HARD_BLOCK_CODES = ['quota_exhausted', 'managed_quota_exhausted', 'byok_cap_reached', 'no_key', 'bad_api_key'];
+            const isHardBlock = meta?.status === 402 || meta?.status === 403 || meta?.hard_block || HARD_BLOCK_CODES.includes(meta?.error_code);
             toast({
-              title: isQuota ? 'Token Limit Reached' : 'Generation failed',
-              description: message || (isQuota ? 'Token quota exhausted. Add your own API key or request a managed key.' : 'Please try again.'),
+              title: isHardBlock ? 'Generation blocked' : 'Generation failed',
+              description: message || (isHardBlock ? 'API key or token quota issue. Check your API Keys settings.' : 'Please try again.'),
               variant: 'destructive',
             });
           },
@@ -298,11 +299,11 @@ const DocumentAuthoring = () => {
       setStreamingTitle('');
       setView('create');
       if (err?.name !== 'AbortError') {
-        const isQuota = err?.status === 402;
+        const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
         toast({
-          title: isQuota ? 'Token Limit Reached' : 'Generation failed',
-          description: isQuota
-            ? (err.message || 'Token quota exhausted. Add your own API key or request a managed key.')
+          title: isHardBlock ? 'Generation blocked' : 'Generation failed',
+          description: isHardBlock
+            ? (err?.message || 'API key or token quota issue. Check your API Keys settings.')
             : (err?.message || 'Please try again.'),
           variant: 'destructive',
         });

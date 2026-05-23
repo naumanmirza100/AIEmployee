@@ -104,6 +104,9 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
                 return 'research'
             return 'research'
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Intent classification failed, treating as research", {"error": str(e)})
             return 'research'
 
@@ -128,6 +131,9 @@ Reply only with the definition, no preamble."""
             if out and out.strip():
                 return out.strip()
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Short definition failed", {"error": str(e)})
         return (
             "This agent focuses on **market and competitive research**. For definitions, try a quick search. "
@@ -288,12 +294,11 @@ Reply only with the definition, no preamble."""
             )
         except Exception as e:
             self.log_action("Error generating research", {"error": str(e)})
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, QuotaExhausted):
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
                 raise
-            if isinstance(e, NoKeyAvailable):
-                raise
-            research_response = f"Research analysis encountered an error: {str(e)}"
+            self.log_action("Research call failed (hidden from user)", {"error": str(e)})
+            research_response = "Research analysis could not be completed at this time. Please try again."
         
         # Parse and structure findings
         findings = self._parse_research_response(research_type, research_response, additional_context)
