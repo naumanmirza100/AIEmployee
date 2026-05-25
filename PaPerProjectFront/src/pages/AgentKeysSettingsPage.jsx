@@ -33,20 +33,25 @@ const modeBadge = (a) => {
   const q = a.quota;
   const p = q?.preferred_pool;
   const hasManagedKey = a.managed?.status === 'active';
+  const byokCapHit = a.byok && q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit;
+  const managedExhausted = hasManagedKey && q?.managed_is_exhausted;
+  const freeExhausted = q?.is_exhausted;
 
-  // Mirrors actualPool logic — no auto-switch when managed is exhausted
+  // Mirrors actualPool logic — no auto-switch when a pool is exhausted
   let active;
-  if (p === 'free') active = 'free';
-  else if (p === 'managed' && hasManagedKey) active = q?.managed_is_exhausted ? 'blocked' : 'managed';
-  else if (a.byok) active = q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit ? 'blocked' : 'byok';
-  else if (hasManagedKey) active = q?.managed_is_exhausted ? 'blocked' : 'managed';
-  else active = 'platform';
+  if (p === 'free') active = freeExhausted ? 'free_exhausted' : 'free';
+  else if (p === 'managed' && hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
+  else if (a.byok) active = byokCapHit ? 'byok_exhausted' : 'byok';
+  else if (hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
+  else active = freeExhausted ? 'free_exhausted' : 'platform';
 
-  if (active === 'blocked') return { label: 'Quota Exhausted', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
-  if (active === 'byok') return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
+  if (active === 'byok_exhausted')     return { label: 'BYOK Cap Reached',     class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
+  if (active === 'managed_exhausted')  return { label: 'Managed Quota Full',   class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
+  if (active === 'free_exhausted')     return { label: 'Free Tokens Exhausted',class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
+  if (active === 'byok')               return { label: 'BYOK Active',          class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
   if (active === 'free' || active === 'platform') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
-  if (a.managed?.status === 'revoked') return { label: 'Key Revoked', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
-  if (active === 'managed') return { label: 'Managed Active', class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
+  if (a.managed?.status === 'revoked') return { label: 'Key Revoked',          class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
+  if (active === 'managed')            return { label: 'Managed Active',       class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
   return { label: 'No key', class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
 };
 

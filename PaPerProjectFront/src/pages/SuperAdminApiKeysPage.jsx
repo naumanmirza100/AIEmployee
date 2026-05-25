@@ -1382,18 +1382,9 @@ const SuperAdminApiKeysPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label className="text-white/60 text-xs uppercase tracking-wider">Provider</Label>
-                <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
-                  <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                    {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
-            {/* RIGHT — key + options */}
+            {/* RIGHT — key + provider + options */}
             <div className="space-y-4">
               <div>
                 <Label className="text-white/60 text-xs uppercase tracking-wider">API Key</Label>
@@ -1403,6 +1394,15 @@ const SuperAdminApiKeysPage = () => {
                   value={assignForm.api_key}
                   onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
                 />
+              </div>
+              <div>
+                <Label className="text-white/60 text-xs uppercase tracking-wider">Provider</Label>
+                <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
+                  <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                    {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               {/* <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
                 <Info className="w-3.5 h-3.5 text-violet-300 mt-0.5 shrink-0" />
