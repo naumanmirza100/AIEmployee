@@ -69,47 +69,26 @@ class BaseAgent:
     
     def __init__(self, model=None):
         """
-        Initialize the base agent with Groq API client.
-        
-        Args:
-            model (str): Groq model to use. Defaults to settings.GROQ_MODEL
-        """
-        self.api_key = getattr(settings, 'GROQ_API_KEY', None)
-        if not self.api_key:
-            raise ValueError("GROQ_API_KEY not found in environment variables. Please set it in .env file.")
-        
-        try:
-            # Simple initialization - just pass api_key
-            # Some versions of groq may have issues with extra arguments
-            self.client = Groq(api_key=self.api_key)
-        except TypeError as e:
-            error_msg = str(e)
-            if 'proxies' in error_msg or 'unexpected keyword' in error_msg:
-                # This usually means the groq library version is incompatible
-                logger.error(f"Groq client initialization error: {e}")
-                logger.error("This is usually caused by an outdated groq library version.")
-                logger.error("Please run: pip install --upgrade groq")
-                raise ValueError(
-                    f"Groq client initialization failed. "
-                    f"This is likely due to an incompatible groq library version. "
-                    f"Please update it: pip install --upgrade groq. "
-                    f"Original error: {e}"
-                )
-            else:
-                raise
-        except Exception as e:
-            logger.error(f"Unexpected error initializing Groq client: {e}")
-            raise ValueError(f"Failed to initialize Groq client: {e}")
-        
-        self.agent_name = self.__class__.__name__
-        self.fallback_model = getattr(settings, 'GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
+        Initialize the base agent.
 
-        # Load per-agent config from settings
+        Keys are NEVER read from environment variables or Django settings.
+        All LLM calls go through _resolve_company_client() → resolve_for_call().
+        Set self.company_id and self.agent_key_name before any LLM call.
+        """
+        # self.client is intentionally None — it is populated lazily in _call_llm
+        # via _resolve_company_client() each request.
+        self.api_key = None   # never read from env
+        self.client = None    # never pre-created; set per-call by _resolve_company_client
+
+        self.agent_name = self.__class__.__name__
+        self.fallback_model = 'llama-3.3-70b-versatile'
+
+        # Per-agent model config (still read from settings for model name, NOT for keys)
         agent_config = getattr(settings, 'PM_AGENT_LLM_CONFIG', {})
         defaults = agent_config.get('defaults', {})
         agent_overrides = agent_config.get(self.agent_name.lower(), {})
 
-        self.model = model or agent_overrides.get('model') or defaults.get('model') or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+        self.model = model or agent_overrides.get('model') or defaults.get('model') or 'llama-3.1-8b-instant'
         self.default_temperature = agent_overrides.get('temperature') or defaults.get('temperature', 0.7)
         self.default_max_tokens = agent_overrides.get('max_tokens') or defaults.get('max_tokens', 1024)
 
@@ -132,18 +111,15 @@ class BaseAgent:
         company_id = getattr(self, 'company_id', None)
         agent_key_name = getattr(self, 'agent_key_name', None)
         if not company_id or not agent_key_name:
-            # No company context (admin/internal call) → use platform env key
+            # company_id / agent_key_name not set → (None, None) signals no-key path
+            # which _call_llm will turn into a ValueError (never silently env-fallback)
             return None, None
-        try:
-            from core.models import Company
-            from core.api_key_service import resolve_for_call, KeyServiceError
-            company = Company.objects.get(pk=company_id)
-            ctx = resolve_for_call(company, agent_key_name)
-        except KeyServiceError:
-            raise  # propagate → global DRF handler → 402 / 403
-        except Exception as e:
-            logger.warning("Per-company key resolution failed (%s); using platform key", e)
-            return None, None
+        from core.models import Company
+        from core.api_key_service import resolve_for_call
+        # All KeyServiceError subclasses (QuotaExhausted, NoKeyAvailable, etc.) propagate.
+        # Other unexpected errors (e.g. Company.DoesNotExist) also propagate — no silent fallback.
+        company = Company.objects.get(pk=company_id)
+        ctx = resolve_for_call(company, agent_key_name)
 
         if ctx.provider == 'groq':
             from groq import Groq
@@ -177,8 +153,12 @@ class BaseAgent:
                 else self.model
             )
         else:
-            call_client = self.client
-            effective_model = self.model
+            # company_id / agent_key_name not set — fail loudly; never use env key
+            raise ValueError(
+                "No API key available. Set self.company_id and self.agent_key_name on this "
+                "agent instance before making LLM calls. Keys are never read from environment variables."
+            )
+        effective_model = effective_model  # already set above
         try:
             messages = []
 

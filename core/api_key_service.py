@@ -163,15 +163,19 @@ def _ensure_quota(company, agent_name: str) -> AgentTokenQuota:
 def resolve_for_call(company, agent_name: str) -> CallContext:
     """Pick the key to use for one LLM call. Raises on hard-block.
 
-    Preference order:
-      1. Active BYOK key — hard-blocks if user-set token cap is exhausted (ByokCapReached)
-      2. Active per-company managed key (admin override) — bypasses platform quota
-      3. Quota exhausted? → hard block (platform path only)
+    Strict preference order — NO automatic switching between pools:
+      1. Active BYOK key (unless preferred_pool is 'free' or 'managed')
+         → ByokCapReached if user-set token cap is exhausted
+      2. Active managed key (unless preferred_pool is 'free')
+         → ManagedQuotaExhausted if managed quota is exhausted (hard-block, no fallback)
+      3. Free platform-token quota gate
+         → QuotaExhausted if free tokens are all used up
       4. Platform key for the agent's default provider (the "free tokens" path)
-      5. Hard block: no key available anywhere
+      5. NoKeyAvailable if no platform key is configured
 
-    Managed keys bypass the platform quota gate because they bring their own API keys.
-    BYOK hard-blocks only when byok_token_limit > 0 and the cap is reached.
+    IMPORTANT: When a managed key's quota is exhausted the call is ALWAYS hard-blocked.
+    There is no automatic fallback to the free/platform pool. The company must either
+    contact their admin to reset/top-up the managed quota or add a BYOK key.
     """
     if agent_name not in VALID_AGENTS:
         raise InvalidAgent()
@@ -208,7 +212,6 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
         .first()
     )
     quota = None
-    managed_exhausted = False  # True when managed exists but its token limit is used up
     managed_plaintext = None
 
     if managed:
@@ -217,16 +220,15 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
             quota = _ensure_quota(company, agent_name)
             preferred_pool = quota.preferred_pool  # 'free' | 'managed' | None
 
-            # If user explicitly chose the free pool, skip managed entirely —
-            # never auto-switch to managed when free is exhausted.
+            # If user explicitly chose the free pool, skip managed entirely.
+            # In ALL other cases: if managed key exists and its quota is exhausted,
+            # hard-block immediately — never auto-switch to a different pool.
             if preferred_pool != 'free':
                 if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
-                    if preferred_pool == 'managed':
-                        # User explicitly chose managed and its quota is exhausted →
-                        # hard-block; do NOT fall back to free/platform automatically.
-                        raise ManagedQuotaExhausted()
-                    # No explicit preference → try platform/free as fallback
-                    managed_exhausted = True
+                    # Managed key quota is exhausted — hard-block regardless of preferred_pool.
+                    # No silent fallback to free/platform.  Company must either reset the quota
+                    # (admin action) or add a BYOK key to continue.
+                    raise ManagedQuotaExhausted()
                 else:
                     return CallContext(
                         company_id=company.id,
@@ -242,8 +244,7 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     if quota is None:
         quota = _ensure_quota(company, agent_name)
     if quota.is_exhausted:
-        # Both pools exhausted — raise the most informative error
-        raise ManagedQuotaExhausted() if managed_exhausted else QuotaExhausted()
+        raise QuotaExhausted()
 
     # Step 4 — platform default key (the "free tokens" path)
     default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai')
@@ -261,8 +262,8 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
                 quota_id=quota.id,
             )
 
-    # Step 5 — no platform key configured; raise managed error if that's what triggered the fallback
-    raise ManagedQuotaExhausted() if managed_exhausted else NoKeyAvailable()
+    # Step 5 — no platform key configured
+    raise NoKeyAvailable()
 
 
 def _check_quota_notifications(quota_id: int) -> None:

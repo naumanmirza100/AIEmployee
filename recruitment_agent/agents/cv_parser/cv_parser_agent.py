@@ -32,7 +32,12 @@ class CVParserAgent:
         groq_client: Optional[GroqClient] = None,
         log_service: Optional[LogService] = None,
     ) -> None:
-        self.groq_client = groq_client or GroqClient()
+        if groq_client is None:
+            raise ValueError(
+                "CVParserAgent requires an explicit groq_client resolved via "
+                "resolve_for_call(). Keys are never sourced from environment variables."
+            )
+        self.groq_client = groq_client
         self.log_service = log_service or LogService()
         self._nlp = None
         if SPACY_AVAILABLE and spacy is not None:
@@ -167,8 +172,8 @@ class CVParserAgent:
                 self._log_error("groq_api_key_expired", exc)
                 # Re-raise with clear message
                 raise GroqClientError(
-                    "Groq API key expired or invalid. CV parsing requires valid API key. "
-                    "Please update GROQ_REC_API_KEY in environment variables.",
+                    "API key rejected by provider. Please update the key in the platform "
+                    "API Keys settings (BYOK) or contact your admin to refresh the managed key.",
                     is_auth_error=True
                 ) from exc
             # Re-raise other GroqClientErrors

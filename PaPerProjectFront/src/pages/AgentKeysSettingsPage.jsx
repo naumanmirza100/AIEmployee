@@ -32,18 +32,19 @@ const formatTokens = (n) => {
 const modeBadge = (a) => {
   const q = a.quota;
   const p = q?.preferred_pool;
-
   const hasManagedKey = a.managed?.status === 'active';
-  // Compute which pool is actually in use (mirrors actualPool in AgentCard)
+
+  // Mirrors actualPool logic — no auto-switch when managed is exhausted
   let active;
   if (p === 'free') active = 'free';
-  else if (p === 'managed' && hasManagedKey) active = 'managed';
-  else if (a.byok) active = 'byok';
-  else if (q?.managed_is_exhausted) active = 'free';
-  else active = hasManagedKey ? 'managed' : 'platform';
+  else if (p === 'managed' && hasManagedKey) active = q?.managed_is_exhausted ? 'blocked' : 'managed';
+  else if (a.byok) active = q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit ? 'blocked' : 'byok';
+  else if (hasManagedKey) active = q?.managed_is_exhausted ? 'blocked' : 'managed';
+  else active = 'platform';
 
+  if (active === 'blocked') return { label: 'Quota Exhausted', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'byok') return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
-  if (active === 'free') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
+  if (active === 'free' || active === 'platform') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
   if (a.managed?.status === 'revoked') return { label: 'Key Revoked', class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'managed') return { label: 'Managed Active', class: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
   return { label: 'No key', class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
@@ -187,10 +188,11 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
   const actualPool = (() => {
     const p = q?.preferred_pool;
     if (p === 'free') return 'free';
-    if (p === 'managed' && hasManagedKey) return 'managed';
-    if (agent.byok) return 'byok';
-    if (q?.managed_is_exhausted) return 'free';
-    return hasManagedKey ? 'managed' : 'platform';
+    if (p === 'managed' && hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
+    if (agent.byok) return q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit ? 'blocked' : 'byok';
+    // No explicit preference: managed key wins if present; exhaustion = hard block
+    if (hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
+    return 'platform';
   })();
 
   return (
@@ -207,7 +209,38 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-white leading-tight">{agent.agent_label}</p>
-            <p className="text-[10px] font-mono text-white/30 mt-0.5">{agent.agent_name}</p>
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+              <p className="text-[10px] font-mono text-white/30">{agent.agent_name}</p>
+              {/* ── Provider/key-source chips ── */}
+              {(() => {
+                const PROVIDER_META = {
+                  openai:  { label: 'OpenAI',        accent: 'text-green-300 bg-green-500/10 border-green-500/20'    },
+                  groq:    { label: 'Groq (Llama)',   accent: 'text-violet-300 bg-violet-500/10 border-violet-500/20' },
+                  claude:  { label: 'Claude',         accent: 'text-orange-300 bg-orange-500/10 border-orange-500/20' },
+                  gemini:  { label: 'Gemini',         accent: 'text-blue-300 bg-blue-500/10 border-blue-500/20'       },
+                  grok:    { label: 'xAI Grok',       accent: 'text-red-300 bg-red-500/10 border-red-500/20'          },
+                };
+                // Active key provider overrides default_provider
+                const activeProvider =
+                  agent.byok?.status === 'active' ? agent.byok.provider
+                  : agent.managed?.status === 'active' ? agent.managed.provider
+                  : agent.default_provider;
+                const meta = PROVIDER_META[activeProvider] || { label: (activeProvider || 'Unknown').toUpperCase(), accent: 'text-white/40 bg-white/5 border-white/10' };
+                const keySource = agent.byok?.status === 'active'
+                  ? 'BYOK'
+                  : agent.managed?.status === 'active' ? 'Managed' : 'Free tokens';
+                return (
+                  <>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded border font-medium ${meta.accent}`}>
+                      {meta.label}
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded border text-white/30 bg-white/5 border-white/10 font-medium">
+                      {keySource}
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
           </div>
           <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-medium shrink-0 ${m.class}`}>{m.label}</span>
           {/* Actions */}
@@ -318,7 +351,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                   <button
                     onClick={() => !q?.managed_is_exhausted && onSetPool(agent.agent_name, 'managed')}
                     disabled={!!q?.managed_is_exhausted}
-                    title={q?.managed_is_exhausted ? 'Managed tokens fully used' : 'Use managed key'}
+                    title={q?.managed_is_exhausted ? 'Managed quota exhausted — LLM calls are hard-blocked. Ask your admin to reset/top-up the quota, or add a BYOK key.' : 'Use managed key'}
                     className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
                       q?.managed_is_exhausted
                         ? 'cursor-not-allowed border-red-500/40 bg-red-500/8 text-red-400/80'
@@ -336,8 +369,8 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     <Activity className="w-2.5 h-2.5 inline mr-0.5" />Platform
                   </span>
                 )}
-                {q?.managed_is_exhausted && !agent.byok && q?.remaining > 0 && (
-                  <span className="text-[9px] text-amber-300/70 self-center">auto-switched</span>
+                {q?.managed_is_exhausted && (
+                  <span className="text-[9px] text-red-400/80 self-center" title="Managed quota exhausted — calls are blocked. Contact your admin to top up, or add a BYOK key.">⛔ blocked</span>
                 )}
               </div>
             </div>
@@ -538,10 +571,21 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
             {!r._synthetic && r.admin_note && <p className="text-xs text-violet-300 mt-1">Admin: "{r.admin_note}"</p>}
 
             {!r._synthetic && r.status === 'payment_pending' && total > 0 && (
-              <div className="mt-1 space-y-0.5 text-[10px] text-white/50">
-                <div className="flex gap-3"><span>Key cost</span><span>${(r.key_cost_snapshot ?? 0).toFixed(2)}</span></div>
-                <div className="flex gap-3"><span>Service charge</span><span>${(r.service_charge_snapshot ?? 0).toFixed(2)}</span></div>
-                <div className="flex gap-3 text-yellow-300 font-semibold"><span>Total due</span><span>${total.toFixed(2)}</span></div>
+              <div className="mt-1.5 flex items-center gap-3 text-[10px] flex-wrap">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-white/30 uppercase tracking-wide" style={{fontSize:'8px'}}>Key cost</span>
+                  <span className="text-white/60 font-medium">${(r.key_cost_snapshot ?? 0).toFixed(2)}</span>
+                </div>
+                <span className="text-white/15 text-base leading-none">·</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-white/30 uppercase tracking-wide" style={{fontSize:'8px'}}>Service charge</span>
+                  <span className="text-white/60 font-medium">${(r.service_charge_snapshot ?? 0).toFixed(2)}</span>
+                </div>
+                <span className="text-white/15 text-base leading-none">·</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-yellow-400/60 uppercase tracking-wide font-semibold" style={{fontSize:'8px'}}>Total due</span>
+                  <span className="text-yellow-300 font-bold">${total.toFixed(2)}</span>
+                </div>
               </div>
             )}
             {!r._synthetic && r.status === 'payment_received' && r.amount_paid != null && (
