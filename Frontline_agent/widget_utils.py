@@ -22,6 +22,18 @@ DEFAULT_WIDGET_CONFIG: Dict[str, Any] = {
         'launcher_text': 'Chat with us',
         'position': 'bottom-right',  # one of: bottom-right, bottom-left
         'logo_url': None,
+        # White-label theming knobs. The widget JS reads these on init and
+        # applies them as CSS variables / inline styles. `css_overrides` is a
+        # last-resort escape hatch for partners with stricter brand rules —
+        # gets injected as a `<style>` block, so it's powerful but unvalidated;
+        # the embed origin allowlist is your safety net here.
+        'font_family': None,         # e.g. '"Inter", system-ui, sans-serif'
+        'border_radius': None,       # e.g. '12px' or '0.75rem'
+        'header_bg': None,           # explicit header colour, defaults to primary_color
+        'header_text_color': None,
+        'bubble_bg_user': None,      # user message bubble bg
+        'bubble_bg_agent': None,     # agent message bubble bg
+        'css_overrides': '',         # raw CSS string appended to widget shadow DOM
     },
     'pre_chat_form': {
         'enabled': False,

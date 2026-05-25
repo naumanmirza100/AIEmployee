@@ -845,6 +845,23 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 1209600}
     },
 
+    # T4 — auto-close resolved tickets after FRONTLINE_AUTO_CLOSE_DAYS (default 7).
+    # Daily tick: cheap query, idempotent via status filter.
+    'frontline-auto-close-inactive-tickets': {
+        'task': 'Frontline_agent.tasks.auto_close_inactive_tickets',
+        'schedule': 86400.0,  # daily
+        'options': {'expires': 172800},
+    },
+
+    # S3 — bump priority + fire `ticket_near_breach` event for tickets within
+    # FRONTLINE_SLA_ESCALATION_MINUTES of SLA breach. Frequent enough that an
+    # urgent escalation actually surfaces in time; idempotent via priority filter.
+    'frontline-escalate-near-breach-tickets': {
+        'task': 'Frontline_agent.tasks.escalate_near_breach_tickets',
+        'schedule': 300.0,  # every 5 minutes
+        'options': {'expires': 600},
+    },
+
     # ----- HR Support Agent -----
     # Process pending HRScheduledNotification rows: send + retry/DLQ.
     'hr-process-scheduled-notifications': {
@@ -957,6 +974,7 @@ REST_FRAMEWORK = {
         'pm_crud': '200/hour',       # CRUD endpoints (chat create/update/delete, meeting respond)
         # Frontline Agent throttles
         'frontline_public': '20/hour',   # Unauthenticated widget/form endpoints — keyed by IP
+        'frontline_widget_key': '200/hour',   # Per-tenant widget budget — keyed by widget_key (covers all visitors of one tenant)
         'frontline_llm': '60/hour',      # Authenticated LLM-powered endpoints (Q&A, triage, auto-resolve, summarize, extract)
         'frontline_upload': '30/hour',   # Document uploads (expensive: parse + embed)
         'frontline_crud': '300/hour',    # Authenticated CRUD endpoints

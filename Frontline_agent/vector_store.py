@@ -42,6 +42,25 @@ except ImportError:
     faiss = None  # type: ignore
     np = None  # type: ignore
 
+# Startup visibility — print once at import which path is active so ops can
+# tell whether retrieval is on FAISS or the legacy O(N) Python loop. If the
+# deployment requires FAISS (``FRONTLINE_REQUIRE_FAISS=True`` in settings),
+# we fail loud at import time rather than silently serve slow queries in prod.
+if FAISS_AVAILABLE:
+    logger.info("Frontline vector store: FAISS active (O(log N) retrieval).")
+else:
+    _msg = (
+        "Frontline vector store: FAISS NOT INSTALLED — falling back to per-chunk "
+        "Python scan (O(N), fine <1k chunks/tenant, slow above 10k)."
+    )
+    if getattr(settings, 'FRONTLINE_REQUIRE_FAISS', False):
+        logger.error(_msg)
+        raise RuntimeError(
+            "FRONTLINE_REQUIRE_FAISS=True but faiss is not importable. "
+            "Install faiss-cpu (or set FRONTLINE_REQUIRE_FAISS=False to allow the slow fallback)."
+        )
+    logger.warning(_msg)
+
 
 # In-process cache — avoid re-loading the index file on every query.
 # Keyed by company_id. Guarded by a lock so concurrent threads don't race.

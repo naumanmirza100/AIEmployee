@@ -33,13 +33,14 @@ const modeBadge = (a) => {
   const q = a.quota;
   const p = q?.preferred_pool;
 
+  const hasManagedKey = a.managed?.status === 'active';
   // Compute which pool is actually in use (mirrors actualPool in AgentCard)
   let active;
   if (p === 'free') active = 'free';
-  else if (p === 'managed') active = 'managed';
+  else if (p === 'managed' && hasManagedKey) active = 'managed';
   else if (a.byok) active = 'byok';
   else if (q?.managed_is_exhausted) active = 'free';
-  else active = a.managed ? 'managed' : 'platform';
+  else active = hasManagedKey ? 'managed' : 'platform';
 
   if (active === 'byok') return { label: 'BYOK Active', class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
   if (active === 'free') return { label: 'Free Tokens', class: 'bg-violet-500/15 text-violet-300 border border-violet-500/30' };
@@ -182,13 +183,14 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
   const managedPct = q && q.managed_included_tokens > 0 ? Math.min(100, (q.managed_used_tokens / q.managed_included_tokens) * 100) : 0;
   const byokPct = q && q.byok_token_limit > 0 ? Math.min(100, (q.byok_tokens_info / q.byok_token_limit) * 100) : 0;
   const barColor = (pct) => pct >= 100 ? 'from-red-500 to-rose-500' : pct >= 80 ? 'from-amber-400 to-orange-500' : 'from-emerald-400 to-teal-500';
+  const hasManagedKey = agent.managed?.status === 'active';
   const actualPool = (() => {
     const p = q?.preferred_pool;
     if (p === 'free') return 'free';
-    if (p === 'managed') return 'managed';
+    if (p === 'managed' && hasManagedKey) return 'managed';
     if (agent.byok) return 'byok';
     if (q?.managed_is_exhausted) return 'free';
-    return agent.managed ? 'managed' : 'platform';
+    return hasManagedKey ? 'managed' : 'platform';
   })();
 
   return (
@@ -729,11 +731,18 @@ const AgentKeysSettingsPage = () => {
   };
 
   const setPool = async (agentName, preferred_pool) => {
+    // Optimistic update — reflect the switch instantly before the API responds
+    setAgents(prev => prev.map(a =>
+      a.agent_name === agentName
+        ? { ...a, quota: { ...a.quota, preferred_pool } }
+        : a
+    ));
     try {
       await agentKeysService.setTokenPool({ agent_name: agentName, preferred_pool });
-      toast({ title: preferred_pool === 'free' ? 'Using free tokens' : 'Using managed key tokens' });
       loadData({ silent: true });
     } catch (e) {
+      // Roll back on failure
+      loadData({ silent: true });
       toast({ title: 'Failed to switch pool', description: String(e.message || e), variant: 'destructive' });
     }
   };

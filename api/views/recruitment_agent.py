@@ -40,6 +40,7 @@ from recruitment_agent.models import (
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
+from core.api_key_service import KeyServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +49,14 @@ def _make_agents(company):
     subscription system and creates fresh agent instances for this request.
 
     - If company has BYOK or admin-assigned key → QuotaAwareGroqClient (usage tracked).
-    - If no key configured anywhere (NoKeyAvailable) → plain GroqClient with env key.
-    - QuotaExhausted / ManagedQuotaExhausted / ByokCapReached propagate to the
+    - NoKeyAvailable / QuotaExhausted / ByokCapReached propagate to the
       global DRF handler (core/drf_exceptions.py) which returns 402/403 JSON.
+    - Env key is NEVER used as a silent fallback.
     """
-    from core.api_key_service import resolve_for_call, NoKeyAvailable
-
-    try:
-        ctx = resolve_for_call(company, 'recruitment_agent')
-        groq_client = QuotaAwareGroqClient(api_key=ctx.api_key, key_ctx=ctx)
-    except NoKeyAvailable:
-        # No key configured anywhere — fall back to platform env key (free tier)
-        groq_client = GroqClient()
-    # QuotaExhausted / ManagedQuotaExhausted / ByokCapReached propagate up
+    from core.api_key_service import resolve_for_call
+    # All exceptions (NoKeyAvailable, QuotaExhausted, etc.) propagate — no env fallback
+    ctx = resolve_for_call(company, 'recruitment_agent')
+    groq_client = QuotaAwareGroqClient(api_key=ctx.api_key, key_ctx=ctx)
 
     log_service = LogService()
     django_repo = DjangoRepository()
@@ -464,6 +460,8 @@ def process_cvs(request):
                 'message': f'Processing failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"CV processing error: {e}")
         return Response({
@@ -577,6 +575,8 @@ def generate_job_description(request):
                 'type': job_type,
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception(f"Error generating job description: {e}")
         return Response({
@@ -618,6 +618,8 @@ def list_job_descriptions(request):
             'data': job_list
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error listing job descriptions: {e}")
         return Response({
@@ -727,6 +729,8 @@ def create_job_description(request):
             }
         }, status=status.HTTP_201_CREATED)
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error creating job description: {e}")
         return Response({
@@ -804,6 +808,8 @@ def update_job_description(request, job_description_id):
             }
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error updating job description: {e}")
         return Response({
@@ -838,6 +844,8 @@ def delete_job_description(request, job_description_id):
             'message': 'Job description deleted successfully'
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error deleting job description: {e}")
         return Response({
@@ -898,6 +906,8 @@ def list_interviews(request):
             'data': interview_list
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error listing interviews: {e}")
         return Response({
@@ -1010,6 +1020,8 @@ def update_interview(request, interview_id):
                 'job_title': job_title,
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception(f"Error updating interview: {e}")
         return Response({
@@ -1052,6 +1064,8 @@ def get_reschedule_slots(request, interview_id):
                 'message': result.get('message'),
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception(f"Error getting reschedule slots: {e}")
         return Response({
@@ -1103,6 +1117,8 @@ def reschedule_interview(request, interview_id):
                 'selected_slot': result.get('selected_slot'),
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception(f"Error rescheduling interview: {e}")
         return Response({
@@ -1223,6 +1239,8 @@ def schedule_interview(request):
             'data': result
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error scheduling interview: {e}")
         return Response({
@@ -1264,6 +1282,8 @@ def get_interview_details(request, interview_id):
             'data': details
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error getting interview details: {e}")
         return Response({
@@ -1348,6 +1368,8 @@ def list_cv_records(request):
             payload['page_size'] = page_size
         return Response(payload)
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error listing CV records: {e}")
         return Response({
@@ -1435,6 +1457,8 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
             logger.info(f"Bulk INTERVIEW: invitation email sent for CV record id={cv_record.id} -> {candidate_email}")
             return ('sent', True)
         return ('error', False)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.warning(f"Failed to schedule interview for CV record {cv_record.id} ({candidate_email}): {e}")
         if log_service:
@@ -1554,6 +1578,8 @@ def bulk_update_cv_records(request):
             'status': 'error',
             'message': 'Invalid cv_record_ids: must be integers'
         }, status=status.HTTP_400_BAD_REQUEST)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error bulk updating CV records: {e}")
         return Response({
@@ -1628,6 +1654,8 @@ def email_settings(request):
                 }
             })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error with email settings: {e}")
         return Response({
@@ -1883,6 +1911,8 @@ def interview_settings(request):
                 }
             })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error with interview settings: {e}")
         return Response({
@@ -1977,6 +2007,8 @@ def qualification_settings(request):
                 }
             })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error with qualification settings: {e}")
         return Response({
@@ -2408,6 +2440,8 @@ def recruitment_analytics(request):
             }
         })
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.error(f"Error generating recruitment analytics: {e}", exc_info=True)
         return Response({
@@ -2496,6 +2530,8 @@ def suggest_interview_questions(request):
             'candidate_name': parsed.get('name') or cv_record.file_name,
             'job_title': job.title,
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("suggest_interview_questions error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2537,6 +2573,8 @@ def recruitment_qa(request):
                 'insights': result.get('insights', []),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("recruitment_qa error")
         return Response({
@@ -2571,6 +2609,8 @@ def list_qa_chats(request):
                 'timestamp': chat.updated_at.isoformat(),
             })
         return Response({'status': 'success', 'data': result})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_qa_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2611,6 +2651,8 @@ def create_qa_chat(request):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2656,6 +2698,8 @@ def update_qa_chat(request, chat_id):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2673,6 +2717,8 @@ def delete_qa_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2731,6 +2777,8 @@ def api_cv_parse(request):
             'status': 'error',
             'message': "Provide 'file' (upload) or 'text' (raw CV text)."
         }, status=status.HTTP_400_BAD_REQUEST)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_cv_parse error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2769,6 +2817,8 @@ def api_cv_summarize(request):
             return Response({'status': 'error', 'message': "Provide 'parsed_json' or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
         insights = sum_agent.summarize(parsed, job_keywords=job_keywords)
         return Response({'status': 'success', 'insights': insights})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_cv_summarize error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2809,6 +2859,8 @@ def api_cv_enrich(request):
             return Response({'status': 'error', 'message': "Provide 'parsed_json' and 'insights_json', or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
         enrichment = enrich_agent.enrich(parsed, insights)
         return Response({'status': 'success', 'enrichment': enrichment})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_cv_enrich error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2879,6 +2931,8 @@ def api_cv_qualify(request):
             interview_threshold=interview_threshold, hold_threshold=hold_threshold,
         )
         return Response({'status': 'success', 'qualification': qualification})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_cv_qualify error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2925,6 +2979,8 @@ def api_job_description_parse(request):
             'status': 'error',
             'message': "Provide 'file' (upload) or 'text' (job description)."
         }, status=status.HTTP_400_BAD_REQUEST)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_job_description_parse error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2971,6 +3027,8 @@ def api_generate_graph(request):
             }
         })
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_generate_graph error")
         return Response({
@@ -3011,6 +3069,8 @@ def api_get_saved_prompts(request):
             'data': data,
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_get_saved_prompts error")
         return Response({
@@ -3095,6 +3155,8 @@ def api_save_prompt(request):
             }
         })
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_save_prompt error")
         return Response({
@@ -3130,6 +3192,8 @@ def api_delete_prompt(request, prompt_id):
             'message': 'Prompt deleted successfully.'
         })
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_delete_prompt error")
         return Response({
@@ -3172,6 +3236,8 @@ def api_toggle_prompt_favorite(request, prompt_id):
             }
         })
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_toggle_prompt_favorite error")
         return Response({
@@ -3222,6 +3288,8 @@ def api_toggle_prompt_dashboard(request, prompt_id):
             }
         })
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_toggle_prompt_dashboard error")
         return Response({

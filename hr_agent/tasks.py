@@ -127,19 +127,51 @@ def process_hr_document(self, document_id):
         overlap = max(0, min(overlap, max(0, chunk_size - 1)))
 
         text_to_chunk = f"{document.title}\n{document.description}\n{extracted_text}".strip()
+        # D-F1 — PDF page markers injected by Frontline's `_extract_pdf`
+        # (which HR shares) look like `\x0c__PAGE_N__\n`. Build an offset→page
+        # index, tag each chunk with the page it came from, and strip the
+        # markers before storage so they don't pollute retrieval or prompts.
+        import re as _re
+        _PAGE_MARKER_RE = _re.compile(r'\x0c__PAGE_(\d+)__\n')
+        page_positions = [(m.start(), int(m.group(1)))
+                          for m in _PAGE_MARKER_RE.finditer(text_to_chunk)]
+
+        def _page_for_offset(offset_in_raw: int):
+            page = None
+            for off, p in page_positions:
+                if off <= offset_in_raw:
+                    page = p
+                else:
+                    break
+            return page
+
         # Section-aware chunking for handbook / policy / procedure / training /
         # compliance / benefits — splits on headings (Markdown #, ALL-CAPS,
         # `Article X`, `Section X.Y`, `4.2 Title`) so citations point at a
         # whole section rather than a sentence fragment. Falls back to fixed
         # chunks when no headings exist. Other doc types use the naive split.
-        # chunk_pairs is a list of (chunk_text, section_heading) tuples.
-        # For section-aware types, heading is the detected section marker;
-        # for other types heading is always ''.
         from hr_agent.chunking import chunk_with_headings, SECTION_AWARE_TYPES
         if document.document_type in SECTION_AWARE_TYPES:
-            chunk_pairs = chunk_with_headings(
+            chunk_pairs_raw = chunk_with_headings(
                 text_to_chunk, max_chunk_size=chunk_size, overlap=overlap,
             )
+            # The section-aware chunker doesn't know its offset in the raw text.
+            # Recover it by scanning the raw text for each chunk's first chars;
+            # for the page-number assignment that's good enough — exact offset
+            # would only matter for sub-page-level precision we don't claim.
+            chunk_pairs = []
+            cursor = 0
+            for ct, heading in chunk_pairs_raw:
+                # Try to find the chunk's start position in the raw text. Use
+                # the first 60 chars as a fingerprint to avoid false matches
+                # from heading repetition.
+                fingerprint = ct[:60].replace('\x0c', '').replace('__PAGE_', '')[:60]
+                idx = text_to_chunk.find(fingerprint, cursor) if fingerprint else -1
+                page = _page_for_offset(idx) if idx >= 0 else _page_for_offset(cursor)
+                if idx >= 0:
+                    cursor = idx
+                clean = _PAGE_MARKER_RE.sub('', ct)
+                chunk_pairs.append((clean, heading, page))
             logger.info("process_hr_document: doc %s chunked section-aware (%d chunks)",
                         document_id, len(chunk_pairs))
         else:
@@ -147,7 +179,10 @@ def process_hr_document(self, document_id):
             start = 0
             step = max(1, chunk_size - overlap)
             while start < len(text_to_chunk):
-                chunk_pairs.append((text_to_chunk[start:start + chunk_size], ''))
+                raw = text_to_chunk[start:start + chunk_size]
+                page = _page_for_offset(start)
+                clean = _PAGE_MARKER_RE.sub('', raw)
+                chunk_pairs.append((clean, '', page))
                 start += step
 
         document.chunks_total = len(chunk_pairs)
@@ -158,7 +193,7 @@ def process_hr_document(self, document_id):
         has_embeddings = embedding_service.is_available()
         batch_size = 20
         # Extract plain texts for embedding generation (embeddings API takes strings).
-        chunk_texts = [ct for ct, _ in chunk_pairs]
+        chunk_texts = [ct for ct, _h, _p in chunk_pairs]
         for i in range(0, len(chunk_pairs), batch_size):
             batch_pairs = chunk_pairs[i:i + batch_size]
             batch_texts = chunk_texts[i:i + batch_size]
@@ -170,9 +205,10 @@ def process_hr_document(self, document_id):
                     chunk_index=i + j,
                     chunk_text=chunk_text,
                     section_heading=(heading or '')[:300],
+                    page_number=page_num,
                     embedding=(json.dumps(emb) if emb else None),
                 )
-                for j, ((chunk_text, heading), emb) in enumerate(zip(batch_pairs, embeddings))
+                for j, ((chunk_text, heading, page_num), emb) in enumerate(zip(batch_pairs, embeddings))
             ]
             HRDocumentChunk.objects.bulk_create(rows)
             document.chunks_processed = i + len(batch_pairs)

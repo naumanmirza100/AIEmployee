@@ -158,6 +158,7 @@ class KnowledgeService:
                 is_indexed=True,
                 processed=True,
                 superseded_by__isnull=True,          # skip old revisions
+                is_outdated=False,                   # skip soft-deprecated docs
                 processing_status='ready',           # skip in-flight / failed docs
             )
             # Visibility gate: 'company' docs are available to any company user.
@@ -206,14 +207,16 @@ class KnowledgeService:
             keyword_results = []
             matching_chunks = all_chunks.filter(chunk_text__icontains=query)[:50]
             for chunk in matching_chunks:
+                page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
                 keyword_results.append({
                     'chunk_id': chunk.id,
                     'document_id': chunk.document_id,
                     'score': 1.0, # Base keyword score
                     'content': chunk.chunk_text,
-                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
                     'file_format': chunk.document.file_format,
-                    'document_type': chunk.document.document_type
+                    'document_type': chunk.document.document_type,
+                    'page_number': chunk.page_number,
                 })
                 
             # 3. Reciprocal Rank Fusion (RRF)
@@ -310,14 +313,16 @@ class KnowledgeService:
                         c = chunk_map.get(cid)
                         if c is None:
                             continue
+                        page_label = f" p.{c.page_number}" if c.page_number else ""
                         out.append({
                             'chunk_id': c.id,
                             'document_id': c.document_id,
                             'score': float(score),
                             'content': c.chunk_text,
-                            'title': f"{c.document.title} (Chunk {c.chunk_index})",
+                            'title': f"{c.document.title} (Chunk {c.chunk_index}{page_label})",
                             'file_format': c.document.file_format,
                             'document_type': c.document.document_type,
+                            'page_number': c.page_number,
                         })
                     return out
 
@@ -330,14 +335,16 @@ class KnowledgeService:
             try:
                 chunk_emb = _json.loads(chunk.embedding) if isinstance(chunk.embedding, str) else chunk.embedding
                 similarity = self.embedding_service.cosine_similarity(query_embedding, chunk_emb)
+                page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
                 semantic_results.append({
                     'chunk_id': chunk.id,
                     'document_id': chunk.document_id,
                     'score': similarity,
                     'content': chunk.chunk_text,
-                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index})",
+                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
                     'file_format': chunk.document.file_format,
                     'document_type': chunk.document.document_type,
+                    'page_number': chunk.page_number,
                 })
             except Exception:
                 pass
@@ -347,15 +354,18 @@ class KnowledgeService:
     def _llm_rerank(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
         """
         Use LLM cross-encoding logic to re-rank retrieved candidate chunks.
+        Routes through the company subscription system when company_id is set:
+        uses the company's OpenAI BYOK/managed key and decrements quota.
+        Falls back to the platform key when no company key is configured.
         """
         try:
             if not candidates:
                 return candidates
-                
+
             chunks_text = ""
             for i, cand in enumerate(candidates):
                 chunks_text += f"\n--- Chunk {i} ---\n{cand['content'][:1000]}\n"
-                
+
             prompt = f"""Given the user query, evaluate the following document chunks.
 For each chunk, score it from 0 to 10 on how well it directly answers or contains information highly relevant to the query.
 Return ONLY a JSON list of integers representing the scores in the exact order of the chunks. E.g. [8, 0, 5, 2]
@@ -365,17 +375,67 @@ Query: {query}
 Chunks:
 {chunks_text}
 """
-            import openai
             from django.conf import settings
-            client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
+
+            # All key resolution goes through the subscription system — no direct
+            # env access. resolve_for_call() already returns the platform key when
+            # the company has free-tier quota remaining.
+            if not self.company_id:
+                logger.info("No company_id on KnowledgeService; skipping LLM rerank.")
+                return candidates[:top_k]
+
+            key_ctx = None
+            provider = None
+            api_key = None
+            rerank_model_openai = 'gpt-4o-mini'
+            rerank_model_groq = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+
+            try:
+                from core.models import Company
+                from core.api_key_service import resolve_for_call, NoKeyAvailable
+                company = Company.objects.get(pk=self.company_id)
+                ctx = resolve_for_call(company, 'frontline_agent')
+                if ctx.provider in ('openai', 'groq'):
+                    provider = ctx.provider
+                    api_key = ctx.api_key
+                    key_ctx = ctx
+            except Exception:
+                # NoKeyAvailable, QuotaExhausted, or any other issue → skip rerank
+                logger.info("No key available via subscription system for reranking; skipping.")
+                return candidates[:top_k]
+
+            if not api_key:
+                return candidates[:top_k]
+
+            if provider == 'groq':
+                from groq import Groq as _Groq
+                llm_client = _Groq(api_key=api_key)
+                rerank_model = rerank_model_groq
+            else:
+                import openai as _openai
+                llm_client = _openai.OpenAI(api_key=api_key)
+                rerank_model = rerank_model_openai
+
+            response = llm_client.chat.completions.create(
+                model=rerank_model,
                 messages=[
                     {"role": "system", "content": "You are a precise document retrieval evaluator. Output ONLY a valid JSON list of integers."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0
             )
+
+            # Decrement company quota for this rerank call
+            if key_ctx:
+                try:
+                    usage = getattr(response, 'usage', None)
+                    total = int(getattr(usage, 'total_tokens', 0) or 0)
+                    if total:
+                        from core.api_key_service import record_usage
+                        record_usage(key_ctx, total)
+                except Exception as exc:
+                    logger.warning("Frontline rerank quota decrement failed: %s", exc)
+
             raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -383,13 +443,12 @@ Chunks:
                     raw = raw[4:]
             import json
             scores = json.loads(raw.strip())
-            
-            # Apply rerank scores if the lists match in size
+
             if len(scores) == len(candidates):
                 for cand, score in zip(candidates, scores):
                     cand['rerank_score'] = cand['similarity_score'] + (score / 10.0)
                 candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
-                
+
             return candidates[:top_k]
         except Exception as e:
             logger.warning(f"LLM reranking failed: {e}")

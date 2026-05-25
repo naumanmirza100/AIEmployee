@@ -215,13 +215,17 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
         managed_plaintext = managed.get_plaintext_key()
         if managed_plaintext:
             quota = _ensure_quota(company, agent_name)
-            # If company prefers free tokens and free quota isn't exhausted yet,
-            # fall through to the platform key path to preserve managed tokens.
-            prefer_free = quota.preferred_pool == 'free' and not quota.is_exhausted
-            if not prefer_free:
+            preferred_pool = quota.preferred_pool  # 'free' | 'managed' | None
+
+            # If user explicitly chose the free pool, skip managed entirely —
+            # never auto-switch to managed when free is exhausted.
+            if preferred_pool != 'free':
                 if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
-                    # Managed limit hit — fall through to free tokens as automatic fallback.
-                    # Only raise if free tokens are also unavailable (handled below).
+                    if preferred_pool == 'managed':
+                        # User explicitly chose managed and its quota is exhausted →
+                        # hard-block; do NOT fall back to free/platform automatically.
+                        raise ManagedQuotaExhausted()
+                    # No explicit preference → try platform/free as fallback
                     managed_exhausted = True
                 else:
                     return CallContext(
