@@ -579,6 +579,8 @@ urlpatterns = [
     re_path(r'^admin/companies-list/?$', admin_api_keys.list_companies_simple, name='admin_list_companies'),  # GET
 
     # AI SDR Agent endpoints
+    re_path(r'^sdr/scheduler-status/?$', sdr_api.sdr_scheduler_status, name='sdr_scheduler_status'),  # GET
+    re_path(r'^sdr/leads/bulk-delete/?$', sdr_api.sdr_bulk_delete_leads, name='sdr_bulk_delete_leads'),  # POST
     re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET
     re_path(r'^sdr/analytics/?$', sdr_api.sdr_analytics, name='sdr_analytics'),  # GET
     re_path(r'^sdr/analytics/send-summary/?$', sdr_api.sdr_send_daily_summary, name='sdr_send_daily_summary'),  # POST

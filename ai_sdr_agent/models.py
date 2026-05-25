@@ -110,6 +110,12 @@ class SDRLead(models.Model):
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='new')
     source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default='manual')
 
+
+    # Email validity — set to True when a hard bounce is detected
+    email_bounced        = models.BooleanField(default=False)
+    email_bounced_at     = models.DateTimeField(null=True, blank=True)
+    email_bounce_reason  = models.CharField(max_length=500, blank=True)
+
     qualified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -353,6 +359,10 @@ class SDRMeeting(models.Model):
     scheduling_email_sent_at = models.DateTimeField(null=True, blank=True)
     reminder_sent_at = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # Timezone — IANA name of the lead's local timezone (e.g. "America/New_York")
+    # Used to display scheduled_at in the lead's local time in emails and UI.
+    lead_timezone = models.CharField(max_length=100, default='UTC', blank=True)
 
     # Public booking link — shared with the lead so they can self-schedule
     booking_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)

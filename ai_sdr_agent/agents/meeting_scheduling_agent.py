@@ -15,11 +15,122 @@ import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Timezone utility — maps location strings to IANA timezone names
+# ---------------------------------------------------------------------------
+_TZ_KEYWORD_MAP = {
+    # North America
+    'new york': 'America/New_York',   'boston': 'America/New_York',
+    'washington': 'America/New_York', 'miami': 'America/New_York',
+    'atlanta': 'America/New_York',    'philadelphia': 'America/New_York',
+    'chicago': 'America/Chicago',     'dallas': 'America/Chicago',
+    'houston': 'America/Chicago',     'austin': 'America/Chicago',
+    'denver': 'America/Denver',       'salt lake': 'America/Denver',
+    'los angeles': 'America/Los_Angeles', 'san francisco': 'America/Los_Angeles',
+    'seattle': 'America/Los_Angeles', 'portland': 'America/Los_Angeles',
+    'san diego': 'America/Los_Angeles', 'silicon valley': 'America/Los_Angeles',
+    'phoenix': 'America/Phoenix',     'arizona': 'America/Phoenix',
+    'toronto': 'America/Toronto',     'montreal': 'America/Toronto',
+    'vancouver': 'America/Vancouver', 'calgary': 'America/Edmonton',
+    'canada': 'America/Toronto',      'mexico': 'America/Mexico_City',
+    'united states': 'America/New_York', 'usa': 'America/New_York',
+    # South America
+    'brazil': 'America/Sao_Paulo',    'sao paulo': 'America/Sao_Paulo',
+    'argentina': 'America/Argentina/Buenos_Aires',
+    # Europe
+    'london': 'Europe/London',        'united kingdom': 'Europe/London',
+    'uk': 'Europe/London',            'england': 'Europe/London',
+    'ireland': 'Europe/Dublin',       'dublin': 'Europe/Dublin',
+    'paris': 'Europe/Paris',          'france': 'Europe/Paris',
+    'berlin': 'Europe/Berlin',        'germany': 'Europe/Berlin',
+    'amsterdam': 'Europe/Amsterdam',  'netherlands': 'Europe/Amsterdam',
+    'madrid': 'Europe/Madrid',        'spain': 'Europe/Madrid',
+    'rome': 'Europe/Rome',            'italy': 'Europe/Rome',
+    'stockholm': 'Europe/Stockholm',  'sweden': 'Europe/Stockholm',
+    'oslo': 'Europe/Oslo',            'norway': 'Europe/Oslo',
+    'zurich': 'Europe/Zurich',        'switzerland': 'Europe/Zurich',
+    'warsaw': 'Europe/Warsaw',        'poland': 'Europe/Warsaw',
+    'moscow': 'Europe/Moscow',        'russia': 'Europe/Moscow',
+    'ukraine': 'Europe/Kiev',
+    # Middle East & Africa
+    'dubai': 'Asia/Dubai',            'uae': 'Asia/Dubai',
+    'riyadh': 'Asia/Riyadh',         'saudi': 'Asia/Riyadh',
+    'istanbul': 'Europe/Istanbul',    'turkey': 'Europe/Istanbul',
+    'tel aviv': 'Asia/Jerusalem',     'israel': 'Asia/Jerusalem',
+    'cairo': 'Africa/Cairo',          'egypt': 'Africa/Cairo',
+    'johannesburg': 'Africa/Johannesburg', 'south africa': 'Africa/Johannesburg',
+    'nairobi': 'Africa/Nairobi',      'kenya': 'Africa/Nairobi',
+    # South & Southeast Asia
+    'india': 'Asia/Kolkata',          'mumbai': 'Asia/Kolkata',
+    'delhi': 'Asia/Kolkata',          'bangalore': 'Asia/Kolkata',
+    'hyderabad': 'Asia/Kolkata',      'chennai': 'Asia/Kolkata',
+    'pakistan': 'Asia/Karachi',       'karachi': 'Asia/Karachi',
+    'lahore': 'Asia/Karachi',         'islamabad': 'Asia/Karachi',
+    'bangladesh': 'Asia/Dhaka',       'dhaka': 'Asia/Dhaka',
+    'singapore': 'Asia/Singapore',    'malaysia': 'Asia/Kuala_Lumpur',
+    'kuala lumpur': 'Asia/Kuala_Lumpur', 'indonesia': 'Asia/Jakarta',
+    'jakarta': 'Asia/Jakarta',        'thailand': 'Asia/Bangkok',
+    'bangkok': 'Asia/Bangkok',        'vietnam': 'Asia/Ho_Chi_Minh',
+    'philippines': 'Asia/Manila',     'manila': 'Asia/Manila',
+    # East Asia
+    'china': 'Asia/Shanghai',         'beijing': 'Asia/Shanghai',
+    'shanghai': 'Asia/Shanghai',      'shenzhen': 'Asia/Shanghai',
+    'hong kong': 'Asia/Hong_Kong',    'taiwan': 'Asia/Taipei',
+    'japan': 'Asia/Tokyo',            'tokyo': 'Asia/Tokyo',
+    'south korea': 'Asia/Seoul',      'seoul': 'Asia/Seoul',
+    # Oceania
+    'sydney': 'Australia/Sydney',     'melbourne': 'Australia/Melbourne',
+    'australia': 'Australia/Sydney',  'new zealand': 'Pacific/Auckland',
+    'auckland': 'Pacific/Auckland',
+}
+
+
+def guess_timezone_from_location(location: str) -> str:
+    """
+    Best-effort IANA timezone from a plain-text location string.
+    Returns 'UTC' if nothing matches.
+    """
+    if not location:
+        return 'UTC'
+    loc = location.lower()
+    for keyword, tz_name in _TZ_KEYWORD_MAP.items():
+        if keyword in loc:
+            try:
+                ZoneInfo(tz_name)   # validate it exists
+                return tz_name
+            except ZoneInfoNotFoundError:
+                pass
+    return 'UTC'
+
+
+def format_datetime_with_timezone(dt, tz_name: str) -> str:
+    """
+    Return a human-readable datetime string showing the lead's local time and UTC.
+    e.g. "Monday, June 10 2026 at 03:00 PM New York (08:00 PM UTC)"
+    """
+    if not dt:
+        return 'TBD — awaiting confirmation'
+    try:
+        if dt.tzinfo is None:
+            dt = timezone.make_aware(dt, ZoneInfo('UTC'))
+        tz_name = tz_name or 'UTC'
+        local_tz = ZoneInfo(tz_name)
+        dt_local = dt.astimezone(local_tz)
+        dt_utc   = dt.astimezone(ZoneInfo('UTC'))
+        city_label = tz_name.split('/')[-1].replace('_', ' ')
+        local_str = dt_local.strftime('%A, %B %d %Y at %I:%M %p')
+        utc_str   = dt_utc.strftime('%I:%M %p UTC')
+        return f'{local_str} {city_label} ({utc_str})'
+    except Exception:
+        # Fallback — plain UTC
+        return dt.strftime('%A, %B %d %Y at %I:%M %p UTC')
 
 _PREP_SYSTEM_PROMPT = (
     "You are an expert B2B sales strategist. "
@@ -723,6 +834,5 @@ Return exactly this JSON:
 
     @staticmethod
     def _format_meeting_time(meeting) -> str:
-        if meeting.scheduled_at:
-            return meeting.scheduled_at.strftime('%A, %B %d %Y at %I:%M %p UTC')
-        return 'TBD — awaiting confirmation'
+        tz_name = getattr(meeting, 'lead_timezone', None) or 'UTC'
+        return format_datetime_with_timezone(meeting.scheduled_at, tz_name)

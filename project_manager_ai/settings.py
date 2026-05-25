@@ -891,6 +891,7 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'crm_sync_agent.tasks.ping_crm_integrations',
         'schedule': 3600.0,
         'options': {'expires': 7200},
+    },
     # Audit log retention — weekly purge of rows older than the configured
     # window (default 730 days). Prevents unbounded growth.
     'hr-purge-audit-log': {

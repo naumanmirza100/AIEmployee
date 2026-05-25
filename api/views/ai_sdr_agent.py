@@ -13,6 +13,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -188,25 +189,71 @@ def leads_list(request):
         try:
             qs = SDRLead.objects.filter(company_user=company_user)
 
+            # ── Filters ───────────────────────────────────────────────
             search = request.GET.get('search', '').strip()
             if search:
                 qs = qs.filter(
                     Q(full_name__icontains=search)
+                    | Q(first_name__icontains=search)
+                    | Q(last_name__icontains=search)
                     | Q(company_name__icontains=search)
                     | Q(email__icontains=search)
                     | Q(job_title__icontains=search)
+                    | Q(company_location__icontains=search)
+                    | Q(company_industry__icontains=search)
                 )
 
-            temp = request.GET.get('temperature', '')
+            temp = request.GET.get('temperature', '').strip()
             if temp:
                 qs = qs.filter(temperature=temp)
 
-            status_f = request.GET.get('status', '')
+            status_f = request.GET.get('status', '').strip()
             if status_f:
                 qs = qs.filter(status=status_f)
 
-            leads = [_serialize_lead(l) for l in qs.select_related()[:200]]
-            return Response({'status': 'success', 'data': leads, 'stats': _lead_stats(company_user)})
+            source_f = request.GET.get('source', '').strip()
+            if source_f:
+                qs = qs.filter(source=source_f)
+
+            # ── Sorting ───────────────────────────────────────────────
+            SORT_MAP = {
+                'score_desc':      ['-score', '-created_at'],
+                'score_asc':       ['score',  '-created_at'],
+                'name_asc':        ['full_name'],
+                'name_desc':       ['-full_name'],
+                'created_desc':    ['-created_at'],
+                'created_asc':     ['created_at'],
+                'company_asc':     ['company_name'],
+            }
+            sort_by = request.GET.get('sort', 'score_desc')
+            ordering = SORT_MAP.get(sort_by, ['-score', '-created_at'])
+            qs = qs.order_by(*ordering)
+
+            # ── Pagination ────────────────────────────────────────────
+            try:
+                page      = max(1, int(request.GET.get('page', 1)))
+                page_size = min(100, max(5, int(request.GET.get('page_size', 25))))
+            except (ValueError, TypeError):
+                page, page_size = 1, 25
+
+            total_count = qs.count()
+            paginator   = Paginator(qs, page_size)
+            page_obj    = paginator.get_page(page)
+
+            leads = [_serialize_lead(l) for l in page_obj.object_list]
+            return Response({
+                'status':      'success',
+                'data':        leads,
+                'stats':       _lead_stats(company_user),
+                'pagination':  {
+                    'page':        page_obj.number,
+                    'page_size':   page_size,
+                    'total_count': total_count,
+                    'total_pages': paginator.num_pages,
+                    'has_next':    page_obj.has_next(),
+                    'has_prev':    page_obj.has_previous(),
+                },
+            })
         except Exception as exc:
             logger.error("List leads error: %s", exc)
             return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -215,12 +262,28 @@ def leads_list(request):
     try:
         d = request.data
         full_name = d.get('full_name') or f"{d.get('first_name', '')} {d.get('last_name', '')}".strip()
+
+        # ── Duplicate guard ──────────────────────────────────────────────────
+        email_input = (d.get('email') or '').strip().lower()
+        if email_input:
+            existing = SDRLead.objects.filter(
+                company_user=company_user, email__iexact=email_input
+            ).first()
+            if existing:
+                logger.info("Create lead DUPLICATE blocked — email=%s lead_id=%s", email_input, existing.id)
+                return Response({
+                    'status': 'duplicate',
+                    'message': f'A lead with email "{email_input}" already exists.',
+                    'data': _serialize_lead(existing),
+                }, status=200)
+        # ────────────────────────────────────────────────────────────────────
+
         lead = SDRLead.objects.create(
             company_user=company_user,
             first_name=d.get('first_name', ''),
             last_name=d.get('last_name', ''),
             full_name=full_name,
-            email=d.get('email', ''),
+            email=email_input or d.get('email', ''),
             phone=d.get('phone', ''),
             job_title=d.get('job_title', ''),
             company_name=d.get('company_name', ''),
@@ -404,15 +467,34 @@ def research_leads(request):
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
+            skipped_dupes = 0
+            # Pre-load existing emails for this company user to avoid N queries
+            existing_emails = set(
+                SDRLead.objects.filter(company_user=company_user)
+                .values_list('email', flat=True)
+            )
+            existing_emails_lower = {e.lower() for e in existing_emails if e}
+
             for ld in raw_leads:
                 full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+                lead_email = (ld.get('email') or '').strip().lower()
+
+                # ── Duplicate guard ──────────────────────────────────────────
+                if lead_email and lead_email in existing_emails_lower:
+                    logger.info("SDR [research] SKIPPING duplicate email=%s", lead_email)
+                    skipped_dupes += 1
+                    continue
+                if lead_email:
+                    existing_emails_lower.add(lead_email)   # prevent intra-batch dupes
+                # ─────────────────────────────────────────────────────────────
+
                 SDRLead.objects.create(
                     company_user=company_user,
                     icp_profile=icp,
                     first_name=ld.get('first_name', ''),
                     last_name=ld.get('last_name', ''),
                     full_name=full_name,
-                    email=ld.get('email', ''),
+                    email=lead_email or ld.get('email', ''),
                     phone=ld.get('phone', ''),
                     job_title=ld.get('job_title', ''),
                     seniority_level=ld.get('seniority_level', ''),
@@ -467,9 +549,10 @@ def research_leads(request):
 
             return Response({
                 'status': 'success',
-                'message': f'Found {created} leads, qualified {qualified}.',
+                'message': f'Found {created} leads, qualified {qualified}. Skipped {skipped_dupes} duplicates.',
                 'leads_created': created,
                 'leads_qualified': qualified,
+                'skipped_duplicates': skipped_dupes,
                 'source': job.source,
                 'stats': _lead_stats(company_user),
             })
@@ -505,7 +588,16 @@ def import_leads_csv(request):
         reader = csv.DictReader(io.StringIO(decoded))
 
         created = 0
+        skipped_dupes = 0
         errors = []
+
+        # Pre-load existing emails once to avoid per-row DB hits
+        existing_emails_lower = set(
+            e.lower()
+            for e in SDRLead.objects.filter(company_user=company_user)
+            .values_list('email', flat=True) if e
+        )
+
         for i, row in enumerate(reader, start=2):
             try:
                 full_name = (
@@ -515,13 +607,23 @@ def import_leads_csv(request):
                 )
                 raw_size = row.get('company_size', '').strip()
                 company_size = int(raw_size) if raw_size.isdigit() else None
+                row_email = (row.get('email') or '').strip().lower()
+
+                # ── Duplicate guard ──────────────────────────────────────────
+                if row_email and row_email in existing_emails_lower:
+                    skipped_dupes += 1
+                    logger.info("CSV import SKIPPING duplicate email=%s (row %d)", row_email, i)
+                    continue
+                if row_email:
+                    existing_emails_lower.add(row_email)   # prevent intra-file dupes
+                # ─────────────────────────────────────────────────────────────
 
                 SDRLead.objects.create(
                     company_user=company_user,
                     first_name=row.get('first_name', ''),
                     last_name=row.get('last_name', ''),
                     full_name=full_name,
-                    email=row.get('email', ''),
+                    email=row_email or row.get('email', ''),
                     phone=row.get('phone', ''),
                     job_title=row.get('job_title') or row.get('title', ''),
                     company_name=row.get('company_name') or row.get('company', ''),
@@ -539,8 +641,9 @@ def import_leads_csv(request):
 
         return Response({
             'status': 'success',
-            'message': f'Imported {created} leads.',
+            'message': f'Imported {created} leads. Skipped {skipped_dupes} duplicates.',
             'created': created,
+            'skipped_duplicates': skipped_dupes,
             'errors': errors[:5],
         })
     except Exception as exc:
@@ -549,6 +652,62 @@ def import_leads_csv(request):
 
 
 # ==========================================================================
+# Bulk lead operations
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_bulk_delete_leads(request):
+    """
+    Bulk-delete leads by ID list.
+    Body: { "ids": [1, 2, 3, ...] }
+    Only deletes leads that belong to the authenticated company_user.
+    """
+    company_user = request.user
+    try:
+        ids = request.data.get('ids', [])
+        if not isinstance(ids, list) or not ids:
+            return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list.'}, status=400)
+
+        # Safety: only delete leads that belong to this company_user
+        qs = SDRLead.objects.filter(company_user=company_user, id__in=ids)
+        deleted_count, _ = qs.delete()
+
+        return Response({
+            'status': 'success',
+            'message': f'Deleted {deleted_count} lead(s).',
+            'deleted': deleted_count,
+        })
+    except Exception as exc:
+        logger.error("SDR bulk delete error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Scheduler health check
+# ==========================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_scheduler_status(request):
+    """
+    Health-check endpoint — returns whether the embedded APScheduler is running
+    and when each job is next scheduled.
+
+    GET /api/sdr/scheduler-status/
+    Response:
+      { "running": true, "jobs": [{"id": "...", "name": "...", "next_run": "..."}, ...] }
+    """
+    try:
+        from ai_sdr_agent.scheduler import scheduler_status
+        return Response({'status': 'success', 'data': scheduler_status()})
+    except Exception as exc:
+        logger.error("SDR scheduler status error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
 # Dashboard overview stats
 # ==========================================================================
 
@@ -716,6 +875,7 @@ def _serialize_meeting(m: SDRMeeting) -> dict:
         'status': m.status,
         'calendar_link': m.calendar_link,
         'prep_notes': m.prep_notes or {},
+        'lead_timezone': m.lead_timezone or 'UTC',
         'scheduling_email_sent_at': m.scheduling_email_sent_at.isoformat() if m.scheduling_email_sent_at else None,
         'reminder_sent_at': m.reminder_sent_at.isoformat() if m.reminder_sent_at else None,
         'confirmed_at': m.confirmed_at.isoformat() if m.confirmed_at else None,
@@ -1022,11 +1182,13 @@ def sdr_enroll_leads(request, campaign_id):
 
         enrolled = skipped = 0
         skipped_reasons = []
+        cross_campaign_warnings = []
+
         for lead in leads:
             # Dedup by lead ID (same object re-enrolled)
             if SDRCampaignEnrollment.objects.filter(campaign=campaign, lead=lead).exists():
                 skipped += 1
-                skipped_reasons.append(f"{lead.display_name}: already enrolled")
+                skipped_reasons.append(f"{lead.display_name}: already enrolled in this campaign")
                 continue
 
             # Dedup by email address — prevents two different lead records with the
@@ -1038,13 +1200,33 @@ def sdr_enroll_leads(request, campaign_id):
                 status__in=['active', 'replied'],
             ).exclude(lead=lead).exists():
                 skipped += 1
-                skipped_reasons.append(f"{lead.display_name}: email {lead_email} already enrolled in this campaign")
+                skipped_reasons.append(f"{lead.display_name}: email already enrolled in this campaign")
                 logger.warning(
                     "SDR [ENROLL-DEDUP] skipping lead=%d (%s) email=%s — "
                     "another lead with the same email is already active in campaign=%d",
                     lead.id, lead.display_name, lead_email, campaign.id,
                 )
                 continue
+
+            # ── Cross-campaign warning ───────────────────────────────────────
+            # Don't block enrollment, but warn if lead is active in other campaigns.
+            # The scheduler's daily guard will prevent them receiving more than
+            # 1 email per day across all campaigns.
+            if lead_email:
+                other_active = SDRCampaignEnrollment.objects.filter(
+                    lead__email__iexact=lead_email,
+                    status__in=['active', 'replied'],
+                    campaign__company_user=company_user,
+                ).exclude(campaign=campaign).select_related('campaign')
+                if other_active.exists():
+                    other_names = ', '.join(
+                        e.campaign.name for e in other_active[:3]
+                    )
+                    cross_campaign_warnings.append(
+                        f"{lead.display_name} is also active in: {other_names} "
+                        f"— will receive max 1 email/day total"
+                    )
+            # ─────────────────────────────────────────────────────────────────
 
             next_action = None
             if first_step:
@@ -1072,6 +1254,8 @@ def sdr_enroll_leads(request, campaign_id):
         }
         if skipped_reasons:
             resp['skipped_reasons'] = skipped_reasons
+        if cross_campaign_warnings:
+            resp['warnings'] = cross_campaign_warnings
         return Response(resp)
     except Exception as exc:
         logger.error("Enroll leads error: %s", exc)
@@ -1198,6 +1382,8 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
         lead.save(update_fields=['status'])
         campaign.replies_received = (campaign.replies_received or 0) + 1
 
+        from ai_sdr_agent.agents.meeting_scheduling_agent import guess_timezone_from_location
+        lead_tz = guess_timezone_from_location(lead.company_location or '')
         meeting, created = SDRMeeting.objects.get_or_create(
             enrollment=enrollment,
             defaults={
@@ -1207,6 +1393,7 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
                 'reply_snippet': reply_text[:500],
                 'calendar_link': campaign.calendar_link or '',
                 'status': 'pending',
+                'lead_timezone': lead_tz,
             },
         )
         if created:
@@ -1466,18 +1653,34 @@ def sdr_meetings_list(request):
 
     if request.method == 'GET':
         try:
-            status_filter  = request.GET.get('status', '')
-            campaign_id    = request.GET.get('campaign_id', '')
+            status_filter  = request.GET.get('status', '').strip()
+            campaign_id    = request.GET.get('campaign_id', '').strip()
             search         = request.GET.get('search', '').strip()
+            temperature_f  = request.GET.get('temperature', '').strip()
             # active_only=true (default) → strictly active campaigns only
             # active_only=false          → all campaigns including ended ones
             active_only    = request.GET.get('active_only', 'true').lower() != 'false'
-            page           = max(1, int(request.GET.get('page', 1)))
-            page_size      = min(50, max(1, int(request.GET.get('page_size', 20))))
+            try:
+                page      = max(1, int(request.GET.get('page', 1)))
+                page_size = min(100, max(5, int(request.GET.get('page_size', 20))))
+            except (ValueError, TypeError):
+                page, page_size = 1, 20
+
+            # Sorting
+            MEET_SORT_MAP = {
+                'created_desc':   ['-created_at'],
+                'created_asc':    ['created_at'],
+                'scheduled_asc':  ['scheduled_at'],
+                'scheduled_desc': ['-scheduled_at'],
+                'score_desc':     ['-lead__score', '-created_at'],
+                'name_asc':       ['lead__full_name'],
+            }
+            sort_by  = request.GET.get('sort', 'created_desc')
+            ordering = MEET_SORT_MAP.get(sort_by, ['-created_at'])
 
             qs = SDRMeeting.objects.filter(company_user=company_user).select_related(
                 'lead', 'enrollment', 'enrollment__campaign'
-            ).order_by('-created_at')
+            ).order_by(*ordering)
 
             # Always exclude orphaned meetings (campaign or enrollment was deleted)
             qs = qs.filter(enrollment__isnull=False, enrollment__campaign__isnull=False)
@@ -1485,13 +1688,15 @@ def sdr_meetings_list(request):
             # active_only → strictly active campaigns; False → all existing campaigns
             if active_only:
                 qs = qs.filter(enrollment__campaign__status='active')
-            # else: show all, but deleted-campaign meetings are still excluded above
 
             if status_filter:
                 qs = qs.filter(status=status_filter)
 
             if campaign_id:
                 qs = qs.filter(enrollment__campaign_id=campaign_id)
+
+            if temperature_f:
+                qs = qs.filter(lead__temperature=temperature_f)
 
             if search:
                 qs = qs.filter(
@@ -1500,18 +1705,21 @@ def sdr_meetings_list(request):
                     | Q(lead__last_name__icontains=search)
                     | Q(lead__email__icontains=search)
                     | Q(lead__company_name__icontains=search)
+                    | Q(lead__job_title__icontains=search)
                 )
 
-            total = qs.count()
-            offset = (page - 1) * page_size
-            meetings_page = qs[offset: offset + page_size]
+            total        = qs.count()
+            paginator    = Paginator(qs, page_size)
+            page_obj     = paginator.get_page(page)
 
             return Response({
-                'results': [_serialize_meeting(m) for m in meetings_page],
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': max(1, (total + page_size - 1) // page_size),
+                'results':     [_serialize_meeting(m) for m in page_obj.object_list],
+                'total':       total,
+                'page':        page_obj.number,
+                'page_size':   page_size,
+                'total_pages': paginator.num_pages,
+                'has_next':    page_obj.has_next(),
+                'has_prev':    page_obj.has_previous(),
             })
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)

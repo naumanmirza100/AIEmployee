@@ -538,6 +538,18 @@ Rules:
             campaign.id, campaign.name, enrollment.current_step, len(steps),
         )
 
+        # Guard: never send to a lead whose email has hard-bounced
+        if getattr(lead, 'email_bounced', False):
+            logger.warning(
+                "SDR [BOUNCED] enrollment=%d lead=%s email=%s — "
+                "email is bounced, marking enrollment bounced and skipping",
+                enrollment.id, lead.display_name, lead.email,
+            )
+            if enrollment.status not in ('bounced', 'unsubscribed', 'completed'):
+                enrollment.status = 'bounced'
+                enrollment.save(update_fields=['status'])
+            return {'status': 'bounced', 'lead': lead.display_name}
+
         if not steps:
             logger.warning(
                 "SDR [process-enrollment] enrollment=%d — NO STEPS in campaign %d",
