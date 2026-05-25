@@ -1906,10 +1906,18 @@ class AgentTokenQuota(models.Model):
     byok_token_limit = models.BigIntegerField(default=0)
     # Which token pool to draw from when both free and managed are available.
     # 'managed' is the default (managed key takes priority, saves free tokens).
+    # 'none' = company has explicitly disabled all LLM calls for this agent.
     preferred_pool = models.CharField(
         max_length=10,
-        choices=[('free', 'Free Platform Tokens'), ('managed', 'Managed Key Tokens')],
+        choices=[
+            ('free',    'Free Platform Tokens'),
+            ('managed', 'Managed Key Tokens'),
+            ('byok',    'BYOK Key'),
+            ('none',    'Disabled (no key)'),
+        ],
         default='managed',
+        blank=True,
+        null=True,
     )
     byok_tokens_info = models.BigIntegerField(
         default=0,

@@ -39,12 +39,14 @@ const modeBadge = (a) => {
 
   // Mirrors actualPool logic — no auto-switch when a pool is exhausted
   let active;
-  if (p === 'free') active = freeExhausted ? 'free_exhausted' : 'free';
+  if (p === 'none') active = 'disabled';
+  else if (p === 'free') active = freeExhausted ? 'free_exhausted' : 'free';
   else if (p === 'managed' && hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
   else if (a.byok) active = byokCapHit ? 'byok_exhausted' : 'byok';
   else if (hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
   else active = freeExhausted ? 'free_exhausted' : 'platform';
 
+  if (active === 'disabled')           return { label: 'Disabled',             class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
   if (active === 'byok_exhausted')     return { label: 'BYOK Cap Reached',     class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'managed_exhausted')  return { label: 'Managed Quota Full',   class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'free_exhausted')     return { label: 'Free Tokens Exhausted',class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
@@ -192,6 +194,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
   const hasManagedKey = agent.managed?.status === 'active';
   const actualPool = (() => {
     const p = q?.preferred_pool;
+    if (p === 'none') return 'disabled';
     if (p === 'free') return 'free';
     if (p === 'managed' && hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
     if (agent.byok) return q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit ? 'blocked' : 'byok';
@@ -324,16 +327,26 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
               <span className="text-[10px] text-white/25 uppercase tracking-wide shrink-0">Using:</span>
               <div className="flex flex-wrap gap-1">
                 {agent.byok && (
-                  <button
-                    onClick={() => onSetPool(agent.agent_name, 'byok')}
-                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
-                      actualPool === 'byok'
-                        ? 'bg-blue-600/20 border-blue-500/50 text-blue-200'
-                        : 'border-white/10 text-white/40 hover:border-blue-500/30 hover:text-blue-300'
-                    }`}
-                  >
-                    <Lock className="w-2.5 h-2.5 inline mr-0.5 mb-[2px]" />BYOK{actualPool === 'byok' && ' ●'}
-                  </button>
+                  (() => {
+                    const byokCapHit = q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit;
+                    const isByokActive = actualPool === 'byok' || actualPool === 'blocked' && byokCapHit;
+                    return (
+                      <button
+                        onClick={() => onSetPool(agent.agent_name, 'byok')}
+                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                          byokCapHit
+                            ? 'cursor-not-allowed border-red-500/40 bg-red-500/8 text-red-400/80'
+                            : isByokActive
+                              ? 'bg-blue-600/20 border-blue-500/50 text-blue-200'
+                              : 'border-white/10 text-white/40 hover:border-blue-500/30 hover:text-blue-300'
+                        }`}
+                        title={byokCapHit ? 'BYOK cap reached — increase or remove the cap to continue.' : 'Use your own API key (BYOK)'}
+                      >
+                        <Lock className="w-2.5 h-2.5 inline mr-0.5 mb-[2px]" />
+                        {byokCapHit ? 'BYOK · Cap hit ●' : <>BYOK{isByokActive && ' ●'}</>}
+                      </button>
+                    );
+                  })()
                 )}
                 {q && q.included_tokens > 0 && (
                   <button
@@ -374,9 +387,22 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     <Activity className="w-2.5 h-2.5 inline mr-0.5" />Platform
                   </span>
                 )}
-                {q?.managed_is_exhausted && (
-                  <span className="text-[9px] text-red-400/80 self-center" title="Managed quota exhausted — calls are blocked. Contact your admin to top up, or add a BYOK key.">⛔ blocked</span>
+                {q?.managed_is_exhausted && actualPool === 'blocked' && (
+                  <span className="text-[9px] text-red-400/80 self-center" title="Managed quota exhausted — calls are blocked. Contact your admin to top up, or add a BYOK key.">blocked</span>
                 )}
+                {/* No Key / Disable option */}
+                <button
+                  onClick={() => onSetPool(agent.agent_name, actualPool === 'disabled' ? 'managed' : 'none')}
+                  title={actualPool === 'disabled' ? 'Agent is disabled — click to re-enable' : 'Disable this agent (no LLM calls will be made)'}
+                  className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                    actualPool === 'disabled'
+                      ? 'bg-gray-500/20 border-gray-400/50 text-gray-300'
+                      : 'border-white/10 text-white/25 hover:border-red-500/30 hover:text-red-400/70'
+                  }`}
+                >
+                  <XCircle className="w-2.5 h-2.5 inline mr-0.5 mb-[2px]" />
+                  {actualPool === 'disabled' ? 'Disabled ●' : 'No key'}
+                </button>
               </div>
             </div>
           </div>

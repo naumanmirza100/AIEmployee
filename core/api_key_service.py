@@ -70,6 +70,14 @@ class NoKeyAvailable(KeyServiceError):
     )
 
 
+class AgentDisabled(KeyServiceError):
+    reason = "agent_disabled"
+    user_message = (
+        "This agent has been disabled by your account settings. "
+        "Go to API Keys settings and select an active key pool to re-enable it."
+    )
+
+
 class InvalidAgent(KeyServiceError):
     reason = "invalid_agent"
     user_message = "Unknown agent."
@@ -164,6 +172,7 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     """Pick the key to use for one LLM call. Raises on hard-block.
 
     Strict preference order — NO automatic switching between pools:
+      0. preferred_pool == 'none' → AgentDisabled (hard-block immediately)
       1. Active BYOK key (unless preferred_pool is 'free' or 'managed')
          → ByokCapReached if user-set token cap is exhausted
       2. Active managed key (unless preferred_pool is 'free')
@@ -179,6 +188,11 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     """
     if agent_name not in VALID_AGENTS:
         raise InvalidAgent()
+
+    # Step 0 — explicitly disabled by the company
+    _pool_check = AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).values_list('preferred_pool', flat=True).first()
+    if _pool_check == 'none':
+        raise AgentDisabled()
 
     # Step 1 — BYOK (unless user explicitly prefers free or managed pool)
     byok = (
