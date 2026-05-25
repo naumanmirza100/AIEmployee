@@ -21,6 +21,7 @@ from django.utils import timezone
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser
+from core.api_key_service import KeyServiceError
 from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
 from reply_draft_agent.models import ReplyDraft, InboxEmail, InboxAttachment, ReplyDraftAttachment
@@ -611,6 +612,8 @@ def dashboard(request):
                 'recent_drafts': [_serialize_draft(d) for d in recent_drafts],
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("reply_draft dashboard failed")
         return Response(
@@ -897,6 +900,8 @@ def download_inbox_attachment(request, email_id, attachment_id):
     except (FileNotFoundError, Http404):
         return Response({'status': 'error', 'message': 'File missing on storage'},
                         status=status.HTTP_404_NOT_FOUND)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception('download_inbox_attachment failed')
         return Response({'status': 'error', 'message': str(e)},
@@ -1086,6 +1091,8 @@ def fetch_inbox_attachments(request, email_id):
             'message': f'IMAP error: {str(e)}',
             'error': 'imap_error',
         }, status=status.HTTP_502_BAD_GATEWAY)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception('fetch_inbox_attachments failed for email %s', email_id)
         return Response({'status': 'error', 'message': str(e)},
@@ -1849,6 +1856,8 @@ def create_reply_account(request):
             'message': f'{email} is not available — please use a different mailbox.',
             'error': 'email_already_used_by_another_company',
         }, status=status.HTTP_409_CONFLICT)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception('create_reply_account failed')
         return Response(
@@ -1947,6 +1956,8 @@ def delete_reply_account(request):
                 ),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception('delete_reply_account failed')
         return Response(
@@ -2369,6 +2380,8 @@ def download_draft_attachment(request, draft_id, attachment_id):
     except (FileNotFoundError, Http404):
         return Response({'status': 'error', 'message': 'File missing on storage'},
                         status=status.HTTP_404_NOT_FOUND)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception('download_draft_attachment failed')
         return Response({'status': 'error', 'message': str(e)},

@@ -37,6 +37,7 @@ from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings as django_settings
 from core.models import CompanyUser
+from core.api_key_service import KeyServiceError
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
@@ -1187,6 +1188,8 @@ def project_pilot(request):
         logger.info(f"Returning project_pilot response with {len(action_results)} action results")
         return Response(data, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("project_pilot failed")
         return Response(
@@ -1399,6 +1402,8 @@ def task_prioritization(request):
 
         return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("task_prioritization failed")
         return Response(
@@ -1562,6 +1567,8 @@ def generate_subtasks(request):
         result["skipped_count"] = skipped_count
         return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("generate_subtasks failed")
         return Response(
@@ -1697,6 +1704,8 @@ def timeline_gantt(request):
 
         return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("timeline_gantt failed")
         return Response(
@@ -2074,6 +2083,8 @@ def knowledge_qa(request):
             "session_id": session_id  # Return session_id for frontend to use
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("knowledge_qa failed")
         return Response(
@@ -2278,6 +2289,8 @@ def pm_generate_graph(request):
                 'insights': result.get('insights', ''),
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("pm_generate_graph failed")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2311,6 +2324,8 @@ def list_knowledge_qa_chats(request):
                 'timestamp': chat.updated_at.isoformat(),
             })
         return Response({'status': 'success', 'data': result})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_knowledge_qa_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2351,6 +2366,8 @@ def create_knowledge_qa_chat(request):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_knowledge_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2396,6 +2413,8 @@ def update_knowledge_qa_chat(request, chat_id):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_knowledge_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2413,6 +2432,8 @@ def delete_knowledge_qa_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_knowledge_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2446,6 +2467,8 @@ def list_project_pilot_chats(request):
                 'timestamp': chat.updated_at.isoformat(),
             })
         return Response({'status': 'success', 'data': result})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_project_pilot_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2486,6 +2509,8 @@ def create_project_pilot_chat(request):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_project_pilot_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2531,6 +2556,8 @@ def update_project_pilot_chat(request, chat_id):
                 'timestamp': chat.updated_at.isoformat(),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_project_pilot_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2548,6 +2575,8 @@ def delete_project_pilot_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_project_pilot_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2709,6 +2738,8 @@ def create_project_manual(request):
             }
         }, status=status.HTTP_201_CREATED)
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_project_manual failed")
         return Response({
@@ -2861,6 +2892,8 @@ def create_task_manual(request):
             }
         }, status=status.HTTP_201_CREATED)
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_task_manual failed")
         return Response({
@@ -2903,6 +2936,8 @@ def get_available_users(request):
             'data': available_users
         }, status=status.HTTP_200_OK)
     
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_available_users failed")
         return Response({
@@ -2991,6 +3026,8 @@ def _extract_text_from_file(file):
 
     except ValueError:
         raise  # Re-raise validation errors as-is
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception(f"Error extracting text from file: {file.name}")
         raise ValueError(f"Failed to extract text from file. Please ensure the file is not corrupted.")
@@ -3543,6 +3580,8 @@ def project_pilot_from_file(request):
             }
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("project_pilot_from_file failed")
         return Response(
@@ -3637,6 +3676,8 @@ def daily_standup(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("daily_standup failed")
         return Response(
@@ -3677,6 +3718,8 @@ def project_health_score(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("project_health_score failed")
         return Response(
@@ -3715,6 +3758,8 @@ def project_status_report(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("project_status_report failed")
         return Response(
@@ -3783,6 +3828,8 @@ def meeting_notes(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("meeting_notes failed")
         return Response(
@@ -3846,6 +3893,8 @@ def workflow_suggest(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("workflow_suggest failed")
         return Response(
@@ -3907,6 +3956,8 @@ def calendar_schedule(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("calendar_schedule failed")
         return Response(
@@ -3986,6 +4037,8 @@ def scan_notifications(request):
             }
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("scan_notifications failed")
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4029,6 +4082,8 @@ def list_notifications(request):
             }
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -4057,6 +4112,8 @@ def mark_notifications_read(request):
             "data": {"marked_read": count}
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -4091,6 +4148,8 @@ def team_performance(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("team_performance failed")
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4159,6 +4218,8 @@ def time_estimation(request):
             "data": result,
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("time_estimation failed")
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4186,6 +4247,8 @@ def _send_meeting_email(recipient_email, subject, body_html, ics_content=None):
             email.attach('meeting.ics', ics_content, 'text/calendar; method=REQUEST')
 
         email.send(fail_silently=True)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.warning(f"Failed to send meeting email to {recipient_email}: {e}")
 
@@ -4578,6 +4641,8 @@ def meeting_schedule(request):
             }
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         import traceback
         logger.exception("meeting_schedule failed")
@@ -4727,6 +4792,8 @@ def meeting_respond(request):
             }
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("meeting_respond failed")
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4768,6 +4835,8 @@ def meeting_list(request):
             }
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("meeting_list failed")
         return Response({"status": "error", "message": "An internal error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4800,6 +4869,8 @@ def list_meeting_scheduler_chats(request):
         offset = max(int(request.GET.get('offset', 0)), 0)
         chats = PMMeetingSchedulerChat.objects.filter(company_user=request.user).prefetch_related('messages').order_by('-updated_at')[offset:offset + limit]
         return Response({'status': 'success', 'data': [_serialize_meeting_chat(c) for c in chats]})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_meeting_scheduler_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4820,6 +4891,8 @@ def create_meeting_scheduler_chat(request):
             )
         chat.refresh_from_db()
         return Response({'status': 'success', 'data': _serialize_meeting_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_meeting_scheduler_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4844,6 +4917,8 @@ def update_meeting_scheduler_chat(request, chat_id):
             )
         chat.refresh_from_db()
         return Response({'status': 'success', 'data': _serialize_meeting_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_meeting_scheduler_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4859,6 +4934,8 @@ def delete_meeting_scheduler_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_meeting_scheduler_chat error")
         return Response({'status': 'error', 'message': 'An internal error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4899,6 +4976,8 @@ def list_audit_logs(request):
             'status': 'success',
             'data': {'logs': data, 'total': total},
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_audit_logs error")
         return Response({'status': 'error', 'message': 'An internal error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4922,6 +5001,8 @@ def pm_health_check(request):
         from project_manager_agent.models import ScheduledMeeting
         ScheduledMeeting.objects.count()
         checks['database'] = {'status': 'ok', 'latency_ms': round((_time.time() - _db_start) * 1000)}
+    except KeyServiceError:
+        raise
     except Exception as e:
         checks['database'] = {'status': 'error', 'error': str(type(e).__name__)}
 
@@ -4935,6 +5016,8 @@ def pm_health_check(request):
             'model': getattr(django_settings, 'GROQ_MODEL', 'unknown'),
             'api_key_configured': bool(api_key),
         }
+    except KeyServiceError:
+        raise
     except Exception as e:
         checks['llm'] = {'status': 'error', 'error': str(type(e).__name__)}
 
@@ -4943,6 +5026,8 @@ def pm_health_check(request):
         from project_manager_agent.ai_agents import AgentRegistry
         registered = list(AgentRegistry._agents.keys()) if hasattr(AgentRegistry, '_agents') else []
         checks['agents'] = {'status': 'ok', 'registered': len(registered), 'names': registered}
+    except KeyServiceError:
+        raise
     except Exception as e:
         checks['agents'] = {'status': 'error', 'error': str(type(e).__name__)}
 

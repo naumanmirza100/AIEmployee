@@ -62,6 +62,11 @@ def _send_meeting_reminders():
     return send_meeting_reminders_impl()
 
 
+def _send_daily_analytics():
+    from ai_sdr_agent.tasks import send_daily_analytics_impl
+    return send_daily_analytics_impl()
+
+
 def start_scheduler():
     """Start the embedded scheduler. Idempotent — safe to call multiple times."""
     global _started
@@ -71,11 +76,12 @@ def start_scheduler():
         _started = True
 
     jobs = [
-        ('send_due_steps',      _send_due_steps,          300,  30),   # every 5 min,  first in 30s
-        ('check_inbox',         _check_inbox,             300,  60),   # every 5 min,  first in 60s
-        ('auto_start',          _auto_start,              900,  90),   # every 15 min, first in 90s
-        ('auto_complete',       _auto_complete,           3600, 120),  # every 60 min, first in 120s
-        ('meeting_reminders',   _send_meeting_reminders,  3600, 150),  # every 60 min, first in 150s
+        ('send_due_steps',      _send_due_steps,          300,   30),   # every 5 min,   first in 30s
+        ('check_inbox',         _check_inbox,             300,   60),   # every 5 min,   first in 60s
+        ('auto_start',          _auto_start,              900,   90),   # every 15 min,  first in 90s
+        ('auto_complete',       _auto_complete,           3600,  120),  # every 60 min,  first in 120s
+        ('meeting_reminders',   _send_meeting_reminders,  3600,  150),  # every 60 min,  first in 150s
+        ('daily_analytics',     _send_daily_analytics,    86400, 180),  # every 24 hours, first in 3 min
     ]
 
     for name, fn, interval, delay in jobs:

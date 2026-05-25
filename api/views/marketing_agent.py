@@ -33,6 +33,7 @@ from marketing_agent.models import (
 )
 from marketing_agent.services.email_service import EmailService
 from project_manager_agent.ai_agents.agents_registry import AgentRegistry
+from core.api_key_service import KeyServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ def verify_imap_credentials(host, port, use_ssl, username, password):
         return False, f'Connection to {host}:{port} timed out. Check the host/port and that the server is reachable.'
     except (OSError, socket.gaierror) as e:
         return False, f'Could not reach IMAP server {host}: {e}'
+    except KeyServiceError:
+        raise
     except Exception as e:
         return False, f'Unexpected IMAP error: {type(e).__name__}: {e}'
 
@@ -194,6 +197,8 @@ def marketing_dashboard(request):
             }
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("marketing_dashboard failed")
         return Response(
@@ -253,6 +258,8 @@ def list_campaigns(request):
             }
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_campaigns failed")
         return Response(
@@ -497,6 +504,8 @@ def get_campaign(request, campaign_id):
             'data': data
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_campaign failed")
         return Response(
@@ -567,6 +576,8 @@ def create_campaign(request):
             }
         }, status=status.HTTP_201_CREATED)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_campaign failed")
         return Response(
@@ -637,6 +648,8 @@ def update_campaign(request, campaign_id):
             'message': 'Campaign updated successfully',
             'data': {'campaign_id': campaign.id}
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_campaign failed")
         return Response(
@@ -666,6 +679,8 @@ def campaign_stop(request, campaign_id):
             'message': f'Campaign "{campaign.name}" has been stopped successfully.',
             'data': {'campaign_id': campaign.id, 'status': campaign.status}
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("campaign_stop failed")
         return Response(
@@ -695,6 +710,8 @@ def campaign_delete(request, campaign_id):
             'message': f'Campaign "{name}" has been deleted successfully.',
             'data': {}
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("campaign_delete failed")
         return Response(
@@ -735,6 +752,8 @@ def list_campaign_leads(request, campaign_id):
                 'limit': limit,
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_campaign_leads failed")
         return Response(
@@ -784,6 +803,8 @@ def add_campaign_lead(request, campaign_id):
             'message': 'Lead added successfully',
             'data': {'lead_id': lead.id}
         }, status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("add_campaign_lead failed")
         return Response(
@@ -838,6 +859,8 @@ def update_campaign_lead(request, campaign_id, lead_id):
             'message': 'Lead updated successfully',
             'data': {'lead_id': lead.id}
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_campaign_lead failed")
         return Response(
@@ -867,6 +890,8 @@ def delete_campaign_lead(request, campaign_id, lead_id):
             'message': message,
             'data': {}
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_campaign_lead failed")
         return Response(
@@ -991,6 +1016,8 @@ def upload_campaign_leads(request, campaign_id):
             'message': f'Successfully added {created_count} lead(s) to the campaign.',
             'data': {'created_count': created_count}
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("upload_campaign_leads failed")
         return Response(
@@ -1020,6 +1047,8 @@ def export_campaign_leads(request, campaign_id):
                 lead.status, lead.source or ''
             ])
         return response
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("export_campaign_leads failed")
         return Response(
@@ -1113,10 +1142,9 @@ def marketing_qa(request):
             'data': result
         }, status=status.HTTP_200_OK)
 
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.exception("marketing_qa failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1166,10 +1194,9 @@ def market_research(request):
             'data': result
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.exception("market_research failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1249,10 +1276,9 @@ def outreach_campaign(request):
             'data': result
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.exception("outreach_campaign failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1317,6 +1343,8 @@ def list_documents(request):
                 },
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_documents failed")
         return Response(
@@ -1353,6 +1381,8 @@ def document_detail(request, document_id):
                 'available_formats': [{'code': c, 'name': n} for c, n in available_formats],
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("document_detail failed")
         return Response(
@@ -1392,6 +1422,8 @@ def document_download(request, document_id, format_type):
             {'status': 'error', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("document_download failed")
         return Response(
@@ -1414,6 +1446,8 @@ def document_delete(request, document_id):
             'status': 'success',
             'data': {'message': 'Document deleted successfully'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("document_delete failed")
         return Response(
@@ -1467,10 +1501,9 @@ def document_authoring(request):
             'data': result
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.exception("document_authoring failed")
         err_msg = _normalize_error_message(e)
         return Response(
@@ -1530,6 +1563,8 @@ def get_notifications(request):
             'data': result
         }, status=status.HTTP_200_OK)
         
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_notifications failed")
         return Response(
@@ -1563,10 +1598,9 @@ def proactive_notification_monitor(request):
             context=context
         )
         return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
-        from core.api_key_service import KeyServiceError
-        if isinstance(e, KeyServiceError):
-            raise
         logger.exception("proactive_notification_monitor failed")
         return Response(
             {'status': 'error', 'message': 'Monitor failed', 'error': str(e)},
@@ -1590,6 +1624,8 @@ def mark_notification_read(request, notification_id):
             {'status': 'error', 'message': 'Notification not found'},
             status=status.HTTP_404_NOT_FOUND
         )
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("mark_notification_read failed")
         return Response(
@@ -1614,6 +1650,8 @@ def delete_notification(request, notification_id):
             {'status': 'error', 'message': 'Notification not found'},
             status=status.HTTP_404_NOT_FOUND
         )
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_notification failed")
         return Response(
@@ -1752,6 +1790,8 @@ def list_sequences(request, campaign_id):
                 'has_main_sequence': has_main_sequence,
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_sequences failed")
         return Response(
@@ -1873,6 +1913,8 @@ def create_sequence(request, campaign_id):
             'status': 'success',
             'data': {'sequence_id': sequence.id, 'message': 'Sequence created successfully.'},
         }, status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_sequence failed")
         return Response(
@@ -1943,6 +1985,8 @@ def get_sequence_details(request, campaign_id, sequence_id):
                 }
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_sequence_details failed")
         return Response(
@@ -2001,6 +2045,8 @@ def update_sequence(request, campaign_id, sequence_id):
             'status': 'success',
             'data': {'message': 'Sequence updated successfully.'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_sequence failed")
         return Response(
@@ -2035,6 +2081,8 @@ def delete_sequence(request, campaign_id, sequence_id):
             'status': 'success',
             'data': {'message': f'Sequence "{name}" deleted successfully.'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_sequence failed")
         return Response(
@@ -2073,6 +2121,8 @@ def create_template(request, campaign_id):
             'status': 'success',
             'data': {'template_id': template.id, 'message': 'Template created successfully.'},
         }, status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_template failed")
         return Response(
@@ -2121,6 +2171,8 @@ def update_template(request, campaign_id, template_id):
             'status': 'success',
             'data': {'message': 'Template updated successfully.'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_template failed")
         return Response(
@@ -2187,6 +2239,8 @@ def delete_template(request, campaign_id, template_id):
             'status': 'success',
             'data': {'message': f'Template "{name}" deleted successfully.'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_template failed")
         return Response(
@@ -2259,6 +2313,8 @@ def test_email_template(request, campaign_id, template_id):
             'status': 'success',
             'data': {'message': f'Test email sent to {test_email}. Check your inbox to verify dynamic values (e.g. first_name, last_name).'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("test_email_template failed")
         return Response(
@@ -2638,6 +2694,8 @@ def get_email_status_full(request, campaign_id):
                 'replies_by_sequence': replies_by_sequence,
             }
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_email_status_full failed")
         return Response(
@@ -2715,6 +2773,8 @@ def list_email_accounts(request):
                 'click_rate': click_rate,
             })
         return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_email_accounts failed")
         return Response(
@@ -2913,6 +2973,8 @@ def create_email_account(request):
                 'immediate_sync_queued': sync_queued,
             },
         }, status=status.HTTP_201_CREATED)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_email_account failed")
         return Response(
@@ -2960,6 +3022,8 @@ def get_email_account(request, account_id):
                 'test_status': getattr(account, 'test_status', 'not_tested') or 'not_tested',
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("get_email_account failed")
         return Response(
@@ -3068,6 +3132,8 @@ def update_email_account(request, account_id):
                 'immediate_sync_queued': sync_queued,
             },
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_email_account failed")
         return Response(
@@ -3147,6 +3213,8 @@ def delete_email_account(request, account_id):
             'status': 'success',
             'data': {'message': f'Email account "{name}" deleted successfully.'},
         }, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_email_account failed")
         return Response(
@@ -3221,6 +3289,8 @@ def test_email_account(request, account_id):
             {'status': 'error', 'message': str(e), 'error': 'smtp'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("test_email_account failed")
         return Response(
@@ -3274,6 +3344,8 @@ def api_marketing_generate_graph(request):
                 'source': 'llm' if bool(getattr(graph_agent, 'last_llm_used', False)) else 'database',
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_marketing_generate_graph error")
         normalized_msg = _normalize_error_message(e)
@@ -3335,6 +3407,8 @@ def api_marketing_get_saved_prompts(request):
                 'total_pages': total_pages,
             },
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_marketing_get_saved_prompts error")
         return Response({
@@ -3391,6 +3465,8 @@ def api_marketing_save_prompt(request):
                 'created_at': saved_prompt.created_at.isoformat(),
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_marketing_save_prompt error")
         return Response({
@@ -3422,6 +3498,8 @@ def api_marketing_delete_prompt(request, prompt_id):
             'status': 'success',
             'message': 'Prompt deleted successfully.'
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_marketing_delete_prompt error")
         return Response({
@@ -3461,6 +3539,8 @@ def api_marketing_toggle_prompt_favorite(request, prompt_id):
                 'is_favorite': prompt.is_favorite,
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_marketing_toggle_prompt_favorite error")
         return Response({
@@ -3508,6 +3588,8 @@ def api_marketing_toggle_prompt_dashboard(request, prompt_id):
                 'on_dashboard': on_dashboard,
             }
         })
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("api_marketing_toggle_prompt_dashboard error")
         return Response({
@@ -3546,6 +3628,8 @@ def list_qa_chats(request):
         company_user = request.user
         chats = MarketingQAChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
         return Response({'status': 'success', 'data': [_serialize_chat(c) for c in chats]})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_qa_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3571,6 +3655,8 @@ def create_qa_chat(request):
             )
         chat.refresh_from_db()
         return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3601,6 +3687,8 @@ def update_qa_chat(request, chat_id):
                 )
         chat.refresh_from_db()
         return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3618,6 +3706,8 @@ def delete_qa_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_qa_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3636,6 +3726,8 @@ def list_research_chats(request):
         company_user = request.user
         chats = MarketResearchChat.objects.filter(company_user=company_user).order_by('-updated_at')[:50]
         return Response({'status': 'success', 'data': [_serialize_chat(c) for c in chats]})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("list_research_chats error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3661,6 +3753,8 @@ def create_research_chat(request):
             )
         chat.refresh_from_db()
         return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("create_research_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3691,6 +3785,8 @@ def update_research_chat(request, chat_id):
                 )
         chat.refresh_from_db()
         return Response({'status': 'success', 'data': _serialize_chat(chat)})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("update_research_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3708,6 +3804,8 @@ def delete_research_chat(request, chat_id):
             return Response({'status': 'error', 'message': 'Chat not found.'}, status=status.HTTP_404_NOT_FOUND)
         chat.delete()
         return Response({'status': 'success', 'message': 'Chat deleted.'})
+    except KeyServiceError:
+        raise
     except Exception as e:
         logger.exception("delete_research_chat error")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

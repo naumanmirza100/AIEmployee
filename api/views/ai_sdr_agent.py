@@ -10,6 +10,7 @@ import csv
 import io
 import json
 import logging
+from datetime import timedelta
 
 from django.conf import settings
 from django.db.models import Q
@@ -132,13 +133,19 @@ def _lead_stats(company_user) -> dict:
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def icp_profile(request):
-    """GET → return active ICP. POST → upsert ICP."""
+    """GET → return all ICPs (list). POST → upsert ICP."""
     company_user = request.user
 
     if request.method == 'GET':
         try:
-            icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
-            return Response({'status': 'success', 'data': _serialize_icp(icp) if icp else None})
+            icps = SDRIcpProfile.objects.filter(company_user=company_user).order_by('-is_active', '-updated_at')
+            if not icps.exists():
+                return Response({'status': 'success', 'data': None, 'all': []})
+            return Response({
+                'status': 'success',
+                'data': _serialize_icp(icps.filter(is_active=True).first()),
+                'all': [_serialize_icp(i) for i in icps],
+            })
         except Exception as exc:
             logger.error("Get ICP error: %s", exc)
             return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -351,6 +358,19 @@ def qualify_all_leads(request):
 # Research (find new leads)
 # ==========================================================================
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def research_sources(request):
+    """Return available lead research sources based on configured API keys."""
+    researcher = _get_research_agent()
+    return Response({
+        'sources': researcher.available_sources,
+        'default': researcher.source_label,
+        'apify_actor': researcher.apify_actor if researcher.apify_token else None,
+    })
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -362,7 +382,12 @@ def research_leads(request):
     company_user = request.user
     try:
         count = min(int(request.data.get('count', 20)), 50)
-        icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+        source = request.data.get('source', 'auto')
+        icp_id = request.data.get('icp_id')
+        if icp_id:
+            icp = SDRIcpProfile.objects.filter(company_user=company_user, pk=icp_id).first()
+        else:
+            icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
@@ -370,13 +395,13 @@ def research_leads(request):
             company_user=company_user,
             icp_profile=icp,
             status='running',
-            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count},
+            search_params={'industries': icp.industries, 'job_titles': icp.job_titles, 'count': count, 'source': source},
             started_at=timezone.now(),
         )
 
         try:
             researcher = _get_research_agent()
-            raw_leads = researcher.search_leads(icp, count=count)
+            raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
             for ld in raw_leads:
@@ -546,6 +571,37 @@ def sdr_dashboard(request):
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_analytics(request):
+    """Full analytics metrics for the Analytics tab dashboard."""
+    company_user = request.user
+    try:
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        metrics = AnalyticsAgent().compute_metrics(company_user)
+        return Response({'status': 'success', 'data': metrics})
+    except Exception as exc:
+        logger.error('SDR analytics error: %s', exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_send_daily_summary(request):
+    """Manually trigger the daily summary email (for testing)."""
+    company_user = request.user
+    try:
+        from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
+        agent = AnalyticsAgent()
+        sent = agent.send_daily_summary(company_user)
+        return Response({'status': 'success', 'sent': sent})
+    except Exception as exc:
+        logger.error('SDR send_daily_summary error: %s', exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
 # ==========================================================================
 # Campaign serialiser helpers
 # ==========================================================================
@@ -620,6 +676,15 @@ def _serialize_enrollment(e: SDRCampaignEnrollment) -> dict:
         'replied_at': e.replied_at.isoformat() if e.replied_at else None,
         'reply_content': e.reply_content or '',
         'reply_sentiment': e.reply_sentiment or '',
+        'reply_category_label': {
+            'out_of_office': '🏖️ Out of Office',
+            'not_interested': '🚫 Not Interested',
+            'wants_more_info': '💬 Wants More Info',
+            'positive': '✅ Interested',
+            'positive_interest': '✅ Interested',
+            'neutral': '💭 Neutral',
+        }.get(e.reply_sentiment or '', ''),
+        'resume_at': e.next_action_at.isoformat() if e.status == 'paused' and e.next_action_at else None,
         'meeting_id': meeting.id if meeting else None,
         'meeting_status': meeting.status if meeting else None,
         'enrolled_at': e.enrolled_at.isoformat(),
@@ -984,7 +1049,7 @@ def sdr_enroll_leads(request, campaign_id):
             next_action = None
             if first_step:
                 # delay_days=1 means "Day 1" = send immediately on enrollment day
-                next_action = timezone.now() + timezone.timedelta(days=max(0, first_step.delay_days - 1))
+                next_action = timezone.now() + timedelta(days=max(0, first_step.delay_days - 1))
 
             SDRCampaignEnrollment.objects.create(
                 campaign=campaign,
@@ -1042,6 +1107,132 @@ def sdr_campaign_enrollments(request, campaign_id):
 # Mark enrollment as replied
 # ==========================================================================
 
+# ==========================================================================
+# Email Assistant — shared reply-action handler
+# ==========================================================================
+
+def _apply_reply_action(company_user, campaign, enrollment, lead, classification, reply_text):
+    """
+    Apply the correct action based on EmailAssistantAgent classification.
+
+    Actions:
+      pause      → OOO: pause enrollment, resume after return date
+      stop       → Not interested: unsubscribe enrollment, disqualify lead
+      send_info  → Wants more info: reply with AI-written follow-up email
+      book_meeting → Positive: create meeting, send scheduling email
+      wait       → Neutral: log reply, no action
+    """
+    action = classification['action']
+    category = classification['category']
+    resume_date = classification.get('resume_date')
+
+    # ── Out of Office → Pause ─────────────────────────────────────────────
+    if action == 'pause':
+        enrollment.status = 'paused'
+        enrollment.replied_at = timezone.now()
+        enrollment.reply_content = reply_text[:2000]
+        enrollment.reply_sentiment = 'out_of_office'
+        enrollment.next_action_at = resume_date or (timezone.now() + timedelta(days=5))
+        enrollment.save()
+        logger.info(
+            'SDR [OOO] enrollment=%d paused until %s for lead=%s',
+            enrollment.id, enrollment.next_action_at, lead.display_name,
+        )
+        return {'action': 'paused', 'meeting_created': False, 'category': category,
+                'resume_at': enrollment.next_action_at.isoformat()}
+
+    # ── Not Interested → Stop ─────────────────────────────────────────────
+    if action == 'stop':
+        enrollment.status = 'unsubscribed'
+        enrollment.replied_at = timezone.now()
+        enrollment.reply_content = reply_text[:2000]
+        enrollment.reply_sentiment = 'not_interested'
+        enrollment.save()
+        lead.status = 'disqualified'
+        lead.save(update_fields=['status'])
+        logger.info(
+            'SDR [NOT-INTERESTED] enrollment=%d unsubscribed, lead=%s disqualified',
+            enrollment.id, lead.display_name,
+        )
+        return {'action': 'unsubscribed', 'meeting_created': False, 'category': category}
+
+    # ── Wants More Info → Send follow-up email ────────────────────────────
+    if action == 'send_info':
+        if enrollment.status != 'replied':
+            enrollment.status = 'replied'
+            enrollment.replied_at = timezone.now()
+            enrollment.reply_content = reply_text[:2000]
+            enrollment.reply_sentiment = 'wants_more_info'
+            enrollment.save()
+        lead.status = 'replied'
+        lead.save(update_fields=['status'])
+        campaign.replies_received = (campaign.replies_received or 0) + 1
+        campaign.save(update_fields=['replies_received'])
+
+        info_sent = False
+        try:
+            from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+            email_agent = EmailAssistantAgent()
+            email_data = email_agent.generate_more_info_email(lead, campaign, reply_text)
+            _get_outreach_agent().send_email(
+                campaign, lead.email,
+                email_data['subject'], email_data['body'],
+            )
+            info_sent = True
+            logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+        except Exception as exc:
+            logger.warning('SDR [MORE-INFO] email failed for lead=%s: %s', lead.id, exc)
+
+        return {'action': 'sent_more_info', 'meeting_created': False,
+                'category': category, 'info_email_sent': info_sent}
+
+    # ── Positive → Book Meeting ───────────────────────────────────────────
+    if action == 'book_meeting':
+        if enrollment.status != 'replied':
+            enrollment.status = 'replied'
+            enrollment.replied_at = timezone.now()
+            enrollment.reply_content = reply_text[:2000]
+            enrollment.reply_sentiment = 'positive'
+            enrollment.save()
+        lead.status = 'replied'
+        lead.save(update_fields=['status'])
+        campaign.replies_received = (campaign.replies_received or 0) + 1
+
+        meeting, created = SDRMeeting.objects.get_or_create(
+            enrollment=enrollment,
+            defaults={
+                'company_user': company_user,
+                'lead': lead,
+                'title': f'Discovery Call with {lead.display_name}',
+                'reply_snippet': reply_text[:500],
+                'calendar_link': campaign.calendar_link or '',
+                'status': 'pending',
+            },
+        )
+        if created:
+            campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
+            try:
+                from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                sched = MeetingSchedulingAgent()
+                prep_notes = sched.generate_prep_notes(lead, enrollment, reply_text)
+                sent = sched.send_scheduling_email_once(campaign, lead, meeting, prep_notes)
+                if sent:
+                    meeting.prep_notes = prep_notes
+                    meeting.save(update_fields=['prep_notes'])
+            except Exception as exc:
+                logger.warning('SDR [MEETING] scheduling email failed lead=%s: %s', lead.id, exc)
+
+        campaign.save(update_fields=['replies_received', 'meetings_booked'])
+        return {'action': 'meeting_created', 'meeting_created': created,
+                'category': category}
+
+    # ── Neutral → Log and wait ────────────────────────────────────────────
+    enrollment.reply_content = reply_text[:2000]
+    enrollment.reply_sentiment = 'neutral'
+    enrollment.save(update_fields=['reply_content', 'reply_sentiment'])
+    return {'action': 'wait', 'meeting_created': False, 'category': category}
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1057,65 +1248,32 @@ def sdr_mark_replied(request, campaign_id, enrollment_id):
     try:
         d = request.data
         reply_content = d.get('reply_content', '')
-
-        # AI sentiment analysis
-        agent = _get_outreach_agent()
-        if reply_content:
-            sentiment_result = agent.analyze_reply_sentiment(reply_content)
-            sentiment = sentiment_result['sentiment']
-            is_interested = sentiment_result['is_interested']
-        else:
-            # Manual override — trust the frontend value
-            sentiment = d.get('reply_sentiment', 'positive')
-            is_interested = sentiment == 'positive'
-
-        enrollment.status = 'replied'
-        enrollment.replied_at = timezone.now()
-        enrollment.reply_content = reply_content
-        enrollment.reply_sentiment = sentiment
-        enrollment.save()
-
         campaign = enrollment.campaign
         lead = enrollment.lead
 
-        if is_interested:
-            lead.status = 'replied'
-            lead.save(update_fields=['status'])
-            campaign.replies_received = (campaign.replies_received or 0) + 1
-            campaign.save(update_fields=['replies_received'])
+        # Classify with EmailAssistantAgent
+        from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+        if reply_content:
+            classification = EmailAssistantAgent().classify_reply(reply_content)
+        else:
+            # Manual override: no text → treat as positive
+            classification = {
+                'category': 'positive_interest', 'action': 'book_meeting',
+                'label': 'Positive', 'is_interested': True, 'reason': 'Manual',
+                'resume_date': None,
+            }
 
-            # Create meeting record (scheduling agent handoff)
-            meeting, created = SDRMeeting.objects.get_or_create(
-                enrollment=enrollment,
-                defaults={
-                    'company_user': company_user,
-                    'lead': lead,
-                    'title': f'Discovery Call with {lead.display_name}',
-                    'reply_snippet': reply_content[:500],
-                    'calendar_link': campaign.calendar_link or '',
-                    'status': 'pending',
-                }
-            )
-            if created:
-                campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
-                campaign.save(update_fields=['meetings_booked'])
-                # Generate prep notes + send scheduling email (atomic — no duplicate sends)
-                try:
-                    from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                    sched_agent = MeetingSchedulingAgent()
-                    prep_notes = sched_agent.generate_prep_notes(lead, enrollment, reply_content)
-                    sent = sched_agent.send_scheduling_email_once(campaign, lead, meeting, prep_notes)
-                    if sent:
-                        meeting.prep_notes = prep_notes
-                        meeting.save(update_fields=['prep_notes'])
-                except Exception as exc:
-                    logger.warning("Scheduling email failed for lead %s: %s", lead.id, exc)
+        result = _apply_reply_action(
+            company_user, campaign, enrollment, lead, classification, reply_content
+        )
 
         return Response({
             'status': 'success',
-            'sentiment': sentiment,
-            'is_interested': is_interested,
-            'meeting_created': is_interested,
+            'category': classification['category'],
+            'label': classification.get('label', ''),
+            'action_taken': result['action'],
+            'meeting_created': result.get('meeting_created', False),
+            'is_interested': classification['is_interested'],
             'data': _serialize_enrollment(enrollment),
         })
     except Exception as exc:
@@ -1234,14 +1392,15 @@ def sdr_check_replies(request, campaign_id):
     try:
         enrollments = list(
             campaign.enrollments
-            .filter(status__in=['active', 'completed'])
+            .filter(status__in=['active', 'paused', 'completed', 'replied'])
             .exclude(lead__email='')
             .select_related('lead')
             .prefetch_related('logs')
         )
 
-        agent = _get_outreach_agent()
-        replies_found = agent.check_inbox_for_replies(campaign, enrollments)
+        from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+        email_agent = EmailAssistantAgent()
+        replies_found = _get_outreach_agent().check_inbox_for_replies(campaign, enrollments)
 
         new_replies = 0
         meetings_created = 0
@@ -1250,68 +1409,35 @@ def sdr_check_replies(request, campaign_id):
         for r in replies_found:
             enrollment = r['enrollment']
             reply_text = r['reply_text']
+            lead = enrollment.lead
 
-            # Skip if already replied AND meeting already exists
+            # Skip only if meeting booked AND already properly classified by new code
             already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
+            already_classified = enrollment.reply_sentiment in (
+                'not_interested', 'out_of_office', 'wants_more_info'
+            )
             if enrollment.status == 'replied' and already_has_meeting:
                 continue
+            if enrollment.status in ('unsubscribed',):
+                continue
 
-            sentiment_result = agent.analyze_reply_sentiment(reply_text)
-            sentiment = sentiment_result['sentiment']
-            is_interested = sentiment_result['is_interested']
+            classification = email_agent.classify_reply(reply_text)
+            result = _apply_reply_action(
+                company_user, campaign, enrollment, lead, classification, reply_text
+            )
 
-            if enrollment.status != 'replied':
-                enrollment.status = 'replied'
-                enrollment.replied_at = timezone.now()
-                enrollment.reply_content = reply_text[:2000]
-                enrollment.reply_sentiment = sentiment
-                enrollment.save()
-
-            campaign.replies_received = (campaign.replies_received or 0) + 1
-            new_replies += 1
-
-            if is_interested:
-                enrollment.lead.status = 'replied'
-                enrollment.lead.save(update_fields=['status'])
-
-                meeting, created = SDRMeeting.objects.get_or_create(
-                    enrollment=enrollment,
-                    defaults={
-                        'company_user': company_user,
-                        'lead': enrollment.lead,
-                        'title': f'Discovery Call with {enrollment.lead.display_name}',
-                        'reply_snippet': reply_text[:500],
-                        'calendar_link': campaign.calendar_link or '',
-                        'status': 'pending',
-                    }
-                )
-                if created:
-                    meetings_created += 1
-                    campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
-
-                # Always attempt send_scheduling_email_once — it's atomic so the
-                # second caller (scheduler vs button race) is silently skipped.
-                try:
-                    from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                    sched_agent = MeetingSchedulingAgent()
-                    prep_notes = sched_agent.generate_prep_notes(
-                        enrollment.lead, enrollment, reply_text
-                    )
-                    sent = sched_agent.send_scheduling_email_once(
-                        campaign, enrollment.lead, meeting, prep_notes
-                    )
-                    if sent:
-                        meeting.prep_notes = prep_notes
-                        meeting.save(update_fields=['prep_notes'])
-                except Exception as exc:
-                    logger.warning("Scheduling email failed: %s", exc)
+            if result['action'] not in ('wait',):
+                new_replies += 1
+            if result.get('meeting_created'):
+                meetings_created += 1
 
             details.append({
-                'lead': enrollment.lead.display_name,
+                'lead': lead.display_name,
                 'email': r['sender_email'],
-                'sentiment': sentiment,
-                'is_interested': is_interested,
                 'subject': r.get('subject', ''),
+                'category': classification['category'],
+                'label': classification['label'],
+                'action_taken': result['action'],
             })
 
         campaign.save(update_fields=['replies_received', 'meetings_booked'])
@@ -1618,9 +1744,11 @@ def sdr_check_all_replies(request):
         company_user=company_user, status='active', auto_check_replies=True
     )
 
+    from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
-    agent = OutreachAgent()
+    outreach_agent = OutreachAgent()
+    email_agent = EmailAssistantAgent()
     total_new_replies = 0
     total_new_meetings = 0
     errors = []
@@ -1629,7 +1757,7 @@ def sdr_check_all_replies(request):
         try:
             enrollments = list(
                 campaign.enrollments
-                .filter(status__in=['active', 'completed'])
+                .filter(status__in=['active', 'paused', 'completed', 'replied'])
                 .exclude(lead__email='')
                 .select_related('lead')
                 .prefetch_related('logs')
@@ -1637,62 +1765,31 @@ def sdr_check_all_replies(request):
             if not enrollments:
                 continue
 
-            replies = agent.check_inbox_for_replies(campaign, enrollments)
+            replies = outreach_agent.check_inbox_for_replies(campaign, enrollments)
 
             for r in replies:
                 enrollment = r['enrollment']
+                reply_text = r['reply_text']
+                lead = enrollment.lead
+
                 already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
                 if enrollment.status == 'replied' and already_has_meeting:
                     continue
 
-                reply_text = r['reply_text']
-                sentiment_result = agent.analyze_reply_sentiment(reply_text)
-                sentiment = sentiment_result['sentiment']
-                is_interested = sentiment_result['is_interested']
+                classification = email_agent.classify_reply(reply_text)
+                result = _apply_reply_action(
+                    company_user, campaign, enrollment, lead, classification, reply_text
+                )
 
-                if enrollment.status != 'replied':
-                    enrollment.status = 'replied'
-                    enrollment.replied_at = timezone.now()
-                    enrollment.reply_content = reply_text[:2000]
-                    enrollment.reply_sentiment = sentiment
-                    enrollment.save()
-                    campaign.replies_received = (campaign.replies_received or 0) + 1
+                if result['action'] not in ('wait',):
                     total_new_replies += 1
+                if result.get('meeting_created'):
+                    total_new_meetings += 1
 
-                if is_interested:
-                    enrollment.lead.status = 'replied'
-                    enrollment.lead.save(update_fields=['status'])
-
-                    meeting, created = SDRMeeting.objects.get_or_create(
-                        enrollment=enrollment,
-                        defaults={
-                            'company_user': company_user,
-                            'lead': enrollment.lead,
-                            'title': f'Discovery Call with {enrollment.lead.display_name}',
-                            'reply_snippet': reply_text[:500],
-                            'calendar_link': campaign.calendar_link or '',
-                            'status': 'pending',
-                        }
-                    )
-                    if created:
-                        total_new_meetings += 1
-                        campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
-
-                    # Atomic guard: only one caller sends regardless of race condition
-                    try:
-                        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                        sched_agent = MeetingSchedulingAgent()
-                        prep_notes = sched_agent.generate_prep_notes(
-                            enrollment.lead, enrollment, reply_text
-                        )
-                        sent = sched_agent.send_scheduling_email_once(
-                            campaign, enrollment.lead, meeting, prep_notes
-                        )
-                        if sent:
-                            meeting.prep_notes = prep_notes
-                            meeting.save(update_fields=['prep_notes'])
-                    except Exception as exc:
-                        logger.warning("Scheduling email failed: %s", exc)
+                logger.info(
+                    'SDR [check-all-replies] campaign=%d lead=%s → %s (%s)',
+                    campaign.id, lead.display_name, classification['label'], result['action'],
+                )
 
             campaign.last_replies_checked_at = timezone.now()
             campaign.save(update_fields=['replies_received', 'meetings_booked', 'last_replies_checked_at'])

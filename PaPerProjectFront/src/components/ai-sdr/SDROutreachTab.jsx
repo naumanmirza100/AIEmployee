@@ -1209,15 +1209,15 @@ const SDROutreachTab = () => {
                           background: `${es.color}15`, color: es.color,
                           border: `1px solid ${es.color}30`,
                         }}>
-                          {enr.status === 'replied' && <Mail size={10} />}
+                          {(enr.status === 'replied' || enr.status === 'unsubscribed' || enr.status === 'paused') && enr.reply_content && <Mail size={10} />}
                           {es.label}
                         </span>
                       </td>
 
                       {/* Next Action / Reply column */}
                       <td style={{ padding: '11px 14px' }}>
-                        {enr.status === 'replied' ? (
-                          /* ── Replied lead: show reply preview + view button ── */
+                        {enr.reply_content ? (
+                          /* ── Any lead with reply content: show preview + view button ── */
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                             <div style={{ color: '#9ca3af', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
                               <Clock size={10} />
@@ -1238,22 +1238,35 @@ const SDROutreachTab = () => {
                                 padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600,
                                 background: enr.reply_sentiment === 'positive'
                                   ? 'rgba(16,185,129,0.15)'
-                                  : enr.reply_sentiment === 'negative'
+                                  : (enr.reply_sentiment === 'not_interested' || enr.reply_sentiment === 'negative')
                                   ? 'rgba(244,63,94,0.15)'
-                                  : 'rgba(96,165,250,0.15)',
+                                  : enr.reply_sentiment === 'out_of_office'
+                                  ? 'rgba(245,158,11,0.15)'
+                                  : enr.reply_sentiment === 'wants_more_info'
+                                  ? 'rgba(96,165,250,0.15)'
+                                  : 'rgba(107,114,128,0.15)',
                                 color: enr.reply_sentiment === 'positive' ? '#10b981'
-                                  : enr.reply_sentiment === 'negative' ? '#f43f5e' : '#60a5fa',
+                                  : (enr.reply_sentiment === 'not_interested' || enr.reply_sentiment === 'negative') ? '#f87171'
+                                  : enr.reply_sentiment === 'out_of_office' ? '#f59e0b'
+                                  : enr.reply_sentiment === 'wants_more_info' ? '#60a5fa'
+                                  : '#9ca3af',
                                 border: `1px solid ${enr.reply_sentiment === 'positive'
                                   ? 'rgba(16,185,129,0.4)'
-                                  : enr.reply_sentiment === 'negative'
-                                  ? 'rgba(244,63,94,0.4)'
-                                  : 'rgba(96,165,250,0.4)'}`,
+                                  : (enr.reply_sentiment === 'not_interested' || enr.reply_sentiment === 'negative')
+                                  ? 'rgba(248,113,113,0.4)'
+                                  : enr.reply_sentiment === 'out_of_office'
+                                  ? 'rgba(245,158,11,0.4)'
+                                  : enr.reply_sentiment === 'wants_more_info'
+                                  ? 'rgba(96,165,250,0.4)'
+                                  : 'rgba(107,114,128,0.3)'}`,
                                 cursor: 'pointer', alignSelf: 'flex-start',
                               }}
                             >
                               <MessageSquare size={11} />
                               {enr.reply_sentiment === 'positive' ? '✓ Interested — View Reply'
-                                : enr.reply_sentiment === 'negative' ? '✗ Not Interested — View Reply'
+                                : (enr.reply_sentiment === 'not_interested' || enr.reply_sentiment === 'negative') ? '✗ Not Interested — View Reply'
+                                : enr.reply_sentiment === 'out_of_office' ? '🏖 OOO — View Reply'
+                                : enr.reply_sentiment === 'wants_more_info' ? 'ℹ Wants Info — View Reply'
                                 : 'View Reply →'}
                             </button>
                           </div>
@@ -1534,13 +1547,23 @@ const SDROutreachTab = () => {
 
       {/* ── View Reply Modal ───────────────────────────────────────────── */}
       {viewReplyModal && (() => {
-        const sentColor = viewReplyModal.reply_sentiment === 'positive' ? '#10b981'
-          : viewReplyModal.reply_sentiment === 'negative' ? '#f43f5e' : '#9ca3af';
-        const sentBg = viewReplyModal.reply_sentiment === 'positive' ? 'rgba(16,185,129,0.1)'
-          : viewReplyModal.reply_sentiment === 'negative' ? 'rgba(244,63,94,0.1)' : 'rgba(107,114,128,0.1)';
-        const sentLabel = viewReplyModal.reply_sentiment === 'positive' ? '✓ Interested — they want to connect!'
-          : viewReplyModal.reply_sentiment === 'negative' ? '✗ Not interested'
-          : '~ Neutral reply';
+        const sent = viewReplyModal.reply_sentiment;
+        const SENT_MAP = {
+          positive:       { color: '#10b981', bg: 'rgba(16,185,129,0.1)',   icon: '🎉', label: '✓ Interested — they want to connect!' },
+          positive_interest: { color: '#10b981', bg: 'rgba(16,185,129,0.1)', icon: '🎉', label: '✓ Interested — they want to connect!' },
+          not_interested: { color: '#f87171', bg: 'rgba(248,113,113,0.1)', icon: '❌', label: '✗ Not interested — asked to stop contact' },
+          negative:       { color: '#f87171', bg: 'rgba(248,113,113,0.1)', icon: '❌', label: '✗ Not interested' },
+          out_of_office:  { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  icon: '🏖️', label: '🏖️ Out of office — follow-up paused' },
+          wants_more_info:{ color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',  icon: 'ℹ️', label: 'ℹ️ Wants more info — info email sent' },
+          neutral:        { color: '#9ca3af', bg: 'rgba(107,114,128,0.1)', icon: '💬', label: '~ Neutral reply' },
+        };
+        const ACTION_TAKEN = {
+          unsubscribed: { color: '#f87171', bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.25)', icon: '🚫', text: 'Outreach stopped — lead marked Disqualified' },
+          paused:       { color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.25)',  icon: '⏸️', text: `Follow-up paused${viewReplyModal.resume_at ? ' until ' + fmtDate(viewReplyModal.resume_at) : ''}` },
+          replied:      { color: '#10b981', bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.25)',  icon: '↩️', text: 'Reply received — action taken' },
+        };
+        const sc = SENT_MAP[sent] || SENT_MAP.neutral;
+        const ac = ACTION_TAKEN[viewReplyModal.status];
         return (
           <Dialog open onOpenChange={() => setViewReplyModal(null)}>
             <DialogContent style={{
@@ -1549,7 +1572,7 @@ const SDROutreachTab = () => {
             }}>
               <DialogHeader>
                 <DialogTitle style={{ color: '#e2d9f3', display: 'flex', alignItems: 'center', gap: 8, fontSize: 16 }}>
-                  <Mail size={17} style={{ color: sentColor }} />
+                  <Mail size={17} style={{ color: sc.color }} />
                   Reply from {viewReplyModal.lead_name}
                 </DialogTitle>
               </DialogHeader>
@@ -1559,16 +1582,26 @@ const SDROutreachTab = () => {
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '10px 14px', borderRadius: 10,
-                  background: sentBg, border: `1px solid ${sentColor}40`,
+                  background: sc.bg, border: `1px solid ${sc.color}40`,
                 }}>
-                  <span style={{ fontSize: 18 }}>
-                    {viewReplyModal.reply_sentiment === 'positive' ? '🎉' : viewReplyModal.reply_sentiment === 'negative' ? '❌' : '💬'}
-                  </span>
+                  <span style={{ fontSize: 18 }}>{sc.icon}</span>
                   <div>
-                    <div style={{ color: sentColor, fontWeight: 700, fontSize: 13 }}>{sentLabel}</div>
-                    <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>AI sentiment analysis</div>
+                    <div style={{ color: sc.color, fontWeight: 700, fontSize: 13 }}>{sc.label}</div>
+                    <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>AI reply classification</div>
                   </div>
                 </div>
+
+                {/* Action taken notice for unsubscribed / paused */}
+                {ac && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', borderRadius: 8,
+                    background: ac.bg, border: `1px solid ${ac.border}`,
+                  }}>
+                    <span style={{ fontSize: 15 }}>{ac.icon}</span>
+                    <span style={{ color: ac.color, fontSize: 12, fontWeight: 600 }}>{ac.text}</span>
+                  </div>
+                )}
 
                 {/* Email metadata */}
                 <div style={{

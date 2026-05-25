@@ -24,6 +24,16 @@ export const getIcpProfile = async () => {
   }
 };
 
+export const listIcpProfiles = async () => {
+  try {
+    const res = await companyApi.get('/sdr/icp/');
+    return res?.data?.all || res?.all || [];
+  } catch (error) {
+    console.error('List ICP profiles error:', error);
+    return [];
+  }
+};
+
 export const saveIcpProfile = async (data) => {
   try {
     return await companyApi.post('/sdr/icp/', data);
@@ -110,11 +120,20 @@ export const qualifyAllLeads = async () => {
 // --------------------------------------------------------------------------
 // Research (Apollo.io or AI generation)
 // --------------------------------------------------------------------------
-export const researchLeads = async ({ count = 20 } = {}) => {
+export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {
   try {
-    return await companyApi.post('/sdr/leads/research/', { count });
+    return await companyApi.post('/sdr/leads/research/', { count, source });
   } catch (error) {
     console.error('Research leads error:', error);
+    throw error;
+  }
+};
+
+export const getResearchSources = async () => {
+  try {
+    return await companyApi.get('/sdr/leads/research/sources/');
+  } catch (error) {
+    console.error('Get research sources error:', error);
     throw error;
   }
 };
@@ -402,6 +421,15 @@ export const getSdrAnalytics = async () => {
   }
 };
 
+export const sendSdrDailySummary = async () => {
+  try {
+    return await companyApi.post('/sdr/analytics/send-summary/');
+  } catch (error) {
+    console.error('SDR send summary error:', error);
+    throw error;
+  }
+};
+
 export const generatePersonalizedEmail = async (data) => {
   try {
     return await companyApi.post('/sdr/emails/generate/', data);
@@ -432,4 +460,55 @@ export const confirmBooking = async (token, scheduledAt) => {
   const data = await resp.json();
   if (!resp.ok) throw data;
   return data;
+};
+
+// --------------------------------------------------------------------------
+// CRM Sync
+// --------------------------------------------------------------------------
+export const listCrmIntegrations = async () => {
+  try { return await companyApi.get('/crm-sync/integrations/'); }
+  catch (e) { console.error('CRM list error:', e); throw e; }
+};
+
+export const createCrmIntegration = async (data) => {
+  try { return await companyApi.post('/crm-sync/integrations/', data); }
+  catch (e) { console.error('CRM create error:', e); throw e; }
+};
+
+export const updateCrmIntegration = async (id, data) => {
+  try { return await companyApi.patch(`/crm-sync/integrations/${id}/`, data); }
+  catch (e) { console.error('CRM update error:', e); throw e; }
+};
+
+export const deleteCrmIntegration = async (id) => {
+  try { return await companyApi.delete(`/crm-sync/integrations/${id}/`); }
+  catch (e) { console.error('CRM delete error:', e); throw e; }
+};
+
+export const pingCrmIntegration = async (id) => {
+  try { return await companyApi.post(`/crm-sync/integrations/${id}/ping/`); }
+  catch (e) { console.error('CRM ping error:', e); throw e; }
+};
+
+export const syncCrmLeads = async (id) => {
+  try { return await companyApi.post(`/crm-sync/integrations/${id}/sync-leads/`); }
+  catch (e) { console.error('CRM sync error:', e); throw e; }
+};
+
+export const getCrmQueueStatus = async () => {
+  try { return await companyApi.get('/crm-sync/queue/'); }
+  catch (e) { console.error('CRM queue error:', e); throw e; }
+};
+
+export const getCrmSyncLogs = async (params = {}) => {
+  try {
+    const qs = new URLSearchParams(params).toString();
+    return await companyApi.get(`/crm-sync/logs/${qs ? '?' + qs : ''}`);
+  }
+  catch (e) { console.error('CRM logs error:', e); throw e; }
+};
+
+export const retryCrmFailed = async () => {
+  try { return await companyApi.post('/crm-sync/queue/retry/'); }
+  catch (e) { console.error('CRM retry error:', e); throw e; }
 };
