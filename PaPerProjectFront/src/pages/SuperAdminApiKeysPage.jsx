@@ -75,13 +75,14 @@ const PROVIDER_OPTIONS = [
 ];
 
 const AGENT_OPTIONS = [
-  { value: 'recruitment_agent', label: 'Recruitment Agent' },
-  { value: 'marketing_agent', label: 'Marketing Agent' },
+  { value: 'recruitment_agent',     label: 'Recruitment Agent'     },
+  { value: 'marketing_agent',       label: 'Marketing Agent'       },
   { value: 'project_manager_agent', label: 'Project Manager Agent' },
-  { value: 'frontline_agent', label: 'Frontline Agent' },
-  { value: 'operations_agent', label: 'Operations Agent' },
-  { value: 'reply_draft_agent', label: 'Reply Draft Agent' },
-  { value: 'hr_agent', label: 'HR Support Agent' },
+  { value: 'frontline_agent',       label: 'Frontline Agent'       },
+  { value: 'operations_agent',      label: 'Operations Agent'      },
+  { value: 'reply_draft_agent',     label: 'Reply Draft Agent'     },
+  { value: 'hr_agent',              label: 'HR Support Agent'      },
+  { value: 'ai_sdr_agent',          label: 'AI SDR Agent'          },
 ];
 
 const formatTokens = (n) => {
@@ -164,12 +165,13 @@ const PlatformKeyRow = ({ row, onSave, saving }) => {
 // Which provider each agent uses by default (mirrors AGENT_DEFAULT_PROVIDER in backend)
 const AGENT_DEFAULT_PROVIDERS = [
   { agent: 'Recruitment Agent',      key: 'recruitment_agent',       provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Marketing Agent',         key: 'marketing_agent',         provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Reply Draft Agent',       key: 'reply_draft_agent',       provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Project Manager Agent',   key: 'project_manager_agent',   provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Operations Agent',        key: 'operations_agent',        provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Frontline Agent',         key: 'frontline_agent',         provider: 'openai', providerLabel: 'OpenAI'          },
-  { agent: 'HR Support Agent',        key: 'hr_agent',                provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'Marketing Agent',        key: 'marketing_agent',         provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'Reply Draft Agent',      key: 'reply_draft_agent',       provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'Project Manager Agent',  key: 'project_manager_agent',   provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'Operations Agent',       key: 'operations_agent',        provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'Frontline Agent',        key: 'frontline_agent',         provider: 'openai', providerLabel: 'OpenAI'          },
+  { agent: 'HR Support Agent',       key: 'hr_agent',                provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'AI SDR Agent',           key: 'ai_sdr_agent',            provider: 'groq',   providerLabel: 'Groq (Llama)'    },
 ];
 
 const PROVIDER_ACCENT = {

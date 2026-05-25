@@ -26,9 +26,8 @@ def send_due_steps_impl():
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
     now = timezone.now()
-    agent = OutreachAgent()
 
-    active_campaigns = SDRCampaign.objects.filter(status='active')
+    active_campaigns = SDRCampaign.objects.filter(status='active').select_related('company_user__company')
     total_processed = 0
     total_sent = 0
     total_failed = 0
@@ -45,6 +44,21 @@ def send_due_steps_impl():
     sent_emails_this_run: set = set()
 
     for campaign in active_campaigns:
+        # Resolve key per campaign owner — each campaign belongs to a company_user
+        try:
+            _company = campaign.company_user.company
+            agent = OutreachAgent(company=_company)
+        except Exception as _key_exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(_key_exc, KeyServiceError):
+                logger.warning(
+                    "SDR [send-due-steps] campaign=%d SKIPPED — key blocked: %s",
+                    campaign.id, _key_exc.reason,
+                )
+                continue
+            logger.error("SDR [send-due-steps] campaign=%d agent init failed: %s", campaign.id, _key_exc)
+            continue
+
         due_qs = campaign.enrollments.filter(
             status='active'
         ).filter(
@@ -124,9 +138,9 @@ def check_inbox_replies_impl():
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
     from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
 
-    agent = OutreachAgent()
-    email_agent = EmailAssistantAgent()
-    campaigns = SDRCampaign.objects.filter(status='active', auto_check_replies=True)
+    campaigns = SDRCampaign.objects.filter(
+        status='active', auto_check_replies=True
+    ).select_related('company_user__company')
 
     total_replies = 0
     total_meetings = 0
@@ -137,6 +151,22 @@ def check_inbox_replies_impl():
     )
 
     for campaign in campaigns:
+        # Resolve keys per campaign owner
+        try:
+            _company = campaign.company_user.company
+            agent = OutreachAgent(company=_company)
+            email_agent = EmailAssistantAgent(company=_company)
+        except Exception as _key_exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(_key_exc, KeyServiceError):
+                logger.warning(
+                    "SDR [check-inbox] campaign=%d SKIPPED — key blocked: %s",
+                    campaign.id, getattr(_key_exc, 'reason', str(_key_exc)),
+                )
+                continue
+            logger.error("SDR [check-inbox] campaign=%d agent init failed: %s", campaign.id, _key_exc)
+            continue
+
         try:
             enrollments = list(
                 campaign.enrollments

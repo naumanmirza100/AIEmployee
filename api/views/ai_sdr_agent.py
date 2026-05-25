@@ -31,32 +31,22 @@ from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# Singletons — initialised once, reused across requests
+# Per-request agent factories — pass company so keys resolve per-company
 # --------------------------------------------------------------------------
-_research_agent: LeadResearchAgent | None = None
-_qualification_agent: LeadQualificationAgent | None = None
-_outreach_agent: OutreachAgent | None = None
+
+def _get_research_agent(company) -> LeadResearchAgent:
+    """Create a LeadResearchAgent with the correct company key context."""
+    return LeadResearchAgent(company=company)
 
 
-def _get_research_agent() -> LeadResearchAgent:
-    global _research_agent
-    if _research_agent is None:
-        _research_agent = LeadResearchAgent()
-    return _research_agent
+def _get_qualification_agent(company) -> LeadQualificationAgent:
+    """Create a LeadQualificationAgent with the correct company key context."""
+    return LeadQualificationAgent(company=company)
 
 
-def _get_qualification_agent() -> LeadQualificationAgent:
-    global _qualification_agent
-    if _qualification_agent is None:
-        _qualification_agent = LeadQualificationAgent()
-    return _qualification_agent
-
-
-def _get_outreach_agent() -> OutreachAgent:
-    global _outreach_agent
-    if _outreach_agent is None:
-        _outreach_agent = OutreachAgent()
-    return _outreach_agent
+def _get_outreach_agent(company) -> OutreachAgent:
+    """Create an OutreachAgent with the correct company key context."""
+    return OutreachAgent(company=company)
 
 
 # --------------------------------------------------------------------------
@@ -292,7 +282,7 @@ def qualify_lead(request, lead_id):
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
-        result = _get_qualification_agent().qualify_lead(lead, icp)
+        result = _get_qualification_agent(company_user.company).qualify_lead(lead, icp)
         lead.score = result['score']
         lead.temperature = result['temperature']
         lead.score_breakdown = result.get('score_breakdown', {})
@@ -324,7 +314,7 @@ def qualify_all_leads(request):
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
         unscored = SDRLead.objects.filter(company_user=company_user, score__isnull=True)[:50]
-        agent = _get_qualification_agent()
+        agent = _get_qualification_agent(company_user.company)
         qualified = errors = 0
 
         for lead in unscored:
@@ -363,7 +353,8 @@ def qualify_all_leads(request):
 @permission_classes([IsCompanyUserOnly])
 def research_sources(request):
     """Return available lead research sources based on configured API keys."""
-    researcher = _get_research_agent()
+    company_user = request.user
+    researcher = _get_research_agent(company_user.company)
     return Response({
         'sources': researcher.available_sources,
         'default': researcher.source_label,
@@ -773,7 +764,7 @@ def sdr_campaigns_list(request):
         # Auto-generate steps if requested
         if d.get('generate_steps', True):
             icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
-            steps_data = _get_outreach_agent().generate_campaign_steps(campaign, icp)
+            steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)
             for sd in steps_data:
                 SDRCampaignStep.objects.create(
                     campaign=campaign,
@@ -970,7 +961,7 @@ def sdr_generate_steps(request, campaign_id):
         campaign.steps.all().delete()
 
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
-        steps_data = _get_outreach_agent().generate_campaign_steps(campaign, icp)
+        steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)
 
         created_steps = []
         for sd in steps_data:
@@ -1174,7 +1165,7 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
             from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
             email_agent = EmailAssistantAgent()
             email_data = email_agent.generate_more_info_email(lead, campaign, reply_text)
-            _get_outreach_agent().send_email(
+            _get_outreach_agent(company_user.company).send_email(
                 campaign, lead.email,
                 email_data['subject'], email_data['body'],
             )
@@ -1400,7 +1391,7 @@ def sdr_check_replies(request, campaign_id):
 
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
         email_agent = EmailAssistantAgent()
-        replies_found = _get_outreach_agent().check_inbox_for_replies(campaign, enrollments)
+        replies_found = _get_outreach_agent(company_user.company).check_inbox_for_replies(campaign, enrollments)
 
         new_replies = 0
         meetings_created = 0
