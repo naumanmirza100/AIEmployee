@@ -481,7 +481,28 @@ def process_hr_scheduled_notifications():
 
         ok, err = False, None
         try:
-            if template.channel == 'email':
+            # Per-template quiet hours (N-F2). If the template is in its own
+            # quiet window AND doesn't override user quiet hours, defer.
+            try:
+                from Frontline_agent.notification_utils import template_quiet_hours_check
+                in_quiet, defer_until = template_quiet_hours_check(template)
+                if in_quiet:
+                    notif.scheduled_at = defer_until or notif.scheduled_at
+                    notif.next_retry_at = defer_until
+                    notif.deferred_reason = 'template_quiet_hours'
+                    notif.save(update_fields=['scheduled_at', 'next_retry_at',
+                                              'deferred_reason'])
+                    failed += 1
+                    continue
+            except Exception:
+                # Reusing the Frontline helper is best-effort; if the import or
+                # call fails, fall through to immediate send rather than block.
+                logger.exception("HR template_quiet_hours_check failed; sending without quiet-hours gate")
+
+            # Multi-channel dispatch (N-F1). Imports the router lazily so this
+            # task module doesn't pull DRF + view code unnecessarily.
+            channel = (template.channel or 'email').lower()
+            if channel == 'email':
                 send_mail(
                     subject=subject or 'HR Notification',
                     message=body,
@@ -490,8 +511,16 @@ def process_hr_scheduled_notifications():
                     fail_silently=False,
                 )
                 ok = True
+            elif channel in ('slack', 'teams'):
+                from api.views.hr_agent import _dispatch_hr_notification
+                company = template.company
+                ok, _used = _dispatch_hr_notification(
+                    template, recipient_email, subject, body, company,
+                )
+                if not ok:
+                    err = f"{channel} send returned False (check {channel}_webhook_url on company)"
             else:
-                err = f"Channel '{template.channel}' not implemented for hr_agent"
+                err = f"Channel '{channel}' not implemented for hr_agent"
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
 
