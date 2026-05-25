@@ -518,6 +518,25 @@ class Company(models.Model):
     frontline_widget_config = models.JSONField(default=dict, blank=True,
                                                help_text='Widget theming + pre-chat form + operating hours + captcha toggle.')
 
+    # Notification channel webhooks for the Frontline agent (N1).
+    # Slack and Teams both use simple "incoming webhook" URLs — paste the URL
+    # the chat platform issues, no OAuth dance needed. Empty string = channel
+    # disabled. When a NotificationTemplate has channel='slack' or 'teams',
+    # the send path POSTs the rendered body to the matching URL here.
+    frontline_slack_webhook_url = models.URLField(blank=True, default='', max_length=500,
+                                                  help_text='Slack incoming-webhook URL for Frontline notifications.')
+    frontline_teams_webhook_url = models.URLField(blank=True, default='', max_length=500,
+                                                  help_text='MS Teams incoming-webhook URL for Frontline notifications.')
+
+    # Separate channel URLs for HR so HR alerts (probation, anniversaries,
+    # review-due) can route to a different Slack channel than support alerts.
+    # Empty = the channel is disabled for HR; a template setting channel='slack'
+    # or 'teams' will fail-quiet with a log line.
+    hr_slack_webhook_url = models.URLField(blank=True, default='', max_length=500,
+                                           help_text='Slack incoming-webhook URL for HR notifications.')
+    hr_teams_webhook_url = models.URLField(blank=True, default='', max_length=500,
+                                           help_text='MS Teams incoming-webhook URL for HR notifications.')
+
     # Inbound email routing.
     # `support_inbox_slug` is the token used to route mail — e.g. slug 'acme' means
     # support+acme@<INBOUND_EMAIL_DOMAIN> lands on this tenant. Must be unique and URL-safe.

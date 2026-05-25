@@ -102,6 +102,64 @@ def _company_employee_or_404(request, employee_id):
     return emp, None
 
 
+# Employment status lifecycle. Each key is a current state; the set is the
+# allowed *next* states for a non-admin caller. HR-admins can override any
+# transition (they often need to correct mid-lifecycle mistakes).
+_EMPLOYMENT_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    'candidate':  {'onboarding', 'offboarded'},   # offer accepted → onboard, or rescinded → offboarded
+    'onboarding': {'active', 'probation', 'offboarded'},
+    'active':     {'on_leave', 'probation', 'notice', 'offboarded'},
+    'probation':  {'active', 'notice', 'offboarded'},
+    'on_leave':   {'active', 'notice', 'offboarded'},
+    'notice':     {'active', 'offboarded'},        # active = resignation rescinded
+    'offboarded': set(),                            # terminal — HR-admin override only
+}
+
+
+def _validate_employment_transition(current: str, target: str, *, is_admin: bool):
+    """Return (ok, error_message). Same-state writes are no-ops. HR-admins
+    bypass the transition map entirely so they can correct lifecycle mistakes."""
+    if current == target:
+        return True, None
+    if is_admin:
+        return True, None
+    allowed = _EMPLOYMENT_STATUS_TRANSITIONS.get(current, set())
+    if target not in allowed:
+        return False, (
+            f"Illegal employment_status transition {current!r} → {target!r}. "
+            f"Allowed from {current!r}: {sorted(allowed) or 'none — HR-admin override required'}."
+        )
+    return True, None
+
+
+def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
+                              *, exclude_goal_id=None):
+    """Reject when adding/updating this goal's weight would push the cycle
+    total past 100%. ``exclude_goal_id`` is the goal being updated (so we
+    don't double-count its OLD weight against the new one).
+
+    Returns (ok, error_message, current_sum). When ``cycle_id`` is None we
+    skip the check entirely — goals outside a cycle don't roll up into
+    weighted scoring.
+    """
+    if not cycle_id:
+        return True, None, 0
+    from hr_agent.models import PerformanceGoal
+    from django.db.models import Sum
+    qs = PerformanceGoal.objects.filter(employee=employee, cycle_id=cycle_id)
+    if exclude_goal_id is not None:
+        qs = qs.exclude(pk=exclude_goal_id)
+    current_sum = int(qs.aggregate(s=Sum('weight_pct'))['s'] or 0)
+    projected = current_sum + max(0, int(new_weight or 0))
+    if projected > 100:
+        return False, (
+            f"Goal weights for this cycle would total {projected}% "
+            f"(other goals: {current_sum}% + this goal: {new_weight}%). "
+            f"Cycle weight total must be ≤ 100%."
+        ), current_sum
+    return True, None, current_sum
+
+
 def _resolve_asker_role(company_user: CompanyUser) -> str:
     """Map a CompanyUser.role to a knowledge confidentiality bucket.
 
@@ -445,6 +503,40 @@ def hr_knowledge_qa(request):
             asker_role=_resolve_asker_role(company_user),
             asker_employee=asker_employee,
         )
+        # F1 — compliance log: an HR doc being quoted into a Q&A answer is
+        # functionally a read of that doc. The direct-read endpoints already log
+        # via `_log_document_access`; without this, the agent could surface
+        # payslips/contracts in chat without a paper trail. Batch the inserts so
+        # one Q&A turn isn't N individual round-trips.
+        try:
+            citations = (result or {}).get('citations') or []
+            doc_ids = []
+            for c in citations:
+                if not isinstance(c, dict):
+                    continue
+                did = c.get('document_id')
+                if did:
+                    try:
+                        doc_ids.append(int(did))
+                    except (TypeError, ValueError):
+                        continue
+            doc_ids = list(dict.fromkeys(doc_ids))  # de-dupe but preserve order
+            if doc_ids:
+                docs = list(HRDocument.objects.filter(
+                    company=company, pk__in=doc_ids,
+                ).only('id', 'company_id'))
+                ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                      or request.META.get('REMOTE_ADDR') or None)
+                ua = (request.META.get('HTTP_USER_AGENT') or '')[:400]
+                from hr_agent.models import HRDocumentAccessLog as _HRDAL
+                _HRDAL.objects.bulk_create([
+                    _HRDAL(company=company, actor=company_user, document=d,
+                           action='read', ip_address=ip, user_agent=ua)
+                    for d in docs
+                ])
+        except Exception:
+            # Logging failure must never break the user's Q&A response.
+            logger.exception("hr_knowledge_qa: failed to log document access for citations")
         return Response({'status': 'success', 'data': result})
     except Exception:
         logger.exception("hr_knowledge_qa failed")
@@ -1569,15 +1661,50 @@ def submit_leave_request(request):
                             status=status.HTTP_400_BAD_REQUEST)
 
         from hr_agent.leave_helpers import working_days_between, resolve_approver_for_leave
-        # Caller can override (e.g. half-day requests); otherwise compute.
-        days_requested = d.get('days_requested')
-        if days_requested in (None, ''):
-            days_requested = working_days_between(sd, ed, company)
+
+        # F2 — partial-day metadata. When set, the request represents less than
+        # a full working day on a single date; we derive days_requested from
+        # the period rather than the date span.
+        partial_period = (d.get('partial_day_period') or '').strip().lower()
+        valid_periods = {'', 'morning', 'afternoon', 'hours'}
+        if partial_period not in valid_periods:
+            return Response({
+                'status': 'error',
+                'message': f"partial_day_period must be one of {sorted(valid_periods - {''})} or omitted for a full day.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        partial_hours_val = None
+        if partial_period:
+            if sd != ed:
+                return Response({
+                    'status': 'error',
+                    'message': 'Partial-day requests must have start_date == end_date.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if partial_period == 'hours':
+                try:
+                    partial_hours_val = float(d.get('partial_hours'))
+                except (TypeError, ValueError):
+                    return Response({
+                        'status': 'error',
+                        'message': 'partial_hours is required (decimal hours, e.g. 2.5) when partial_day_period="hours".',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                if not (0 < partial_hours_val < 8):
+                    return Response({
+                        'status': 'error',
+                        'message': 'partial_hours must be > 0 and < 8 (anything >= 8 should be a full day).',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                days_requested = round(partial_hours_val / 8.0, 2)
+            else:  # morning / afternoon
+                days_requested = 0.5
         else:
-            try:
-                days_requested = float(days_requested)
-            except (TypeError, ValueError):
+            # Caller can override (e.g. legacy half-day requests); otherwise compute.
+            days_requested = d.get('days_requested')
+            if days_requested in (None, ''):
                 days_requested = working_days_between(sd, ed, company)
+            else:
+                try:
+                    days_requested = float(days_requested)
+                except (TypeError, ValueError):
+                    days_requested = working_days_between(sd, ed, company)
 
         approver = resolve_approver_for_leave(emp, company)
         lr = LeaveRequest.objects.create(
@@ -1585,6 +1712,8 @@ def submit_leave_request(request):
             leave_type=d.get('leave_type') or 'vacation',
             start_date=sd, end_date=ed,
             days_requested=days_requested,
+            partial_day_period=partial_period,
+            partial_hours=partial_hours_val,
             reason=(d.get('reason') or '')[:2000],
             status='pending',
             approver=approver,
@@ -1592,6 +1721,8 @@ def submit_leave_request(request):
         return Response({'status': 'success', 'data': {
             'id': lr.id, 'employee_id': emp.id, 'status': lr.status,
             'days_requested': float(lr.days_requested),
+            'partial_day_period': lr.partial_day_period,
+            'partial_hours': float(lr.partial_hours) if lr.partial_hours is not None else None,
             'approver_id': lr.approver_id,
             'approver_name': lr.approver.full_name if lr.approver_id else None,
         }}, status=status.HTTP_201_CREATED)
@@ -1736,38 +1867,76 @@ def decide_leave_request(request, request_id):
     ``LeaveBalance.used_days`` for that leave_type.
     """
     try:
+        from django.db import transaction
+        from django.db.models import F
         company = request.user.company
-        lr = LeaveRequest.objects.filter(pk=request_id, employee__company=company).first()
-        if not lr:
-            return Response({'status': 'error', 'message': 'Leave request not found'},
-                            status=status.HTTP_404_NOT_FOUND)
-        if lr.status != 'pending':
-            return Response({'status': 'error', 'message': f'Leave request is {lr.status}, not pending'},
-                            status=status.HTTP_400_BAD_REQUEST)
         action = (request.data or {}).get('action')
         if action not in ('approve', 'reject'):
             return Response({'status': 'error', 'message': "action must be 'approve' or 'reject'"},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # Permission gate
+        # Race-safe: lock the LeaveRequest row before we read its status.
+        # Without select_for_update, two concurrent approve calls both read
+        # status='pending', both flip to 'approved', and both decrement
+        # LeaveBalance — taking the balance down twice the requested days.
+        # The lock serialises them; the second one sees status='approved'
+        # post-lock and returns the 400 below.
         cu = request.user
-        is_hr_admin = (cu.role or '').lower() in ('hr_agent', 'owner', 'admin')
-        approver_emp = (Employee.objects.filter(company=company, company_user=cu).first()
-                        or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
-        is_assigned_approver = bool(lr.approver_id and approver_emp and lr.approver_id == approver_emp.id)
-        if not (is_hr_admin or is_assigned_approver):
-            return Response({'status': 'error',
-                             'message': "You aren't authorized to decide this request — "
-                                        "must be the assigned approver or HR admin."},
-                            status=status.HTTP_403_FORBIDDEN)
+        with transaction.atomic():
+            lr = (LeaveRequest.objects
+                  .select_for_update()
+                  .filter(pk=request_id, employee__company=company)
+                  .first())
+            if not lr:
+                return Response({'status': 'error', 'message': 'Leave request not found'},
+                                status=status.HTTP_404_NOT_FOUND)
+            if lr.status != 'pending':
+                return Response({'status': 'error', 'message': f'Leave request is {lr.status}, not pending'},
+                                status=status.HTTP_400_BAD_REQUEST)
 
-        prev_status = lr.status
-        lr.status = 'approved' if action == 'approve' else 'rejected'
-        lr.approval_note = (request.data.get('note') or '')[:2000]
-        lr.decided_at = timezone.now()
-        lr.save(update_fields=['status', 'approval_note', 'decided_at', 'updated_at'])
+            # Permission gate
+            is_hr_admin = (cu.role or '').lower() in ('hr_agent', 'owner', 'admin', 'company_user')
+            approver_emp = (Employee.objects.filter(company=company, company_user=cu).first()
+                            or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
+            is_assigned_approver = bool(lr.approver_id and approver_emp and lr.approver_id == approver_emp.id)
+            if not (is_hr_admin or is_assigned_approver):
+                return Response({'status': 'error',
+                                 'message': "You aren't authorized to decide this request — "
+                                            "must be the assigned approver or HR admin."},
+                                status=status.HTTP_403_FORBIDDEN)
+
+            prev_status = lr.status
+            lr.status = 'approved' if action == 'approve' else 'rejected'
+            lr.approval_note = (request.data.get('note') or '')[:2000]
+            lr.decided_at = timezone.now()
+            lr.save(update_fields=['status', 'approval_note', 'decided_at', 'updated_at'])
+
+            # Bump used_days on approval. F() expression is atomic at the DB
+            # level — no read-modify-write window — so even if a second
+            # request slipped past the lock (it can't, but defence in depth),
+            # the increment wouldn't compound.
+            if lr.status == 'approved':
+                try:
+                    from hr_agent.models import LeaveBalance
+                    from datetime import date as _date
+                    # Scope the balance to the leave year so used_days doesn't
+                    # bleed across annual accrual cycles.
+                    year_start = _date(lr.start_date.year, 1, 1)
+                    bal, _ = LeaveBalance.objects.get_or_create(
+                        employee_id=lr.employee_id,
+                        leave_type=lr.leave_type,
+                        period_start=year_start,
+                    )
+                    LeaveBalance.objects.filter(pk=bal.pk).update(
+                        used_days=F('used_days') + (lr.days_requested or 0),
+                        updated_at=timezone.now(),
+                    )
+                except Exception:
+                    logger.exception("decide_leave_request: failed to bump LeaveBalance for lr %s", lr.id)
 
         # Audit — leave decisions are the most compliance-sensitive HR action.
+        # Written AFTER the atomic block commits so a logging failure can't
+        # roll back the actual approval.
         _write_audit_log(
             cu, company,
             f'leave_request.{action}',
@@ -1782,25 +1951,6 @@ def decide_leave_request(request, request_id):
                 'days_requested': float(lr.days_requested or 0),
             },
         )
-
-        # Bump used_days on approval — keeps the balance honest without
-        # requiring a separate workflow step.
-        if lr.status == 'approved':
-            try:
-                from hr_agent.models import LeaveBalance
-                from datetime import date as _date
-                # Scope the balance to the leave year so used_days doesn't
-                # bleed across annual accrual cycles.
-                year_start = _date(lr.start_date.year, 1, 1)
-                bal, _ = LeaveBalance.objects.get_or_create(
-                    employee_id=lr.employee_id,
-                    leave_type=lr.leave_type,
-                    period_start=year_start,
-                )
-                bal.used_days = (bal.used_days or 0) + (lr.days_requested or 0)
-                bal.save(update_fields=['used_days', 'updated_at'])
-            except Exception:
-                logger.exception("decide_leave_request: failed to bump LeaveBalance for lr %s", lr.id)
 
         return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
     except Exception:
@@ -2267,11 +2417,22 @@ def cancel_hr_meeting(request, meeting_id):
     if err:
         return err
     reason = (request.data or {}).get('reason') or ''
+    prev_status = m.status
     m.status = 'cancelled'
     if reason:
         prefix = '\n\n[Cancelled] ' if m.notes else '[Cancelled] '
         m.notes = (m.notes or '') + prefix + reason
     m.save(update_fields=['status', 'notes', 'updated_at'])
+    # Audit — cancellation was the only meeting mutation not logged. Compliance
+    # queries like "who cancelled this exit interview?" now have an answer.
+    _write_audit_log(
+        request.user, request.user.company,
+        'meeting.cancel', 'meeting', m.id,
+        before={'status': prev_status},
+        after={'status': 'cancelled', 'reason': reason[:500],
+               'meeting_type': m.meeting_type,
+               'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None},
+    )
     return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
 
 
@@ -2768,9 +2929,20 @@ def update_employee(request, employee_id):
                 fields.append('personal_email')
             if 'employment_status' in d:
                 val = d['employment_status']
-                if val in dict(Employee.EMPLOYMENT_STATUS_CHOICES):
-                    emp.employment_status = val
-                    fields.append('employment_status')
+                if val not in dict(Employee.EMPLOYMENT_STATUS_CHOICES):
+                    return Response({
+                        'status': 'error',
+                        'message': f"Unknown employment_status {val!r}. Must be one of "
+                                   f"{sorted(dict(Employee.EMPLOYMENT_STATUS_CHOICES))}.",
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                ok, err = _validate_employment_transition(
+                    emp.employment_status, val, is_admin=is_admin,
+                )
+                if not ok:
+                    return Response({'status': 'error', 'message': err},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                emp.employment_status = val
+                fields.append('employment_status')
             if 'employment_type' in d:
                 val = d['employment_type']
                 if val in dict(Employee.EMPLOYMENT_TYPE_CHOICES):
@@ -3217,6 +3389,35 @@ def update_perf_review(request, review_id):
     d = request.data or {}
     fields = []
     before_review = _serialize_perf_review(r)
+
+    # Deadline gates — non-admin writers can't edit a self-review past
+    # `cycle.self_review_due`, or a manager-review past `cycle.manager_review_due`.
+    # HR-admins can always back-fill (they often need to correct late submissions).
+    today = timezone.now().date()
+    cycle = r.cycle if r.cycle_id else None
+    self_keys = {'self_summary', 'submit_self'}
+    manager_keys = {'manager_summary', 'strengths', 'growth_areas', 'goals',
+                    'overall_rating', 'submit_manager'}
+    if not is_admin:
+        if cycle and cycle.self_review_due and today > cycle.self_review_due \
+                and any(k in d for k in self_keys):
+            return Response({
+                'status': 'error',
+                'message': (
+                    f"Self-review deadline ({cycle.self_review_due.isoformat()}) "
+                    f"has passed. Ask HR to reopen the cycle if you need to submit late."
+                ),
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if cycle and cycle.manager_review_due and today > cycle.manager_review_due \
+                and any(k in d for k in manager_keys):
+            return Response({
+                'status': 'error',
+                'message': (
+                    f"Manager-review deadline ({cycle.manager_review_due.isoformat()}) "
+                    f"has passed. Ask HR to reopen the cycle if you need to submit late."
+                ),
+            }, status=status.HTTP_400_BAD_REQUEST)
+
     # Self-review fields
     if 'self_summary' in d and (is_reviewee or is_admin):
         if r.self_submitted_at and not is_admin:
@@ -3424,6 +3625,13 @@ def create_employee_goal(request, employee_id):
             employee__company=request.user.company, pk=parent_id).exists():
         return Response({'status': 'error', 'message': 'parent_id not found'},
                         status=status.HTTP_400_BAD_REQUEST)
+    new_weight = max(0, min(100, int(d.get('weight_pct') or 0)))
+    # Sum-check cycle weights so they can't add up past 100%. Only enforced
+    # when a cycle is attached — goals outside a cycle don't roll up.
+    ok, err, _cur = _validate_goal_weight_sum(emp, cycle_id or None, new_weight)
+    if not ok:
+        return Response({'status': 'error', 'message': err},
+                        status=status.HTTP_400_BAD_REQUEST)
     g = PerformanceGoal.objects.create(
         employee=emp,
         cycle_id=cycle_id or None,
@@ -3432,7 +3640,7 @@ def create_employee_goal(request, employee_id):
         description=(d.get('description') or '')[:5000],
         success_criteria=(d.get('success_criteria') or '')[:5000],
         status=d.get('status') or 'open',
-        weight_pct=max(0, min(100, int(d.get('weight_pct') or 0))),
+        weight_pct=new_weight,
         target_value=(d.get('target_value') or '')[:80],
         current_value=(d.get('current_value') or '')[:80],
         progress_pct=max(0, min(100, int(d.get('progress_pct') or 0))),
@@ -3489,9 +3697,18 @@ def update_employee_goal(request, goal_id):
                 fields.append('closed_at')
         elif k == 'weight_pct':
             try:
-                g.weight_pct = max(0, min(100, int(d[k] or 0))); fields.append('weight_pct')
+                proposed = max(0, min(100, int(d[k] or 0)))
             except (TypeError, ValueError):
-                pass
+                proposed = None
+            if proposed is not None:
+                ok, err, _cur = _validate_goal_weight_sum(
+                    g.employee, g.cycle_id, proposed, exclude_goal_id=g.id,
+                )
+                if not ok:
+                    return Response({'status': 'error', 'message': err},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                g.weight_pct = proposed
+                fields.append('weight_pct')
         elif k == 'progress_pct':
             try:
                 g.progress_pct = max(0, min(100, int(d[k] or 0))); fields.append('progress_pct')
@@ -3886,3 +4103,340 @@ def list_hr_document_access_log(request, document_id):
     } for r in qs[offset:offset + limit]]
     return Response({'status': 'success', 'data': rows,
                      'pagination': {'total': total, 'limit': limit, 'offset': offset}})
+
+
+# ============================================================================
+# GDPR right-to-export (F3) — Article 15 / 20 data-portability bundle
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def export_employee_data(request, employee_id):
+    """GDPR Article 15 / 20 data-portability export.
+
+    Returns a ZIP containing the employee's profile, leave history, comp
+    history, performance reviews, goals, personal documents (file copies),
+    and audit-log entries that reference them. HR-admin OR self only.
+
+    Synchronous — fine for typical employee record sizes (<100 MB). If a
+    long-tenured employee with thousands of documents stresses this, move
+    to a Celery task that emails a download link.
+    """
+    import io
+    import zipfile
+    from django.http import HttpResponse
+
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    company = request.user.company
+    caller_user_id = getattr(request.user, 'user_id', None)
+    is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
+    is_admin = _is_hr_admin(request.user)
+    if not (is_self or is_admin):
+        return Response({'status': 'error',
+                         'message': 'Only the employee themselves or an HR-admin can export this record.'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    from hr_agent.models import (
+        LeaveBalance, LeaveRequest, HRDocument, PerformanceReview,
+        PerformanceGoal, HRAuditLog, HRDocumentAccessLog,
+    )
+    try:
+        from hr_agent.models import Compensation
+    except ImportError:
+        Compensation = None
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Profile (serialised employee row)
+        zf.writestr('profile.json', json.dumps(_serialize_employee(emp), indent=2, default=str))
+
+        # Leave history
+        leave_rows = list(LeaveRequest.objects.filter(employee=emp).values(
+            'id', 'leave_type', 'start_date', 'end_date', 'days_requested',
+            'status', 'reason', 'approval_note', 'decided_at', 'created_at',
+        ))
+        zf.writestr('leave_requests.json', json.dumps(leave_rows, indent=2, default=str))
+        balance_rows = list(LeaveBalance.objects.filter(employee=emp).values(
+            'leave_type', 'accrued_days', 'used_days', 'carried_over_days',
+            'period_start', 'period_end',
+        ))
+        zf.writestr('leave_balances.json', json.dumps(balance_rows, indent=2, default=str))
+
+        # Compensation history (HR-admin only includes raw amounts; self gets
+        # their own data per GDPR right-of-access, so include here too).
+        if Compensation is not None:
+            comp_rows = list(Compensation.objects.filter(employee=emp).values(
+                'effective_date', 'base_salary', 'currency', 'pay_frequency',
+                'bonus_target_pct', 'equity_grant_value', 'grade', 'reason',
+                'notes', 'created_at',
+            ))
+            zf.writestr('compensation.json', json.dumps(comp_rows, indent=2, default=str))
+
+        # Performance reviews. For self exports we still include unreleased
+        # reviews because GDPR right-of-access entitles the subject to ALL
+        # personal data the company holds, including in-progress manager
+        # commentary about them.
+        review_rows = list(PerformanceReview.objects.filter(employee=emp).values(
+            'cycle__name', 'status', 'self_summary', 'manager_summary',
+            'strengths', 'growth_areas', 'goals', 'overall_rating',
+            'visible_to_employee', 'self_submitted_at', 'manager_submitted_at',
+            'finalized_at', 'created_at',
+        ))
+        zf.writestr('performance_reviews.json', json.dumps(review_rows, indent=2, default=str))
+
+        # Goals (own, plus parent linkage)
+        goal_rows = list(PerformanceGoal.objects.filter(employee=emp).values(
+            'title', 'description', 'success_criteria', 'status', 'weight_pct',
+            'target_value', 'current_value', 'progress_pct', 'due_date',
+            'closed_at', 'created_at',
+        ))
+        zf.writestr('goals.json', json.dumps(goal_rows, indent=2, default=str))
+
+        # Audit log entries referencing this employee
+        audit_rows = list(HRAuditLog.objects.filter(
+            company=company, target_type='employee', target_id=emp.id,
+        ).values('action', 'target_type', 'target_id', 'diff', 'created_at',
+                 'actor__email'))
+        zf.writestr('audit_log.json', json.dumps(audit_rows, indent=2, default=str))
+
+        # Document access log — who has read this employee's personal docs
+        access_rows = list(HRDocumentAccessLog.objects.filter(
+            company=company, document__employee=emp,
+        ).values('action', 'document_id', 'ip_address', 'user_agent',
+                 'created_at', 'actor__email'))
+        zf.writestr('document_access_log.json', json.dumps(access_rows, indent=2, default=str))
+
+        # Personal documents — actual file bytes when present on disk
+        from django.conf import settings as _s
+        personal_docs = HRDocument.objects.filter(company=company, employee=emp)
+        doc_index = []
+        for d in personal_docs:
+            doc_index.append({
+                'id': d.id, 'title': d.title, 'document_type': d.document_type,
+                'confidentiality': d.confidentiality, 'file_path': d.file_path,
+                'file_format': d.file_format, 'file_size': d.file_size,
+                'extracted_fields': d.extracted_fields or {},
+                'created_at': d.created_at.isoformat() if d.created_at else None,
+            })
+            if d.file_path:
+                try:
+                    full = Path(_s.MEDIA_ROOT) / d.file_path
+                    if full.exists() and full.is_file():
+                        with open(full, 'rb') as fh:
+                            zf.writestr(f'documents/{d.id}_{Path(d.file_path).name}', fh.read())
+                except Exception:
+                    logger.exception("export_employee_data: failed to read file for doc %s", d.id)
+        zf.writestr('documents/_index.json', json.dumps(doc_index, indent=2, default=str))
+
+        # README
+        zf.writestr('README.txt',
+            "GDPR Data Export\n"
+            "================\n"
+            f"Employee: {emp.full_name} (id={emp.id})\n"
+            f"Generated: {timezone.now().isoformat()}\n"
+            f"Generated by: {request.user.email}\n\n"
+            "This archive contains all personal data the company holds about\n"
+            "you. JSON files are structured per category; the `documents/`\n"
+            "directory contains the actual file bytes for each personal\n"
+            "document, indexed in `documents/_index.json`.\n")
+
+    # Audit the export itself — GDPR exports are auditable events.
+    _write_audit_log(
+        request.user, company, 'employee.gdpr_export', 'employee', emp.id,
+        after={'exported_by': request.user.email,
+               'self_export': bool(is_self),
+               'admin_export': bool(is_admin),
+               'bytes': buf.tell()},
+    )
+
+    buf.seek(0)
+    resp = HttpResponse(buf.read(), content_type='application/zip')
+    safe_name = ''.join(c if c.isalnum() else '_' for c in (emp.full_name or f'employee_{emp.id}'))[:60]
+    resp['Content-Disposition'] = f'attachment; filename="{safe_name}_gdpr_export.zip"'
+    return resp
+
+
+# ============================================================================
+# HR document soft-deprecation + re-ingest (D-F2, D-F3)
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def mark_hr_document_outdated(request, document_id):
+    """Soft-deprecate an HR doc: excluded from retrieval immediately, kept on
+    disk so HR can review or restore. Distinct from `superseded_by` (which
+    requires uploading a replacement). HR-admin only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    d = HRDocument.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if d.is_outdated:
+        return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': True, 'already': True}})
+    d.is_outdated = True
+    d.save(update_fields=['is_outdated', 'updated_at'])
+    _write_audit_log(request.user, company, 'hr_document.mark_outdated',
+                     'hr_document', d.id, after={'is_outdated': True})
+    return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': True}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def unmark_hr_document_outdated(request, document_id):
+    """Restore a soft-deprecated HR doc back into retrieval. HR-admin only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    d = HRDocument.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if not d.is_outdated:
+        return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': False, 'already': True}})
+    d.is_outdated = False
+    d.save(update_fields=['is_outdated', 'updated_at'])
+    _write_audit_log(request.user, company, 'hr_document.unmark_outdated',
+                     'hr_document', d.id, after={'is_outdated': False})
+    return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': False}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def reingest_hr_document(request, document_id):
+    """Re-run the ingestion pipeline on an HR doc — useful when processing
+    landed in `failed`, or after fixing OCR settings, or after updating the
+    embedding model. Wipes existing chunks + flips status back to
+    `processing`, then dispatches the Celery task. HR-admin only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    d = HRDocument.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    d.chunks.all().delete()
+    d.chunks_processed = 0
+    d.chunks_total = 0
+    d.is_indexed = False
+    d.processing_status = 'processing'
+    d.processing_error = ''
+    d.save(update_fields=['chunks_processed', 'chunks_total', 'is_indexed',
+                          'processing_status', 'processing_error', 'updated_at'])
+    try:
+        from hr_agent.tasks import process_hr_document
+        process_hr_document.delay(d.id)
+    except Exception as exc:
+        logger.exception("reingest_hr_document: failed to dispatch process_hr_document for doc %s", d.id)
+        d.processing_status = 'failed'
+        d.processing_error = f'Failed to enqueue: {exc}'
+        d.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+        return Response({'status': 'error',
+                         'message': f'Failed to enqueue ingestion: {exc}'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    _write_audit_log(request.user, company, 'hr_document.reingest',
+                     'hr_document', d.id,
+                     after={'processing_status': d.processing_status})
+    return Response({'status': 'success', 'data': {
+        'id': d.id, 'processing_status': d.processing_status,
+    }})
+
+
+# ============================================================================
+# HR Slack + Teams send adapters (N-F1)
+# ============================================================================
+
+def _send_hr_notification_slack(company, subject, body):
+    """POST to the tenant's HR Slack webhook URL. Returns False with a log
+    line when no URL is configured — caller can queue / fail."""
+    url = (getattr(company, 'hr_slack_webhook_url', '') or '').strip()
+    if not url:
+        logger.warning("HR Slack send skipped — no hr_slack_webhook_url for company %s",
+                       getattr(company, 'id', '?'))
+        return False
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError, HTTPError
+    text = f"*{subject}*\n{body}" if subject else body
+    payload = json.dumps({'text': text}).encode('utf-8')
+    req = Request(url, data=payload, method='POST',
+                  headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(req, timeout=15) as resp:
+            return 200 <= int(resp.status) < 300
+    except (URLError, HTTPError, OSError) as exc:
+        logger.warning("HR Slack send failed for company %s: %s",
+                       getattr(company, 'id', '?'), exc)
+        return False
+
+
+def _send_hr_notification_teams(company, subject, body):
+    """POST to the tenant's HR Teams webhook URL. Same MessageCard envelope
+    Frontline uses."""
+    url = (getattr(company, 'hr_teams_webhook_url', '') or '').strip()
+    if not url:
+        logger.warning("HR Teams send skipped — no hr_teams_webhook_url for company %s",
+                       getattr(company, 'id', '?'))
+        return False
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError, HTTPError
+    title = subject or 'HR Notification'
+    payload = json.dumps({
+        '@type': 'MessageCard',
+        '@context': 'https://schema.org/extensions',
+        'summary': title[:200],
+        'title': title,
+        'text': body,
+    }).encode('utf-8')
+    req = Request(url, data=payload, method='POST',
+                  headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(req, timeout=15) as resp:
+            return 200 <= int(resp.status) < 300
+    except (URLError, HTTPError, OSError) as exc:
+        logger.warning("HR Teams send failed for company %s: %s",
+                       getattr(company, 'id', '?'), exc)
+        return False
+
+
+def _dispatch_hr_notification(template, recipient_email, subject, body, company):
+    """Route a rendered HR notification to the right channel adapter. Returns
+    ``(ok, channel_used)``. Defaults to email for empty/unknown channels so a
+    typo can't silently drop notifications."""
+    channel = (getattr(template, 'channel', 'email') or 'email').lower()
+    if channel == 'slack':
+        return _send_hr_notification_slack(company, subject, body), 'slack'
+    if channel == 'teams':
+        return _send_hr_notification_teams(company, subject, body), 'teams'
+    if channel in ('sms', 'in_app'):
+        logger.warning("HR channel %r not implemented yet — notification dropped (template=%s)",
+                       channel, getattr(template, 'id', '?'))
+        return False, channel
+    # Default to email (back-compat). Use the existing per-template email
+    # helpers / Celery sender for retries; here just send synchronously.
+    try:
+        from django.core.mail import send_mail
+        send_mail(
+            subject=subject or 'Notification',
+            message=body,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            recipient_list=[recipient_email] if recipient_email else [],
+            fail_silently=False,
+        )
+        return True, 'email'
+    except Exception:
+        logger.exception("HR email send failed for template %s recipient %s",
+                         getattr(template, 'id', '?'), recipient_email)
+        return False, 'email'

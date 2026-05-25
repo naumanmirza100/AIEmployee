@@ -8,13 +8,14 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from Frontline_agent.throttling import (
-    FrontlinePublicThrottle,
+    FrontlinePublicThrottle, FrontlineWidgetKeyThrottle,
     FrontlineLLMThrottle,
     FrontlineUploadThrottle,
     FrontlineCRUDThrottle,
 )
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db import IntegrityError
 from django.db.models import Q, Count
 from django.contrib.auth.models import User
 from django.http import HttpResponse
@@ -41,7 +42,9 @@ from Frontline_agent.models import (
     NotificationTemplate, ScheduledNotification, FrontlineWorkflow, FrontlineWorkflowExecution,
     FrontlineWorkflowVersion, FrontlineMeeting,
     SavedGraphPrompt, KBFeedback, FrontlineNotificationPreferences, DocumentChunk,
-    Contact,
+    Contact, FrontlineAuditLog,
+    TicketMacro, FrontlineDeadLetter, TicketSatisfaction,
+    TicketLink, ContactNote,
 )
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Frontline_agent.frontline_agent import FrontlineAgent
@@ -90,14 +93,27 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
     few minutes later still fires.
     """
     try:
-        templates = NotificationTemplate.objects.filter(
+        # Dedup across templates: at most ONE template per (company, event) fires
+        # — if HR has both a "legacy" and "new" ticket-created template, the
+        # most recently updated one wins. Older ones get logged and skipped so
+        # the same recipient doesn't get two emails for the same event. To
+        # intentionally run two flows, encode them under different `on` values.
+        templates = list(NotificationTemplate.objects.filter(
             company_id=company_id,
             trigger_config__on=event_type,
-        )
+        ).order_by('-updated_at', '-id'))
+        seen_for_event = False
         for t in templates:
             cfg = t.trigger_config or {}
             if cfg.get('on') != event_type:
                 continue
+            if seen_for_event:
+                logger.info(
+                    "Notification trigger: skipping older template %s (company=%s event=%s) — newer one already won",
+                    t.id, company_id, event_type,
+                )
+                continue
+            seen_for_event = True
             recipient_email = getattr(ticket.created_by, 'email', '') or ''
             if not _should_send_notification_to_recipient(company_id, recipient_email, t.channel, event_type):
                 logger.info(f"Notification trigger: skipped template {t.id} for {recipient_email} (user preferences)")
@@ -137,6 +153,100 @@ def _run_notification_triggers(company_id, event_type, ticket, old_status=None):
 _NOTIFICATION_DEDUP_WINDOW_SECONDS = 90
 
 
+def _write_frontline_audit_log(actor_cu, company, action: str, target_type: str,
+                               target_id: int, *,
+                               before: dict | None = None, after: dict | None = None,
+                               created: dict | None = None, deleted: dict | None = None) -> None:
+    """Fire-and-forget audit log writer — never raises (a logging failure must
+    not roll back the underlying mutation). Mirrors HR's _write_audit_log.
+
+    Pass exactly one of (before+after), (created), or (deleted) — whichever
+    matches the mutation shape.
+    """
+    try:
+        if created is not None:
+            diff = {'created': created}
+        elif deleted is not None:
+            diff = {'deleted': deleted}
+        else:
+            diff = {}
+            if before is not None:
+                diff['before'] = before
+            if after is not None:
+                diff['after'] = after
+        FrontlineAuditLog.objects.create(
+            company=company, actor=actor_cu,
+            action=action, target_type=target_type, target_id=target_id,
+            diff=diff,
+        )
+    except Exception:
+        logger.exception("_write_frontline_audit_log failed: %s on %s:%s",
+                         action, target_type, target_id)
+
+
+# Ticket lifecycle state machine. Lists the statuses each row can transition TO.
+# Anything outside this map is rejected with a 400, so callers can't write
+# `status='wat'` or jump `closed → new` arbitrarily.
+_TICKET_ALLOWED_TRANSITIONS = {
+    'new':           {'open', 'in_progress', 'resolved', 'closed', 'auto_resolved'},
+    'open':          {'in_progress', 'resolved', 'closed', 'auto_resolved'},
+    'in_progress':   {'open', 'resolved', 'closed', 'auto_resolved'},
+    'resolved':      {'open', 'closed'},          # reopen or finalise
+    'closed':        {'open'},                     # reopening is the only legal exit
+    'auto_resolved': {'open', 'resolved', 'closed'},  # human override
+}
+
+
+# Magic-byte signatures for widget attachments. We sniff the actual bytes
+# rather than trust the client's content_type header. List ordered by frequency
+# (PDF, image, DOCX, plain text → most common widget upload types).
+_WIDGET_MAGIC_SIGNATURES = (
+    (b'%PDF',                 'application/pdf'),
+    (b'\xff\xd8\xff',         'image/jpeg'),
+    (b'\x89PNG\r\n\x1a\n',    'image/png'),
+    (b'GIF87a',               'image/gif'),
+    (b'GIF89a',               'image/gif'),
+    (b'PK\x03\x04',           'application/zip'),  # plain zip OR docx/xlsx/pptx
+)
+
+
+def _sniff_widget_attachment_mime(data: bytes) -> str | None:
+    """Magic-byte detect a widget attachment's actual MIME. Returns None when
+    nothing matches — caller should reject. DOCX/XLSX/PPTX are distinguished
+    from raw ZIP by checking for the OOXML ``[Content_Types].xml`` marker."""
+    if not data:
+        return None
+    for prefix, mime in _WIDGET_MAGIC_SIGNATURES:
+        if data.startswith(prefix):
+            if mime == 'application/zip' and b'[Content_Types].xml' in data[:8192]:
+                return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            return mime
+    # Plain text fallback: only accept if the head decodes as UTF-8 and looks
+    # like text (no NUL bytes — that would hint at a binary disguised as txt).
+    head = data[:1024]
+    if b'\x00' in head:
+        return None
+    try:
+        head.decode('utf-8')
+    except UnicodeDecodeError:
+        return None
+    return 'text/plain'
+
+
+def _validate_ticket_transition(current: str, target: str) -> tuple[bool, str | None]:
+    """Return (ok, error_message). Same-state writes are allowed as no-ops so
+    repeated saves don't 400."""
+    if current == target:
+        return True, None
+    allowed = _TICKET_ALLOWED_TRANSITIONS.get(current, set())
+    if target not in allowed:
+        return False, (
+            f"Illegal status transition '{current}' → '{target}'. "
+            f"Allowed from '{current}': {sorted(allowed) or 'none'}."
+        )
+    return True, None
+
+
 def _create_scheduled_notification_dedup(*, company_id, template, scheduled_at,
                                          recipient_email, related_ticket, context):
     """Create a pending ScheduledNotification unless an equivalent one already
@@ -148,29 +258,39 @@ def _create_scheduled_notification_dedup(*, company_id, template, scheduled_at,
     intentionally NOT considered — if a previous send failed, the next trigger
     should get a fresh chance.
     """
+    from django.db import transaction
     window = timedelta(seconds=_NOTIFICATION_DEDUP_WINDOW_SECONDS)
-    existing = ScheduledNotification.objects.filter(
-        company_id=company_id,
-        template=template,
-        related_ticket=related_ticket,
-        recipient_email=recipient_email,
-        status='pending',
-        scheduled_at__gte=scheduled_at - window,
-        scheduled_at__lte=scheduled_at + window,
-    ).only('id').first()
-    if existing:
-        return False, existing.id
+    # Race-safe dedup: two concurrent signal firings for the same ticket can
+    # otherwise both pass the "already scheduled?" check and create duplicates.
+    # Lock the related_ticket row so concurrent calls serialise — by the time
+    # the second one runs its SELECT, the first's INSERT is visible.
+    with transaction.atomic():
+        if related_ticket is not None:
+            type(related_ticket).objects.select_for_update().filter(
+                pk=related_ticket.pk,
+            ).first()
+        existing = ScheduledNotification.objects.filter(
+            company_id=company_id,
+            template=template,
+            related_ticket=related_ticket,
+            recipient_email=recipient_email,
+            status='pending',
+            scheduled_at__gte=scheduled_at - window,
+            scheduled_at__lte=scheduled_at + window,
+        ).only('id').first()
+        if existing:
+            return False, existing.id
 
-    n = ScheduledNotification.objects.create(
-        company_id=company_id,
-        template=template,
-        scheduled_at=scheduled_at,
-        status='pending',
-        recipient_email=recipient_email,
-        related_ticket=related_ticket,
-        context=context,
-    )
-    return True, n.id
+        n = ScheduledNotification.objects.create(
+            company_id=company_id,
+            template=template,
+            scheduled_at=scheduled_at,
+            status='pending',
+            recipient_email=recipient_email,
+            related_ticket=related_ticket,
+            context=context,
+        )
+        return True, n.id
 
 
 def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old_status=None):
@@ -205,6 +325,23 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
             if event_type == 'ticket_updated' and old_status is not None:
                 context_data['old_status'] = old_status
             try:
+                # Idempotency — a webhook provider redelivering the same event
+                # would otherwise create a second execution. The unique
+                # constraint on (workflow, idempotency_key) turns the second
+                # arrival into a 200 no-op via the IntegrityError handler below.
+                idem_key = _idempotency_key_for_event(
+                    w.id, event_type, ticket.id,
+                )
+                # Pre-check is cheap and lets us log/return cleanly without
+                # relying solely on the constraint race.
+                if FrontlineWorkflowExecution.objects.filter(
+                    workflow=w, idempotency_key=idem_key,
+                ).exists():
+                    logger.info(
+                        "Workflow trigger: skipping duplicate (workflow=%s event=%s ticket=%s) — already executed",
+                        w.id, event_type, ticket.id,
+                    )
+                    continue
                 exec_obj = FrontlineWorkflowExecution.objects.create(
                     workflow=w,
                     workflow_name=w.name,
@@ -212,6 +349,7 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
                     executed_by=executed_by_user,
                     status='awaiting_approval' if w.requires_approval else 'in_progress',
                     context_data=context_data,
+                    idempotency_key=idem_key,
                 )
                 if w.requires_approval:
                     logger.info(f"Workflow trigger: workflow {w.id} requires approval. Status: awaiting_approval.")
@@ -234,6 +372,14 @@ def _run_workflow_triggers(company_id, event_type, ticket, executed_by_user, old
                         exec_obj.completed_at = timezone.now()
                         exec_obj.save()
                         logger.info(f"Workflow trigger: executed workflow {w.id} ({w.name}) for event={event_type} ticket={ticket.id}, status={exec_obj.status}")
+            except IntegrityError:
+                # Lost the idempotency race — a concurrent request beat us to
+                # the create. The other call's execution is authoritative;
+                # we silently drop this one.
+                logger.info(
+                    "Workflow trigger: idempotency-key collision for workflow=%s ticket=%s — skipped",
+                    w.id, ticket.id,
+                )
             except Exception as e:
                 logger.exception("Workflow trigger: execution failed for workflow %s (ticket %s): %s", w.id, ticket.id, e)
     except KeyServiceError:
@@ -302,11 +448,88 @@ def _celery_broker_ready(timeout_seconds: float = 1.0) -> bool:
         return False
 
 
-def _sla_due_at_for_priority(priority):
-    """Return SLA due datetime for a ticket priority (urgent=4h, high=8h, medium=24h, low=48h)."""
-    from datetime import timedelta
-    hours = {'urgent': 4, 'high': 8, 'medium': 24, 'low': 48}.get((priority or 'medium').lower(), 24)
-    return timezone.now() + timedelta(hours=hours)
+_SLA_HOURS_BY_PRIORITY = {'urgent': 4, 'high': 8, 'medium': 24, 'low': 48}
+
+
+def _sla_due_at_for_priority(priority, company=None):
+    """Return SLA due datetime for a ticket priority.
+
+    Wall-clock by default (urgent=4h, high=8h, medium=24h, low=48h).
+    When the tenant has business-hours enabled (widget_config.operating_hours.enabled),
+    the SLA budget is consumed only during business hours so a Friday-5pm
+    ticket doesn't "breach" at Saturday 1am when nobody's on shift. Pass
+    ``company=`` to opt into business-hours math; omit it for the legacy
+    wall-clock behaviour (back-compat for callers that don't have the company
+    in scope).
+    """
+    hours = _SLA_HOURS_BY_PRIORITY.get((priority or 'medium').lower(), 24)
+    now = timezone.now()
+    if company is None:
+        return now + timedelta(hours=hours)
+    try:
+        from Frontline_agent.widget_utils import resolved_widget_config
+        cfg = (resolved_widget_config(company) or {}).get('operating_hours') or {}
+        if not cfg.get('enabled'):
+            return now + timedelta(hours=hours)
+        return _add_business_hours(now, hours, cfg)
+    except Exception:
+        # Never let SLA computation crash a ticket create — fall back to wall-clock.
+        logger.exception("_sla_due_at_for_priority: business-hours calc failed, falling back to wall-clock")
+        return now + timedelta(hours=hours)
+
+
+def _add_business_hours(now, hours_to_add, oh_cfg):
+    """Walk forward from ``now`` consuming ``hours_to_add`` of business-hour
+    budget, skipping nights / closed days. ``oh_cfg`` is the
+    operating_hours config dict (timezone_name, schedule).
+
+    Implementation: minute-by-minute walk to keep the code obvious. SLA windows
+    are small (≤48h) so the loop bound is fine. Falls through to wall-clock if
+    the company has no open hours at all (misconfigured), to avoid hanging.
+    """
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        tz = ZoneInfo((oh_cfg.get('timezone_name') or 'UTC'))
+    except (ZoneInfoNotFoundError, Exception):
+        tz = timezone.utc
+    schedule = oh_cfg.get('schedule') or {}
+    day_keys = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
+    # Quick "no open time at all" guard
+    if not any((schedule.get(d) or []) for d in day_keys):
+        return now + timedelta(hours=hours_to_add)
+
+    def _windows_for_day(local_dt):
+        return schedule.get(day_keys[local_dt.weekday()]) or []
+
+    def _in_open_window(local_dt):
+        cur = local_dt.time()
+        for start_s, end_s in _windows_for_day(local_dt):
+            try:
+                sh, sm = [int(x) for x in start_s.split(':')]
+                eh, em = [int(x) for x in end_s.split(':')]
+            except (TypeError, ValueError):
+                continue
+            from datetime import time as _time
+            if _time(sh, sm) <= cur < _time(eh, em):
+                return True
+        return False
+
+    remaining_minutes = int(round(hours_to_add * 60))
+    cursor = now.astimezone(tz)
+    # Cap the loop at 90 calendar days as a sanity bound — anything longer than
+    # that means a config bug; better to return *something* than to spin.
+    max_iter = 60 * 24 * 90
+    iters = 0
+    while remaining_minutes > 0 and iters < max_iter:
+        iters += 1
+        if _in_open_window(cursor):
+            cursor += timedelta(minutes=1)
+            remaining_minutes -= 1
+        else:
+            # Jump to the next minute. The next-open-window seek is also valid
+            # but the minute increments keep the code simple.
+            cursor += timedelta(minutes=1)
+    return cursor.astimezone(timezone.utc)
 
 
 def _should_send_notification_to_recipient(company_id, recipient_email, channel, event_type=None):
@@ -492,7 +715,7 @@ def update_frontline_widget_config(request):
 @api_view(["GET"])
 @permission_classes([])
 @authentication_classes([])
-@throttle_classes([FrontlinePublicThrottle])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
 def public_widget_config(request):
     """Public endpoint the embed script calls on page load to fetch theming,
     pre-chat form definition, operating-hours status, and whether a CAPTCHA is
@@ -1172,7 +1395,7 @@ def _check_widget_gates(request, company, body_data):
 @api_view(["POST"])
 @permission_classes([])
 @authentication_classes([])
-@throttle_classes([FrontlinePublicThrottle])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
 def public_qa(request):
     """Public Knowledge Q&A for embedded chat/widget. No auth. Identify company by widget_key in body or X-Widget-Key header."""
     try:
@@ -1189,6 +1412,16 @@ def public_qa(request):
                 {'status': 'error', 'message': 'question is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        # Hard cap + sanitize the public input. Without these a 50 MB
+        # prompt-injection payload would still reach the LLM (and our retrieval
+        # cost) even though the throttle limits request count.
+        if len(question) > 2000:
+            return Response({
+                'status': 'error',
+                'message': 'Question too long (max 2000 characters).',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        from core.Frontline_agent.prompt_safety import sanitize_user_input
+        question = sanitize_user_input(question, max_len=2000)
         scope_document_type = data.get('scope_document_type')
         if scope_document_type is not None:
             scope_document_type = [scope_document_type] if isinstance(scope_document_type, str) else list(scope_document_type)
@@ -1196,6 +1429,19 @@ def public_qa(request):
         if scope_document_ids is not None:
             scope_document_ids = [int(x) for x in scope_document_ids if x is not None]
         min_similarity, max_age_days, max_results, enable_rewrite = _parse_rag_params(data)
+        # Conversation history is sent by the embedded widget as the chat unfolds.
+        # No persistence on this path (no auth, no user), so the client owns the
+        # transcript and resends it each turn. Capped to last 10 to keep payloads
+        # small and avoid runaway prompts.
+        public_history = data.get('history') or []
+        if isinstance(public_history, list):
+            public_history = [
+                {'role': str(h.get('role') or 'user')[:20],
+                 'content': str(h.get('content') or '')[:2000]}
+                for h in public_history if isinstance(h, dict)
+            ][-10:]
+        else:
+            public_history = []
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(
             question,
@@ -1206,11 +1452,13 @@ def public_qa(request):
             max_age_days=max_age_days,
             max_results=max_results,
             enable_rewrite=enable_rewrite,
+            history=public_history,
         )
 
         # Hand-off: customer explicitly asked for a human → create a pending-handoff
         # ticket so an agent picks it up. Requires a customer identifier — fall back
         # to the widget session visitor_email when the embed widget supplies one.
+        handoff_triggered = False
         try:
             from Frontline_agent.handoff import detect_handoff_request, trigger_handoff
             from Frontline_agent.contacts import upsert_contact_from_email
@@ -1226,7 +1474,7 @@ def public_qa(request):
                     status='new', priority='medium', category='other',
                     company=company, created_by=handoff_user, assigned_to=handoff_user,
                     contact=contact,
-                    sla_due_at=_sla_due_at_for_priority('medium'),
+                    sla_due_at=_sla_due_at_for_priority('medium', company=company),
                 )
                 trigger_handoff(
                     ticket, reason='customer_requested',
@@ -1240,8 +1488,45 @@ def public_qa(request):
                 result = dict(result)
                 result['handoff_requested'] = True
                 result['handoff_ticket_id'] = ticket.id
+                handoff_triggered = True
         except Exception:
             logger.exception("public_qa handoff detection failed")
+
+        # P1 — auto-open a kb_gap ticket whenever the public agent has no
+        # verified answer (and didn't already escalate via explicit handoff).
+        # The authenticated path already does this; the public path didn't,
+        # so KB blind spots from real customer questions disappeared into the
+        # void. Captures the question + retrieval confidence so HR can spot
+        # patterns ("we keep getting asked about X").
+        try:
+            if (not handoff_triggered
+                    and result.get('has_verified_info') is False):
+                from Frontline_agent.contacts import upsert_contact_from_email
+                visitor_email = (data.get('visitor_email') or data.get('email') or '').strip()
+                visitor_name = (data.get('visitor_name') or data.get('name') or '').strip()
+                contact = (upsert_contact_from_email(company, visitor_email, visitor_name)
+                           if visitor_email else None)
+                handoff_user = _ensure_handoff_system_user()
+                gap_ticket = Ticket.objects.create(
+                    title=f"KB gap: {question[:60]}{'...' if len(question) > 60 else ''}",
+                    description=_build_knowledge_gap_task_description(
+                        question,
+                        result.get('answer') or "No verified answer was found in the knowledge base.",
+                    ),
+                    status='new', priority='medium', category='knowledge_gap',
+                    company=company, created_by=handoff_user, assigned_to=handoff_user,
+                    contact=contact,
+                    sla_due_at=_sla_due_at_for_priority('medium', company=company),
+                )
+                logger.info(
+                    "public_qa kb_gap ticket created: id=%s company=%s confidence=%s best=%s",
+                    gap_ticket.id, company.id,
+                    result.get('confidence'), result.get('best_score'),
+                )
+                result = dict(result)
+                result['kb_gap_ticket_id'] = gap_ticket.id
+        except Exception:
+            logger.exception("public_qa kb_gap auto-ticket failed")
 
         return Response({
             'status': 'success',
@@ -1260,7 +1545,7 @@ def public_qa(request):
 @api_view(["POST"])
 @permission_classes([])
 @authentication_classes([])
-@throttle_classes([FrontlinePublicThrottle])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
 def public_submit(request):
     """Public web form submit (contact/support). Creates a ticket for the company. No auth.
 
@@ -1312,7 +1597,7 @@ def public_submit(request):
             created_by=user,
             assigned_to=user,
             auto_resolved=False,
-            sla_due_at=_sla_due_at_for_priority('medium'),
+            sla_due_at=_sla_due_at_for_priority('medium', company=company),
             contact=contact,
         )
         if contact:
@@ -1331,27 +1616,38 @@ def public_submit(request):
             if uploaded_file.size > max_bytes:
                 attachment_info = {'skipped': True, 'reason': 'too_large',
                                    'size': uploaded_file.size, 'max': max_bytes}
-            elif allowed_mime and (uploaded_file.content_type or '').lower() not in {m.lower() for m in allowed_mime}:
-                attachment_info = {'skipped': True, 'reason': 'disallowed_mime',
-                                   'mime': uploaded_file.content_type}
             else:
-                try:
-                    safe_name = DocumentProcessor.sanitize_filename(uploaded_file.name)
-                    upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_widget_uploads' / str(company.id)
-                    upload_dir.mkdir(parents=True, exist_ok=True)
-                    stored = upload_dir / f"t{ticket.id}_{safe_name}"
-                    with open(stored, 'wb') as fh:
-                        for chunk in uploaded_file.chunks():
-                            fh.write(chunk)
-                    rel = str(stored.relative_to(settings.MEDIA_ROOT))
-                    # Append the attachment path to the ticket description so agents see it.
-                    ticket.description = (ticket.description or '') + f"\n\n[Attachment] {rel}"
-                    ticket.save(update_fields=['description', 'updated_at'])
-                    attachment_info = {'stored_path': rel, 'size': uploaded_file.size,
-                                       'mime': uploaded_file.content_type}
-                except Exception as exc:
-                    logger.warning("public_submit attachment save failed: %s", exc)
-                    attachment_info = {'skipped': True, 'reason': 'save_failed'}
+                # Magic-byte sniff the actual content rather than trusting the
+                # client-supplied content_type header. ``head`` is enough for
+                # all the formats we support; we seek(0) before saving.
+                head = uploaded_file.read(8192)
+                uploaded_file.seek(0)
+                detected_mime = _sniff_widget_attachment_mime(head)
+                if detected_mime is None:
+                    attachment_info = {'skipped': True, 'reason': 'unrecognized_content',
+                                       'claimed_mime': uploaded_file.content_type}
+                elif allowed_mime and detected_mime.lower() not in {m.lower() for m in allowed_mime}:
+                    attachment_info = {'skipped': True, 'reason': 'disallowed_mime',
+                                       'detected_mime': detected_mime,
+                                       'claimed_mime': uploaded_file.content_type}
+                else:
+                    try:
+                        safe_name = DocumentProcessor.sanitize_filename(uploaded_file.name)
+                        upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_widget_uploads' / str(company.id)
+                        upload_dir.mkdir(parents=True, exist_ok=True)
+                        stored = upload_dir / f"t{ticket.id}_{safe_name}"
+                        with open(stored, 'wb') as fh:
+                            for chunk in uploaded_file.chunks():
+                                fh.write(chunk)
+                        rel = str(stored.relative_to(settings.MEDIA_ROOT))
+                        # Append the attachment path to the ticket description so agents see it.
+                        ticket.description = (ticket.description or '') + f"\n\n[Attachment] {rel}"
+                        ticket.save(update_fields=['description', 'updated_at'])
+                        attachment_info = {'stored_path': rel, 'size': uploaded_file.size,
+                                           'mime': detected_mime}
+                    except Exception as exc:
+                        logger.warning("public_submit attachment save failed: %s", exc)
+                        attachment_info = {'skipped': True, 'reason': 'save_failed'}
 
         _run_notification_triggers(company.id, 'ticket_created', ticket)
         _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
@@ -1401,6 +1697,24 @@ def knowledge_qa(request):
         # Optional retrieval tuning params (all safely defaulted if absent)
         min_similarity, max_age_days, max_results, enable_rewrite = _parse_rag_params(data)
 
+        # Optional conversation history for follow-up contextualisation.
+        # Accepts both the chat-message shape (`{role, content}`) and the
+        # client's `chat_id` so we can hydrate from the persisted chat too —
+        # the client-supplied list wins when both are present.
+        history = data.get('history') or data.get('messages') or []
+        if not history and data.get('chat_id'):
+            try:
+                chat = FrontlineQAChat.objects.filter(
+                    company_user=company_user, id=data['chat_id'],
+                ).first()
+                if chat:
+                    history = [
+                        {'role': m.role, 'content': m.content}
+                        for m in chat.messages.order_by('-created_at')[:10][::-1]
+                    ]
+            except Exception:
+                logger.warning("knowledge_qa: failed to hydrate chat history for chat_id=%s", data.get('chat_id'))
+
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
         result = agent.answer_question(
@@ -1413,6 +1727,7 @@ def knowledge_qa(request):
             max_results=max_results,
             enable_rewrite=enable_rewrite,
             company_user_id=company_user.id,
+            history=history,
         )
         
         # When agent doesn't have verified info, create a ticket task assigned to this company user
@@ -1436,7 +1751,7 @@ def knowledge_qa(request):
                     created_by=user,
                     assigned_to=user,
                     auto_resolved=False,
-                    sla_due_at=_sla_due_at_for_priority('medium'),
+                    sla_due_at=_sla_due_at_for_priority('medium', company=company),
                 )
                 ticket_task_created = True
                 ticket_task_id = ticket.id
@@ -1613,7 +1928,12 @@ def list_tickets(request):
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
-        qs = Ticket.objects.filter(created_by=user).order_by('-created_at')
+        # Tenant gate — without `company=`, a user whose Django auth User happens
+        # to be shared across companies (or whose id collides) could see another
+        # tenant's tickets. Belt-and-suspenders alongside created_by.
+        qs = Ticket.objects.filter(
+            company=company_user.company, created_by=user,
+        ).order_by('-created_at')
 
         status_filter = request.GET.get('status')
         if status_filter:
@@ -1624,6 +1944,17 @@ def list_tickets(request):
         category_filter = request.GET.get('category')
         if category_filter:
             qs = qs.filter(category=category_filter)
+        # T2 — substring search across title AND description so agents can find
+        # tickets by content, not just headline. Capped at 80 chars to keep the
+        # LIKE pattern bounded (DB optimiser hates long ILIKE prefixes).
+        q_term = (request.GET.get('q') or '').strip()[:80]
+        if q_term:
+            qs = qs.filter(Q(title__icontains=q_term) | Q(description__icontains=q_term))
+        # T1 — filter by tag. Accept multiple ?tag=foo&tag=bar to require ALL.
+        tag_filters = [t for t in request.GET.getlist('tag') if t]
+        for t in tag_filters:
+            # SQL Server JSONField __contains works with list-of-strings.
+            qs = qs.filter(tags__contains=[t])
         date_from = request.GET.get('date_from')
         if date_from:
             try:
@@ -1776,16 +2107,60 @@ def update_ticket_task(request, ticket_id):
             )
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
         old_status = ticket.status
+        old_resolution = ticket.resolution
         if 'status' in data:
-            ticket.status = data['status']
+            target = (data['status'] or '').strip()
+            ok, err = _validate_ticket_transition(ticket.status, target)
+            if not ok:
+                return Response(
+                    {'status': 'error', 'message': err},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ticket.status = target
         if 'resolution' in data:
             ticket.resolution = data['resolution']
             if data.get('status') in ('resolved', 'closed'):
                 ticket.resolved_at = timezone.now()
+        # T1 — tag updates. Accept a list[str] outright, dedup + trim.
+        if 'tags' in data:
+            tag_input = data['tags'] or []
+            if not isinstance(tag_input, list):
+                return Response({'status': 'error', 'message': 'tags must be a list of strings'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            # Dedup while preserving order; trim long tags; drop empties.
+            seen = set(); clean = []
+            for t in tag_input:
+                if not isinstance(t, str):
+                    continue
+                tt = t.strip()[:40]
+                if tt and tt not in seen:
+                    seen.add(tt); clean.append(tt)
+            ticket.tags = clean
         ticket.save()
+        # T5 — reopen audit. The state machine allows resolved/closed → open; when
+        # that transition fires we write a separate `ticket.reopen` audit entry so
+        # compliance queries can distinguish a fresh status change from a reopen.
+        if old_status in ('resolved', 'closed', 'auto_resolved') and ticket.status == 'open':
+            _write_frontline_audit_log(
+                company_user, company_user.company,
+                'ticket.reopen', 'ticket', ticket.id,
+                before={'status': old_status},
+                after={'status': ticket.status, 'reopened_at': timezone.now().isoformat()},
+            )
         if old_status != ticket.status:
+            _write_frontline_audit_log(
+                company_user, company_user.company,
+                'ticket.status_change', 'ticket', ticket.id,
+                before={'status': old_status, 'resolution': old_resolution},
+                after={'status': ticket.status, 'resolution': ticket.resolution},
+            )
             _run_notification_triggers(company_user.company_id, 'ticket_updated', ticket, old_status=old_status)
             # Workflow triggers for ticket_updated run via post_save signal (Frontline_agent.signals)
+            # CSAT — when the ticket closes for the first time, schedule a
+            # satisfaction survey for the requester. Idempotent (one row per
+            # ticket via OneToOne) so reopen → reclose doesn't duplicate.
+            if ticket.status in ('closed', 'resolved') and old_status not in ('closed', 'resolved'):
+                _ensure_satisfaction_survey(ticket)
         return Response({
             'status': 'success',
             'data': {
@@ -2143,7 +2518,10 @@ def create_ticket(request):
             )
         ticket_id = result.get('ticket_id')
         if ticket_id:
-            ticket = Ticket.objects.filter(id=ticket_id).first()
+            # Tenant gate — the agent just created this ticket so it should be
+            # in the caller's company, but explicit company= here means a broken
+            # FrontlineAgent path can never leak an unrelated ticket through.
+            ticket = Ticket.objects.filter(id=ticket_id, company=company).first()
             if ticket:
                 _run_notification_triggers(company.id, 'ticket_created', ticket)
                 _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
@@ -2350,6 +2728,78 @@ def _send_notification_email(recipient_email, subject, body):
     except Exception as e:
         logger.exception("Send notification email failed: %s", e)
         return False
+
+
+def _send_notification_slack(company, subject, body):
+    """POST to the tenant's Slack incoming-webhook URL. Returns False (with a
+    clear log line) when no webhook is configured — caller can then queue or
+    fail. Webhook URL is per-tenant, set in `Company.frontline_slack_webhook_url`."""
+    url = (getattr(company, 'frontline_slack_webhook_url', '') or '').strip()
+    if not url:
+        logger.warning(
+            "Slack send skipped — no frontline_slack_webhook_url configured for company %s",
+            getattr(company, 'id', '?'),
+        )
+        return False
+    text = f"*{subject}*\n{body}" if subject else body
+    payload = json.dumps({'text': text}).encode('utf-8')
+    req = Request(url, data=payload, method='POST',
+                  headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(req, timeout=15) as resp:
+            return 200 <= int(resp.status) < 300
+    except (URLError, HTTPError, OSError) as exc:
+        logger.warning("Slack send failed for company %s: %s", getattr(company, 'id', '?'), exc)
+        return False
+
+
+def _send_notification_teams(company, subject, body):
+    """POST to the tenant's Microsoft Teams incoming-webhook URL. Teams uses
+    a `text` field for MessageCard payloads, same minimal envelope as Slack —
+    that's all we need for plain notifications. Webhook URL is per-tenant,
+    set in `Company.frontline_teams_webhook_url`."""
+    url = (getattr(company, 'frontline_teams_webhook_url', '') or '').strip()
+    if not url:
+        logger.warning(
+            "Teams send skipped — no frontline_teams_webhook_url configured for company %s",
+            getattr(company, 'id', '?'),
+        )
+        return False
+    title = subject or 'Notification'
+    payload = json.dumps({
+        '@type': 'MessageCard',
+        '@context': 'https://schema.org/extensions',
+        'summary': title[:200],
+        'title': title,
+        'text': body,
+    }).encode('utf-8')
+    req = Request(url, data=payload, method='POST',
+                  headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(req, timeout=15) as resp:
+            # Teams returns 200 with body "1" on success.
+            return 200 <= int(resp.status) < 300
+    except (URLError, HTTPError, OSError) as exc:
+        logger.warning("Teams send failed for company %s: %s", getattr(company, 'id', '?'), exc)
+        return False
+
+
+def _dispatch_notification(template, recipient_email, subject, body, company):
+    """Route a rendered notification to the right channel adapter.
+    Returns ``(ok: bool, channel_used: str)``. Falls back to email when the
+    template's channel isn't recognised, so a typo in `channel` doesn't
+    silently drop notifications."""
+    channel = (getattr(template, 'channel', 'email') or 'email').lower()
+    if channel == 'slack':
+        return _send_notification_slack(company, subject, body), 'slack'
+    if channel == 'teams':
+        return _send_notification_teams(company, subject, body), 'teams'
+    if channel in ('sms', 'in_app'):
+        logger.warning("Channel %r is not implemented yet — notification dropped (template=%s)",
+                       channel, template.id)
+        return False, channel
+    # Default to email, including for empty/unknown channels (back-compat).
+    return _send_notification_email(recipient_email, subject, body), 'email'
 
 
 def _build_unsubscribe_url(company_user_id, scope='email'):
@@ -2681,14 +3131,38 @@ def send_notification_now(request):
                 context.setdefault('ticket_title', related_ticket.title)
                 context.setdefault('resolution', related_ticket.resolution or '')
 
-        # Quiet-hours: if the recipient is in a quiet window, queue it for the Celery
-        # worker to deliver when the window closes rather than sending right now.
+        # Quiet-hours gates (in priority order):
+        #   1. Template-level quiet hours (set on the template's quiet_hours JSON) —
+        #      these may also opt to OVERRIDE per-user quiet hours for urgent
+        #      notifications (SLA-breach alerts that should ignore "no emails
+        #      after 10pm" rules).
+        #   2. Per-user prefs (existing behaviour) — when no template-level
+        #      window or when the template defers to user prefs.
         from Frontline_agent.notification_utils import (
             get_recipient_preferences, in_quiet_hours, next_allowed_send_time,
+            template_quiet_hours_check,
         )
         prefs = get_recipient_preferences(company.id, recipient_email)
         now = timezone.now()
-        if prefs and in_quiet_hours(prefs, now):
+        tpl_qh = (getattr(template, 'quiet_hours', None) or {})
+        in_tpl_quiet, tpl_defer_until = template_quiet_hours_check(template, now)
+        if in_tpl_quiet:
+            deferred_until = tpl_defer_until or now
+            n = ScheduledNotification.objects.create(
+                company=company, template=template, scheduled_at=deferred_until,
+                status='pending', recipient_email=recipient_email,
+                related_ticket=related_ticket, context=context,
+                next_retry_at=deferred_until, deferred_reason='template_quiet_hours',
+            )
+            return Response({
+                'status': 'deferred',
+                'message': 'Template is in its own quiet hours — queued for delivery.',
+                'data': {'id': n.id, 'scheduled_at': deferred_until.isoformat(),
+                         'reason': 'template_quiet_hours'},
+            }, status=status.HTTP_202_ACCEPTED)
+        # User-level quiet hours apply UNLESS the template explicitly overrides
+        # (e.g. an "urgent SLA breach" template bypasses normal quiet hours).
+        if not tpl_qh.get('override_user_quiet_hours') and prefs and in_quiet_hours(prefs, now):
             deferred_until = next_allowed_send_time(prefs, now)
             n = ScheduledNotification.objects.create(
                 company=company, template=template, scheduled_at=deferred_until,
@@ -2710,11 +3184,9 @@ def send_notification_now(request):
         if personalized_body:
             body = personalized_body
         subject = _render_template_body(template.subject, context)
-        if template.channel == 'email':
-            ok = _send_notification_email(recipient_email, subject, body)
-        else:
-            ok = False
-            logger.warning("SMS/in_app send not implemented, logging only")
+        ok, channel_used = _dispatch_notification(
+            template, recipient_email, subject, body, company,
+        )
         if ok:
             n = ScheduledNotification.objects.create(
                 company=company, template=template, scheduled_at=timezone.now(), status='sent',
@@ -2842,7 +3314,7 @@ def retry_dead_lettered_notification(request, notification_id):
 @api_view(["GET", "POST"])
 @permission_classes([])
 @authentication_classes([])
-@throttle_classes([FrontlinePublicThrottle])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
 def public_unsubscribe(request):
     """Public one-click unsubscribe endpoint. No auth — identifies the recipient
     by a signed token.
@@ -3443,7 +3915,13 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
         if not ticket:
             return False, {**base, 'done': False, 'error': 'Ticket not found'}, None
         if 'status' in step:
-            ticket.status = step['status']
+            target = (step['status'] or '').strip()
+            ok, err = _validate_ticket_transition(ticket.status, target)
+            if not ok:
+                # Workflow step targets an illegal transition — fail the step
+                # loudly rather than silently writing a bogus status.
+                return False, {**base, 'done': False, 'error': err}, None
+            ticket.status = target
         if 'resolution' in step:
             ticket.resolution = step['resolution']
         ticket.save()
@@ -3487,8 +3965,9 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
         text = _render_template_body(step.get('text') or 'Workflow step executed.', merged)
         payload = json.dumps({'text': text}).encode('utf-8')
         req = Request(webhook_url, data=payload, method='POST', headers={'Content-Type': 'application/json'})
+        slack_timeout = max(1, min(120, int(step.get('timeout_seconds', 15))))
         try:
-            with urlopen(req, timeout=15) as resp:
+            with urlopen(req, timeout=slack_timeout) as resp:
                 status_code = resp.status
             return True, {**base, 'done': True, 'status_code': status_code}, None
         except (URLError, HTTPError, OSError) as e:
@@ -3502,15 +3981,28 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
         if simulate:
             return True, {**base, 'done': True, 'simulated': True,
                           'ticket_id': ticket_id, 'assignee': assign_to_company_user_id}, None
-        ticket = Ticket.objects.filter(id=ticket_id).first()
+        # Tenant gate on the ticket too — the assignee was already company-scoped
+        # but the ticket lookup was not, so a workflow with the right ticket id
+        # could reassign a ticket from a different company.
+        ticket = Ticket.objects.filter(id=ticket_id, company=workflow.company).first()
         company_user = CompanyUser.objects.filter(
             id=assign_to_company_user_id, company=workflow.company, is_active=True,
         ).first()
         if not (ticket and company_user):
             return False, {**base, 'done': False, 'error': 'Ticket or assignee not found'}, None
         assign_user = _get_or_create_user_for_company_user(company_user)
+        prev_assignee_id = ticket.assigned_to_id
         ticket.assigned_to = assign_user
         ticket.save()
+        # Audit — workflow assignments are an authorship change worth tracing.
+        # actor=None because the trigger is the workflow itself, not a person.
+        _write_frontline_audit_log(
+            None, workflow.company,
+            'ticket.assign', 'ticket', ticket.id,
+            before={'assigned_to_id': prev_assignee_id},
+            after={'assigned_to_id': assign_user.id,
+                   'via_workflow_id': workflow.id, 'via_workflow_name': workflow.name},
+        )
         return True, {**base, 'done': True}, None
 
     if step_type in ('wait', 'wait_for_duration'):
@@ -4626,7 +5118,7 @@ def _serialize_ticket_message(msg: 'TicketMessage') -> dict:
 @api_view(['POST'])
 @permission_classes([])
 @authentication_classes([])
-@throttle_classes([FrontlinePublicThrottle])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
 def inbound_email_webhook(request, provider):
     """Receive inbound email from a provider webhook, turn it into a ticket.
 
@@ -5502,4 +5994,1027 @@ def _build_suggest_reply_prompt(*, ticket_title: str, thread: str,
         f"{kb_section}"
         f"Start with: '{greeting}' and sign off with '— Support Team'."
     )
+
+
+# ============================================================================
+# Audit log
+# ============================================================================
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_frontline_audit_log(request):
+    """List Frontline audit log entries for the caller's company.
+
+    Filters: ``target_type`` (e.g. ``ticket``), ``target_id``, ``action``.
+    Pagination: ``limit`` (default 50, max 200), ``offset``.
+    """
+    company = request.user.company
+    qs = FrontlineAuditLog.objects.filter(company=company).select_related('actor')
+    target_type = request.GET.get('target_type')
+    if target_type:
+        qs = qs.filter(target_type=target_type)
+    target_id = request.GET.get('target_id')
+    if target_id:
+        try:
+            qs = qs.filter(target_id=int(target_id))
+        except ValueError:
+            pass
+    action = request.GET.get('action')
+    if action:
+        qs = qs.filter(action=action)
+    try:
+        limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+        offset = max(0, int(request.GET.get('offset') or 0))
+    except ValueError:
+        limit, offset = 50, 0
+    total = qs.count()
+    rows = [{
+        'id': r.id,
+        'action': r.action,
+        'target_type': r.target_type,
+        'target_id': r.target_id,
+        'actor_id': r.actor_id,
+        'actor_email': r.actor.email if r.actor_id else None,
+        'actor_name': r.actor.full_name if r.actor_id else None,
+        'diff': r.diff or {},
+        'created_at': r.created_at.isoformat() if r.created_at else None,
+    } for r in qs[offset:offset + limit]]
+    return Response({'status': 'success', 'data': rows,
+                     'pagination': {'total': total, 'limit': limit, 'offset': offset}})
+
+
+# ============================================================================
+# Saved replies / macros
+# ============================================================================
+
+def _serialize_macro(m: 'TicketMacro') -> dict:
+    return {
+        'id': m.id,
+        'name': m.name,
+        'body': m.body,
+        'is_active': m.is_active,
+        'times_used': m.times_used,
+        'created_by_id': m.created_by_id,
+        'created_at': m.created_at.isoformat() if m.created_at else None,
+        'updated_at': m.updated_at.isoformat() if m.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_ticket_macros(request):
+    """List saved replies for the caller's company. Ordered by most-used first
+    so the picker UI surfaces what agents actually grab."""
+    company = request.user.company
+    only_active = request.GET.get('active_only') in ('1', 'true', 'True')
+    qs = TicketMacro.objects.filter(company=company)
+    if only_active:
+        qs = qs.filter(is_active=True)
+    rows = [_serialize_macro(m) for m in qs[:200]]
+    return Response({'status': 'success', 'data': rows})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_ticket_macro(request):
+    """Create a saved reply. Anyone with a CompanyUser account can save one."""
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    name = (d.get('name') or '').strip()
+    body = (d.get('body') or '').strip()
+    if not name or not body:
+        return Response({'status': 'error', 'message': 'name and body are required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    company = request.user.company
+    if TicketMacro.objects.filter(company=company, name__iexact=name).exists():
+        return Response({'status': 'error', 'message': 'A macro with that name already exists'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    m = TicketMacro.objects.create(
+        company=company, created_by=request.user,
+        name=name[:120], body=body, is_active=bool(d.get('is_active', True)),
+    )
+    _write_frontline_audit_log(request.user, company, 'macro.create', 'macro', m.id,
+                               created=_serialize_macro(m))
+    return Response({'status': 'success', 'data': _serialize_macro(m)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST', 'PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_ticket_macro(request, macro_id):
+    company = request.user.company
+    m = TicketMacro.objects.filter(company=company, pk=macro_id).first()
+    if not m:
+        return Response({'status': 'error', 'message': 'Macro not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    before = _serialize_macro(m)
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    fields = []
+    if 'name' in d:
+        new_name = (d['name'] or '').strip()[:120]
+        if new_name and new_name.lower() != m.name.lower():
+            if TicketMacro.objects.filter(company=company, name__iexact=new_name).exclude(pk=m.pk).exists():
+                return Response({'status': 'error', 'message': 'A macro with that name already exists'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            m.name = new_name; fields.append('name')
+    if 'body' in d:
+        m.body = (d['body'] or '').strip(); fields.append('body')
+    if 'is_active' in d:
+        m.is_active = bool(d['is_active']); fields.append('is_active')
+    if fields:
+        fields.append('updated_at')
+        m.save(update_fields=fields)
+        _write_frontline_audit_log(request.user, company, 'macro.update', 'macro', m.id,
+                                   before=before, after=_serialize_macro(m))
+    return Response({'status': 'success', 'data': _serialize_macro(m)})
+
+
+@api_view(['POST', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_ticket_macro(request, macro_id):
+    company = request.user.company
+    m = TicketMacro.objects.filter(company=company, pk=macro_id).first()
+    if not m:
+        return Response({'status': 'error', 'message': 'Macro not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    snapshot = _serialize_macro(m)
+    m.delete()
+    _write_frontline_audit_log(request.user, company, 'macro.delete', 'macro', macro_id,
+                               deleted=snapshot)
+    return Response({'status': 'success', 'data': {'id': macro_id, 'deleted': True}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def bump_ticket_macro_usage(request, macro_id):
+    """Tick the times_used counter when a macro is inserted into a reply. UI
+    calls this after the agent uses one — keeps "most used" sorting honest."""
+    from django.db.models import F
+    company = request.user.company
+    updated = TicketMacro.objects.filter(company=company, pk=macro_id).update(
+        times_used=F('times_used') + 1, updated_at=timezone.now(),
+    )
+    if not updated:
+        return Response({'status': 'error', 'message': 'Macro not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': {'id': int(macro_id), 'bumped': True}})
+
+
+# ============================================================================
+# Bulk ticket operations
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def bulk_update_tickets(request):
+    """Apply a single change to many tickets in one round-trip.
+
+    Body: ``{ids: [1, 2, …], status?, assigned_to_company_user_id?, priority?, category?}``.
+    Each ticket is processed independently; the response reports per-id success/failure
+    so a partial failure doesn't poison the whole batch.
+
+    Same status state-machine as single updates, so you can't bulk-flip
+    `closed → new`.
+    """
+    company = request.user.company
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    ids = d.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return Response({'status': 'error', 'message': 'ids[] is required and must be non-empty'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        ids = [int(x) for x in ids][:500]  # hard cap so a bad caller can't flood
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'ids must be integers'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    target_status = d.get('status')
+    target_priority = d.get('priority')
+    target_category = d.get('category')
+    assignee_cu_id = d.get('assigned_to_company_user_id')
+    if not any([target_status, target_priority, target_category, assignee_cu_id]):
+        return Response({'status': 'error',
+                         'message': 'Pass at least one of: status, priority, category, assigned_to_company_user_id'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    assignee_user = None
+    if assignee_cu_id:
+        cu = CompanyUser.objects.filter(id=assignee_cu_id, company=company, is_active=True).first()
+        if not cu:
+            return Response({'status': 'error', 'message': 'Assignee not found in this company'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        assignee_user = _get_or_create_user_for_company_user(cu)
+
+    tickets = list(Ticket.objects.filter(id__in=ids, company=company))
+    found_ids = {t.id for t in tickets}
+    results = {'updated': [], 'skipped': [], 'not_found': sorted(set(ids) - found_ids)}
+
+    for t in tickets:
+        before = {'status': t.status, 'priority': t.priority, 'category': t.category,
+                  'assigned_to_id': t.assigned_to_id}
+        fields = []
+        if target_status:
+            ok, err = _validate_ticket_transition(t.status, target_status.strip())
+            if not ok:
+                results['skipped'].append({'id': t.id, 'reason': err})
+                continue
+            t.status = target_status.strip(); fields.append('status')
+        if target_priority:
+            t.priority = target_priority.strip()[:10]; fields.append('priority')
+        if target_category:
+            t.category = target_category.strip()[:20]; fields.append('category')
+        if assignee_user is not None:
+            t.assigned_to = assignee_user; fields.append('assigned_to')
+        if fields:
+            fields.append('updated_at')
+            t.save(update_fields=fields)
+            _write_frontline_audit_log(
+                request.user, company, 'ticket.bulk_update', 'ticket', t.id,
+                before=before,
+                after={'status': t.status, 'priority': t.priority,
+                       'category': t.category, 'assigned_to_id': t.assigned_to_id},
+            )
+            results['updated'].append(t.id)
+        else:
+            results['skipped'].append({'id': t.id, 'reason': 'no_changes'})
+    return Response({'status': 'success', 'data': results})
+
+
+# ============================================================================
+# Workflow idempotency helper (F4)
+# ============================================================================
+
+def _idempotency_key_for_event(workflow_id, event_kind: str, target_pk) -> str:
+    """Stable digest for a workflow trigger. The combo of (workflow, event,
+    target) is sufficient — same workflow on the same event for the same
+    ticket = same execution. Different (workflow, ticket) pairs hash differently
+    so a second workflow firing on the same ticket still runs."""
+    import hashlib
+    payload = f"wf={workflow_id}|evt={event_kind}|tgt={target_pk}".encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+# ============================================================================
+# Dead-letter queue (F5)
+# ============================================================================
+
+def record_task_failure(task_name: str, *, task_id: str = '', args=None, kwargs=None,
+                        error_type: str = '', error_message: str = '',
+                        traceback: str = '', company_id=None,
+                        retry_count: int = 0) -> int:
+    """Helper for Celery `on_failure` handlers. Writes a DLQ row and returns
+    its id. Safe to call from any task — wraps everything in try/except so a
+    DLQ write failure can't itself trigger another failure cascade.
+
+    Usage in a task class:
+        class MyTask(Task):
+            def on_failure(self, exc, task_id, args, kwargs, einfo):
+                record_task_failure(self.name, task_id=task_id, args=args,
+                                    kwargs=kwargs, error_type=type(exc).__name__,
+                                    error_message=str(exc), traceback=str(einfo),
+                                    retry_count=self.request.retries)
+    """
+    try:
+        # Coerce args/kwargs to JSON-serialisable before storing; Celery passes
+        # tuples and the JSONField needs lists.
+        try:
+            args_json = json.loads(json.dumps(args or []))
+        except (TypeError, ValueError):
+            args_json = [repr(args)]
+        try:
+            kwargs_json = json.loads(json.dumps(kwargs or {}))
+        except (TypeError, ValueError):
+            kwargs_json = {'_repr': repr(kwargs)}
+        company = None
+        if company_id:
+            from core.models import Company
+            company = Company.objects.filter(pk=company_id).first()
+        row = FrontlineDeadLetter.objects.create(
+            company=company,
+            task_name=task_name[:200],
+            task_id=task_id[:64],
+            args_json=args_json,
+            kwargs_json=kwargs_json,
+            error_type=(error_type or '')[:120],
+            error_message=(error_message or ''),
+            traceback=(traceback or ''),
+            retry_count=int(retry_count or 0),
+        )
+        return row.id
+    except Exception:
+        logger.exception("record_task_failure could not persist DLQ row for task=%s", task_name)
+        return 0
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_dead_letters(request):
+    """List unresolved DLQ entries scoped to the caller's company. Pass
+    ``?include_resolved=1`` to include already-handled rows. Pagination via
+    ``limit`` / ``offset`` (defaults 50/0, hard cap 200)."""
+    company = request.user.company
+    qs = FrontlineDeadLetter.objects.filter(company=company)
+    if request.GET.get('include_resolved') not in ('1', 'true', 'True'):
+        qs = qs.filter(resolved_at__isnull=True)
+    task_name = request.GET.get('task_name')
+    if task_name:
+        qs = qs.filter(task_name=task_name)
+    try:
+        limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+        offset = max(0, int(request.GET.get('offset') or 0))
+    except ValueError:
+        limit, offset = 50, 0
+    total = qs.count()
+    rows = [{
+        'id': r.id, 'task_name': r.task_name, 'task_id': r.task_id,
+        'error_type': r.error_type, 'error_message': r.error_message[:500],
+        'retry_count': r.retry_count,
+        'first_failed_at': r.first_failed_at.isoformat() if r.first_failed_at else None,
+        'last_failed_at': r.last_failed_at.isoformat() if r.last_failed_at else None,
+        'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
+    } for r in qs[offset:offset + limit]]
+    return Response({'status': 'success', 'data': rows,
+                     'pagination': {'total': total, 'limit': limit, 'offset': offset}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def resolve_dead_letter(request, dlq_id):
+    """Mark a DLQ row as handled — ops viewed it, optionally re-queued it
+    elsewhere, and wants it off the active list."""
+    company = request.user.company
+    r = FrontlineDeadLetter.objects.filter(company=company, pk=dlq_id, resolved_at__isnull=True).first()
+    if not r:
+        return Response({'status': 'error', 'message': 'DLQ row not found or already resolved'},
+                        status=status.HTTP_404_NOT_FOUND)
+    r.resolved_at = timezone.now()
+    r.save(update_fields=['resolved_at'])
+    return Response({'status': 'success', 'data': {'id': r.id, 'resolved_at': r.resolved_at.isoformat()}})
+
+
+# ============================================================================
+# CSAT — satisfaction survey on ticket close
+# ============================================================================
+
+def _ensure_satisfaction_survey(ticket) -> 'TicketSatisfaction | None':
+    """Create a satisfaction-survey row + dispatch the email. Idempotent — if
+    a survey already exists for this ticket, returns the existing row without
+    re-sending. Email failures are logged but never raise (the survey row is
+    still useful for tracking, even if delivery flaked)."""
+    import secrets
+    existing = TicketSatisfaction.objects.filter(ticket=ticket).first()
+    if existing:
+        return existing
+    recipient_email = (getattr(ticket.created_by, 'email', '') or '').strip()
+    if not recipient_email:
+        # No-one to ask — bail without creating a row so a later resolution
+        # path with a real email can still seed the survey.
+        logger.info("CSAT skip: ticket %s has no requester email", ticket.id)
+        return None
+    survey = TicketSatisfaction.objects.create(
+        ticket=ticket,
+        token=secrets.token_urlsafe(32)[:64],
+    )
+    try:
+        from django.core.mail import send_mail
+        public_base = (getattr(settings, 'FRONTLINE_PUBLIC_BASE_URL', '') or '').rstrip('/')
+        link = f"{public_base}/embed/csat?t={survey.token}" if public_base else f"(token: {survey.token})"
+        subject = f"How did we do? Ticket #{ticket.id}"
+        body = (
+            f"Hi,\n\n"
+            f"Your support ticket \"{ticket.title}\" was just resolved. "
+            f"Would you mind rating how we did?\n\n"
+            f"{link}\n\n"
+            f"Thanks — Support Team"
+        )
+        send_mail(
+            subject=subject, message=body,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            recipient_list=[recipient_email],
+            fail_silently=False,
+        )
+        survey.sent_at = timezone.now()
+        survey.save(update_fields=['sent_at'])
+    except Exception:
+        logger.exception("CSAT email send failed for ticket %s", ticket.id)
+    return survey
+
+
+@api_view(['POST'])
+@permission_classes([])
+@authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
+def submit_satisfaction(request):
+    """Public, token-authenticated CSAT submission. No login — the token in
+    the survey email is the only credential. Re-submits update the same row
+    (recipient might fix a rating they fat-fingered)."""
+    try:
+        d = json.loads(request.body) if request.body else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        d = {}
+    token = (d.get('token') or request.GET.get('token') or '').strip()
+    if not token:
+        return Response({'status': 'error', 'message': 'token is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    survey = TicketSatisfaction.objects.filter(token=token).select_related('ticket').first()
+    if not survey:
+        return Response({'status': 'error', 'message': 'Survey not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    try:
+        rating = int(d.get('rating'))
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'rating must be an integer 1-5'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if rating < 1 or rating > 5:
+        return Response({'status': 'error', 'message': 'rating must be 1-5'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    survey.rating = rating
+    survey.comment = (d.get('comment') or '')[:5000]
+    survey.submitted_at = timezone.now()
+    survey.save(update_fields=['rating', 'comment', 'submitted_at'])
+    return Response({'status': 'success', 'data': {
+        'ticket_id': survey.ticket_id,
+        'rating': survey.rating,
+        'submitted_at': survey.submitted_at.isoformat(),
+    }})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def satisfaction_summary(request):
+    """CSAT summary tile for the company dashboard. Returns average rating +
+    response count + per-star distribution for the last 90 days."""
+    company = request.user.company
+    cutoff = timezone.now() - timedelta(days=90)
+    rows = TicketSatisfaction.objects.filter(
+        ticket__company=company,
+        submitted_at__isnull=False, submitted_at__gte=cutoff,
+    ).values_list('rating', flat=True)
+    ratings = list(rows)
+    total = len(ratings)
+    if total == 0:
+        return Response({'status': 'success', 'data': {
+            'response_count': 0, 'average': None, 'distribution': {str(i): 0 for i in range(1, 6)},
+            'window_days': 90,
+        }})
+    distribution = {str(i): 0 for i in range(1, 6)}
+    for r in ratings:
+        if r is not None:
+            distribution[str(r)] = distribution.get(str(r), 0) + 1
+    return Response({'status': 'success', 'data': {
+        'response_count': total,
+        'average': round(sum(ratings) / total, 2),
+        'distribution': distribution,
+        'window_days': 90,
+    }})
+
+
+# ============================================================================
+# KB coverage report (KB-C1)
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def kb_coverage_report(request):
+    """Aggregate "questions we answer poorly" for the dashboard.
+
+    Combines two signals: (1) ``kb_gap`` tickets auto-created when retrieval
+    has no verified answer, and (2) ``KBFeedback`` rows where a user
+    thumbs-down'd the answer. Buckets by the question title (truncated +
+    lowercased) so near-duplicates roll up.
+    """
+    company = request.user.company
+    try:
+        window_days = max(1, min(int(request.GET.get('window_days') or 30), 365))
+    except ValueError:
+        window_days = 30
+    try:
+        top_n = max(1, min(int(request.GET.get('top_n') or 10), 50))
+    except ValueError:
+        top_n = 10
+    cutoff = timezone.now() - timedelta(days=window_days)
+
+    # 1) kb_gap tickets — title looks like "KB gap: <question>"
+    from django.db.models import Count
+    kb_gaps_qs = Ticket.objects.filter(
+        company=company, category='knowledge_gap', created_at__gte=cutoff,
+    ).values('title').annotate(count=Count('id')).order_by('-count')[:200]
+
+    rollup: dict = {}
+    for row in kb_gaps_qs:
+        title = (row['title'] or '').replace('KB gap: ', '').strip().lower()[:120]
+        if not title:
+            continue
+        rollup.setdefault(title, {'question': title, 'kb_gap_count': 0, 'thumbs_down_count': 0})
+        rollup[title]['kb_gap_count'] += row['count']
+
+    # 2) KBFeedback thumbs-down rows (helpful=False)
+    try:
+        fb_qs = KBFeedback.objects.filter(
+            company=company, helpful=False, created_at__gte=cutoff,
+        ).values('question').annotate(count=Count('id')).order_by('-count')[:200]
+        for row in fb_qs:
+            q = (row['question'] or '').strip().lower()[:120]
+            if not q:
+                continue
+            rollup.setdefault(q, {'question': q, 'kb_gap_count': 0, 'thumbs_down_count': 0})
+            rollup[q]['thumbs_down_count'] += row['count']
+    except Exception:
+        # KBFeedback may not always be populated — kb_gap count alone is still useful.
+        logger.exception("kb_coverage_report: KBFeedback aggregation failed (kb_gap counts still returned)")
+
+    items = sorted(
+        rollup.values(),
+        key=lambda r: r['kb_gap_count'] + r['thumbs_down_count'],
+        reverse=True,
+    )[:top_n]
+    return Response({'status': 'success', 'data': {
+        'window_days': window_days,
+        'top_n': top_n,
+        'items': items,
+        'total_kb_gaps': sum(i['kb_gap_count'] for i in rollup.values()),
+        'total_thumbs_down': sum(i['thumbs_down_count'] for i in rollup.values()),
+    }})
+
+
+# ============================================================================
+# SLA dashboard (S4)
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sla_dashboard(request):
+    """SLA breach summary for the dashboard tile.
+
+    Returns: total tickets in window, breached count + %, at-risk count
+    (sla_due_at within next 2h), per-assignee breach % (top 10), and
+    per-priority breakdown. Window defaults to 30 days, override with
+    ``?window_days=``."""
+    company = request.user.company
+    try:
+        window_days = max(1, min(int(request.GET.get('window_days') or 30), 365))
+    except ValueError:
+        window_days = 30
+    now = timezone.now()
+    cutoff = now - timedelta(days=window_days)
+    at_risk_threshold = now + timedelta(hours=2)
+
+    qs = Ticket.objects.filter(company=company, created_at__gte=cutoff)
+    total = qs.count()
+    breached_qs = qs.filter(sla_due_at__lt=now).exclude(status__in=['resolved', 'closed', 'auto_resolved'])
+    breached = breached_qs.count()
+    at_risk = qs.filter(
+        sla_due_at__gte=now, sla_due_at__lte=at_risk_threshold,
+    ).exclude(status__in=['resolved', 'closed', 'auto_resolved']).count()
+
+    # Per-priority breakdown
+    from django.db.models import Count, Q
+    priority_breakdown = list(qs.values('priority').annotate(
+        total=Count('id'),
+        breached=Count('id', filter=Q(sla_due_at__lt=now) & ~Q(status__in=['resolved', 'closed', 'auto_resolved'])),
+    ))
+    for row in priority_breakdown:
+        row['breach_pct'] = round((row['breached'] / row['total']) * 100, 1) if row['total'] else 0.0
+
+    # Top assignees by breach %
+    assignee_rows = list(qs.exclude(assigned_to__isnull=True).values(
+        'assigned_to', 'assigned_to__email',
+    ).annotate(
+        total=Count('id'),
+        breached=Count('id', filter=Q(sla_due_at__lt=now) & ~Q(status__in=['resolved', 'closed', 'auto_resolved'])),
+    ).filter(total__gte=3))   # require ≥3 tickets so a single-ticket breach doesn't dominate
+    for row in assignee_rows:
+        row['breach_pct'] = round((row['breached'] / row['total']) * 100, 1)
+    assignee_rows.sort(key=lambda r: r['breach_pct'], reverse=True)
+    assignee_rows = assignee_rows[:10]
+
+    return Response({'status': 'success', 'data': {
+        'window_days': window_days,
+        'total_tickets': total,
+        'breached': breached,
+        'breach_pct': round((breached / total) * 100, 1) if total else 0.0,
+        'at_risk': at_risk,
+        'per_priority': priority_breakdown,
+        'top_breaching_assignees': assignee_rows,
+    }})
+
+
+# ============================================================================
+# Document soft-deprecation (D-O2)
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def mark_document_outdated(request, document_id):
+    """Soft-deprecate a doc: excluded from retrieval immediately, kept on disk
+    so HR can review or restore. Distinct from `superseded_by` because there's
+    no replacement row yet."""
+    company = request.user.company
+    d = Document.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if d.is_outdated:
+        return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': True, 'already': True}})
+    d.is_outdated = True
+    d.save(update_fields=['is_outdated', 'updated_at'])
+    _write_frontline_audit_log(request.user, company, 'document.mark_outdated',
+                               'document', d.id, after={'is_outdated': True})
+    try:
+        from Frontline_agent.vector_store import mark_index_dirty
+        if d.company_id:
+            mark_index_dirty(d.company_id)
+    except Exception:
+        logger.exception("mark_document_outdated: failed to dirty vector index")
+    return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': True}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def unmark_document_outdated(request, document_id):
+    """Restore a soft-deprecated doc back into retrieval."""
+    company = request.user.company
+    d = Document.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if not d.is_outdated:
+        return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': False, 'already': True}})
+    d.is_outdated = False
+    d.save(update_fields=['is_outdated', 'updated_at'])
+    _write_frontline_audit_log(request.user, company, 'document.unmark_outdated',
+                               'document', d.id, after={'is_outdated': False})
+    try:
+        from Frontline_agent.vector_store import mark_index_dirty
+        if d.company_id:
+            mark_index_dirty(d.company_id)
+    except Exception:
+        logger.exception("unmark_document_outdated: failed to dirty vector index")
+    return Response({'status': 'success', 'data': {'id': d.id, 'is_outdated': False}})
+
+
+# ============================================================================
+# Document re-ingest (D-O3)
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reingest_document(request, document_id):
+    """Re-run the ingestion pipeline on a doc that landed in `failed` (or that
+    HR just wants to re-chunk after fixing OCR settings, embedding model, etc.).
+    Clears existing chunks + flips status back to `processing`, then dispatches
+    the Celery task. Safe to call on `ready` docs too — they get re-chunked."""
+    company = request.user.company
+    d = Document.objects.filter(company=company, pk=document_id).first()
+    if not d:
+        return Response({'status': 'error', 'message': 'Document not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    # Wipe old chunks so the new run starts clean. FAISS will rebuild on next query.
+    d.chunks.all().delete()
+    d.chunks_processed = 0
+    d.chunks_total = 0
+    d.is_indexed = False
+    d.processed = False
+    d.processing_status = 'processing'
+    d.processing_error = ''
+    d.save(update_fields=['chunks_processed', 'chunks_total', 'is_indexed',
+                          'processed', 'processing_status', 'processing_error',
+                          'updated_at'])
+    try:
+        from Frontline_agent.tasks import process_document
+        process_document.delay(d.id)
+    except Exception as exc:
+        # Broker unreachable etc — flip status back so the row reflects truth.
+        logger.exception("reingest_document: failed to dispatch process_document for doc %s", d.id)
+        d.processing_status = 'failed'
+        d.processing_error = f'Failed to enqueue: {exc}'
+        d.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+        return Response({'status': 'error',
+                         'message': f'Failed to enqueue ingestion: {exc}'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    _write_frontline_audit_log(request.user, company, 'document.reingest',
+                               'document', d.id,
+                               after={'processing_status': d.processing_status})
+    return Response({'status': 'success', 'data': {
+        'id': d.id, 'processing_status': d.processing_status,
+    }})
+
+
+# ============================================================================
+# Ticket links (T3)
+# ============================================================================
+
+def _serialize_ticket_link(link: 'TicketLink', *, point_of_view: int) -> dict:
+    """Serialise a link from the perspective of the ticket viewing it. The
+    "other side" of the relation is whichever ticket isn't the viewer."""
+    if link.from_ticket_id == point_of_view:
+        other = link.to_ticket
+        direction = 'outgoing'
+        relation = link.relation
+    else:
+        other = link.from_ticket
+        direction = 'incoming'
+        relation = link.relation
+    return {
+        'id': link.id, 'relation': relation, 'direction': direction,
+        'other_ticket_id': other.id, 'other_ticket_title': other.title,
+        'other_ticket_status': other.status,
+        'created_by_id': link.created_by_id,
+        'created_at': link.created_at.isoformat() if link.created_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_ticket_links(request, ticket_id):
+    """Return all links touching this ticket — outgoing AND incoming combined."""
+    company = request.user.company
+    if not Ticket.objects.filter(pk=ticket_id, company=company).exists():
+        return Response({'status': 'error', 'message': 'Ticket not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    qs = TicketLink.objects.filter(
+        Q(from_ticket_id=ticket_id) | Q(to_ticket_id=ticket_id),
+    ).select_related('from_ticket', 'to_ticket')
+    rows = [_serialize_ticket_link(link, point_of_view=int(ticket_id)) for link in qs]
+    return Response({'status': 'success', 'data': rows})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_ticket_link(request, ticket_id):
+    """Add a link from this ticket to another. Body: ``{to_ticket_id, relation}``.
+    ``relation`` must be one of ``TicketLink.RELATION_CHOICES``."""
+    company = request.user.company
+    src = Ticket.objects.filter(pk=ticket_id, company=company).first()
+    if not src:
+        return Response({'status': 'error', 'message': 'Ticket not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    try:
+        to_id = int(d.get('to_ticket_id'))
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'to_ticket_id is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if to_id == src.id:
+        return Response({'status': 'error', 'message': "A ticket can't link to itself."},
+                        status=status.HTTP_400_BAD_REQUEST)
+    relation = (d.get('relation') or '').strip()
+    valid = {c[0] for c in TicketLink.RELATION_CHOICES}
+    if relation not in valid:
+        return Response({'status': 'error',
+                         'message': f"relation must be one of {sorted(valid)}"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    dst = Ticket.objects.filter(pk=to_id, company=company).first()
+    if not dst:
+        return Response({'status': 'error', 'message': "Target ticket not found in this company"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        link = TicketLink.objects.create(
+            from_ticket=src, to_ticket=dst, relation=relation,
+            created_by=request.user,
+        )
+    except IntegrityError:
+        return Response({'status': 'error',
+                         'message': 'That link already exists between these tickets.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    _write_frontline_audit_log(request.user, company, 'ticket.link.create',
+                               'ticket_link', link.id,
+                               created={'from': src.id, 'to': dst.id, 'relation': relation})
+    return Response({'status': 'success',
+                     'data': _serialize_ticket_link(link, point_of_view=src.id)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_ticket_link(request, link_id):
+    company = request.user.company
+    link = TicketLink.objects.filter(
+        pk=link_id,
+        from_ticket__company=company,
+    ).first()
+    if not link:
+        return Response({'status': 'error', 'message': 'Link not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    snapshot = {'from': link.from_ticket_id, 'to': link.to_ticket_id, 'relation': link.relation}
+    link.delete()
+    _write_frontline_audit_log(request.user, company, 'ticket.link.delete',
+                               'ticket_link', int(link_id), deleted=snapshot)
+    return Response({'status': 'success', 'data': {'id': int(link_id), 'deleted': True}})
+
+
+# ============================================================================
+# Contact notes (C-N1)
+# ============================================================================
+
+def _serialize_contact_note(n: 'ContactNote') -> dict:
+    return {
+        'id': n.id, 'contact_id': n.contact_id,
+        'body': n.body, 'is_pinned': n.is_pinned,
+        'created_by_id': n.created_by_id,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+        'updated_at': n.updated_at.isoformat() if n.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_contact_notes(request, contact_id):
+    company = request.user.company
+    if not Contact.objects.filter(pk=contact_id, company=company).exists():
+        return Response({'status': 'error', 'message': 'Contact not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    qs = ContactNote.objects.filter(contact_id=contact_id)
+    return Response({'status': 'success',
+                     'data': [_serialize_contact_note(n) for n in qs[:200]]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def create_contact_note(request, contact_id):
+    company = request.user.company
+    contact = Contact.objects.filter(pk=contact_id, company=company).first()
+    if not contact:
+        return Response({'status': 'error', 'message': 'Contact not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    body = (d.get('body') or '').strip()
+    if not body:
+        return Response({'status': 'error', 'message': 'body is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    note = ContactNote.objects.create(
+        contact=contact, body=body, is_pinned=bool(d.get('is_pinned')),
+        created_by=request.user,
+    )
+    _write_frontline_audit_log(request.user, company, 'contact.note.create',
+                               'contact_note', note.id,
+                               created={'contact_id': contact.id, 'is_pinned': note.is_pinned})
+    return Response({'status': 'success', 'data': _serialize_contact_note(note)},
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST', 'PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_contact_note(request, note_id):
+    company = request.user.company
+    note = ContactNote.objects.filter(pk=note_id, contact__company=company).first()
+    if not note:
+        return Response({'status': 'error', 'message': 'Note not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    before = _serialize_contact_note(note)
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    fields = []
+    if 'body' in d:
+        note.body = (d['body'] or '').strip(); fields.append('body')
+    if 'is_pinned' in d:
+        note.is_pinned = bool(d['is_pinned']); fields.append('is_pinned')
+    if fields:
+        fields.append('updated_at')
+        note.save(update_fields=fields)
+        _write_frontline_audit_log(request.user, company, 'contact.note.update',
+                                   'contact_note', note.id,
+                                   before=before, after=_serialize_contact_note(note))
+    return Response({'status': 'success', 'data': _serialize_contact_note(note)})
+
+
+@api_view(['POST', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_contact_note(request, note_id):
+    company = request.user.company
+    note = ContactNote.objects.filter(pk=note_id, contact__company=company).first()
+    if not note:
+        return Response({'status': 'error', 'message': 'Note not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    snapshot = _serialize_contact_note(note)
+    note.delete()
+    _write_frontline_audit_log(request.user, company, 'contact.note.delete',
+                               'contact_note', int(note_id), deleted=snapshot)
+    return Response({'status': 'success', 'data': {'id': int(note_id), 'deleted': True}})
+
+
+# ============================================================================
+# Contact merge (C-N2)
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def merge_contacts(request):
+    """Merge ``source_id`` into ``target_id`` and delete the source.
+
+    Body: ``{source_id, target_id}``. Both must belong to the caller's company.
+    Tickets and notes pointing at the source are repointed at the target. The
+    target's fields are kept (target wins on conflict) — if the source has
+    data the target is missing (e.g. a phone number), that gets copied in.
+    The source row is deleted; consumers should use the returned target id.
+    """
+    company = request.user.company
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    try:
+        source_id = int(d.get('source_id'))
+        target_id = int(d.get('target_id'))
+    except (TypeError, ValueError):
+        return Response({'status': 'error',
+                         'message': 'source_id and target_id are required (integers)'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if source_id == target_id:
+        return Response({'status': 'error', 'message': 'source and target must differ'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    source = Contact.objects.filter(pk=source_id, company=company).first()
+    target = Contact.objects.filter(pk=target_id, company=company).first()
+    if not (source and target):
+        return Response({'status': 'error',
+                         'message': 'Both contacts must exist in this company'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    # Fill target gaps from source for a handful of common fields. Skip when
+    # the target already has something — never overwrite.
+    fill_fields = ('name', 'phone', 'company_name', 'notes')
+    touched = []
+    for f in fill_fields:
+        if not hasattr(target, f):
+            continue
+        if not (getattr(target, f, None) or '').strip() and (getattr(source, f, None) or '').strip():
+            setattr(target, f, getattr(source, f))
+            touched.append(f)
+    if touched:
+        target.save(update_fields=touched + ['updated_at'] if any(getattr(target, '_meta').get_field(x).name == 'updated_at' for x in touched) else touched)
+
+    # Repoint tickets and notes
+    moved_tickets = Ticket.objects.filter(contact=source).update(contact=target)
+    moved_notes = ContactNote.objects.filter(contact=source).update(contact=target)
+
+    snapshot = {
+        'merged_source_id': source.id, 'merged_into_target_id': target.id,
+        'tickets_moved': moved_tickets, 'notes_moved': moved_notes,
+        'fields_filled_from_source': touched,
+    }
+    source.delete()
+    _write_frontline_audit_log(request.user, company, 'contact.merge',
+                               'contact', target.id, after=snapshot)
+    return Response({'status': 'success', 'data': snapshot})
+
+
+# ============================================================================
+# Handoff release (H1)
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def release_handoff(request, ticket_id):
+    """Release a handoff back into the pending pool — used when the assigned
+    agent can't handle it and wants someone else to pick it up. Clears
+    `handoff_accepted_at` / `handoff_accepted_by`, flips `handoff_status` back
+    to `pending`. The ticket's `assigned_to` is also cleared so the queue
+    treats it as unowned again."""
+    company = request.user.company
+    ticket = Ticket.objects.filter(pk=ticket_id, company=company).first()
+    if not ticket:
+        return Response({'status': 'error', 'message': 'Ticket not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if ticket.handoff_status != 'accepted':
+        return Response({'status': 'error',
+                         'message': f'Handoff is {ticket.handoff_status!r}, not accepted — nothing to release.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    before = {
+        'handoff_status': ticket.handoff_status,
+        'handoff_accepted_by_id': ticket.handoff_accepted_by_id,
+        'assigned_to_id': ticket.assigned_to_id,
+    }
+    ticket.handoff_status = 'pending'
+    ticket.handoff_accepted_at = None
+    ticket.handoff_accepted_by = None
+    ticket.assigned_to = None
+    ticket.save(update_fields=['handoff_status', 'handoff_accepted_at',
+                               'handoff_accepted_by', 'assigned_to', 'updated_at'])
+    _write_frontline_audit_log(
+        request.user, company, 'ticket.handoff.release', 'ticket', ticket.id,
+        before=before,
+        after={'handoff_status': ticket.handoff_status, 'assigned_to_id': None},
+    )
+    return Response({'status': 'success', 'data': {
+        'id': ticket.id, 'handoff_status': ticket.handoff_status,
+    }})
 

@@ -118,6 +118,7 @@ class HRKnowledgeService:
             is_indexed=True,
             processing_status='ready',
             superseded_by__isnull=True,  # never retrieve old revisions
+            is_outdated=False,            # D-F2 — skip soft-deprecated docs too
         )
         # Confidentiality gate
         allowed_levels = _allowed_confidentialities(asker_role)
@@ -188,12 +189,15 @@ class HRKnowledgeService:
             if not c:
                 continue
             heading = getattr(c, 'section_heading', '') or ''
+            page = getattr(c, 'page_number', None)
+            page_label = f" p.{page}" if page else ""
             out.append({
                 'chunk_id': c.id,
                 'document_id': c.document_id,
-                'title': (f"{c.document.title} — {heading}" if heading
-                          else f"{c.document.title} (Chunk {c.chunk_index})"),
+                'title': (f"{c.document.title} — {heading}{page_label}" if heading
+                          else f"{c.document.title} (Chunk {c.chunk_index}{page_label})"),
                 'section_heading': heading,
+                'page_number': page,
                 'content': c.chunk_text,
                 'semantic_score': sem_score.get(cid),
             })

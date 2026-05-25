@@ -251,11 +251,32 @@ class LeaveRequest(models.Model):
         ('cancelled', 'Cancelled'),
     ]
 
+    PARTIAL_DAY_PERIOD_CHOICES = [
+        ('', 'Full day'),
+        ('morning', 'Morning (half-day)'),
+        ('afternoon', 'Afternoon (half-day)'),
+        ('hours', 'Specific hours'),
+    ]
+
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='leave_requests')
     leave_type = models.CharField(max_length=20, choices=LeaveBalance.LEAVE_TYPE_CHOICES)
     start_date = models.DateField()
     end_date = models.DateField()
     days_requested = models.DecimalField(max_digits=5, decimal_places=2)
+    # Partial-day metadata. When `partial_day_period` is non-empty, the request
+    # represents less than a full working day on a single date (start_date should
+    # equal end_date). The submit endpoint enforces:
+    #   morning/afternoon → days_requested = 0.5 (half-day)
+    #   hours → days_requested = partial_hours / 8 (rounded to 2dp)
+    # Full-day requests leave both fields blank/null.
+    partial_day_period = models.CharField(
+        max_length=12, blank=True, default='', choices=PARTIAL_DAY_PERIOD_CHOICES,
+        help_text='Empty for full-day. "morning"/"afternoon" = half-day. "hours" = use partial_hours.',
+    )
+    partial_hours = models.DecimalField(
+        max_digits=4, decimal_places=2, null=True, blank=True,
+        help_text='Only used when partial_day_period="hours". Working hours requested (e.g. 2.5).',
+    )
     reason = models.TextField(blank=True, default='')
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='pending', db_index=True)
     approver = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True,
@@ -581,6 +602,14 @@ class HRDocument(models.Model):
                                       related_name='superseded_revisions', db_index=True,
                                       help_text='Points to the newer revision; non-null = excluded from retrieval.')
 
+    # Soft deprecation — distinct from `superseded_by` (which requires a
+    # replacement row). Set to True when HR wants to take a doc out of
+    # retrieval without uploading a corrected version yet.
+    is_outdated = models.BooleanField(
+        default=False, db_index=True,
+        help_text='Soft-deprecate: when True, this doc is excluded from retrieval.',
+    )
+
     # Retention — defaults vary by document_type at upload time
     # (e.g. payroll → 7 years).
     retention_days = models.IntegerField(null=True, blank=True)
@@ -613,6 +642,10 @@ class HRDocumentChunk(models.Model):
         max_length=300, blank=True, default='',
         help_text='The detected heading (Markdown #, ALL-CAPS, Article/Section marker) '
                   'that opened the section this chunk belongs to. Empty for non-section-aware types.',
+    )
+    page_number = models.PositiveIntegerField(
+        null=True, blank=True, db_index=True,
+        help_text='1-based PDF page this chunk came from. Null for non-PDF docs or chunks that span page breaks.',
     )
     embedding = models.TextField(null=True, blank=True,
                                  help_text='Vector embedding as JSON; nvarchar(max) on MSSQL.')
@@ -688,12 +721,25 @@ class HRWorkflowExecution(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
 
+    # Idempotency — webhook providers commonly deliver the same event twice.
+    # The key is set on create to a stable digest of (workflow, event, target);
+    # the unique constraint turns the second arrival into a 200 no-op via the
+    # IntegrityError handler in the trigger code.
+    idempotency_key = models.CharField(max_length=128, blank=True, default='', db_index=True)
+
     class Meta:
         app_label = 'hr_agent'
         ordering = ['-started_at']
         indexes = [
             models.Index(fields=['status', 'started_at']),
             models.Index(fields=['employee', 'status']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workflow', 'idempotency_key'],
+                condition=models.Q(idempotency_key__gt=''),
+                name='hr_workflow_exec_idem_uniq',
+            ),
         ]
 
     def __str__(self):
@@ -784,6 +830,8 @@ class HRNotificationTemplate(models.Model):
         ('email', 'Email'),
         ('sms', 'SMS'),
         ('in_app', 'In-App'),
+        ('slack', 'Slack (webhook)'),
+        ('teams', 'Microsoft Teams (webhook)'),
     ]
     NOTIFICATION_TYPE_CHOICES = [
         ('birthday', 'Birthday'),
@@ -805,6 +853,15 @@ class HRNotificationTemplate(models.Model):
     body = models.TextField(help_text='Use {{employee_name}}, {{event_date}}, {{document_title}} placeholders.')
     trigger_config = models.JSONField(default=dict, blank=True,
                                       help_text='e.g. {"on": "probation_ending", "days_before": 7}')
+    # Per-template quiet hours. Shape:
+    # {"enabled": bool, "start": "HH:MM", "end": "HH:MM", "timezone_name": "UTC",
+    #  "override_user_quiet_hours": bool}. Falls back to per-user prefs when absent.
+    # `override_user_quiet_hours=True` lets urgent templates (e.g. probation-ends-tomorrow)
+    # bypass the recipient's per-user quiet window.
+    quiet_hours = models.JSONField(
+        default=dict, blank=True,
+        help_text='Optional per-template quiet-hours config. See model source for shape.',
+    )
     use_llm_personalization = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
