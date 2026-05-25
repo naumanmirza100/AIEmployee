@@ -1036,8 +1036,8 @@ const SuperAdminApiKeysPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [savingAgent, setSavingAgent] = useState(null);
 
-  const loadAll = async () => {
-    setLoading(true);
+  const loadAll = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const [o, k, p, q, r, pk] = await Promise.all([
         adminApiKeysService.getOverview(),
@@ -1054,9 +1054,9 @@ const SuperAdminApiKeysPage = () => {
       setRequests(r.requests || []);
       setPlatformKeys(pk.platform_keys || []);
     } catch (e) {
-      toast({ title: 'Load failed', description: String(e.message || e), variant: 'destructive' });
+      if (!silent) toast({ title: 'Load failed', description: String(e.message || e), variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -1074,7 +1074,22 @@ const SuperAdminApiKeysPage = () => {
     } finally { setSavingProvider(null); }
   };
 
-  useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    loadAll();
+
+    // Auto-refresh every 30 seconds (silent — no spinner, no error toast)
+    const interval = setInterval(() => loadAll({ silent: true }), 30_000);
+
+    // Refresh immediately when user tabs back to this page
+    const onVisible = () => { if (document.visibilityState === 'visible') loadAll({ silent: true }); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const reloadKeys = async () => {
     try {

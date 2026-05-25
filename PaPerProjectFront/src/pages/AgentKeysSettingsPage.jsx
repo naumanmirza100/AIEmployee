@@ -47,7 +47,7 @@ const modeBadge = (a) => {
   else active = freeExhausted ? 'free_exhausted' : 'platform';
 
   if (active === 'disabled')           return { label: 'Disabled',             class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
-  if (active === 'byok_exhausted')     return { label: 'BYOK Cap Reached',     class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
+  if (active === 'byok_exhausted')     return { label: 'BYOK Cap Reached',     class: 'bg-orange-500/15 text-orange-300 border border-orange-500/30' };
   if (active === 'managed_exhausted')  return { label: 'Managed Quota Full',   class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'free_exhausted')     return { label: 'Free Tokens Exhausted',class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
   if (active === 'byok')               return { label: 'BYOK Active',          class: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' };
@@ -196,9 +196,13 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
     const p = q?.preferred_pool;
     if (p === 'none') return 'disabled';
     if (p === 'free') return 'free';
-    if (p === 'managed' && hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
-    if (agent.byok) return q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit ? 'blocked' : 'byok';
-    // No explicit preference: managed key wins if present; exhaustion = hard block
+    if (p === 'managed') {
+      if (hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
+      return 'platform';
+    }
+    // BYOK wins when preferred_pool is 'byok' or unset (backend Step 1)
+    // cap-hit still counts as 'byok' — it IS the active key, just blocked by cap
+    if (p === 'byok' || (!p && agent.byok)) return 'byok';
     if (hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
     return 'platform';
   })();
@@ -329,21 +333,23 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                 {agent.byok && (
                   (() => {
                     const byokCapHit = q?.byok_token_limit > 0 && q?.byok_tokens_info >= q?.byok_token_limit;
-                    const isByokActive = actualPool === 'byok' || actualPool === 'blocked' && byokCapHit;
+                    const isByokActive = actualPool === 'byok'; // ● only when BYOK is the actual running pool
                     return (
                       <button
                         onClick={() => onSetPool(agent.agent_name, 'byok')}
+                        title={byokCapHit ? 'BYOK cap reached — click to switch to BYOK, then increase the cap to resume.' : 'Use your own API key (BYOK)'}
                         className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
-                          byokCapHit
-                            ? 'cursor-not-allowed border-red-500/40 bg-red-500/8 text-red-400/80'
-                            : isByokActive
-                              ? 'bg-blue-600/20 border-blue-500/50 text-blue-200'
-                              : 'border-white/10 text-white/40 hover:border-blue-500/30 hover:text-blue-300'
+                          isByokActive
+                            ? byokCapHit
+                              ? 'bg-orange-500/15 border-orange-500/40 text-orange-300'   // active but capped → orange highlight
+                              : 'bg-blue-600/20 border-blue-500/50 text-blue-200'          // active and ok → blue highlight
+                            : byokCapHit
+                              ? 'border-orange-500/20 text-orange-400/50 hover:border-orange-500/40 hover:text-orange-300' // not active, capped → dim orange, still clickable
+                              : 'border-white/10 text-white/40 hover:border-blue-500/30 hover:text-blue-300'               // normal inactive
                         }`}
-                        title={byokCapHit ? 'BYOK cap reached — increase or remove the cap to continue.' : 'Use your own API key (BYOK)'}
                       >
                         <Lock className="w-2.5 h-2.5 inline mr-0.5 mb-[2px]" />
-                        {byokCapHit ? 'BYOK · Cap hit ●' : <>BYOK{isByokActive && ' ●'}</>}
+                        {byokCapHit ? <>BYOK · Cap hit{isByokActive && ' ●'}</> : <>BYOK{isByokActive && ' ●'}</>}
                       </button>
                     );
                   })()
@@ -766,6 +772,18 @@ const AgentKeysSettingsPage = () => {
           loadData({ silent: true });
         });
     }
+
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => loadData({ silent: true }), 30_000);
+
+    // Refresh immediately when user tabs back to this page
+    const onVisible = () => { if (document.visibilityState === 'visible') loadData({ silent: true }); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
