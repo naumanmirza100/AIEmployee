@@ -403,6 +403,9 @@ class MeetingSchedulingAgent:
             try:
                 return self._ai_prep_notes(lead, enrollment, reply_text)
             except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
                 logger.warning("AI prep notes failed, using defaults: %s", exc)
         return self._default_prep_notes(lead, reply_text)
 

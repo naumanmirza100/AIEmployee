@@ -195,6 +195,9 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 'body': data.get('body', body),
             }
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning('EmailAssistantAgent.improve_email failed: %s', exc)
             return {'subject': subject, 'body': body}
 
@@ -250,6 +253,9 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 'body': data.get('body', ''),
             }
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning('EmailAssistantAgent.generate_more_info_email failed: %s', exc)
             return {
                 'subject': f"Re: More about {campaign.sender_company}",
@@ -295,6 +301,9 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
                 cat = CAT_NEUTRAL
             return self._result(cat, confidence='high', reason=data.get('reason', 'AI classified'))
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning('EmailAssistantAgent._ai_classify failed: %s', exc)
             return self._result(CAT_NEUTRAL, confidence='low', reason='AI classification failed')
 

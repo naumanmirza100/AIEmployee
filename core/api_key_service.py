@@ -261,6 +261,7 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
         raise QuotaExhausted()
 
     # Step 4 — platform default key (the "free tokens" path)
+    # Try the agent's default provider first, then fall back to any other active platform key.
     default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai')
     platform = PlatformAPIKey.objects.filter(provider=default_provider, status='active').first()
     if platform:
@@ -273,6 +274,32 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
                 provider=platform.provider,
                 api_key=plaintext,
                 key_id=platform.id,
+                quota_id=quota.id,
+            )
+
+    # Step 4b — default provider key missing/revoked → try any other active platform key
+    fallback_platform = (
+        PlatformAPIKey.objects
+        .filter(status='active')
+        .exclude(provider=default_provider)
+        .first()
+    )
+    if fallback_platform:
+        fallback_key = fallback_platform.get_plaintext_key()
+        if fallback_key:
+            import logging
+            logging.getLogger(__name__).info(
+                "resolve_for_call: %s default provider '%s' not available — "
+                "falling back to platform key '%s'",
+                agent_name, default_provider, fallback_platform.provider,
+            )
+            return CallContext(
+                company_id=company.id,
+                agent_name=agent_name,
+                mode='platform',
+                provider=fallback_platform.provider,
+                api_key=fallback_key,
+                key_id=fallback_platform.id,
                 quota_id=quota.id,
             )
 

@@ -254,7 +254,7 @@ const DashboardNavbar = ({
           {/* Navigation Tabs */}
           {showNavTabs && navItems.length > 0 && (
             <div className="border-t border-white/[0.08] pt-3 sm:pt-4 -mx-3 sm:-mx-4 px-3 sm:px-4">
-              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent pb-1">
+              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none pb-1" style={{scrollbarWidth:'none',msOverflowStyle:'none'}}>
                 {navItems.map((item) => {
                   const isActive = item.section === activeSection;
                   return (

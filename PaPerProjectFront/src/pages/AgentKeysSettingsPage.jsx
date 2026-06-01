@@ -392,9 +392,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     <Activity className="w-2.5 h-2.5 inline mr-0.5" />Platform
                   </span>
                 )}
-                {q?.managed_is_exhausted && actualPool === 'blocked' && (
-                  <span className="text-[9px] text-red-400/80 self-center" title="Managed quota exhausted — calls are blocked. Contact your admin to top up, or add a BYOK key.">blocked</span>
-                )}
+
                 {/* No Key / Disable option */}
                 <button
                   onClick={() => { if (actualPool !== 'disabled') onSetPool(agent.agent_name, 'none'); }}

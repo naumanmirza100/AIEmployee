@@ -61,6 +61,9 @@ class LeadQualificationAgent:
             try:
                 return self._ai_qualify(lead, icp_profile)
             except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
                 logger.warning("AI qualification failed, falling back to rule-based: %s", exc)
 
         return self._rule_based_qualify(lead, icp_profile)

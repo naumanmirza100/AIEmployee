@@ -71,6 +71,7 @@ import {
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { renderChart } from '../recruitment/ChartRenderer';
 import {
   BarChart,
@@ -1967,7 +1968,7 @@ const FrontlineDashboard = () => {
       const content = typeof extracted === 'object' ? JSON.stringify(extracted, null, 2) : (extracted || 'No data extracted.');
       setDocResultDialog((prev) => ({ ...prev, content, loading: false }));
     } catch (error) {
-      setDocResultDialog((prev) => ({ ...prev, content: `Error: ${error.message || 'Extraction failed'}`, loading: false }));
+      setDocResultDialog((prev) => ({ ...prev, content: apiErrorMessage(error, 'Extraction failed'), loading: false }));
     }
   };
 
@@ -2317,7 +2318,7 @@ const FrontlineDashboard = () => {
       setQuestion('');
       setTimeout(scrollToBottom, 100);
     } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to get answer', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(error, 'Failed to get answer'), variant: 'destructive' });
     } finally {
       setAnswering(false);
     }

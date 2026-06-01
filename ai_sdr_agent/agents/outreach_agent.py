@@ -61,6 +61,9 @@ class OutreachAgent:
             try:
                 return self._ai_generate_steps(campaign, icp)
             except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
                 logger.warning("AI step generation failed, using defaults: %s", exc)
         return self._default_steps(campaign)
 

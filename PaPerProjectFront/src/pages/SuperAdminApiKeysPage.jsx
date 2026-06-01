@@ -108,8 +108,25 @@ const StatCard = ({ icon: Icon, label, value, accent }) => (
 );
 
 // -------------------- Platform Keys Tab --------------------
-const PlatformKeyRow = ({ row, onSave, saving }) => {
+// Expected key prefixes per provider for frontend validation
+const PROVIDER_KEY_PREFIXES = {
+  openai:  { prefixes: ['sk-'], hint: 'OpenAI keys start with sk-' },
+  groq:    { prefixes: ['gsk_'], hint: 'Groq keys start with gsk_' },
+  claude:  { prefixes: ['sk-ant-'], hint: 'Anthropic keys start with sk-ant-' },
+  gemini:  { prefixes: ['AIza'], hint: 'Gemini keys start with AIza' },
+  grok:    { prefixes: ['xai-'], hint: 'xAI Grok keys start with xai-' },
+};
+
+const PlatformKeyRow = ({ row, onSave, onRevoke, saving, revoking }) => {
   const [apiKey, setApiKey] = useState('');
+
+  const prefixInfo = PROVIDER_KEY_PREFIXES[row.provider];
+  const validPrefix = !apiKey || !prefixInfo ||
+    prefixInfo.prefixes.some(p => apiKey.startsWith(p));
+  const prefixError = apiKey.length > 3 && !validPrefix
+    ? `Wrong key format. ${prefixInfo.hint}.`
+    : null;
+
   return (
     <div className={`${ROW_CLASS} rounded-lg p-4`}>
       <div className="flex items-center justify-between mb-3">
@@ -124,29 +141,49 @@ const PlatformKeyRow = ({ row, onSave, saving }) => {
             </p>
           </div>
         </div>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
-          row.configured && row.status === 'active'
-            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-            : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
-        }`}>
-          {row.configured && row.status === 'active' ? 'Active' : 'Not set'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+            row.configured && row.status === 'active'
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
+          }`}>
+            {row.configured && row.status === 'active' ? 'Active' : 'Not set'}
+          </span>
+          {row.configured && row.status === 'active' && (
+            <button
+              onClick={() => onRevoke(row.provider)}
+              disabled={revoking}
+              title="Remove this key"
+              className="text-[10px] px-2 py-0.5 rounded-full border border-red-500/30 text-red-400/70 hover:bg-red-500/10 hover:text-red-300 transition-all disabled:opacity-50"
+            >
+              {revoking ? <Loader2 className="w-3 h-3 animate-spin inline" /> : <Trash2 className="w-3 h-3 inline" />}
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex items-end gap-2">
         <div className="flex-1">
+          <div className='flex justify-start items-center gap-2'>
           <Label className="text-white/60 text-xs">
             {row.configured ? 'Replace key' : 'Paste new key'}
           </Label>
+           {prefixError && (
+            <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 inline" /> {prefixError}
+            </p>
+          )}
+          </div>
           <Input
-            type="password" autoComplete="off" placeholder="sk-..."
+            type="password" autoComplete="off"
+            placeholder={prefixInfo ? prefixInfo.prefixes[0] + '...' : 'sk-...'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
+            className={`bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono ${prefixError ? 'border-red-500/60' : ''}`}
           />
         </div>
         <Button
           className="bg-violet-600 hover:bg-violet-700 text-white"
-          disabled={saving || apiKey.length < 10}
+          disabled={saving || apiKey.length < 10 || !!prefixError}
           onClick={() => onSave(row.provider, apiKey, () => setApiKey(''))}
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
@@ -218,7 +255,7 @@ const AgentProviderReferenceTable = () => (
   </div>
 );
 
-const PlatformTab = ({ platformKeys, onSave, savingProvider }) => (
+const PlatformTab = ({ platformKeys, onSave, onRevoke, savingProvider, revokingProvider }) => (
   <div className="space-y-3">
     <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-lg p-4 flex items-start gap-3">
       <Globe className="w-5 h-5 text-emerald-300 shrink-0 mt-0.5" />
@@ -237,7 +274,9 @@ const PlatformTab = ({ platformKeys, onSave, savingProvider }) => (
         key={row.provider}
         row={row}
         onSave={onSave}
+        onRevoke={onRevoke}
         saving={savingProvider === row.provider}
+        revoking={revokingProvider === row.provider}
       />
     ))}
   </div>
@@ -1023,6 +1062,7 @@ const SuperAdminApiKeysPage = () => {
   const [requests, setRequests] = useState([]);
   const [platformKeys, setPlatformKeys] = useState([]);
   const [savingProvider, setSavingProvider] = useState(null);
+  const [revokingProvider, setRevokingProvider] = useState(null);
 
   const [keyFilter, setKeyFilter] = useState({ mode: 'managed' });
   const [quotaFilter, setQuotaFilter] = useState({});
@@ -1074,6 +1114,19 @@ const SuperAdminApiKeysPage = () => {
     } catch (e) {
       toast({ title: 'Save failed', description: String(e.message || e), variant: 'destructive' });
     } finally { setSavingProvider(null); }
+  };
+
+  const handleRevokePlatformKey = async (provider) => {
+    setRevokingProvider(provider);
+    try {
+      await adminApiKeysService.revokePlatformKey(provider);
+      toast({ title: 'Key removed', description: `${provider.toUpperCase()} platform key has been revoked.`, variant: 'destructive' });
+      const pk = await adminApiKeysService.listPlatformKeys();
+      setPlatformKeys(pk.platform_keys || []);
+      loadAll();
+    } catch (e) {
+      toast({ title: 'Remove failed', description: String(e.message || e), variant: 'destructive' });
+    } finally { setRevokingProvider(null); }
   };
 
   useEffect(() => {
@@ -1306,7 +1359,7 @@ const SuperAdminApiKeysPage = () => {
 
             <TabsContent value="platform">
               {loading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>
-                : <PlatformTab platformKeys={platformKeys} onSave={savePlatformKey} savingProvider={savingProvider} />}
+                : <PlatformTab platformKeys={platformKeys} onSave={savePlatformKey} onRevoke={handleRevokePlatformKey} savingProvider={savingProvider} revokingProvider={revokingProvider} />}
             </TabsContent>
             <TabsContent value="overview">
               {loading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div> : <OverviewTab stats={stats} />}

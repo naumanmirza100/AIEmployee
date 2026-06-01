@@ -495,6 +495,9 @@ class FrontlineAgent(BaseAgent):
             )
             return {'success': True, 'summary': (summary or "").strip()}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f"Summarize document failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'summary': None}
 
@@ -539,6 +542,9 @@ class FrontlineAgent(BaseAgent):
             data = json.loads(raw)
             return {'success': True, 'data': data}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f"Extract from document failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'data': None}
 
@@ -567,6 +573,9 @@ class FrontlineAgent(BaseAgent):
             )
             return {'success': True, 'narrative': (narrative or "").strip()}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f"Generate analytics narrative failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'narrative': None}
 
@@ -610,6 +619,9 @@ class FrontlineAgent(BaseAgent):
                 'chart_type': chart_type,
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f"Answer analytics question failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'answer': None, 'chart_type': None}
 
@@ -643,6 +655,9 @@ class FrontlineAgent(BaseAgent):
                 return (body.strip())[:2000]
             return None
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.warning(f"Generate notification body failed: {e}", exc_info=True)
             return None
 
@@ -727,6 +742,9 @@ Rules:
                 "insights": chart_config.get("insights") or "",
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.warning(f"generate_analytics_chart failed: {e}", exc_info=True)
             # Fallback: bar chart by status
             status_obj = analytics_data.get("tickets_by_status_obj") or {}

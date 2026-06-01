@@ -4876,6 +4876,8 @@ def frontline_analytics(request):
                 if nar_result.get('success') and nar_result.get('narrative'):
                     data['narrative'] = nar_result['narrative']
             except Exception as nar_err:
+                if isinstance(nar_err, KeyServiceError):
+                    raise
                 logger.warning("Analytics narrative generation failed: %s", nar_err)
         return Response({
             'status': 'success',
@@ -5949,6 +5951,9 @@ def suggest_ticket_reply(request, ticket_id):
                 max_tokens=500,
             )
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.exception("suggest-reply LLM call failed")
             return Response(
                 {'status': 'error', 'message': f'LLM call failed: {exc}'},
@@ -5970,6 +5975,8 @@ def suggest_ticket_reply(request, ticket_id):
                 'messages_considered': len(thread_parts),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception:
         logger.exception("suggest_ticket_reply failed")
         return Response({'status': 'error', 'message': 'Failed to draft reply'},
