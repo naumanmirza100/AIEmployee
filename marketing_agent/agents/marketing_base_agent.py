@@ -36,62 +36,28 @@ class MarketingBaseAgent:
     
     def __init__(self, model=None, use_embeddings=False):
         """
-        Initialize the marketing base agent with Groq (for Q&A) and OpenAI (for advanced tasks).
-        
-        Args:
-            model (str): Groq model to use. Defaults to settings.GROQ_MODEL for Q&A
-            use_embeddings (bool): Whether this agent needs embeddings capability
+        Initialize the marketing base agent.
+
+        Keys are NEVER read from environment variables or Django settings here.
+        All LLM calls go through _resolve_company_client() which calls
+        resolve_for_call(company, agent_key_name) — the only authorised key source.
+        Set self.company_id and self.agent_key_name before any LLM call.
         """
-        # Groq API (for Q&A) – optional so agents that don't use LLM (e.g. ProactiveNotificationAgent) can run without it
-        # Note: GROQ (Q) = Groq.com (Llama). GROK (K) = xAI Grok – different service.
-        self.groq_api_key = (
-            getattr(settings, 'GROQ_API_KEY', None) or getattr(settings, 'GROQ_REC_API_KEY', None)
-            or os.environ.get('GROQ_API_KEY') or os.environ.get('GROQ_REC_API_KEY') or ''
-        ).strip()
-        self.groq_client = None
-        if self.groq_api_key:
-            try:
-                self.groq_client = Groq(api_key=self.groq_api_key)
-            except TypeError as e:
-                error_msg = str(e)
-                if 'proxies' in error_msg or 'unexpected keyword' in error_msg:
-                    logger.error(f"Groq client initialization error: {e}")
-                    logger.error("This is usually caused by an outdated groq library version.")
-                    logger.error("Please run: pip install --upgrade groq")
-                    raise ValueError(
-                        f"Groq client initialization failed. "
-                        f"This is likely due to an incompatible groq library version. "
-                        f"Please update it: pip install --upgrade groq. "
-                        f"Original error: {e}"
-                    )
-                else:
-                    raise
-            except Exception as e:
-                logger.error(f"Unexpected error initializing Groq client: {e}")
-                raise ValueError(f"Failed to initialize Groq client: {e}")
-        
-        # OpenAI API (Optional - for document writing and advanced tasks)
-        self.openai_api_key = getattr(settings, 'OPENAI_API_KEY', None)
-        if OpenAI and self.openai_api_key:
-            try:
-                self.openai_client = OpenAI(api_key=self.openai_api_key)
-            except Exception as e:
-                logger.warning(f"OpenAI client initialization failed: {e}. Will use Groq only.")
-                self.openai_client = None
-        else:
-            self.openai_client = None
-        
+        # No env-key pre-loading. groq_client / openai_client are created lazily
+        # per-call inside _resolve_company_client when company_id is set.
+        self.groq_client = None   # legacy attribute; not used in the per-company path
+        self.openai_client = None  # legacy attribute; not used in the per-company path
+        self.groq_api_key = ''     # intentionally empty — never read from env
+        self.openai_api_key = ''   # intentionally empty — never read from env
+
         # Model selection based on use case
         if use_embeddings:
-            # For embeddings, we'll use a separate method
             self.embedding_model = getattr(settings, 'OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
-            self.model = None  # Embeddings don't use chat model
+            self.model = None
         else:
-            # Default to Groq model for Q&A
-            default_model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
-            self.model = model or default_model
+            self.model = model or 'llama-3.1-8b-instant'
             self.embedding_model = None
-        
+
         self.agent_name = self.__class__.__name__
         self.last_token_usage = None
         self.last_llm_used = False
@@ -163,10 +129,15 @@ class MarketingBaseAgent:
             else:
                 model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
         else:
-            call_client = self.openai_client
+            # company_id/agent_key_name not set — fail; never fall back to env key
+            call_client = None
             model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
         if not call_client:
-            raise ValueError("OpenAI client not available. Please set OPENAI_API_KEY in .env file.")
+            raise ValueError(
+                "No API key available for OpenAI call. Set self.company_id and self.agent_key_name "
+                "so the platform key service can resolve the correct key. "
+                "Keys are never read from environment variables."
+            )
 
         try:
             messages = []
@@ -259,7 +230,11 @@ class MarketingBaseAgent:
         else:
             emb_client = self.openai_client
         if not emb_client:
-            raise ValueError("OpenAI client not available for embeddings. Please set OPENAI_API_KEY in .env file.")
+            raise ValueError(
+                "No OpenAI key available for embeddings. Set self.company_id and self.agent_key_name "
+                "so the platform key service can resolve an OpenAI key. "
+                "Keys are never read from environment variables."
+            )
 
         try:
             model_to_use = model or self.embedding_model or 'text-embedding-3-large'
@@ -322,12 +297,15 @@ class MarketingBaseAgent:
             else:
                 effective_model = self.model
         else:
-            call_client = self.groq_client
+            # company_id/agent_key_name not set — this agent was not initialised through the
+            # subscription key service.  Fail loudly; never silently fall back to an env key.
+            call_client = None
             effective_model = self.model
         if not call_client:
             raise ValueError(
-                "GROQ_API_KEY or GROQ_REC_API_KEY not found in environment variables. "
-                "Set one of them in your .env file to use LLM features."
+                "No API key available. Set self.company_id and self.agent_key_name before "
+                "making LLM calls so the platform key service can resolve the correct key. "
+                "Keys are never read from environment variables."
             )
         messages = []
         if system_prompt:

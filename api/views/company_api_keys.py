@@ -267,9 +267,9 @@ def revoke_byok_key(request, agent_name):
 def set_token_pool(request):
     """Set the preferred token pool for an agent.
 
-    Body: { agent_name, preferred_pool }  — preferred_pool: 'free' | 'managed'
-    Only relevant when the company has both free tokens remaining and an active
-    managed key. The chosen pool is used for subsequent LLM calls.
+    Body: { agent_name, preferred_pool }
+    preferred_pool: 'free' | 'managed' | 'byok' | 'none'
+    'none' disables all LLM calls for this agent until changed.
     """
     company = request.user.company
     agent_name = (request.data.get('agent_name') or '').strip()
@@ -278,8 +278,8 @@ def set_token_pool(request):
     if agent_name not in {name for name, _ in AGENT_CHOICES}:
         return Response({'status': 'error', 'message': 'Invalid agent_name'},
                         status=status.HTTP_400_BAD_REQUEST)
-    if preferred_pool not in ('free', 'managed', 'byok'):
-        return Response({'status': 'error', 'message': "preferred_pool must be 'free', 'managed', or 'byok'"},
+    if preferred_pool not in ('free', 'managed', 'byok', 'none'):
+        return Response({'status': 'error', 'message': "preferred_pool must be 'free', 'managed', 'byok', or 'none'"},
                         status=status.HTTP_400_BAD_REQUEST)
 
     quota, _ = AgentTokenQuota.objects.get_or_create(

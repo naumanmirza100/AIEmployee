@@ -18,7 +18,12 @@ class JobDescriptionParserAgent:
         groq_client: Optional[GroqClient] = None,
         log_service: Optional[LogService] = None,
     ) -> None:
-        self.groq_client = groq_client or GroqClient()
+        if groq_client is None:
+            raise ValueError(
+                "JobDescriptionParserAgent requires an explicit groq_client resolved via "
+                "resolve_for_call(). Keys are never sourced from environment variables."
+            )
+        self.groq_client = groq_client
         self.log_service = log_service or LogService()
 
     def parse_file(self, filepath: str) -> Dict[str, Any]:
@@ -138,8 +143,8 @@ class JobDescriptionParserAgent:
             if exc.is_auth_error:
                 self._log_error("groq_api_key_expired", exc)
                 raise GroqClientError(
-                    "Groq API key expired or invalid. Job description parsing requires valid API key. "
-                    "Please update GROQ_REC_API_KEY in environment variables.",
+                    "API key rejected by provider. Please update the key in the platform "
+                    "API Keys settings (BYOK) or contact your admin to refresh the managed key.",
                     is_auth_error=True
                 ) from exc
             self._log_error("groq_parsing_failed", exc)

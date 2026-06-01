@@ -19,8 +19,9 @@ class GroqClientError(Exception):
 class GroqClient:
     """
     Thin wrapper around Groq's chat completion API for structured JSON extraction.
-    Uses GROQ_REC_API_KEY from environment for recruitment agent.
-    Handles API key expiration and rate limits gracefully.
+    API key MUST be supplied explicitly — never fetched from environment.
+    Use QuotaAwareGroqClient (below) with a CallContext from resolve_for_call()
+    so that every call is tracked against the company's quota.
     """
 
     def __init__(
@@ -30,17 +31,18 @@ class GroqClient:
         base_url: Optional[str] = None,
         timeout: int = 30,
     ) -> None:
-        # Use GROQ_REC_API_KEY for recruitment agent, fallback to GROQ_API_KEY
-        self.api_key = api_key or os.environ.get("GROQ_REC_API_KEY") or os.environ.get("GROQ_API_KEY")
-        if not self.api_key:
+        # Keys must come from the platform (resolve_for_call), never from .env.
+        # If api_key is still None here, something in the call chain bypassed
+        # resolve_for_call — fail loudly so the bug is caught immediately.
+        if not api_key:
             raise GroqClientError(
-                "GROQ_REC_API_KEY or GROQ_API_KEY is required. Set it in environment variables.",
-                is_auth_error=True
+                "No API key provided. All keys must come from the platform key service "
+                "(resolve_for_call). Do not set GROQ_API_KEY or GROQ_REC_API_KEY in the environment.",
+                is_auth_error=True,
             )
-        self.model = model or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
-        self.base_url = base_url or os.environ.get(
-            "GROQ_BASE_URL", "https://api.groq.com/openai/v1/chat/completions"
-        )
+        self.api_key = api_key
+        self.model = model or "llama-3.1-8b-instant"
+        self.base_url = base_url or "https://api.groq.com/openai/v1/chat/completions"
         self.timeout = timeout
         self.last_token_usage: Optional[Dict] = None  # Tracks token usage of last API call
 

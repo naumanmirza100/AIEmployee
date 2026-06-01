@@ -1,0 +1,14 @@
+[33mcommit d4b201b2f9ba23daed2274d7860a9fb59528c1e0[m[33m ([m[1;36mHEAD -> [m[1;32mnoorBranch[m[33m)[m
+Author: Noor Fatima <noorfatima262004@gmail.com>
+Date:   Thu May 21 18:13:48 2026 +0500
+
+    implementing subscription in ai_sdr_agent
+
+ ai_sdr_agent/agents/lead_qualification_agent.py |  50 [32m+++++++[m[31m----[m
+ ai_sdr_agent/agents/lead_research_agent.py      |  55 [32m++++++++[m[31m----[m
+ ai_sdr_agent/agents/meeting_scheduling_agent.py |  49 [32m+++++++[m[31m----[m
+ ai_sdr_agent/agents/outreach_agent.py           |  52 [32m++++++++[m[31m----[m
+ ai_sdr_agent/tasks.py                           |  71 [32m++++++++++++++[m[31m--[m
+ api/views/ai_sdr_agent.py                       | 107 [32m++++++++++++++++[m[31m--------[m
+ core/models.py                                  |   2 [32m+[m
+ 7 files changed, 276 insertions(+), 110 deletions(-)
