@@ -50,6 +50,7 @@ export default function HRLeaveTab() {
   const [form, setForm] = useState({
     employee_id: '', leave_type: 'vacation',
     start_date: '', end_date: '', reason: '',
+    partial_day_period: '', partial_hours: '',
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -83,7 +84,11 @@ export default function HRLeaveTab() {
   useEffect(() => { loadEmployees(); }, []);
 
   const openSubmit = () => {
-    setForm({ employee_id: '', leave_type: 'vacation', start_date: '', end_date: '', reason: '' });
+    setForm({
+      employee_id: '', leave_type: 'vacation',
+      start_date: '', end_date: '', reason: '',
+      partial_day_period: '', partial_hours: '',
+    });
     setSubmitOpen(true);
   };
 
@@ -96,9 +101,33 @@ export default function HRLeaveTab() {
       toast({ title: 'End date must be on or after start date', variant: 'destructive' });
       return;
     }
+    // Partial-day rules: must be a single date, and "hours" needs a valid number.
+    if (form.partial_day_period) {
+      if (form.start_date !== form.end_date) {
+        toast({ title: 'Partial-day leave must be a single date', variant: 'destructive' });
+        return;
+      }
+      if (form.partial_day_period === 'hours') {
+        const h = Number(form.partial_hours);
+        if (!(h > 0 && h < 8)) {
+          toast({ title: 'Hours must be > 0 and < 8', variant: 'destructive' });
+          return;
+        }
+      }
+    }
     setSubmitting(true);
     try {
-      const res = await hrAgentService.submitLeaveRequest(form);
+      // Strip empty partial fields so the backend's full-day path takes over.
+      const payload = { ...form };
+      if (!payload.partial_day_period) {
+        delete payload.partial_day_period;
+        delete payload.partial_hours;
+      } else if (payload.partial_day_period !== 'hours') {
+        delete payload.partial_hours;
+      } else {
+        payload.partial_hours = Number(payload.partial_hours);
+      }
+      const res = await hrAgentService.submitLeaveRequest(payload);
       const lr = res?.data || {};
       toast({
         title: 'Leave requested',
@@ -315,13 +344,57 @@ export default function HRLeaveTab() {
               <div>
                 <Label>Start date</Label>
                 <Input type="date" value={form.start_date}
-                  onChange={(e) => setForm((s) => ({ ...s, start_date: e.target.value }))} />
+                  onChange={(e) => setForm((s) => {
+                    // When user is in a partial-day mode, keep end_date in sync.
+                    const next = { ...s, start_date: e.target.value };
+                    if (s.partial_day_period) next.end_date = e.target.value;
+                    return next;
+                  })} />
               </div>
               <div>
                 <Label>End date</Label>
                 <Input type="date" value={form.end_date}
+                  disabled={!!form.partial_day_period}
                   onChange={(e) => setForm((s) => ({ ...s, end_date: e.target.value }))} />
               </div>
+            </div>
+            <div>
+              <Label>Time off</Label>
+              <Select value={form.partial_day_period || 'full'}
+                onValueChange={(v) => setForm((s) => {
+                  if (v === 'full') {
+                    return { ...s, partial_day_period: '', partial_hours: '' };
+                  }
+                  // For any partial mode, force end_date == start_date.
+                  return {
+                    ...s,
+                    partial_day_period: v,
+                    end_date: s.start_date || s.end_date,
+                    partial_hours: v === 'hours' ? s.partial_hours : '',
+                  };
+                })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">Full day(s)</SelectItem>
+                  <SelectItem value="morning">Half day — Morning</SelectItem>
+                  <SelectItem value="afternoon">Half day — Afternoon</SelectItem>
+                  <SelectItem value="hours">Specific hours</SelectItem>
+                </SelectContent>
+              </Select>
+              {form.partial_day_period === 'hours' && (
+                <div className="mt-2">
+                  <Label className="text-xs">Hours (must be &gt; 0 and &lt; 8)</Label>
+                  <Input type="number" min="0.25" max="7.99" step="0.25"
+                    value={form.partial_hours}
+                    onChange={(e) => setForm((s) => ({ ...s, partial_hours: e.target.value }))}
+                    placeholder="e.g. 2.5" />
+                </div>
+              )}
+              {form.partial_day_period && form.partial_day_period !== 'hours' && (
+                <div className="text-[11px] text-white/55 mt-1">
+                  Will deduct 0.5 day from balance.
+                </div>
+              )}
             </div>
             <div>
               <Label>Reason (optional)</Label>

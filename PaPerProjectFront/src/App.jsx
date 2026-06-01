@@ -60,6 +60,7 @@ import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
+import FrontlineEmbedCsatPage from '@/pages/FrontlineEmbedCsatPage';
 import ModulePurchaseSuccessPage from '@/pages/ModulePurchaseSuccessPage';
 import MeetingBookingPage from '@/pages/MeetingBookingPage';
 import ProtectedRoute from '@/components/common/ProtectedRoute';
@@ -196,6 +197,7 @@ import { useTranslation } from 'react-i18next';
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />
             <Route path="/embed/form" element={<FrontlineEmbedFormPage />} />
+            <Route path="/embed/csat" element={<FrontlineEmbedCsatPage />} />
 
             {/* Meeting self-scheduling page (public, no auth) */}
             <Route path="/book/:token" element={<MeetingBookingPage />} />

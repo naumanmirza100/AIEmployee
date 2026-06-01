@@ -783,6 +783,184 @@ export const getTicketContext = async (ticketId) => {
 };
 
 
+// ---------- Macros (saved replies) ----------
+export const listTicketMacros = async ({ activeOnly = false } = {}) => {
+  try {
+    const qs = activeOnly ? '?active_only=1' : '';
+    const response = await companyApi.get(`/frontline/macros${qs}`);
+    return response;
+  } catch (error) {
+    console.error('List ticket macros error:', error);
+    throw error;
+  }
+};
+
+export const createTicketMacro = async (payload) => {
+  try {
+    const response = await companyApi.post('/frontline/macros/create', payload);
+    return response;
+  } catch (error) {
+    console.error('Create ticket macro error:', error);
+    throw error;
+  }
+};
+
+export const updateTicketMacro = async (macroId, payload) => {
+  try {
+    const response = await companyApi.post(`/frontline/macros/${macroId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update ticket macro error:', error);
+    throw error;
+  }
+};
+
+export const deleteTicketMacro = async (macroId) => {
+  try {
+    const response = await companyApi.post(`/frontline/macros/${macroId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete ticket macro error:', error);
+    throw error;
+  }
+};
+
+export const bumpTicketMacroUsage = async (macroId) => {
+  try {
+    const response = await companyApi.post(`/frontline/macros/${macroId}/bump`);
+    return response;
+  } catch (error) {
+    console.error('Bump ticket macro usage error:', error);
+    throw error;
+  }
+};
+
+// ---------- Bulk ticket update ----------
+export const bulkUpdateTickets = async (payload) => {
+  try {
+    const response = await companyApi.post('/frontline/tickets/bulk-update', payload);
+    return response;
+  } catch (error) {
+    console.error('Bulk update tickets error:', error);
+    throw error;
+  }
+};
+
+// ---------- 7-feature UI batch ----------
+export const listFrontlineDeadLetters = async ({ includeResolved = false, taskName, limit = 50, offset = 0 } = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (includeResolved) params.set('include_resolved', '1');
+    if (taskName) params.set('task_name', taskName);
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+    const response = await companyApi.get(`/frontline/dead-letters?${params.toString()}`);
+    return response;
+  } catch (error) {
+    console.error('List Frontline DLQ error:', error);
+    throw error;
+  }
+};
+
+export const resolveFrontlineDeadLetter = async (dlqId) => {
+  try {
+    const response = await companyApi.post(`/frontline/dead-letters/${dlqId}/resolve`);
+    return response;
+  } catch (error) {
+    console.error('Resolve Frontline DLQ entry error:', error);
+    throw error;
+  }
+};
+
+export const listFrontlineAuditLog = async ({ targetType, targetId, action, limit = 50, offset = 0 } = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (targetType) params.set('target_type', targetType);
+    if (targetId) params.set('target_id', String(targetId));
+    if (action) params.set('action', action);
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+    const response = await companyApi.get(`/frontline/audit-log?${params.toString()}`);
+    return response;
+  } catch (error) {
+    console.error('List Frontline audit log error:', error);
+    throw error;
+  }
+};
+
+export const getKbCoverageReport = async ({ windowDays = 30, topN = 10 } = {}) => {
+  try {
+    const response = await companyApi.get(`/frontline/kb-coverage?window_days=${windowDays}&top_n=${topN}`);
+    return response;
+  } catch (error) {
+    console.error('Get KB coverage report error:', error);
+    throw error;
+  }
+};
+
+export const getFrontlineSlaDashboard = async ({ windowDays = 30 } = {}) => {
+  try {
+    const response = await companyApi.get(`/frontline/sla/dashboard?window_days=${windowDays}`);
+    return response;
+  } catch (error) {
+    console.error('Get Frontline SLA dashboard error:', error);
+    throw error;
+  }
+};
+
+export const markFrontlineDocumentOutdated = async (documentId) => {
+  try {
+    const response = await companyApi.post(`/frontline/documents/${documentId}/mark-outdated`);
+    return response;
+  } catch (error) {
+    console.error('Mark Frontline document outdated error:', error);
+    throw error;
+  }
+};
+
+export const unmarkFrontlineDocumentOutdated = async (documentId) => {
+  try {
+    const response = await companyApi.post(`/frontline/documents/${documentId}/unmark-outdated`);
+    return response;
+  } catch (error) {
+    console.error('Unmark Frontline document outdated error:', error);
+    throw error;
+  }
+};
+
+// CSAT submit endpoint is PUBLIC (no auth) — uses bare fetch so the company
+// auth token isn't sent. The token in the URL authenticates the submission.
+export const submitFrontlineSatisfaction = async ({ token, rating, comment = '' }) => {
+  const apiBase = (import.meta?.env?.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+  const resp = await fetch(`${apiBase}/frontline/csat/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, rating, comment }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data?.message || `Submit failed (${resp.status})`);
+  }
+  return data;
+};
+
+export const getFrontlineSatisfactionSummary = async ({ windowDays = 90 } = {}) => {
+  try {
+    const response = await companyApi.get(`/frontline/csat/summary?window_days=${windowDays}`);
+    return response;
+  } catch (error) {
+    console.error('Get Frontline CSAT summary error:', error);
+    throw error;
+  }
+};
+
+
+// ---------- Default export ----------
+// IMPORTANT: this MUST stay at the bottom of the file. It references every
+// `export const` above by name; an `export default` block placed earlier
+// would trip the temporal dead zone and throw "Cannot access X before
+// initialization" at module load. Add new exports above this line, then
+// drop the name into the object below.
 export default {
   getFrontlineDashboard,
   getFrontlineWidgetConfig,
@@ -863,5 +1041,22 @@ export default {
   suggestTicketReply,
   summarizeDocument,
   extractDocument,
+  // Macros + bulk update
+  listTicketMacros,
+  createTicketMacro,
+  updateTicketMacro,
+  deleteTicketMacro,
+  bumpTicketMacroUsage,
+  bulkUpdateTickets,
+  // 7-feature UI batch
+  listFrontlineDeadLetters,
+  resolveFrontlineDeadLetter,
+  listFrontlineAuditLog,
+  getKbCoverageReport,
+  getFrontlineSlaDashboard,
+  markFrontlineDocumentOutdated,
+  unmarkFrontlineDocumentOutdated,
+  submitFrontlineSatisfaction,
+  getFrontlineSatisfactionSummary,
 };
 
