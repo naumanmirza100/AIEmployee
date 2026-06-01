@@ -25,7 +25,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, User, Briefcase, Building2, Mail, CalendarClock, FileText,
   ClipboardList, ChevronRight, DollarSign, Plus, Trash2, Star,
-  Pencil, Shield, Target,
+  Pencil, Shield, Target, Download,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -239,8 +239,28 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       current_value: g.current_value || '',
       progress_pct: g.progress_pct ?? '',
       due_date: g.due_date || '',
+      cycle_id: g.cycle_id || null,
     },
   });
+
+  // Running total of weights for the goal's cycle, excluding the goal being
+  // edited. Used by the UI hint below to warn the user before they hit the
+  // backend's 400 from `_validate_goal_weight_sum`.
+  const goalCycleWeightInfo = (() => {
+    const cyc = goalForm.payload?.cycle_id;
+    if (!cyc) return null;  // Goals without a cycle don't sum-check.
+    const others = (goals.rows || []).filter(
+      (g) => g.cycle_id === cyc && g.id !== goalForm.editingId,
+    );
+    const othersTotal = others.reduce((s, g) => s + (Number(g.weight_pct) || 0), 0);
+    const proposed = Number(goalForm.payload?.weight_pct) || 0;
+    return {
+      othersTotal,
+      proposed,
+      projected: othersTotal + proposed,
+      remaining: Math.max(0, 100 - othersTotal),
+    };
+  })();
 
   const setGoalField = (k, v) => setGoalForm((s) => ({ ...s, payload: { ...s.payload, [k]: v } }));
 
@@ -282,6 +302,20 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       setGoals((s) => ({ ...s, rows: s.rows.filter((x) => x.id !== g.id) }));
     } catch (e) {
       toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleGdprExport = async () => {
+    const emp = data?.employee;
+    if (!emp) return;
+    try {
+      const res = await hrAgentService.exportHREmployeeData(emp.id, emp.full_name);
+      toast({
+        title: 'Data export downloaded',
+        description: `${res.filename} (${Math.round((res.size || 0) / 1024)} KB)`,
+      });
+    } catch (e) {
+      toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -372,6 +406,12 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                     <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={openEditForm}
                       disabled={!!e.anonymized_at}>
                       <Pencil className="h-3 w-3 mr-1" /> Edit
+                    </Button>
+                    <Button size="sm" variant="outline"
+                      className="h-7 px-2 text-xs text-sky-300 hover:text-sky-200 border-sky-400/30"
+                      onClick={handleGdprExport}
+                      title="Download a ZIP of all data we hold about this employee (GDPR Article 15)">
+                      <Download className="h-3 w-3 mr-1" /> Export data
                     </Button>
                     {!e.anonymized_at && (
                       <Button size="sm" variant="outline"
@@ -851,6 +891,16 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
               <Input type="number" min="0" max="100"
                 value={goalForm.payload.weight_pct ?? ''}
                 onChange={(ev) => setGoalField('weight_pct', ev.target.value)} />
+              {goalCycleWeightInfo && (
+                <div className={`text-[10px] mt-0.5 ${
+                  goalCycleWeightInfo.projected > 100 ? 'text-rose-300' : 'text-white/50'
+                }`}>
+                  Cycle total: {goalCycleWeightInfo.projected}% (other goals {goalCycleWeightInfo.othersTotal}%, max 100%).
+                  {goalCycleWeightInfo.projected > 100 && (
+                    <> Save will be rejected — drop by {goalCycleWeightInfo.projected - 100}%.</>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <Label className="text-xs">Due date</Label>

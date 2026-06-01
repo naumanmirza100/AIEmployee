@@ -11,6 +11,7 @@ Scores each lead 0–100 against the company's ICP using Groq AI.
 import json
 import logging
 import os
+import re
 
 from django.conf import settings
 
@@ -153,12 +154,10 @@ Return exactly this JSON:
 
         raw = resp.choices[0].message.content.strip()
 
-        # Strip markdown if present
         if "```" in raw:
-            for part in raw.split("```"):
-                if "{" in part:
-                    raw = part.lstrip("json").strip()
-                    break
+            m = re.search(r'```(?:json)?\s*([\s\S]*?)```', raw)
+            if m:
+                raw = m.group(1).strip()
 
         result = json.loads(raw)
 

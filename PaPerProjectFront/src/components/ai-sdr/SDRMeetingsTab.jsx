@@ -3,6 +3,8 @@ import {
   Calendar, CheckCircle2, XCircle, AlertCircle, RefreshCw, Send,
   Sparkles, Bell, Loader2, CalendarCheck, ChevronLeft, ChevronRight,
   Search, ChevronDown, ChevronUp, ExternalLink, Clock, PhoneCall, Eye, X,
+  ChevronsLeft, ChevronsRight, Flame, Thermometer, Snowflake,
+  ArrowUpDown, CheckCircle, SlidersHorizontal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -53,6 +55,105 @@ function useDebounce(value, delay = 400) {
   }, [value, delay]);
   return debounced;
 }
+
+// ---------------------------------------------------------------------------
+// Pagination button style
+// ---------------------------------------------------------------------------
+const pgBtn = (disabled, active = false) => ({
+  minWidth: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  borderRadius: 7, fontSize: 13, fontWeight: active ? 700 : 400,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  border: `1px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
+  background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
+  color: disabled ? '#2d1f4a' : active ? '#c084fc' : '#9ca3af',
+  opacity: disabled ? 0.5 : 1, transition: 'all 0.15s', padding: '0 8px',
+});
+
+// ---------------------------------------------------------------------------
+// Custom Filter Dropdown
+// ---------------------------------------------------------------------------
+const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, fullWidth }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const selected = options.find(o => o.key === value) || options[0];
+
+  return (
+    <div ref={ref} style={{ position: 'relative', userSelect: 'none', width: fullWidth ? '100%' : 'auto' }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7, padding: '7px 12px',
+          borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
+          minWidth: fullWidth ? 'auto' : 130,
+          width: fullWidth ? '100%' : 'auto',
+          background: value ? `${selected?.color}15` : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${value ? selected?.color + '60' : '#2d1f4a'}`,
+          color: value ? selected?.color : '#9ca3af',
+          fontSize: 13, fontWeight: value ? 600 : 400, transition: 'all 0.15s',
+        }}
+      >
+        {LabelIcon && <LabelIcon size={13} style={{ color: value ? selected?.color : '#6b7280' }} />}
+        <span style={{ flex: 1, textAlign: 'left' }}>{value ? selected?.label : label}</span>
+        <ChevronDown size={12} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50,
+          background: 'linear-gradient(135deg,#0f0a1f,#140830)',
+          border: '1px solid #2d1f4a', borderRadius: 11,
+          boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+          minWidth: '100%', width: 'max-content', overflow: 'hidden',
+          animation: 'fadeDown 0.12s ease',
+        }}>
+          {options.map((opt, idx) => {
+            const isSel = opt.key === value;
+            return (
+              <button key={opt.key} onClick={() => { onChange(opt.key); setOpen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                  padding: '9px 14px', border: 'none', cursor: 'pointer',
+                  background: isSel ? `${opt.color}18` : 'transparent',
+                  borderBottom: idx < options.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid #2d1f4a' }} />
+                {opt.Icon && <opt.Icon size={13} style={{ color: opt.color, flexShrink: 0 }} />}
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? '#d1d5db' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>
+                  {opt.label}
+                </span>
+                {isSel && <CheckCircle size={13} style={{ color: opt.color, flexShrink: 0 }} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <style>{`@keyframes fadeDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}`}</style>
+    </div>
+  );
+};
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
+const MEET_SORT_OPTIONS = [
+  { value: 'created_desc',   label: 'Newest First' },
+  { value: 'created_asc',    label: 'Oldest First' },
+  { value: 'scheduled_asc',  label: 'Scheduled: Soonest' },
+  { value: 'scheduled_desc', label: 'Scheduled: Latest' },
+  { value: 'score_desc',     label: 'Lead Score: High → Low' },
+  { value: 'name_asc',       label: 'Name A → Z' },
+];
 
 // ---------------------------------------------------------------------------
 // PrepNotesPanel  (used in expanded row)
@@ -362,46 +463,52 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
 // ---------------------------------------------------------------------------
 
 const SDRMeetingsTab = () => {
-  const [data, setData]             = useState({ results: [], total: 0, total_pages: 1, page: 1 });
+  const [data, setData]             = useState({ results: [], total: 0, total_pages: 1, page: 1, has_next: false, has_prev: false });
   const [campaigns, setCampaigns]   = useState([]);
   const [loading, setLoading]       = useState(true);
   const [checkingReplies, setCheckingReplies] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
-  const [prepModal, setPrepModal]   = useState(null);   // meeting object shown in modal
-  const [prepGenIds, setPrepGenIds] = useState(new Set()); // meeting IDs currently generating
+  const [prepModal, setPrepModal]   = useState(null);
+  const [prepGenIds, setPrepGenIds] = useState(new Set());
   const mountCheckDone = useRef(false);
 
-  // Filters (all server-side)
-  const [search, setSearch]               = useState('');
-  const [statusFilter, setStatusFilter]   = useState('');
+  // Filters
+  const [filtersOpen, setFiltersOpen]       = useState(false);
+  const [searchRaw, setSearchRaw]           = useState('');
+  const [statusFilter, setStatusFilter]     = useState('');
   const [campaignFilter, setCampaignFilter] = useState('');
-  const [activeOnly, setActiveOnly]       = useState(true);
-  const [page, setPage]                   = useState(1);
-  const PAGE_SIZE = 20;
+  const [tempFilter, setTempFilter]         = useState('');
+  const [sortBy, setSortBy]                 = useState('created_desc');
+  const [activeOnly, setActiveOnly]         = useState(true);
+  const [page, setPage]                     = useState(1);
+  const [pageSize, setPageSize]             = useState(20);
 
-  const debouncedSearch = useDebounce(search, 400);
+  const search = useDebounce(searchRaw, 400);
   const { toast } = useToast();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (overrides = {}) => {
     setLoading(true);
     try {
       const [meetingsResp, campaignsResp] = await Promise.all([
         listMeetings({
-          status: statusFilter,
-          campaign_id: campaignFilter,
-          search: debouncedSearch,
-          active_only: activeOnly,
-          page,
-          page_size: PAGE_SIZE,
+          status:      overrides.status      ?? statusFilter,
+          campaign_id: overrides.campaign_id ?? campaignFilter,
+          search:      overrides.search      ?? search,
+          temperature: overrides.temperature ?? tempFilter,
+          sort:        overrides.sort        ?? sortBy,
+          active_only: overrides.active_only ?? activeOnly,
+          page:        overrides.page        ?? page,
+          page_size:   overrides.page_size   ?? pageSize,
         }),
         listCampaigns(),
       ]);
-      setData(meetingsResp);
-      setCampaigns(campaignsResp?.data || []);
+      // companyApi returns response.json() directly
+      setData(meetingsResp || { results: [], total: 0, total_pages: 1, page: 1 });
+      setCampaigns(campaignsResp?.data || campaignsResp || []);
     } catch (e) {
       toast({ title: 'Failed to load meetings', description: e.message, variant: 'destructive' });
     } finally { setLoading(false); }
-  }, [debouncedSearch, statusFilter, campaignFilter, activeOnly, page]);
+  }, [search, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, page, pageSize, toast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -432,7 +539,7 @@ const SDRMeetingsTab = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset to page 1 when any filter changes
-  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter, campaignFilter, activeOnly]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, pageSize]);
 
   const handleRowUpdate = useCallback((updated) => {
     setData(d => ({
@@ -472,12 +579,6 @@ const SDRMeetingsTab = () => {
   const th = { padding: '10px 14px', color: '#6b7280', fontSize: 11, fontWeight: 700, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #1e1535', whiteSpace: 'nowrap' };
   const td = { padding: '12px 14px', color: '#c4b5d4', fontSize: 13, borderBottom: '1px solid #1a1030', verticalAlign: 'middle' };
   const inp = { background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, color: '#e2d9f3', padding: '7px 12px', fontSize: 13, outline: 'none' };
-  const filterBtn = (active) => ({
-    padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: active ? 700 : 400,
-    cursor: 'pointer', border: 'none',
-    background: active ? 'linear-gradient(90deg,#a855f7,#6366f1)' : 'rgba(255,255,255,0.04)',
-    color: active ? '#fff' : '#6b7280',
-  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0616' }}>
@@ -551,39 +652,195 @@ const SDRMeetingsTab = () => {
         </div>
 
         {/* ── Filter / Search bar ── */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', paddingBottom: 14 }}>
-          {/* Search */}
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#4b5563' }} />
-            <input
-              placeholder="Search name, email, company…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ ...inp, width: '100%', paddingLeft: 30, boxSizing: 'border-box' }}
-            />
-          </div>
+        <div style={{ paddingBottom: 14 }}>
 
-          {/* Status filter */}
-          <div style={{ display: 'flex', gap: 5 }}>
-            {['', 'pending', 'scheduled', 'completed', 'cancelled', 'no_show'].map(s => (
-              <button key={s} style={filterBtn(statusFilter === s)} onClick={() => setStatusFilter(s)}>
-                {s === '' ? 'All' : STATUS_CONFIG[s]?.label || s}
-              </button>
-            ))}
-          </div>
+          {/* Top row: search + filter toggle + sort + page size + refresh */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
 
-          {/* Campaign filter */}
-          {campaigns.length > 0 && (
-            <select value={campaignFilter} onChange={e => setCampaignFilter(e.target.value)}
-              style={{ ...inp, cursor: 'pointer', color: campaignFilter ? '#c084fc' : '#6b7280', minWidth: 160 }}>
-              <option value="">All Campaigns</option>
-              {campaigns.map(c => {
-                const cs = CAMPAIGN_STATUS_LABEL[c.status] || {};
-                return <option key={c.id} value={c.id}>{c.name} ({cs.label || c.status})</option>;
-              })}
+            {/* Search */}
+            <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
+              <Search size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
+              <input
+                placeholder="Search name, email, company, title…"
+                value={searchRaw}
+                onChange={e => setSearchRaw(e.target.value)}
+                style={{ ...inp, width: '100%', paddingLeft: 32, paddingRight: searchRaw ? 30 : 12, boxSizing: 'border-box' }}
+              />
+              {searchRaw && (
+                <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Filters toggle */}
+            {(() => {
+              const mActiveCount = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length;
+              const mTotalActive = mActiveCount + (sortBy !== 'created_desc' ? 1 : 0);
+              return (
+                <button
+                  onClick={() => setFiltersOpen(v => !v)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
+                    borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
+                    background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`,
+                    color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
+                    fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
+                  }}
+                >
+                  <SlidersHorizontal size={13} />
+                  Filters
+                  {mTotalActive > 0 && (
+                    <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                      {mTotalActive}
+                    </span>
+                  )}
+                  <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+                </button>
+              );
+            })()}
+
+            {/* Page size */}
+            <select
+              value={pageSize}
+              onChange={e => setPageSize(Number(e.target.value))}
+              style={{ ...inp, cursor: 'pointer', padding: '7px 10px', fontSize: 13, width: 'auto' }}
+            >
+              {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
             </select>
+
+            {/* Refresh */}
+            <button onClick={() => load()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid #2d1f4a', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            </button>
+          </div>
+
+          {/* ── Collapsible filter panel ── */}
+          {filtersOpen && (
+            <div style={{
+              marginTop: 10,
+              padding: '16px 16px 14px',
+              background: 'linear-gradient(135deg,rgba(10,4,28,0.92),rgba(16,6,38,0.95))',
+              border: '1px solid rgba(168,85,247,0.2)',
+              borderRadius: 11,
+              boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06), 0 4px 20px rgba(0,0,0,0.3)',
+            }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+
+                {/* Status */}
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} /> STATUS
+                  </div>
+                  <FilterDropdown fullWidth
+                    label="All Statuses"
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { key: '',          label: 'All Statuses', color: '#6b7280' },
+                      { key: 'pending',   label: 'Pending',      color: '#f59e0b', dot: true },
+                      { key: 'scheduled', label: 'Scheduled',    color: '#10b981', dot: true },
+                      { key: 'completed', label: 'Completed',    color: '#6b7280', dot: true },
+                      { key: 'cancelled', label: 'Cancelled',    color: '#ef4444', dot: true },
+                      { key: 'no_show',   label: 'No Show',      color: '#8b5cf6', dot: true },
+                    ]}
+                  />
+                </div>
+
+                {/* Temperature */}
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Thermometer size={11} style={{ color: '#f59e0b' }} /> LEAD TEMP
+                  </div>
+                  <FilterDropdown fullWidth
+                    label="All Temps"
+                    value={tempFilter}
+                    onChange={setTempFilter}
+                    icon={Thermometer}
+                    options={[
+                      { key: '',     label: 'All Temps', color: '#6b7280' },
+                      { key: 'hot',  label: 'Hot',       color: '#f43f5e', dot: true, Icon: Flame },
+                      { key: 'warm', label: 'Warm',      color: '#f59e0b', dot: true, Icon: Thermometer },
+                      { key: 'cold', label: 'Cold',      color: '#60a5fa', dot: true, Icon: Snowflake },
+                    ]}
+                  />
+                </div>
+
+                {/* Campaign */}
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6366f1', display: 'inline-block' }} /> CAMPAIGN
+                  </div>
+                  <FilterDropdown fullWidth
+                    label="All Campaigns"
+                    value={campaignFilter}
+                    onChange={setCampaignFilter}
+                    options={[
+                      { key: '', label: 'All Campaigns', color: '#6b7280' },
+                      ...campaigns.map(c => ({
+                        key: String(c.id),
+                        label: c.name.length > 26 ? c.name.slice(0, 24) + '…' : c.name,
+                        color: CAMPAIGN_STATUS_LABEL[c.status]?.color || '#6b7280',
+                        dot: true,
+                      })),
+                    ]}
+                  />
+                </div>
+
+                {/* Sort */}
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <ArrowUpDown size={11} style={{ color: '#a78bfa' }} /> SORT BY
+                  </div>
+                  <FilterDropdown fullWidth
+                    label="Sort by"
+                    value={sortBy}
+                    onChange={setSortBy}
+                    icon={ArrowUpDown}
+                    options={MEET_SORT_OPTIONS.map(o => ({ key: o.value, label: o.label, color: '#a78bfa' }))}
+                  />
+                </div>
+              </div>
+
+              {/* Panel footer */}
+              {(() => {
+                const mTotalActive = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length + (sortBy !== 'created_desc' ? 1 : 0);
+                return mTotalActive > 0 ? (
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <button
+                      onClick={() => { setStatusFilter(''); setTempFilter(''); setCampaignFilter(''); setSortBy('created_desc'); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}
+                    >
+                      <X size={11} /> Clear all
+                    </button>
+                    <span style={{ color: '#6b7280', fontSize: 12 }}>{mTotalActive} active</span>
+                  </div>
+                ) : null;
+              })()}
+            </div>
           )}
+
+          {/* Result summary */}
+          <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {loading
+              ? <span style={{ color: '#a78bfa' }}>Loading…</span>
+              : <>
+                  <span>
+                    Showing <strong style={{ color: '#e2d9f3' }}>
+                      {data.total === 0 ? 0 : ((data.page - 1) * pageSize) + 1}–{Math.min(data.page * pageSize, data.total)}
+                    </strong> of <strong style={{ color: '#e2d9f3' }}>{data.total}</strong> meetings
+                  </span>
+                  {(searchRaw || statusFilter || tempFilter || campaignFilter) && (
+                    <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: '#a78bfa', fontSize: 11 }}>
+                      filtered
+                    </span>
+                  )}
+                </>
+            }
+          </div>
         </div>
+        <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
       </div>
 
       {/* ── Table ── */}
@@ -744,44 +1001,50 @@ const SDRMeetingsTab = () => {
         )}
       </div>
 
-      {/* ── Pagination ── */}
+      {/* ── Pagination footer ── */}
       {total_pages > 1 && !loading && (
-        <div style={{ padding: '12px 24px', borderTop: '1px solid #1e1535', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0616' }}>
-          <span style={{ color: '#4b5563', fontSize: 12 }}>
-            Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, total)} of {total} meetings
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '12px 20px', borderTop: '1px solid #1e1535', background: '#0a0616' }}>
+
+          {/* Left: page info */}
+          <span style={{ fontSize: 13, color: '#6b7280' }}>
+            Page <strong style={{ color: '#e2d9f3' }}>{page}</strong> of <strong style={{ color: '#e2d9f3' }}>{total_pages}</strong>
+            <span style={{ color: '#4b5563', marginLeft: 8 }}>({total.toLocaleString()} total)</span>
           </span>
+
+          {/* Right: page controls */}
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              style={{ padding: '5px 10px', borderRadius: 7, border: '1px solid #2d1f4a', background: 'transparent', color: page <= 1 ? '#2d1f4a' : '#9ca3af', cursor: page <= 1 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}>
+            {/* First */}
+            <button onClick={() => { setPage(1); load({ page: 1 }); }} disabled={page <= 1} style={pgBtn(page <= 1)} title="First page">
+              <ChevronsLeft size={14} />
+            </button>
+            {/* Prev */}
+            <button onClick={() => { const p = page - 1; setPage(p); load({ page: p }); }} disabled={page <= 1} style={pgBtn(page <= 1)} title="Previous">
               <ChevronLeft size={14} />
             </button>
 
-            {Array.from({ length: Math.min(7, total_pages) }, (_, i) => {
-              let p;
-              if (total_pages <= 7) {
-                p = i + 1;
-              } else if (page <= 4) {
-                p = i + 1;
-              } else if (page >= total_pages - 3) {
-                p = total_pages - 6 + i;
-              } else {
-                p = page - 3 + i;
-              }
-              return (
-                <button key={p} onClick={() => setPage(p)}
-                  style={{ padding: '5px 10px', minWidth: 32, borderRadius: 7, border: '1px solid #2d1f4a', background: page === p ? 'linear-gradient(90deg,#a855f7,#6366f1)' : 'transparent', color: page === p ? '#fff' : '#6b7280', cursor: 'pointer', fontSize: 13, fontWeight: page === p ? 700 : 400 }}>
-                  {p}
-                </button>
-              );
-            })}
+            {/* Page numbers with smart ellipsis */}
+            {Array.from({ length: total_pages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === total_pages || Math.abs(p - page) <= 2)
+              .reduce((acc, p, idx, arr) => {
+                if (idx > 0 && p - arr[idx - 1] > 1) acc.push('…');
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, i) =>
+                p === '…'
+                  ? <span key={`ellipsis-${i}`} style={{ color: '#4b5563', padding: '0 4px', fontSize: 13 }}>…</span>
+                  : <button key={p} onClick={() => { setPage(p); load({ page: p }); }} style={pgBtn(false, p === page)}>
+                      {p}
+                    </button>
+              )}
 
-            <button
-              onClick={() => setPage(p => Math.min(total_pages, p + 1))}
-              disabled={page >= total_pages}
-              style={{ padding: '5px 10px', borderRadius: 7, border: '1px solid #2d1f4a', background: 'transparent', color: page >= total_pages ? '#2d1f4a' : '#9ca3af', cursor: page >= total_pages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}>
+            {/* Next */}
+            <button onClick={() => { const p = page + 1; setPage(p); load({ page: p }); }} disabled={page >= total_pages} style={pgBtn(page >= total_pages)} title="Next">
               <ChevronRight size={14} />
+            </button>
+            {/* Last */}
+            <button onClick={() => { setPage(total_pages); load({ page: total_pages }); }} disabled={page >= total_pages} style={pgBtn(page >= total_pages)} title="Last page">
+              <ChevronsRight size={14} />
             </button>
           </div>
         </div>

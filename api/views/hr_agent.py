@@ -732,6 +732,7 @@ def list_hr_documents(request):
             'version': d.version,
             'parent_document_id': d.parent_document_id,
             'superseded_by_id': d.superseded_by_id,
+            'is_outdated': d.is_outdated,
             'created_at': d.created_at.isoformat(),
         } for d in qs.order_by('-created_at')[offset:offset + limit]]
         return Response({'status': 'success', 'data': rows,

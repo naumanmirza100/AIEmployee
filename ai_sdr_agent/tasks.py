@@ -91,6 +91,27 @@ def send_due_steps_impl():
                 )
                 continue
 
+            # ── Cross-campaign daily guard ───────────────────────────────────
+            # A lead enrolled in multiple campaigns must receive at most ONE
+            # email per day across ALL campaigns. This prevents a lead in
+            # Campaign A and Campaign B from getting 2 emails on Day 1.
+            if lead_email:
+                from ai_sdr_agent.models import SDROutreachLog
+                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                already_emailed_today = SDROutreachLog.objects.filter(
+                    enrollment__lead__email__iexact=lead_email,
+                    status='sent',
+                    sent_at__gte=today_start,
+                ).exclude(enrollment__campaign=campaign).exists()
+                if already_emailed_today:
+                    logger.warning(
+                        "SDR [CROSS-CAMPAIGN-DAILY] enrollment=%d lead=%s email=%s "
+                        "campaign=%d — SKIPPED: already emailed from another campaign today",
+                        enrollment.id, lead_name, lead_email, campaign.id,
+                    )
+                    continue
+            # ────────────────────────────────────────────────────────────────
+
             # Lock this email address NOW — before the call — so that even if
             # process_enrollment throws an exception the address is still blocked
             # for all subsequent enrollments in this same scheduler cycle.
@@ -194,6 +215,40 @@ def check_inbox_replies_impl():
                 reply_text = r['reply_text']
                 lead = enrollment.lead
                 lead_email = r['sender_email']
+                reply_subject = (r.get('subject') or '').lower()
+
+                # ── Bounce detection ─────────────────────────────────────────
+                # Hard bounces come from MAILER-DAEMON / postmaster with
+                # delivery-failure subjects. Detect and mark lead + enrollment.
+                _BOUNCE_SENDERS = ('mailer-daemon', 'postmaster', 'noreply+bounce',
+                                   'bounce+', 'bounces+', 'mail-noreply')
+                _BOUNCE_SUBJECTS = (
+                    'undeliverable', 'delivery failure', 'delivery status notification',
+                    'mail delivery failed', 'returned mail', 'failure notice',
+                    'auto-submitted', 'could not deliver', 'message not delivered',
+                    'address not found', 'user unknown',
+                )
+                is_bounce = (
+                    any(b in lead_email for b in _BOUNCE_SENDERS) or
+                    any(b in reply_subject for b in _BOUNCE_SUBJECTS)
+                )
+                if is_bounce:
+                    # Find the actual lead whose email bounced — it's the lead
+                    # enrolled in this campaign, not the mailer-daemon sender.
+                    bounced_lead = enrollment.lead
+                    if not bounced_lead.email_bounced:
+                        bounced_lead.email_bounced = True
+                        bounced_lead.email_bounced_at = timezone.now()
+                        bounced_lead.email_bounce_reason = f"{lead_email}: {reply_subject[:200]}"
+                        bounced_lead.save(update_fields=['email_bounced', 'email_bounced_at', 'email_bounce_reason'])
+                    enrollment.status = 'bounced'
+                    enrollment.save(update_fields=['status'])
+                    logger.warning(
+                        "SDR [BOUNCE] lead=%s email=%s enrollment=%d marked bounced — subject='%s'",
+                        bounced_lead.display_name, bounced_lead.email, enrollment.id, reply_subject,
+                    )
+                    continue   # skip normal reply classification
+                # ─────────────────────────────────────────────────────────────
 
                 # Skip already-unsubscribed enrollments
                 if enrollment.status == 'unsubscribed':
@@ -264,6 +319,8 @@ def check_inbox_replies_impl():
                     campaign.replies_received = (campaign.replies_received or 0) + 1
                     total_replies += 1
 
+                    from ai_sdr_agent.agents.meeting_scheduling_agent import guess_timezone_from_location
+                    lead_tz = guess_timezone_from_location(lead.company_location or '')
                     meeting, created = SDRMeeting.objects.get_or_create(
                         enrollment=enrollment,
                         defaults={
@@ -273,6 +330,7 @@ def check_inbox_replies_impl():
                             'reply_snippet': reply_text[:500],
                             'calendar_link': campaign.calendar_link or '',
                             'status': 'pending',
+                            'lead_timezone': lead_tz,
                         },
                     )
                     if created:

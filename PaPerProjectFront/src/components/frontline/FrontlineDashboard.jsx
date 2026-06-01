@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+import FrontlineInsightsPanel from './FrontlineInsightsPanel';
+import MacroPickerDialog from './MacroPickerDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,6 +70,10 @@ import {
   Bot,
   Maximize2,
   User,
+  BookOpen,
+  CheckSquare,
+  Square,
+  X as XIcon,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
@@ -1107,6 +1113,16 @@ function HandoffQueueTab() {
     open: false, ticket: null, messages: [], loading: false,
     reply: '', sending: false, suggesting: false, accepting: false,
   });
+  // Macro picker — opens when the agent wants a canned reply.
+  const [macroOpen, setMacroOpen] = useState(false);
+  const handleMacroInsert = (body) => {
+    setDrawer((prev) => {
+      const cur = prev.reply || '';
+      // Append to existing draft when there is one, otherwise replace.
+      const sep = cur.trim() ? '\n\n' : '';
+      return { ...prev, reply: cur + sep + body };
+    });
+  };
 
   const load = async () => {
     setLoading(true);
@@ -1392,6 +1408,15 @@ function HandoffQueueTab() {
                   : <Sparkles className="h-4 w-4 mr-1" />}
                 Suggest reply
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMacroOpen(true)}
+                disabled={drawer.sending}
+                title="Insert a saved reply"
+              >
+                <BookOpen className="h-4 w-4 mr-1" /> Macros
+              </Button>
               {drawer.ticket?.handoff_status === 'pending' && (
                 <Button
                   variant="outline"
@@ -1417,6 +1442,10 @@ function HandoffQueueTab() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <MacroPickerDialog open={macroOpen}
+        onOpenChange={setMacroOpen}
+        onInsert={handleMacroInsert} />
     </div>
   );
 }
@@ -1748,6 +1777,15 @@ const FrontlineDashboard = () => {
   const [widgetConfigLoading, setWidgetConfigLoading] = useState(false);
   const [allowedOrigins, setAllowedOrigins] = useState('');
   const [allowedOriginsSaving, setAllowedOriginsSaving] = useState(false);
+  // Extra theming knobs (EW1). When all are blank/null, the widget JS uses its
+  // built-in defaults — these are purely additive customisations.
+  const [widgetTheme, setWidgetTheme] = useState({
+    primary_color: '', font_family: '', border_radius: '',
+    header_bg: '', header_text_color: '',
+    bubble_bg_user: '', bubble_bg_agent: '',
+    css_overrides: '',
+  });
+  const [themeSaving, setThemeSaving] = useState(false);
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
@@ -1777,6 +1815,64 @@ const FrontlineDashboard = () => {
   const [ticketFilters, setTicketFilters] = useState({ status: '', priority: '', category: '', date_from: '', date_to: '' });
   const [ticketsPagination, setTicketsPagination] = useState({ page: 1, limit: 20, total: 0, total_pages: 1 });
   const [ticketsAging, setTicketsAging] = useState(null); // { breached: [], at_risk: [], count_breached, count_at_risk }
+  // Bulk-update selection state. Set of ticket IDs. Cleared when filters change
+  // so a selection from a previous page can't accidentally be applied to a
+  // different list.
+  const [selectedTicketIds, setSelectedTicketIds] = useState(new Set());
+  const [bulkActionDialog, setBulkActionDialog] = useState({ open: false, field: null, value: '' });
+  const [bulkApplying, setBulkApplying] = useState(false);
+  const toggleTicketSelected = (id) => {
+    setSelectedTicketIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllTicketsOnPage = () => {
+    setSelectedTicketIds((prev) => {
+      const allOnPage = ticketsList.every((t) => prev.has(t.id));
+      if (allOnPage) {
+        const next = new Set(prev);
+        ticketsList.forEach((t) => next.delete(t.id));
+        return next;
+      }
+      const next = new Set(prev);
+      ticketsList.forEach((t) => next.add(t.id));
+      return next;
+    });
+  };
+  const clearTicketSelection = () => setSelectedTicketIds(new Set());
+  const handleBulkApply = async () => {
+    const ids = Array.from(selectedTicketIds);
+    const { field, value } = bulkActionDialog;
+    if (!ids.length || !field || !value) return;
+    setBulkApplying(true);
+    try {
+      const payload = { ids };
+      if (field === 'status') payload.status = value;
+      else if (field === 'priority') payload.priority = value;
+      else if (field === 'category') payload.category = value;
+      const res = await frontlineAgentService.bulkUpdateTickets(payload);
+      const data = res?.data || {};
+      const updated = data.updated || [];
+      const skipped = data.skipped || [];
+      toast({
+        title: `Bulk update: ${updated.length} updated`,
+        description: skipped.length
+          ? `${skipped.length} skipped — see console for details.`
+          : (data.not_found?.length ? `${data.not_found.length} not found.` : 'All matching tickets updated.'),
+      });
+      if (skipped.length) console.warn('Bulk update skipped:', skipped);
+      // Refresh list so badges reflect new state.
+      loadTickets?.();
+      clearTicketSelection();
+      setBulkActionDialog({ open: false, field: null, value: '' });
+    } catch (e) {
+      toast({ title: 'Bulk update failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setBulkApplying(false);
+    }
+  };
 
   useEffect(() => {
     fetchDashboard();
@@ -1817,6 +1913,17 @@ const FrontlineDashboard = () => {
         if (cancelled || res?.status !== 'success') return;
         if (res?.data?.widget_key) setWidgetKey(res.data.widget_key);
         setAllowedOrigins(res?.data?.allowed_origins || '');
+        const theme = res?.data?.config?.theme || {};
+        setWidgetTheme({
+          primary_color: theme.primary_color || '',
+          font_family: theme.font_family || '',
+          border_radius: theme.border_radius || '',
+          header_bg: theme.header_bg || '',
+          header_text_color: theme.header_text_color || '',
+          bubble_bg_user: theme.bubble_bg_user || '',
+          bubble_bg_agent: theme.bubble_bg_agent || '',
+          css_overrides: theme.css_overrides || '',
+        });
       })
       .catch(() => { if (!cancelled) { setWidgetKey(''); setAllowedOrigins(''); } })
       .finally(() => { if (!cancelled) setWidgetConfigLoading(false); });
@@ -1839,6 +1946,28 @@ const FrontlineDashboard = () => {
       toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
     } finally {
       setAllowedOriginsSaving(false);
+    }
+  };
+
+  const handleSaveTheme = async () => {
+    setThemeSaving(true);
+    try {
+      // Only send non-empty values so blank inputs fall back to backend defaults.
+      const themePatch = Object.fromEntries(
+        Object.entries(widgetTheme).filter(([, v]) => v !== '' && v != null),
+      );
+      const res = await frontlineAgentService.updateFrontlineWidgetConfig({
+        config: { theme: themePatch },
+      });
+      if (res?.status === 'success') {
+        toast({ title: 'Theme saved', description: 'Embed widget will pick up new colours on next load.' });
+      } else {
+        throw new Error(res?.message || 'Save failed');
+      }
+    } catch (e) {
+      toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setThemeSaving(false);
     }
   };
 
@@ -1969,6 +2098,25 @@ const FrontlineDashboard = () => {
       setDocResultDialog((prev) => ({ ...prev, content, loading: false }));
     } catch (error) {
       setDocResultDialog((prev) => ({ ...prev, content: apiErrorMessage(error, 'Extraction failed'), loading: false }));
+    }
+  };
+
+  const handleToggleDocOutdated = async (doc, makeOutdated) => {
+    try {
+      if (makeOutdated) {
+        await frontlineAgentService.markFrontlineDocumentOutdated(doc.id);
+        toast({ title: 'Document marked outdated', description: 'Excluded from knowledge retrieval until restored.' });
+      } else {
+        await frontlineAgentService.unmarkFrontlineDocumentOutdated(doc.id);
+        toast({ title: 'Document restored', description: 'Back in knowledge retrieval.' });
+      }
+      setDocuments((arr) => arr.map((x) => x.id === doc.id ? { ...x, is_outdated: makeOutdated } : x));
+    } catch (e) {
+      toast({
+        title: makeOutdated ? 'Mark-outdated failed' : 'Restore failed',
+        description: e.message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -2532,6 +2680,10 @@ const FrontlineDashboard = () => {
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-6">
           <ErrorBoundary>
+          {/* Admin insights — SLA / KB / DLQ / audit log tiles. Lazy-fetched. */}
+          <div className="mb-5">
+            <FrontlineInsightsPanel />
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
             {[
               {
@@ -2717,6 +2869,11 @@ const FrontlineDashboard = () => {
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${procColor}`}>
                               {procLabel}
                             </Badge>
+                            {doc.is_outdated && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-rose-500/10 text-rose-300 border-rose-400/30">
+                                outdated
+                              </Badge>
+                            )}
                             {doc.created_at && (
                               <span className="text-[10px] text-muted-foreground">
                                 {new Date(doc.created_at).toLocaleDateString()}
@@ -2768,6 +2925,19 @@ const FrontlineDashboard = () => {
                             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => handleExtractDocument(doc)} title="Extract structured data">
                               <ListChecks className="h-3.5 w-3.5 mr-1" /> Extract
                             </Button>
+                            {doc.is_outdated ? (
+                              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-emerald-400 hover:text-emerald-300"
+                                onClick={() => handleToggleDocOutdated(doc, false)}
+                                title="Restore — bring this doc back into retrieval">
+                                Restore
+                              </Button>
+                            ) : (
+                              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-amber-400 hover:text-amber-300"
+                                onClick={() => handleToggleDocOutdated(doc, true)}
+                                title="Mark outdated — excluded from knowledge retrieval until restored">
+                                Outdated
+                              </Button>
+                            )}
                           </div>
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-rose-400" onClick={() => handleDeleteDocument(doc.id)} title="Delete">
                             <Trash2 className="h-3.5 w-3.5" />
@@ -3467,6 +3637,76 @@ const FrontlineDashboard = () => {
                       </Button>
                     </div>
                   </div>
+
+                  {/* Theming — pure customisation. Empty values use widget defaults. */}
+                  <div className="space-y-2 rounded-lg border border-white/[0.06] bg-black/20 p-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-muted-foreground">Theme & appearance</Label>
+                      <Button size="sm" onClick={handleSaveTheme} disabled={themeSaving}>
+                        {themeSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                        Save theme
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      All fields optional — blank inputs fall back to the widget's defaults.
+                      Customers see these on the embedded chat. CSS overrides are an escape hatch
+                      for white-label partners; powerful but unvalidated.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <Label className="text-xs">Primary colour</Label>
+                        <Input placeholder="#7c3aed"
+                          value={widgetTheme.primary_color}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, primary_color: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Font family</Label>
+                        <Input placeholder='"Inter", system-ui, sans-serif'
+                          value={widgetTheme.font_family}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, font_family: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Border radius</Label>
+                        <Input placeholder="12px or 0.75rem"
+                          value={widgetTheme.border_radius}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, border_radius: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Header background</Label>
+                        <Input placeholder="defaults to primary colour"
+                          value={widgetTheme.header_bg}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, header_bg: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Header text colour</Label>
+                        <Input placeholder="#ffffff"
+                          value={widgetTheme.header_text_color}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, header_text_color: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">User bubble bg</Label>
+                        <Input placeholder="#eef2ff"
+                          value={widgetTheme.bubble_bg_user}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, bubble_bg_user: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Agent bubble bg</Label>
+                        <Input placeholder="#f8fafc"
+                          value={widgetTheme.bubble_bg_agent}
+                          onChange={(e) => setWidgetTheme((s) => ({ ...s, bubble_bg_agent: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Custom CSS overrides</Label>
+                      <textarea
+                        rows={3}
+                        placeholder="/* injected into the widget's shadow DOM — use sparingly */"
+                        value={widgetTheme.css_overrides}
+                        onChange={(e) => setWidgetTheme((s) => ({ ...s, css_overrides: e.target.value }))}
+                        className="w-full mt-1 rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-xs font-mono text-white/85 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-violet-400/50 resize-none"
+                      />
+                    </div>
+                  </div>
                   <div className="space-y-1">
                     <Label className="text-muted-foreground">Embed on your site (floating chat button)</Label>
                     <p className="text-xs text-muted-foreground mb-1">Add this script before &lt;/body&gt;. Replace the origin with your app URL if different.</p>
@@ -3603,10 +3843,46 @@ const FrontlineDashboard = () => {
                 </div>
               ) : (
                 <>
+                  {/* Bulk action bar — appears when at least one row is selected. */}
+                  {selectedTicketIds.size > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 mb-2">
+                      <span className="text-sm font-medium text-violet-200">
+                        {selectedTicketIds.size} selected
+                      </span>
+                      <div className="flex items-center gap-1 ml-2 flex-wrap">
+                        <Button size="sm" variant="outline" className="h-7 text-xs"
+                          onClick={() => setBulkActionDialog({ open: true, field: 'status', value: '' })}>
+                          Change status…
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs"
+                          onClick={() => setBulkActionDialog({ open: true, field: 'priority', value: '' })}>
+                          Change priority…
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs"
+                          onClick={() => setBulkActionDialog({ open: true, field: 'category', value: '' })}>
+                          Change category…
+                        </Button>
+                      </div>
+                      <Button size="sm" variant="ghost" className="h-7 ml-auto text-xs"
+                        onClick={clearTicketSelection}>
+                        <XIcon className="h-3.5 w-3.5 mr-1" /> Clear
+                      </Button>
+                    </div>
+                  )}
                   <div className="overflow-x-auto -mx-2 sm:mx-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-8">
+                          <button onClick={toggleAllTicketsOnPage}
+                            title={ticketsList.every((t) => selectedTicketIds.has(t.id))
+                              ? 'Deselect all on page' : 'Select all on page'}
+                            className="text-white/50 hover:text-white/90">
+                            {ticketsList.every((t) => selectedTicketIds.has(t.id))
+                              ? <CheckSquare className="h-4 w-4" />
+                              : <Square className="h-4 w-4" />}
+                          </button>
+                        </TableHead>
                         <TableHead>Title</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Priority</TableHead>
@@ -3620,6 +3896,15 @@ const FrontlineDashboard = () => {
                     <TableBody>
                       {ticketsList.map((t) => (
                         <TableRow key={t.id}>
+                          <TableCell className="w-8">
+                            <button onClick={() => toggleTicketSelected(t.id)}
+                              className="text-white/50 hover:text-white/90"
+                              title={selectedTicketIds.has(t.id) ? 'Deselect' : 'Select'}>
+                              {selectedTicketIds.has(t.id)
+                                ? <CheckSquare className="h-4 w-4 text-violet-400" />
+                                : <Square className="h-4 w-4" />}
+                            </button>
+                          </TableCell>
                           <TableCell>
                             <div>
                               <div className="font-medium flex items-center gap-2 flex-wrap">
@@ -4034,6 +4319,77 @@ const FrontlineDashboard = () => {
                   Create Ticket
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk ticket update dialog (#3). Reused across status / priority /
+          category — the trigger button decides which field. */}
+      <Dialog open={bulkActionDialog.open}
+        onOpenChange={(o) => setBulkActionDialog((s) => ({ ...s, open: o }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {bulkActionDialog.field === 'status' && 'Change status'}
+              {bulkActionDialog.field === 'priority' && 'Change priority'}
+              {bulkActionDialog.field === 'category' && 'Change category'}
+            </DialogTitle>
+            <DialogDescription>
+              Applies to {selectedTicketIds.size} selected ticket{selectedTicketIds.size === 1 ? '' : 's'}.
+              {bulkActionDialog.field === 'status' && ' Illegal status transitions are skipped per ticket; you\'ll see the count in the result.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label className="text-xs">New value</Label>
+            {bulkActionDialog.field === 'status' && (
+              <Select value={bulkActionDialog.value}
+                onValueChange={(v) => setBulkActionDialog((s) => ({ ...s, value: v }))}>
+                <SelectTrigger><SelectValue placeholder="Pick a status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">open</SelectItem>
+                  <SelectItem value="in_progress">in_progress</SelectItem>
+                  <SelectItem value="resolved">resolved</SelectItem>
+                  <SelectItem value="closed">closed</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {bulkActionDialog.field === 'priority' && (
+              <Select value={bulkActionDialog.value}
+                onValueChange={(v) => setBulkActionDialog((s) => ({ ...s, value: v }))}>
+                <SelectTrigger><SelectValue placeholder="Pick a priority" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">low</SelectItem>
+                  <SelectItem value="medium">medium</SelectItem>
+                  <SelectItem value="high">high</SelectItem>
+                  <SelectItem value="urgent">urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {bulkActionDialog.field === 'category' && (
+              <Select value={bulkActionDialog.value}
+                onValueChange={(v) => setBulkActionDialog((s) => ({ ...s, value: v }))}>
+                <SelectTrigger><SelectValue placeholder="Pick a category" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="technical">technical</SelectItem>
+                  <SelectItem value="billing">billing</SelectItem>
+                  <SelectItem value="account">account</SelectItem>
+                  <SelectItem value="feature_request">feature_request</SelectItem>
+                  <SelectItem value="bug">bug</SelectItem>
+                  <SelectItem value="knowledge_gap">knowledge_gap</SelectItem>
+                  <SelectItem value="other">other</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline"
+              onClick={() => setBulkActionDialog({ open: false, field: null, value: '' })}
+              disabled={bulkApplying}>Cancel</Button>
+            <Button onClick={handleBulkApply}
+              disabled={bulkApplying || !bulkActionDialog.value}>
+              {bulkApplying ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Apply to {selectedTicketIds.size}
             </Button>
           </DialogFooter>
         </DialogContent>

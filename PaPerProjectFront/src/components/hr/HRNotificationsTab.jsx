@@ -95,19 +95,34 @@ export default function HRNotificationsTab() {
       subject: '', body: 'Hi {{employee_name}},\n\nThis is your reminder.\n\n— HR',
       trigger_event: '', days_before: 0,
       use_llm_personalization: false,
+      // Per-template quiet hours (N-F2). Disabled by default — when off, the
+      // backend falls back to per-user prefs as before.
+      qh_enabled: false,
+      qh_start: '22:00',
+      qh_end: '08:00',
+      qh_timezone: 'UTC',
+      qh_override_user: false,
     },
   });
 
-  const openEdit = (t) => setDialog({
-    open: true, mode: 'edit',
-    tpl: {
-      id: t.id, name: t.name, notification_type: t.notification_type,
-      channel: t.channel, subject: t.subject || '', body: t.body || '',
-      trigger_event: t.trigger_config?.on || '',
-      days_before: Number(t.trigger_config?.days_before || 0),
-      use_llm_personalization: !!t.use_llm_personalization,
-    },
-  });
+  const openEdit = (t) => {
+    const qh = t.quiet_hours || {};
+    setDialog({
+      open: true, mode: 'edit',
+      tpl: {
+        id: t.id, name: t.name, notification_type: t.notification_type,
+        channel: t.channel, subject: t.subject || '', body: t.body || '',
+        trigger_event: t.trigger_config?.on || '',
+        days_before: Number(t.trigger_config?.days_before || 0),
+        use_llm_personalization: !!t.use_llm_personalization,
+        qh_enabled: !!qh.enabled,
+        qh_start: qh.start || '22:00',
+        qh_end: qh.end || '08:00',
+        qh_timezone: qh.timezone_name || 'UTC',
+        qh_override_user: !!qh.override_user_quiet_hours,
+      },
+    });
+  };
 
   const handleSave = async () => {
     const tpl = dialog.tpl;
@@ -118,6 +133,13 @@ export default function HRNotificationsTab() {
     const trigger_config = {};
     if (tpl.trigger_event) trigger_config.on = tpl.trigger_event;
     if (tpl.days_before) trigger_config.days_before = Number(tpl.days_before) || 0;
+    const quiet_hours = tpl.qh_enabled ? {
+      enabled: true,
+      start: tpl.qh_start || '22:00',
+      end: tpl.qh_end || '08:00',
+      timezone_name: tpl.qh_timezone || 'UTC',
+      override_user_quiet_hours: !!tpl.qh_override_user,
+    } : {};
     const payload = {
       name: tpl.name.trim(),
       notification_type: tpl.notification_type,
@@ -125,6 +147,7 @@ export default function HRNotificationsTab() {
       subject: tpl.subject || '',
       body: tpl.body,
       trigger_config,
+      quiet_hours,
       use_llm_personalization: !!tpl.use_llm_personalization,
     };
     try {
@@ -336,8 +359,16 @@ export default function HRNotificationsTab() {
                       <SelectItem value="email">Email</SelectItem>
                       <SelectItem value="sms">SMS</SelectItem>
                       <SelectItem value="in_app">In-app</SelectItem>
+                      <SelectItem value="slack">Slack (webhook)</SelectItem>
+                      <SelectItem value="teams">MS Teams (webhook)</SelectItem>
                     </SelectContent>
                   </Select>
+                  {(dialog.tpl.channel === 'slack' || dialog.tpl.channel === 'teams') && (
+                    <div className="text-[10px] text-amber-300/90 mt-1">
+                      Needs <code className="px-1 rounded bg-white/[0.06]">hr_{dialog.tpl.channel}_webhook_url</code> set on the Company.
+                      Sends will fail-quiet with a log line until that's configured.
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label>Trigger event (for daily walker)</Label>
@@ -350,6 +381,7 @@ export default function HRNotificationsTab() {
                       <SelectItem value="birthday">birthday</SelectItem>
                       <SelectItem value="work_anniversary">work_anniversary</SelectItem>
                       <SelectItem value="document_expiring">document_expiring</SelectItem>
+                      <SelectItem value="review_due">review_due</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -380,6 +412,48 @@ export default function HRNotificationsTab() {
                   onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, use_llm_personalization: e.target.checked } }))} />
                 <span>Use LLM personalization (slower, costs LLM tokens, falls back to template body on failure)</span>
               </label>
+
+              {/* Quiet hours — per-template (N-F2). Off by default; when off,
+                  the backend respects each recipient's personal quiet hours
+                  via FrontlineNotificationPreferences. */}
+              <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+                <label className="flex items-center gap-2 text-sm select-none">
+                  <input type="checkbox" className="h-4 w-4"
+                    checked={!!dialog.tpl.qh_enabled}
+                    onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, qh_enabled: e.target.checked } }))} />
+                  <span className="font-medium">Quiet hours for this template</span>
+                </label>
+                <p className="text-[11px] text-white/55 mt-1 ml-6">
+                  Defer sends to outside the window below. When off (default), per-user prefs apply.
+                </p>
+                {dialog.tpl.qh_enabled && (
+                  <div className="ml-6 mt-2 space-y-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <Label className="text-xs">Start</Label>
+                        <Input type="time" value={dialog.tpl.qh_start}
+                          onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, qh_start: e.target.value } }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">End</Label>
+                        <Input type="time" value={dialog.tpl.qh_end}
+                          onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, qh_end: e.target.value } }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Timezone</Label>
+                        <Input placeholder="UTC" value={dialog.tpl.qh_timezone}
+                          onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, qh_timezone: e.target.value } }))} />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs select-none">
+                      <input type="checkbox" className="h-3.5 w-3.5"
+                        checked={!!dialog.tpl.qh_override_user}
+                        onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, qh_override_user: e.target.checked } }))} />
+                      <span>Override recipient's personal quiet hours (use for urgent alerts only)</span>
+                    </label>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           <DialogFooter>

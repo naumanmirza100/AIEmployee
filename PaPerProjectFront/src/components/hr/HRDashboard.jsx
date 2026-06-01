@@ -35,6 +35,7 @@ import {
   CalendarClock, Plus, Upload, Menu, Check, UserCheck, Clock, AlertTriangle,
   PlaneTakeoff, ClipboardList, MoreHorizontal, Trash2, FileSearch, ListChecks,
   Play, Power, Pencil, History, Network, BookTemplate, User,
+  RotateCcw, AlertOctagon, RefreshCw,
 } from 'lucide-react';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import hrAgentService from '@/services/hrAgentService';
@@ -394,6 +395,40 @@ const HRDashboard = () => {
         toast({ title: 'Failed to load access log', description: e.message, variant: 'destructive' });
         setDocAccess({ open: false, doc: null, rows: [], loading: false, allowed: true });
       }
+    }
+  };
+
+  const handleMarkOutdated = async (d) => {
+    try {
+      await hrAgentService.markHRDocumentOutdated(d.id);
+      setDocuments((arr) => arr.map((x) => x.id === d.id ? { ...x, is_outdated: true } : x));
+      toast({ title: 'Document marked outdated', description: 'Excluded from knowledge retrieval until restored.' });
+    } catch (e) {
+      toast({ title: 'Mark-outdated failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleUnmarkOutdated = async (d) => {
+    try {
+      await hrAgentService.unmarkHRDocumentOutdated(d.id);
+      setDocuments((arr) => arr.map((x) => x.id === d.id ? { ...x, is_outdated: false } : x));
+      toast({ title: 'Document restored', description: 'Back in knowledge retrieval.' });
+    } catch (e) {
+      toast({ title: 'Restore failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleReingest = async (d) => {
+    if (!confirm(`Re-ingest "${d.title}"? Existing chunks will be wiped and re-built.`)) return;
+    try {
+      const res = await hrAgentService.reingestHRDocument(d.id);
+      const newStatus = res?.data?.processing_status || 'processing';
+      setDocuments((arr) => arr.map((x) => x.id === d.id
+        ? { ...x, processing_status: newStatus, chunks_processed: 0, chunks_total: 0, is_indexed: false }
+        : x));
+      toast({ title: 'Re-ingestion started', description: 'Status will update as Celery progresses.' });
+    } catch (e) {
+      toast({ title: 'Re-ingest failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -1171,6 +1206,11 @@ const HRDashboard = () => {
                                       superseded
                                     </Badge>
                                   )}
+                                  {d.is_outdated && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-rose-500/10 text-rose-300 border-rose-400/30">
+                                      outdated
+                                    </Badge>
+                                  )}
                                   {d.chunks_total > 0 && procStatus !== 'ready' && (
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-white/[0.04]">
                                       {d.chunks_processed}/{d.chunks_total} chunks
@@ -1216,6 +1256,18 @@ const HRDashboard = () => {
                                       )}
                                       <DropdownMenuItem onClick={() => openDocAccessLog(d)} className="text-white/80">
                                         <History className="h-4 w-4 mr-2 text-amber-400" /> Access log
+                                      </DropdownMenuItem>
+                                      {d.is_outdated ? (
+                                        <DropdownMenuItem onClick={() => handleUnmarkOutdated(d)} className="text-white/80">
+                                          <RotateCcw className="h-4 w-4 mr-2 text-emerald-400" /> Restore (un-mark outdated)
+                                        </DropdownMenuItem>
+                                      ) : (
+                                        <DropdownMenuItem onClick={() => handleMarkOutdated(d)} className="text-white/80">
+                                          <AlertOctagon className="h-4 w-4 mr-2 text-amber-400" /> Mark outdated
+                                        </DropdownMenuItem>
+                                      )}
+                                      <DropdownMenuItem onClick={() => handleReingest(d)} className="text-white/80">
+                                        <RefreshCw className="h-4 w-4 mr-2 text-sky-400" /> Re-ingest
                                       </DropdownMenuItem>
                                     </DropdownMenuContent>
                                   </DropdownMenu>

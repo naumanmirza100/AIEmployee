@@ -40,20 +40,25 @@ APOLLO_SIZE_BUCKETS = [
 class LeadResearchAgent:
     """Finds and enriches leads against an ICP profile."""
 
-    def __init__(self, company=None):
+    def __init__(self, company=None, apollo_api_key: str = None,
+                 apify_token: str = None, apify_actor: str = None):
         # Apollo & Apify are third-party data services (not LLM providers) — still from env
+        # Per-user keys (apollo_api_key etc.) take priority over env/settings
         self.apollo_api_key = (
-            getattr(settings, 'APOLLO_API_KEY', None)
+            apollo_api_key
+            or getattr(settings, 'APOLLO_API_KEY', None)
             or os.environ.get('APOLLO_API_KEY', '')
         ).strip()
 
         self.apify_token = (
-            getattr(settings, 'APIFY_API_TOKEN', None)
+            apify_token
+            or getattr(settings, 'APIFY_API_TOKEN', None)
             or os.environ.get('APIFY_API_TOKEN', '')
         ).strip()
 
         self.apify_actor = (
-            getattr(settings, 'APIFY_ACTOR_ID', None)
+            apify_actor
+            or getattr(settings, 'APIFY_ACTOR_ID', None)
             or os.environ.get('APIFY_ACTOR_ID', '')
             or DEFAULT_APIFY_ACTOR
         ).strip()
@@ -80,11 +85,17 @@ class LeadResearchAgent:
         """Return a list of raw lead dicts for the given ICP profile."""
         if source == 'apify':
             if not self.apify_token:
-                raise ValueError('APIFY_API_TOKEN not set in .env')
+                raise ValueError(
+                    'Apify API token not configured. '
+                    'Go to SDR Agent → Settings and enter your Apify API token.'
+                )
             return self._search_apify(icp_profile, count)
         if source == 'apollo':
             if not self.apollo_api_key:
-                raise ValueError('APOLLO_API_KEY not set in .env — get your free key at apollo.io')
+                raise ValueError(
+                    'Apollo API key not configured. '
+                    'Go to SDR Agent → Settings and enter your Apollo.io API key.'
+                )
             return self._search_apollo(icp_profile, count)
         if source == 'ai':
             return self._generate_ai_leads(icp_profile, count)

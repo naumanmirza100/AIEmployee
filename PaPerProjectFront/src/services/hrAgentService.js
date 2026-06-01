@@ -455,6 +455,73 @@ export const listHRDocumentAccessLog = async (documentId, { limit = 50, offset =
   }
 };
 
+// GDPR right-to-export — returns a ZIP. The endpoint requires the company
+// auth token in a header, so we can't just use `window.location.href`. Fetch
+// the blob with the auth header, then trigger a client-side download.
+export const exportHREmployeeData = async (employeeId, filenameHint = '') => {
+  const token = localStorage.getItem('company_auth_token');
+  const apiBase = (import.meta?.env?.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+  const resp = await fetch(`${apiBase}/hr/employees/${employeeId}/export`, {
+    method: 'GET',
+    headers: token ? { Authorization: `Token ${token}` } : {},
+  });
+  if (!resp.ok) {
+    // Try to surface the API's error JSON when present.
+    let detail = '';
+    try { detail = (await resp.json())?.message || ''; } catch { /* not json */ }
+    throw new Error(`Export failed: ${resp.status} ${detail}`.trim());
+  }
+  const blob = await resp.blob();
+  // Filename from Content-Disposition when the server sets it, else fall back.
+  const cd = resp.headers.get('Content-Disposition') || '';
+  let filename = '';
+  const match = /filename="?([^"]+)"?/i.exec(cd);
+  if (match) filename = match[1];
+  if (!filename) {
+    const safe = (filenameHint || `employee_${employeeId}`).replace(/[^a-z0-9_-]/gi, '_');
+    filename = `${safe}_gdpr_export.zip`;
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return { status: 'success', size: blob.size, filename };
+};
+
+export const markHRDocumentOutdated = async (documentId) => {
+  try {
+    const response = await companyApi.post(`/hr/documents/${documentId}/mark-outdated`);
+    return response;
+  } catch (error) {
+    console.error('Mark HR document outdated error:', error);
+    throw error;
+  }
+};
+
+export const unmarkHRDocumentOutdated = async (documentId) => {
+  try {
+    const response = await companyApi.post(`/hr/documents/${documentId}/unmark-outdated`);
+    return response;
+  } catch (error) {
+    console.error('Unmark HR document outdated error:', error);
+    throw error;
+  }
+};
+
+export const reingestHRDocument = async (documentId) => {
+  try {
+    const response = await companyApi.post(`/hr/documents/${documentId}/reingest`);
+    return response;
+  } catch (error) {
+    console.error('Reingest HR document error:', error);
+    throw error;
+  }
+};
+
 // ---------- Departments ----------
 export const listHRDepartments = async ({ activeOnly = false } = {}) => {
   try {
@@ -945,5 +1012,9 @@ export default {
   getMyHRProfile,
   listHRDocumentVersions,
   anonymizeHREmployee,
+  exportHREmployeeData,
+  markHRDocumentOutdated,
+  unmarkHRDocumentOutdated,
+  reingestHRDocument,
   listHRDocumentAccessLog,
 };

@@ -160,8 +160,9 @@ export default function SDRAnalyticsTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // companyApi returns response.json() directly: { status, data: { metrics... } }
       const res = await getSdrAnalytics();
-      setMetrics(res?.data?.data || res?.data || null);
+      setMetrics(res?.data || null);
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || 'Unknown error';
       console.error('Analytics load failed:', msg, err?.response?.data);
