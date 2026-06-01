@@ -797,10 +797,14 @@ def sdr_campaigns_list(request):
             status=initial_status,
         )
 
-        # Auto-generate steps if requested
+        # Auto-generate steps — on KeyServiceError rollback the campaign so no orphan is left
         if d.get('generate_steps', True):
             icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
-            steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)  # noqa: E501
+            try:
+                steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)
+            except KeyServiceError:
+                campaign.delete()
+                raise
             for sd in steps_data:
                 SDRCampaignStep.objects.create(
                     campaign=campaign,
@@ -812,10 +816,9 @@ def sdr_campaigns_list(request):
                     body_template=sd.get('body_template', ''),
                 )
 
-        # If start_date is today and steps exist, save() will auto-activate
         if start_date:
             campaign.end_date = campaign.derive_end_date()
-            campaign.save()  # triggers auto-activation hook
+            campaign.save()
 
         return Response({'status': 'success', 'data': _serialize_campaign(campaign)}, status=201)
     except KeyServiceError:
@@ -1003,12 +1006,11 @@ def sdr_generate_steps(request, campaign_id):
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
 
     try:
-        # Delete existing steps first
-        campaign.steps.all().delete()
-
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+        # Generate BEFORE deleting existing steps — so quota error leaves steps intact
         steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)
 
+        campaign.steps.all().delete()
         created_steps = []
         for sd in steps_data:
             step = SDRCampaignStep.objects.create(

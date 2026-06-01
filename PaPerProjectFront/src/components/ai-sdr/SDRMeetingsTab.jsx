@@ -456,7 +456,7 @@ const SDRMeetingsTab = () => {
       setPrepModal(pm => pm && pm.id === meeting.id ? { ...pm, prep_notes: fresh } : pm);
       toast({ title: 'Prep notes generated!' });
     } catch (err) {
-      toast({ title: 'Prep generation failed', description: err.message, variant: 'destructive' });
+      toast({ title: 'Prep generation failed', description: apiErrorMessage(err, 'Failed to generate prep notes'), variant: 'destructive' });
     } finally {
       setPrepGenIds(s => { const n = new Set(s); n.delete(meeting.id); return n; });
     }

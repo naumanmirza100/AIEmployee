@@ -57,8 +57,8 @@ class QuotaExhausted(KeyServiceError):
 class ManagedQuotaExhausted(KeyServiceError):
     reason = "managed_quota_exhausted"
     user_message = (
-        "Token quota exhausted — both your free platform tokens and managed key tokens have been used up. "
-        "Contact your admin to increase the limits, or add your own API key (BYOK) to continue."
+        "Your managed key token quota has been exhausted. "
+        "Contact your admin to top up the quota, or add your own API key (BYOK) to continue."
     )
 
 

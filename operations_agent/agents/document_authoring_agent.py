@@ -227,7 +227,9 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 yield ('error', {'message': prepared.get('error', 'Invalid input')})
                 return
 
-            if not getattr(self, 'groq_client', None):
+            # Resolve key via subscription system
+            stream_client, key_ctx = self._resolve_company_client()
+            if stream_client is None:
                 yield ('error', {'message': 'No API key available. Please add a BYOK key in API Keys settings or ask your admin to assign a managed key.'})
                 return
 
@@ -241,9 +243,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 {'role': 'user', 'content': prepared['user_prompt']},
             ]
 
-            # Groq chat streaming. Newer SDKs accept `stream_options={'include_usage': True}`
-            # to get a final usage chunk, but older ones reject the kwarg — so we gracefully
-            # fall back to character-based estimation if usage isn't provided.
+            # Groq chat streaming.
             create_kwargs = dict(
                 model=self.model,
                 messages=messages,
@@ -252,13 +252,12 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 stream=True,
             )
             try:
-                stream = self.groq_client.chat.completions.create(
+                stream = stream_client.chat.completions.create(
                     **create_kwargs,
                     stream_options={'include_usage': True},
                 )
             except TypeError:
-                # SDK doesn't support stream_options — retry without it
-                stream = self.groq_client.chat.completions.create(**create_kwargs)
+                stream = stream_client.chat.completions.create(**create_kwargs)
 
             full_text = ''
             usage = None
@@ -309,6 +308,15 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                     'estimated': True,
                 }
 
+            # Record quota usage
+            total_tokens = tokens_used.get('total_tokens') or 0
+            if key_ctx and total_tokens:
+                try:
+                    from core.api_key_service import record_usage
+                    record_usage(key_ctx, total_tokens)
+                except Exception as _ru_err:
+                    logger.warning('DocumentAuthoringAgent stream record_usage failed: %s', _ru_err)
+
             yield ('done', {
                 'title': prepared['resolved_title'],
                 'content_markdown': content,
@@ -340,8 +348,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         if not prompt:
             return {'ok': False, 'error': 'Prompt is required.'}
 
-        if not getattr(self, 'groq_client', None):
-            return {'ok': False, 'error': 'No API key available. Please add a BYOK key in API Keys settings or ask your admin to assign a managed key.'}
+        # Key resolved per-call via _resolve_company_client() — no groq_client check needed
 
         template_info = TEMPLATE_GUIDES.get(template_type) or TEMPLATE_GUIDES['custom']
         tone_guide = TONE_GUIDES.get(tone, TONE_GUIDES['formal'])

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import {
   Mail, Linkedin, Plus, RefreshCw, Trash2, Users, ChevronLeft,
   Zap, Check, Loader2, Send, MessageSquare, Calendar, Edit2,
@@ -470,7 +471,7 @@ const SDROutreachTab = () => {
       // Open the new campaign detail
       await loadDetail(resp.data);
     } catch (e) {
-      toast({ title: 'Create failed', description: e.message, variant: 'destructive' });
+      toast({ title: 'Create failed', description: apiErrorMessage(e, 'Failed to create campaign'), variant: 'destructive' });
     } finally { setCreating(false); }
   };
 
@@ -514,7 +515,7 @@ const SDROutreachTab = () => {
       setSteps(resp.data || []);
       toast({ title: 'AI generated 4 sequence steps' });
     } catch (e) {
-      toast({ title: 'Generate failed', description: e.message, variant: 'destructive' });
+      toast({ title: 'Generate failed', description: apiErrorMessage(e, 'Failed to generate steps'), variant: 'destructive' });
     } finally { setGeneratingSteps(false); }
   };
 
@@ -587,7 +588,7 @@ const SDROutreachTab = () => {
       });
       await loadDetail(selectedCampaign);
     } catch (e) {
-      toast({ title: 'Process failed', description: e.message, variant: 'destructive' });
+      toast({ title: 'Process failed', description: apiErrorMessage(e, 'Failed to process outreach'), variant: 'destructive' });
     } finally { setProcessing(false); }
   };
 
