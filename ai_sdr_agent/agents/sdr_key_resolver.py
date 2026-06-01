@@ -22,21 +22,19 @@ AGENT_KEY = 'ai_sdr_agent'
 def resolve_sdr_groq_client(company) -> Tuple[Optional[object], Optional[object]]:
     """Return (groq_client, ctx) for the given company using the platform key service.
 
-    Returns (None, None) if no key is available — callers must handle gracefully.
     Raises core.api_key_service.KeyServiceError subclasses on hard-block
-    (quota exhausted, agent disabled, etc.) — let these propagate to the view.
+    (quota exhausted, agent disabled, etc.) — let these propagate to the view layer.
+    Returns (None, None) only on unexpected SDK/import errors (not key errors).
     """
+    from core.api_key_service import resolve_for_call
+    # KeyServiceError propagates directly — NOT inside try/except
+    ctx = resolve_for_call(company, AGENT_KEY)
     try:
         from groq import Groq
-        from core.api_key_service import resolve_for_call
-        ctx = resolve_for_call(company, AGENT_KEY)
         client = Groq(api_key=ctx.api_key)
         return client, ctx
     except Exception as exc:
-        from core.api_key_service import KeyServiceError
-        if isinstance(exc, KeyServiceError):
-            raise  # hard-block — propagate to view layer
-        logger.error("SDR Groq client init failed: %s", exc)
+        logger.error("SDR Groq SDK init failed: %s", exc)
         return None, None
 
 

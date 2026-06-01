@@ -39,6 +39,7 @@ class OutreachAgent:
     def __init__(self, company=None):
         self._key_ctx = None
         self.groq_client = None
+        self._company = company
 
         if company is not None:
             from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
@@ -184,7 +185,8 @@ Rules:
         # Delegate to EmailAssistantAgent for consistent, high-quality personalisation
         try:
             from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-            improved = EmailAssistantAgent().improve_email(
+            _company = getattr(self, '_company', None)
+            improved = EmailAssistantAgent(company=_company).improve_email(
                 subject=subject,
                 body=body,
                 lead=lead,

@@ -86,7 +86,9 @@
       "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import importlib.util; spec = importlib.util.find_spec\\('django'\\); print\\(spec\\)\" 2>&1)",
       "Bash(dir \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\ai_sdr_agent\\\\\" /b)",
       "PowerShell(& \"D:\\\\Umer Bhai Work\\\\AI Project Django\\\\AI Employee-old\\\\venv\\\\Scripts\\\\python.exe\" -c \"import apscheduler; print\\(apscheduler.__version__\\)\" 2>&1)",
-      "Bash(C:\\\\Python313\\\\python.exe manage.py migrate ai_sdr_agent)"
+      "Bash(C:\\\\Python313\\\\python.exe manage.py migrate ai_sdr_agent)",
+      "Bash(dir core\\\\migrations\\\\*.py /b)",
+      "Read(//d/University/work/AI_Employyes/ReplyAgent/AIEmployee/core/migrations/**)"
     ]
   }
 }

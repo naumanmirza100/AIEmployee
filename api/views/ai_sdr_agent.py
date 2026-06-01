@@ -20,6 +20,7 @@ from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
+from core.api_key_service import KeyServiceError
 from ai_sdr_agent.models import (
     SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
@@ -27,6 +28,8 @@ from ai_sdr_agent.models import (
 from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+
+from core.api_key_service import KeyServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +139,8 @@ def icp_profile(request):
                 'data': _serialize_icp(icps.filter(is_active=True).first()),
                 'all': [_serialize_icp(i) for i in icps],
             })
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.error("Get ICP error: %s", exc)
             return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -159,6 +164,8 @@ def icp_profile(request):
             },
         )
         return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp(icp)})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Save ICP error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -197,6 +204,8 @@ def leads_list(request):
 
             leads = [_serialize_lead(l) for l in qs.select_related()[:200]]
             return Response({'status': 'success', 'data': leads, 'stats': _lead_stats(company_user)})
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.error("List leads error: %s", exc)
             return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -223,6 +232,8 @@ def leads_list(request):
             status='new',
         )
         return Response({'status': 'success', 'data': _serialize_lead(lead)}, status=201)
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Create lead error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -258,6 +269,8 @@ def lead_detail(request, lead_id):
                     setattr(lead, field, d[field])
             lead.save()
             return Response({'status': 'success', 'data': _serialize_lead(lead)})
+        except KeyServiceError:
+            raise
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -293,6 +306,8 @@ def qualify_lead(request, lead_id):
         return Response({'status': 'success', 'data': _serialize_lead(lead)})
     except SDRLead.DoesNotExist:
         return Response({'status': 'error', 'message': 'Lead not found.'}, status=404)
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Qualify lead error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -328,6 +343,8 @@ def qualify_all_leads(request):
                 lead.status = 'qualified'
                 lead.save()
                 qualified += 1
+            except KeyServiceError:
+                raise
             except Exception as exc:
                 logger.error("Qualify lead %s error: %s", lead.id, exc)
                 errors += 1
@@ -339,6 +356,8 @@ def qualify_all_leads(request):
             'errors': errors,
             'stats': _lead_stats(company_user),
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Qualify-all error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -391,7 +410,7 @@ def research_leads(request):
         )
 
         try:
-            researcher = _get_research_agent()
+            researcher = _get_research_agent(company_user.company)
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
@@ -432,7 +451,7 @@ def research_leads(request):
                 company_user=company_user, score__isnull=True
             ).order_by('-created_at')[:created]
 
-            qualifier = _get_qualification_agent()
+            qualifier = _get_qualification_agent(company_user.company)
             qualified = 0
             for lead in new_leads:
                 try:
@@ -445,6 +464,8 @@ def research_leads(request):
                     lead.status = 'qualified'
                     lead.save()
                     qualified += 1
+                except KeyServiceError:
+                    raise
                 except Exception as exc:
                     logger.error("Auto-qualify lead %s: %s", lead.id, exc)
 
@@ -465,6 +486,8 @@ def research_leads(request):
                 'stats': _lead_stats(company_user),
             })
 
+        except KeyServiceError:
+            raise
         except Exception as exc:
             job.status = 'failed'
             job.error_message = str(exc)
@@ -472,6 +495,8 @@ def research_leads(request):
             job.save()
             raise
 
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Research leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -525,6 +550,8 @@ def import_leads_csv(request):
                     status='new',
                 )
                 created += 1
+            except KeyServiceError:
+                raise
             except Exception as exc:
                 errors.append(f"Row {i}: {exc}")
 
@@ -534,6 +561,8 @@ def import_leads_csv(request):
             'created': created,
             'errors': errors[:5],
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("CSV import error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -557,6 +586,8 @@ def sdr_dashboard(request):
             ).order_by('-score', '-created_at')[:5]
         ]
         return Response({'status': 'success', 'data': {'stats': stats, 'recent_hot_leads': hot_leads}})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("SDR dashboard error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -572,6 +603,8 @@ def sdr_analytics(request):
         from ai_sdr_agent.agents.analytics_agent import AnalyticsAgent
         metrics = AnalyticsAgent().compute_metrics(company_user)
         return Response({'status': 'success', 'data': metrics})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error('SDR analytics error: %s', exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -588,6 +621,8 @@ def sdr_send_daily_summary(request):
         agent = AnalyticsAgent()
         sent = agent.send_daily_summary(company_user)
         return Response({'status': 'success', 'sent': sent})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error('SDR send_daily_summary error: %s', exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -731,6 +766,8 @@ def sdr_campaigns_list(request):
                 'status': 'success',
                 'data': [_serialize_campaign(c) for c in campaigns],
             })
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.error("List campaigns error: %s", exc)
             return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -764,7 +801,7 @@ def sdr_campaigns_list(request):
         # Auto-generate steps if requested
         if d.get('generate_steps', True):
             icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
-            steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)
+            steps_data = _get_outreach_agent(company_user.company).generate_campaign_steps(campaign, icp)  # noqa: E501
             for sd in steps_data:
                 SDRCampaignStep.objects.create(
                     campaign=campaign,
@@ -782,6 +819,8 @@ def sdr_campaigns_list(request):
             campaign.save()  # triggers auto-activation hook
 
         return Response({'status': 'success', 'data': _serialize_campaign(campaign)}, status=201)
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Create campaign error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -826,6 +865,8 @@ def sdr_campaign_detail(request, campaign_id):
                     campaign.status = 'scheduled'
             campaign.save()
             return Response({'status': 'success', 'data': _serialize_campaign(campaign)})
+        except KeyServiceError:
+            raise
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -863,6 +904,8 @@ def sdr_clear_campaign_leads(request, campaign_id):
             'message': f'Cleared {deleted_count} enrollment records.',
             'data': _serialize_campaign(campaign),
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("SDR clear leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -900,6 +943,8 @@ def sdr_campaign_steps(request, campaign_id):
             ai_personalize=bool(d.get('ai_personalize', True)),
         )
         return Response({'status': 'success', 'data': _serialize_step(step)}, status=201)
+    except KeyServiceError:
+        raise
     except Exception as exc:
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -938,6 +983,8 @@ def sdr_campaign_step_detail(request, campaign_id, step_id):
             step.ai_personalize = bool(d['ai_personalize'])
         step.save()
         return Response({'status': 'success', 'data': _serialize_step(step)})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -977,6 +1024,8 @@ def sdr_generate_steps(request, campaign_id):
             created_steps.append(_serialize_step(step))
 
         return Response({'status': 'success', 'data': created_steps})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Generate steps error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1064,6 +1113,8 @@ def sdr_enroll_leads(request, campaign_id):
         if skipped_reasons:
             resp['skipped_reasons'] = skipped_reasons
         return Response(resp)
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Enroll leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1089,6 +1140,8 @@ def sdr_campaign_enrollments(request, campaign_id):
             'status': 'success',
             'data': [_serialize_enrollment(e) for e in enrollments],
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("List enrollments error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1163,7 +1216,7 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
         info_sent = False
         try:
             from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-            email_agent = EmailAssistantAgent()
+            email_agent = EmailAssistantAgent(company=company_user.company)
             email_data = email_agent.generate_more_info_email(lead, campaign, reply_text)
             _get_outreach_agent(company_user.company).send_email(
                 campaign, lead.email,
@@ -1171,6 +1224,8 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
             )
             info_sent = True
             logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.warning('SDR [MORE-INFO] email failed for lead=%s: %s', lead.id, exc)
 
@@ -1204,12 +1259,14 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
             campaign.meetings_booked = (campaign.meetings_booked or 0) + 1
             try:
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                sched = MeetingSchedulingAgent()
+                sched = MeetingSchedulingAgent(company=company_user.company)
                 prep_notes = sched.generate_prep_notes(lead, enrollment, reply_text)
                 sent = sched.send_scheduling_email_once(campaign, lead, meeting, prep_notes)
                 if sent:
                     meeting.prep_notes = prep_notes
                     meeting.save(update_fields=['prep_notes'])
+            except KeyServiceError:
+                raise
             except Exception as exc:
                 logger.warning('SDR [MEETING] scheduling email failed lead=%s: %s', lead.id, exc)
 
@@ -1245,7 +1302,7 @@ def sdr_mark_replied(request, campaign_id, enrollment_id):
         # Classify with EmailAssistantAgent
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
         if reply_content:
-            classification = EmailAssistantAgent().classify_reply(reply_content)
+            classification = EmailAssistantAgent(company=company_user.company).classify_reply(reply_content)
         else:
             # Manual override: no text → treat as positive
             classification = {
@@ -1267,6 +1324,8 @@ def sdr_mark_replied(request, campaign_id, enrollment_id):
             'is_interested': classification['is_interested'],
             'data': _serialize_enrollment(enrollment),
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Mark replied error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1309,7 +1368,7 @@ def sdr_process_outreach(request, campaign_id):
                 'results': [],
             })
 
-        agent = _get_outreach_agent()
+        agent = _get_outreach_agent(company_user.company)
         results = []
         for enrollment in due:
             result = agent.process_enrollment(enrollment)
@@ -1329,6 +1388,8 @@ def sdr_process_outreach(request, campaign_id):
             'errors': errors,
             'results': results,
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Process outreach error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1390,7 +1451,7 @@ def sdr_check_replies(request, campaign_id):
         )
 
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-        email_agent = EmailAssistantAgent()
+        email_agent = EmailAssistantAgent(company=company_user.company)
         replies_found = _get_outreach_agent(company_user.company).check_inbox_for_replies(campaign, enrollments)
 
         new_replies = 0
@@ -1440,6 +1501,8 @@ def sdr_check_replies(request, campaign_id):
             'meetings_created': meetings_created,
             'details': details,
         })
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Check replies error for campaign %s: %s", campaign_id, exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1504,6 +1567,8 @@ def sdr_meetings_list(request):
                 'page_size': page_size,
                 'total_pages': max(1, (total + page_size - 1) // page_size),
             })
+        except KeyServiceError:
+            raise
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -1527,6 +1592,8 @@ def sdr_meetings_list(request):
         return Response({'status': 'success', 'data': _serialize_meeting(meeting)}, status=201)
     except SDRLead.DoesNotExist:
         return Response({'status': 'error', 'message': 'Lead not found.'}, status=404)
+    except KeyServiceError:
+        raise
     except Exception as exc:
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -1556,6 +1623,8 @@ def sdr_meeting_detail(request, meeting_id):
                 meeting.scheduled_at = d['scheduled_at'] or None
             meeting.save()
             return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
+        except KeyServiceError:
+            raise
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
@@ -1610,10 +1679,14 @@ def sdr_confirm_meeting(request, meeting_id):
             try:
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
                 MeetingSchedulingAgent().send_confirmation_email(campaign, lead, meeting)
+            except KeyServiceError:
+                raise
             except Exception as exc:
                 logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
 
         return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Confirm meeting error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1646,6 +1719,8 @@ def sdr_send_meeting_reminder(request, meeting_id):
         meeting.reminder_sent_at = timezone.now()
         meeting.save(update_fields=['reminder_sent_at'])
         return Response({'status': 'success', 'message': 'Reminder sent.', 'data': _serialize_meeting(meeting)})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Send reminder error for meeting %s: %s", meeting.id, exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1670,7 +1745,7 @@ def sdr_generate_meeting_prep(request, meeting_id):
 
     try:
         from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-        prep_notes = MeetingSchedulingAgent().generate_prep_notes(
+        prep_notes = MeetingSchedulingAgent(company=company_user.company).generate_prep_notes(
             meeting.lead,
             meeting.enrollment,
             meeting.reply_snippet or '',
@@ -1678,6 +1753,8 @@ def sdr_generate_meeting_prep(request, meeting_id):
         meeting.prep_notes = prep_notes
         meeting.save(update_fields=['prep_notes'])
         return Response({'status': 'success', 'prep_notes': prep_notes, 'data': _serialize_meeting(meeting)})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Generate prep notes error for meeting %s: %s", meeting.id, exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1712,6 +1789,8 @@ def sdr_resend_scheduling_email(request, meeting_id):
         meeting.scheduling_email_sent_at = timezone.now()
         meeting.save(update_fields=['scheduling_email_sent_at'])
         return Response({'status': 'success', 'message': 'Scheduling email resent.', 'data': _serialize_meeting(meeting)})
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.error("Resend scheduling email error for meeting %s: %s", meeting.id, exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -1738,8 +1817,8 @@ def sdr_check_all_replies(request):
     from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
-    outreach_agent = OutreachAgent()
-    email_agent = EmailAssistantAgent()
+    outreach_agent = OutreachAgent(company=company_user.company)
+    email_agent = EmailAssistantAgent(company=company_user.company)
     total_new_replies = 0
     total_new_meetings = 0
     errors = []
@@ -1785,6 +1864,8 @@ def sdr_check_all_replies(request):
             campaign.last_replies_checked_at = timezone.now()
             campaign.save(update_fields=['replies_received', 'meetings_booked', 'last_replies_checked_at'])
 
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.error("check-all-replies failed for campaign %s: %s", campaign.id, exc)
             errors.append(str(exc))
@@ -1910,6 +1991,8 @@ def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
         logger.info("Google Meet created: %s for meeting %d", meet_url, meeting.id)
         return meet_url or None
 
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.warning("Google Meet creation failed for meeting %d: %s", meeting.id, exc)
         return None
@@ -1985,6 +2068,8 @@ def sdr_booking_confirm(request, token):
         from django.utils import timezone as _tz
         if scheduled_at.tzinfo is None:
             scheduled_at = _tz.make_aware(scheduled_at)
+    except KeyServiceError:
+        raise
     except Exception:
         return Response({'error': 'Invalid date format. Use ISO 8601.'}, status=400)
 
@@ -2023,6 +2108,8 @@ def sdr_booking_confirm(request, token):
         try:
             from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
             MeetingSchedulingAgent().send_confirmation_email(campaign, meeting.lead, meeting)
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
 
