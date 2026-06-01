@@ -15,6 +15,7 @@ import imaplib
 import json
 import logging
 import os
+import re
 import smtplib
 import ssl
 from datetime import timedelta
@@ -101,10 +102,9 @@ Rules:
 
         raw = resp.choices[0].message.content.strip()
         if "```" in raw:
-            for part in raw.split("```"):
-                if "[" in part:
-                    raw = part.lstrip("json").strip()
-                    break
+            m = re.search(r'```(?:json)?\s*([\s\S]*?)```', raw)
+            if m:
+                raw = m.group(1).strip()
 
         return json.loads(raw)
 
@@ -160,17 +160,26 @@ Rules:
     # ------------------------------------------------------------------
 
     def generate_personalized_email(self, lead, step, campaign) -> dict:
+        first_name = lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there')
+        company_name = lead.company_name or 'your company'
+        company_industry = lead.company_industry or 'your industry'
         ctx = {
-            'first_name': lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there'),
+            'first_name': first_name,
             'last_name': lead.last_name or '',
             'full_name': lead.display_name,
-            'company_name': lead.company_name or 'your company',
+            'company_name': company_name,
             'job_title': lead.job_title or 'your role',
-            'company_industry': lead.company_industry or 'your industry',
+            'company_industry': company_industry,
             'company_location': lead.company_location or '',
             'sender_name': campaign.sender_name or '',
             'sender_company': campaign.sender_company or '',
             'sender_title': campaign.sender_title or '',
+            # Common aliases Groq sometimes uses
+            'name': first_name,
+            'company': company_name,
+            'industry': company_industry,
+            'location': lead.company_location or '',
+            'sender': campaign.sender_name or '',
         }
 
         subject = step.subject_template
@@ -178,6 +187,11 @@ Rules:
         for key, val in ctx.items():
             subject = subject.replace('{' + key + '}', str(val))
             body = body.replace('{' + key + '}', str(val))
+
+        leftover = re.findall(r'\{[a-z_]+\}', subject)
+        if leftover:
+            logger.warning("Unreplaced subject placeholders lead=%s: %s", lead.id, leftover)
+            subject = re.sub(r'\{[a-z_]+\}', '', subject).strip()
 
         if not step.ai_personalize:
             return {'subject': subject, 'body': body}

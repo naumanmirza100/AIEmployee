@@ -191,6 +191,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/ai-sdr/analytics" element={<AiSdrAgentPage />} />
             <Route path="/ai-sdr/email-assistant" element={<AiSdrAgentPage />} />
             <Route path="/ai-sdr/crm-sync" element={<AiSdrAgentPage />} />
+            <Route path="/ai-sdr/settings" element={<AiSdrAgentPage />} />
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

@@ -24,6 +24,7 @@ from api.permissions import IsCompanyUserOnly
 from ai_sdr_agent.models import (
     SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
+    SDRAgentSettings,
 )
 from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
@@ -32,18 +33,11 @@ from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# Singletons — initialised once, reused across requests
+# Agent factories — qualification/outreach are stateless so singletons are fine;
+# research agent is created per-request so it picks up the company user's keys.
 # --------------------------------------------------------------------------
-_research_agent: LeadResearchAgent | None = None
 _qualification_agent: LeadQualificationAgent | None = None
 _outreach_agent: OutreachAgent | None = None
-
-
-def _get_research_agent() -> LeadResearchAgent:
-    global _research_agent
-    if _research_agent is None:
-        _research_agent = LeadResearchAgent()
-    return _research_agent
 
 
 def _get_qualification_agent() -> LeadQualificationAgent:
@@ -58,6 +52,28 @@ def _get_outreach_agent() -> OutreachAgent:
     if _outreach_agent is None:
         _outreach_agent = OutreachAgent()
     return _outreach_agent
+
+
+def _get_research_agent(company_user=None) -> LeadResearchAgent:
+    """Create a LeadResearchAgent using the company user's saved API keys."""
+    if company_user is not None:
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        if sdr_settings:
+            return LeadResearchAgent(
+                apollo_api_key=sdr_settings.apollo_api_key or None,
+                apify_token=sdr_settings.apify_api_token or None,
+                apify_actor=sdr_settings.apify_actor_id or None,
+            )
+    return LeadResearchAgent()
+
+
+def _mask_key(key: str) -> str:
+    """Return a masked version of an API key for display (e.g. abc...xyz)."""
+    if not key:
+        return ''
+    if len(key) <= 8:
+        return '***'
+    return key[:4] + '***' + key[-4:]
 
 
 # --------------------------------------------------------------------------
@@ -425,8 +441,8 @@ def qualify_all_leads(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def research_sources(request):
-    """Return available lead research sources based on configured API keys."""
-    researcher = _get_research_agent()
+    """Return available lead research sources based on the company user's API keys."""
+    researcher = _get_research_agent(company_user=request.user)
     return Response({
         'sources': researcher.available_sources,
         'default': researcher.source_label,
@@ -463,7 +479,7 @@ def research_leads(request):
         )
 
         try:
-            researcher = _get_research_agent()
+            researcher = _get_research_agent(company_user=company_user)
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
@@ -2130,6 +2146,59 @@ def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
     except Exception as exc:
         logger.warning("Google Meet creation failed for meeting %d: %s", meeting.id, exc)
         return None
+
+
+# ==========================================================================
+# SDR Agent Settings — per-company-user API keys (Apollo, Apify, etc.)
+# ==========================================================================
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_agent_settings(request):
+    """
+    GET  — return current settings (keys are masked for display).
+    POST — save/update one or more keys. Send only the fields you want to change.
+           Pass an empty string "" to clear a key.
+    """
+    company_user = request.user
+    sdr_settings, _ = SDRAgentSettings.objects.get_or_create(company_user=company_user)
+
+    if request.method == 'GET':
+        return Response({
+            'apollo_api_key': sdr_settings.apollo_api_key or '',
+            'apollo_api_key_set': bool(sdr_settings.apollo_api_key),
+            'apify_api_token': sdr_settings.apify_api_token or '',
+            'apify_api_token_set': bool(sdr_settings.apify_api_token),
+            'apify_actor_id': sdr_settings.apify_actor_id or '',
+            'updated_at': sdr_settings.updated_at.isoformat() if sdr_settings.updated_at else None,
+        })
+
+    # POST — update only the fields that were sent
+    data = request.data
+    changed = False
+
+    if 'apollo_api_key' in data:
+        sdr_settings.apollo_api_key = (data['apollo_api_key'] or '').strip()
+        changed = True
+
+    if 'apify_api_token' in data:
+        sdr_settings.apify_api_token = (data['apify_api_token'] or '').strip()
+        changed = True
+
+    if 'apify_actor_id' in data:
+        sdr_settings.apify_actor_id = (data['apify_actor_id'] or '').strip()
+        changed = True
+
+    if changed:
+        sdr_settings.save()
+
+    return Response({
+        'status': 'saved',
+        'apollo_api_key_set': bool(sdr_settings.apollo_api_key),
+        'apify_api_token_set': bool(sdr_settings.apify_api_token),
+        'apify_actor_id': sdr_settings.apify_actor_id or '',
+    })
 
 
 # ==========================================================================

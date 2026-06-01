@@ -11,6 +11,7 @@ Handles the full lifecycle after a positive reply:
 import json
 import logging
 import os
+import re
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
@@ -568,10 +569,9 @@ Return exactly this JSON:
         )
         raw = resp.choices[0].message.content.strip()
         if "```" in raw:
-            for part in raw.split("```"):
-                if "{" in part:
-                    raw = part.lstrip("json").strip()
-                    break
+            m = re.search(r'```(?:json)?\s*([\s\S]*?)```', raw)
+            if m:
+                raw = m.group(1).strip()
         return json.loads(raw)
 
     def _default_prep_notes(self, lead, reply_text: str) -> dict:
@@ -651,11 +651,18 @@ Return exactly this JSON:
         subject = f"Let's find a time to connect, {first_name}!"
 
         if meeting and getattr(meeting, 'booking_token', None):
-            frontend_url = (
-                getattr(settings, 'FRONTEND_URL', None)
-                or os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+            # SDR_BOOKING_URL points to wherever /book/<token>/ is served.
+            # Defaults to SITE_URL (Django backend) so the link works even
+            # without a separate React frontend.
+            base_url = (
+                getattr(settings, 'SDR_BOOKING_URL', None)
+                or os.environ.get('SDR_BOOKING_URL', '')
+                or getattr(settings, 'SITE_URL', None)
+                or os.environ.get('SITE_URL', '')
+                or getattr(settings, 'FRONTEND_URL', None)
+                or os.environ.get('FRONTEND_URL', 'http://localhost:8000')
             ).rstrip('/')
-            booking_url = f"{frontend_url}/book/{meeting.booking_token}"
+            booking_url = f"{base_url}/book/{meeting.booking_token}"
         elif campaign.calendar_link:
             booking_url = campaign.calendar_link
         else:
@@ -702,11 +709,15 @@ Return exactly this JSON:
 
         booking_url = None
         if getattr(meeting, 'booking_token', None):
-            frontend_url = (
-                getattr(settings, 'FRONTEND_URL', None)
-                or os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+            base_url = (
+                getattr(settings, 'SDR_BOOKING_URL', None)
+                or os.environ.get('SDR_BOOKING_URL', '')
+                or getattr(settings, 'SITE_URL', None)
+                or os.environ.get('SITE_URL', '')
+                or getattr(settings, 'FRONTEND_URL', None)
+                or os.environ.get('FRONTEND_URL', 'http://localhost:8000')
             ).rstrip('/')
-            booking_url = f"{frontend_url}/book/{meeting.booking_token}"
+            booking_url = f"{base_url}/book/{meeting.booking_token}"
 
         subject = f"Confirmed: {title} on {scheduled_str}"
 
@@ -755,11 +766,15 @@ Return exactly this JSON:
 
         booking_url = None
         if getattr(meeting, 'booking_token', None):
-            frontend_url = (
-                getattr(settings, 'FRONTEND_URL', None)
-                or os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+            base_url = (
+                getattr(settings, 'SDR_BOOKING_URL', None)
+                or os.environ.get('SDR_BOOKING_URL', '')
+                or getattr(settings, 'SITE_URL', None)
+                or os.environ.get('SITE_URL', '')
+                or getattr(settings, 'FRONTEND_URL', None)
+                or os.environ.get('FRONTEND_URL', 'http://localhost:8000')
             ).rstrip('/')
-            booking_url = f"{frontend_url}/book/{meeting.booking_token}"
+            booking_url = f"{base_url}/book/{meeting.booking_token}"
 
         subject = f"Reminder: {title} is tomorrow — {scheduled_str}"
 

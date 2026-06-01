@@ -378,6 +378,23 @@ class SDRMeeting(models.Model):
         return f"Meeting with {self.lead.display_name} ({self.status})"
 
 
+class SDRAgentSettings(models.Model):
+    """Per-company-user API credentials for the SDR agent (Apollo, Apify, etc.)."""
+    company_user = models.OneToOneField(
+        'core.CompanyUser', on_delete=models.CASCADE, related_name='sdr_settings'
+    )
+    apollo_api_key = models.CharField(max_length=500, blank=True)
+    apify_api_token = models.CharField(max_length=500, blank=True)
+    apify_actor_id = models.CharField(max_length=255, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sdr_agent_settings'
+
+    def __str__(self):
+        return f"SDR settings for {self.company_user}"
+
+
 class SDRLeadResearchJob(models.Model):
     """Tracks async lead-research jobs (Apollo search or AI generation)."""
 

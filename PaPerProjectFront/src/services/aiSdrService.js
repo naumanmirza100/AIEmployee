@@ -1,6 +1,27 @@
 import { companyApi } from './companyAuthService';
 
 // --------------------------------------------------------------------------
+// SDR Agent Settings (per-user API keys)
+// --------------------------------------------------------------------------
+export const getSdrSettings = async () => {
+  try {
+    return await companyApi.get('/sdr/settings/');
+  } catch (error) {
+    console.error('SDR settings error:', error);
+    throw error;
+  }
+};
+
+export const saveSdrSettings = async (data) => {
+  try {
+    return await companyApi.post('/sdr/settings/', data);
+  } catch (error) {
+    console.error('SDR save settings error:', error);
+    throw error;
+  }
+};
+
+// --------------------------------------------------------------------------
 // Dashboard
 // --------------------------------------------------------------------------
 export const getSdrDashboard = async () => {

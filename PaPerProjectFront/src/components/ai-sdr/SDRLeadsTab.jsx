@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Users, Search, Plus, Upload, Brain,
   Flame, Thermometer, Snowflake, ExternalLink, Linkedin, Globe,
@@ -16,7 +17,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
   researchLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
-  bulkDeleteLeads,
+  bulkDeleteLeads, getSdrSettings,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -525,7 +526,11 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 // --------------------------------------------------------------------------
 const SDRLeadsTab = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
+
+  // SDR key status (apollo_set, apify_set)
+  const [sdrKeyStatus, setSdrKeyStatus] = useState({ apollo: false, apify: false, loaded: false });
 
   // Data
   const [leads, setLeads] = useState([]);
@@ -643,9 +648,21 @@ const SDRLeadsTab = () => {
 
   const openGenModal = async () => {
     try {
-      const profiles = await listIcpProfiles();
-      setIcpProfiles(profiles);
-      if (profiles.length > 0) setGenIcpId(profiles.find(p => p.is_active)?.id || profiles[0].id);
+      const [profiles, settingsRes] = await Promise.allSettled([
+        listIcpProfiles(),
+        getSdrSettings(),
+      ]);
+      if (profiles.status === 'fulfilled') {
+        const p = profiles.value;
+        setIcpProfiles(p);
+        if (p.length > 0) setGenIcpId(p.find(x => x.is_active)?.id || p[0].id);
+      } else { setIcpProfiles([]); }
+      if (settingsRes.status === 'fulfilled') {
+        const d = settingsRes.value?.data || settingsRes.value;
+        setSdrKeyStatus({ apollo: !!d.apollo_api_key_set, apify: !!d.apify_api_token_set, loaded: true });
+      } else {
+        setSdrKeyStatus({ apollo: false, apify: false, loaded: true });
+      }
     } catch (_) { setIcpProfiles([]); }
     setShowGenModal(true);
   };
@@ -1437,6 +1454,35 @@ const SDRLeadsTab = () => {
               </div>
             </div>
 
+            {/* Key-not-set warning */}
+            {sdrKeyStatus.loaded && !sdrKeyStatus[genSource] && (
+              <div style={{
+                padding: '12px 14px', borderRadius: 10,
+                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+              }}>
+                <span style={{ fontSize: 18, lineHeight: 1 }}>🔑</span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ color: '#f87171', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                    {genSource === 'apollo' ? 'Apollo.io' : 'Apify'} API key not set
+                  </p>
+                  <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, marginBottom: 8 }}>
+                    Go to Settings and enter your {genSource === 'apollo' ? 'Apollo.io API key' : 'Apify API token'} to use this source.
+                  </p>
+                  <button
+                    onClick={() => { setShowGenModal(false); navigate('/ai-sdr/settings'); }}
+                    style={{
+                      background: 'linear-gradient(135deg,#a855f7,#ec4899)', border: 'none',
+                      borderRadius: 6, padding: '6px 14px', color: '#fff',
+                      fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    Set up API Key →
+                  </button>
+                </div>
+              </div>
+            )}
+
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
@@ -1472,7 +1518,7 @@ const SDRLeadsTab = () => {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
-            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{
+            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])} style={{
               background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff',
               border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
             }}>
