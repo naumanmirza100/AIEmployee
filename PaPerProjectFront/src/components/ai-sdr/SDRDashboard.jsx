@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   LayoutDashboard, Users, Mail, Calendar, BarChart3,
-  Sparkles, RefreshCw, Menu, Check,
+  RefreshCw, Menu, Check, Settings,
 } from 'lucide-react';
 
 import SDROverviewTab from './SDROverviewTab';
@@ -18,37 +18,37 @@ import SDRLeadsTab from './SDRLeadsTab';
 import SDROutreachTab from './SDROutreachTab';
 import SDRMeetingsTab from './SDRMeetingsTab';
 import SDRAnalyticsTab from './SDRAnalyticsTab';
-import SDREmailAssistantTab from './SDREmailAssistantTab';
 import SDRCRMSyncTab from './SDRCRMSyncTab';
+import SDRSettingsTab from './SDRSettingsTab';
 
 const TAB_ITEMS = [
-  { value: 'dashboard',        icon: LayoutDashboard, label: 'Dashboard' },
-  { value: 'leads',            icon: Users,           label: 'Leads' },
-  { value: 'outreach',         icon: Mail,            label: 'Outreach' },
-  { value: 'meetings',         icon: Calendar,        label: 'Meetings' },
-  { value: 'analytics',        icon: BarChart3,       label: 'Analytics' },
-  { value: 'email-assistant',  icon: Sparkles,        label: 'Email Assistant' },
-  { value: 'crm-sync',         icon: RefreshCw,       label: 'CRM Sync' },
+  { value: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { value: 'leads',     icon: Users,           label: 'Leads' },
+  { value: 'outreach',  icon: Mail,            label: 'Outreach' },
+  { value: 'meetings',  icon: Calendar,        label: 'Meetings' },
+  { value: 'analytics', icon: BarChart3,       label: 'Analytics' },
+  { value: 'crm-sync',  icon: RefreshCw,       label: 'CRM Sync' },
+  { value: 'settings',  icon: Settings,        label: 'Settings' },
 ];
 
 const PATH_TO_TAB = {
-  dashboard:         'dashboard',
-  leads:             'leads',
-  outreach:          'outreach',
-  meetings:          'meetings',
-  analytics:         'analytics',
-  'email-assistant': 'email-assistant',
-  'crm-sync':        'crm-sync',
+  dashboard: 'dashboard',
+  leads:     'leads',
+  outreach:  'outreach',
+  meetings:  'meetings',
+  analytics: 'analytics',
+  'crm-sync':'crm-sync',
+  settings:  'settings',
 };
 
 const TAB_TO_PATH = {
-  'dashboard':       'dashboard',
-  'leads':           'leads',
-  'outreach':        'outreach',
-  'meetings':        'meetings',
-  'analytics':       'analytics',
-  'email-assistant': 'email-assistant',
-  'crm-sync':        'crm-sync',
+  dashboard: 'dashboard',
+  leads:     'leads',
+  outreach:  'outreach',
+  meetings:  'meetings',
+  analytics: 'analytics',
+  'crm-sync':'crm-sync',
+  settings:  'settings',
 };
 
 const SDRDashboard = () => {
@@ -151,11 +151,11 @@ const SDRDashboard = () => {
         <TabsContent value="analytics" className="mt-4">
           <SDRAnalyticsTab />
         </TabsContent>
-        <TabsContent value="email-assistant" className="mt-4">
-          <SDREmailAssistantTab />
-        </TabsContent>
         <TabsContent value="crm-sync" className="mt-4">
           <SDRCRMSyncTab />
+        </TabsContent>
+        <TabsContent value="settings" className="mt-4">
+          <SDRSettingsTab />
         </TabsContent>
       </Tabs>
     </div>

@@ -59,6 +59,71 @@ const btnSecondary = {
 };
 
 // ---------------------------------------------------------------------------
+// Confirm delete modal
+// ---------------------------------------------------------------------------
+const PROVIDER_META = {
+  hubspot:    { label: 'HubSpot',     logo: '🟠' },
+  salesforce: { label: 'Salesforce',  logo: '🔵' },
+  pipedrive:  { label: 'Pipedrive',   logo: '🟢' },
+};
+
+const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
+  const meta = PROVIDER_META[provider] || { label: provider, logo: '🔌' };
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 2000,
+      background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: 'linear-gradient(135deg,#0f0a1f 0%,#1a0a2e 100%)',
+        border: '1px solid rgba(239,68,68,0.25)',
+        borderRadius: 16, padding: 32, width: 400, maxWidth: '90vw',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 14, marginBottom: 20,
+          background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Trash2 size={24} color="#f87171" />
+        </div>
+
+        <div style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
+          Remove {meta.label}?
+        </div>
+        <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
+          This will permanently disconnect your{' '}
+          <strong style={{ color: '#f87171' }}>{meta.label}</strong> integration.
+          All saved credentials will be deleted and lead syncing will stop.
+        </p>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} disabled={deleting} style={{
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 8, padding: '9px 20px', color: '#d1d5db',
+            fontSize: 14, fontWeight: 500, cursor: 'pointer',
+          }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} disabled={deleting} style={{
+            background: 'linear-gradient(135deg,#dc2626,#ef4444)', border: 'none',
+            borderRadius: 8, padding: '9px 20px', color: '#fff',
+            fontSize: 14, fontWeight: 700, cursor: deleting ? 'not-allowed' : 'pointer',
+            opacity: deleting ? 0.7 : 1,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            {deleting
+              ? <><Loader2 size={14} className="animate-spin" /> Removing…</>
+              : <><Trash2 size={14} /> Yes, Remove</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Provider Config
 // ---------------------------------------------------------------------------
 const PROVIDERS = {
@@ -195,19 +260,21 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
     }
   };
 
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  const handleDelete = async () => {
-    if (!confirmDelete) { setConfirmDelete(true); return; }
+  const handleDeleteConfirmed = async () => {
+    setDeleting(true);
     try {
       await deleteCrmIntegration(integration.id);
-      toast({ title: `${cfg.label} disconnected` });
+      toast({ title: `${cfg.label} disconnected`, description: 'Integration removed successfully.' });
+      setShowDeleteModal(false);
       onRefresh();
     } catch (e) {
       const msg = e?.response?.data?.error || e?.message || 'Unknown error';
       toast({ title: 'Delete failed', description: msg, variant: 'destructive' });
     } finally {
-      setConfirmDelete(false);
+      setDeleting(false);
     }
   };
 
@@ -215,7 +282,16 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
   const neverPinged = integration.last_ping_ok === null || integration.last_ping_ok === undefined;
 
   return (
-    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <>
+      {showDeleteModal && (
+        <ConfirmDeleteModal
+          provider={integration.provider}
+          onConfirm={handleDeleteConfirmed}
+          onCancel={() => setShowDeleteModal(false)}
+          deleting={deleting}
+        />
+      )}
+      <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -234,11 +310,10 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           </div>
         </div>
         <button
-          style={{ ...btnSecondary, color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)',
-            background: confirmDelete ? 'rgba(239,68,68,0.15)' : undefined }}
-          onClick={handleDelete}
+          style={{ ...btnSecondary, color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)' }}
+          onClick={() => setShowDeleteModal(true)}
         >
-          <Trash2 size={14} /> {confirmDelete ? 'Confirm Remove?' : 'Remove'}
+          <Trash2 size={14} /> Remove
         </button>
       </div>
 
@@ -274,6 +349,7 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         </button>
       </div>
     </div>
+    </>
   );
 }
 

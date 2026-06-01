@@ -21,10 +21,6 @@ logger = logging.getLogger(__name__)
 
 def _serialize_integration(integration: CRMIntegration) -> dict:
     creds = dict(integration.credentials or {})
-    # Mask secrets — never return raw tokens to the client
-    for key in ('access_token', 'api_token', 'client_secret', 'password', 'security_token'):
-        if key in creds and creds[key]:
-            creds[key] = '***' + str(creds[key])[-4:]
 
     return {
         'id': integration.pk,

@@ -1,6 +1,27 @@
 import { companyApi } from './companyAuthService';
 
 // --------------------------------------------------------------------------
+// SDR Agent Settings (per-user API keys)
+// --------------------------------------------------------------------------
+export const getSdrSettings = async () => {
+  try {
+    return await companyApi.get('/sdr/settings/');
+  } catch (error) {
+    console.error('SDR settings error:', error);
+    throw error;
+  }
+};
+
+export const saveSdrSettings = async (data) => {
+  try {
+    return await companyApi.post('/sdr/settings/', data);
+  } catch (error) {
+    console.error('SDR save settings error:', error);
+    throw error;
+  }
+};
+
+// --------------------------------------------------------------------------
 // Dashboard
 // --------------------------------------------------------------------------
 export const getSdrDashboard = async () => {
@@ -46,14 +67,20 @@ export const saveIcpProfile = async (data) => {
 // --------------------------------------------------------------------------
 // Leads — CRUD
 // --------------------------------------------------------------------------
-export const listLeads = async ({ search = '', temperature = '', status = '' } = {}) => {
+export const listLeads = async ({
+  search = '', temperature = '', status = '', source = '',
+  sort = 'score_desc', page = 1, page_size = 25,
+} = {}) => {
   try {
     const params = new URLSearchParams();
     if (search)      params.set('search', search);
     if (temperature) params.set('temperature', temperature);
     if (status)      params.set('status', status);
-    const qs = params.toString();
-    return await companyApi.get(qs ? `/sdr/leads/?${qs}` : '/sdr/leads/');
+    if (source)      params.set('source', source);
+    if (sort)        params.set('sort', sort);
+    params.set('page', page);
+    params.set('page_size', page_size);
+    return await companyApi.get(`/sdr/leads/?${params.toString()}`);
   } catch (error) {
     console.error('List leads error:', error);
     throw error;
@@ -92,6 +119,15 @@ export const deleteLead = async (id) => {
     return await companyApi.delete(`/sdr/leads/${id}/`);
   } catch (error) {
     console.error('Delete lead error:', error);
+    throw error;
+  }
+};
+
+export const bulkDeleteLeads = async (ids) => {
+  try {
+    return await companyApi.post('/sdr/leads/bulk-delete/', { ids });
+  } catch (error) {
+    console.error('Bulk delete leads error:', error);
     throw error;
   }
 };
@@ -321,14 +357,16 @@ export const checkReplies = async (campaignId) => {
 
 // Meetings
 export const listMeetings = async ({
-  status = '', campaign_id = '', search = '',
-  active_only = true, page = 1, page_size = 20,
+  status = '', campaign_id = '', search = '', temperature = '',
+  sort = 'created_desc', active_only = true, page = 1, page_size = 20,
 } = {}) => {
   try {
     const params = new URLSearchParams();
     if (status)      params.set('status', status);
     if (campaign_id) params.set('campaign_id', campaign_id);
     if (search)      params.set('search', search);
+    if (temperature) params.set('temperature', temperature);
+    if (sort)        params.set('sort', sort);
     params.set('active_only', active_only ? 'true' : 'false');
     params.set('page', page);
     params.set('page_size', page_size);
