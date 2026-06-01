@@ -20,7 +20,6 @@ from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from core.api_key_service import KeyServiceError
 from ai_sdr_agent.models import (
     SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
@@ -1678,7 +1677,7 @@ def sdr_confirm_meeting(request, meeting_id):
             campaign = meeting.enrollment.campaign
             try:
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                MeetingSchedulingAgent().send_confirmation_email(campaign, lead, meeting)
+                MeetingSchedulingAgent(company=company_user.company).send_confirmation_email(campaign, lead, meeting)
             except KeyServiceError:
                 raise
             except Exception as exc:
@@ -1715,7 +1714,7 @@ def sdr_send_meeting_reminder(request, meeting_id):
     campaign = meeting.enrollment.campaign
     try:
         from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-        MeetingSchedulingAgent().send_reminder_email(campaign, meeting.lead, meeting)
+        MeetingSchedulingAgent(company=company_user.company).send_reminder_email(campaign, meeting.lead, meeting)
         meeting.reminder_sent_at = timezone.now()
         meeting.save(update_fields=['reminder_sent_at'])
         return Response({'status': 'success', 'message': 'Reminder sent.', 'data': _serialize_meeting(meeting)})
@@ -1783,7 +1782,7 @@ def sdr_resend_scheduling_email(request, meeting_id):
     campaign = meeting.enrollment.campaign
     try:
         from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-        MeetingSchedulingAgent().send_scheduling_email(
+        MeetingSchedulingAgent(company=company_user.company).send_scheduling_email(
             campaign, meeting.lead, meeting, meeting.prep_notes or None
         )
         meeting.scheduling_email_sent_at = timezone.now()
@@ -2107,7 +2106,7 @@ def sdr_booking_confirm(request, token):
     if campaign:
         try:
             from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-            MeetingSchedulingAgent().send_confirmation_email(campaign, meeting.lead, meeting)
+            MeetingSchedulingAgent(company=None).send_confirmation_email(campaign, meeting.lead, meeting)
         except KeyServiceError:
             raise
         except Exception as exc:

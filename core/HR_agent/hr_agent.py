@@ -72,6 +72,9 @@ class HRAgent(BaseAgent):
                 'citations': knowledge_result.get('citations', []),
             }
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.exception("HRAgent.answer_question LLM formatting failed: %s", exc)
             return {
                 'success': True,
@@ -102,6 +105,9 @@ class HRAgent(BaseAgent):
             )
             return {'success': True, 'summary': (summary or '').strip()}
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.exception("HRAgent.summarize_document failed")
             return {'success': False, 'error': str(exc)}
 
@@ -145,5 +151,8 @@ class HRAgent(BaseAgent):
                 return {'success': False, 'error': 'LLM did not return valid JSON', 'raw': s[:500]}
             return {'success': True, 'data': data}
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.exception("HRAgent.extract_from_document failed")
             return {'success': False, 'error': str(exc)}

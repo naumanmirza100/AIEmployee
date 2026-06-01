@@ -336,6 +336,9 @@ Provide a summary JSON with:
                         summary_response = summary_response[json_start:json_end].strip()
                 summary = json.loads(summary_response)
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 self.log_action("Summary generation failed", {"error": str(e)})
                 summary = {
                     "prioritization_strategy": f"Prioritized {len(tasks)} tasks with {high_priority_count} high, {medium_priority_count} medium, and {low_priority_count} low priority tasks.",
@@ -371,6 +374,9 @@ Provide a summary JSON with:
             return result_data
             
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error prioritizing tasks", {"error": str(e)})
             # Fallback: simple priority based on due date
             for task in tasks:
@@ -631,6 +637,9 @@ Return ONLY the reasoning text (no prefixes, no labels, just the reasoning). Mak
                                 combined_reasoning = combined_reasoning[len(prefix):].strip()
                         task['ai_reasoning'] = combined_reasoning
                     except Exception as e:
+                        from core.api_key_service import KeyServiceError
+                        if isinstance(e, KeyServiceError):
+                            raise
                         self.log_action("Combined reasoning generation failed", {"error": str(e), "task_id": task_id})
                         # Fallback: combine existing reasoning
                         priority_reasoning = task.get('ai_reasoning', '')
@@ -732,6 +741,9 @@ Provide a detailed JSON response:
                 else:
                     order_analysis['summary'] = overall_reasoning
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 self.log_action("Overall reasoning generation failed", {"error": str(e)})
                 if not order_analysis.get('summary'):
                     order_analysis['summary'] = {}
@@ -746,6 +758,9 @@ Provide a detailed JSON response:
             }
             
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error suggesting task order", {"error": str(e)})
             # Fallback: sort by priority and due date
             sorted_tasks = sorted(tasks, key=lambda t: (
@@ -813,6 +828,9 @@ Return JSON format:
             return estimate
             
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error calculating effort", {"error": str(e)})
             # Fallback estimate
             return {
@@ -1060,6 +1078,9 @@ Return JSON:
             return analysis
             
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error identifying bottlenecks", {"error": str(e)})
             return {
                 "bottlenecks": [
@@ -1351,6 +1372,9 @@ Return JSON:
             return suggestions
             
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error suggesting delegation", {"error": str(e)})
             # Fallback: round-robin assignment
             suggestions = []
@@ -1532,6 +1556,9 @@ Provide a comprehensive JSON response explaining why THIS EXECUTION STRATEGY is 
                     reasoning_response = reasoning_response[json_start:json_end].strip()
             overall_reasoning = json.loads(reasoning_response)
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Overall reasoning generation failed", {"error": str(e)})
             overall_reasoning = {
                 "overall_reasoning": f"This execution strategy optimizes project delivery by focusing on high-value, urgent tasks first and sequencing them for maximum parallelization and efficiency. The approach balances urgency, importance, dependencies, and resource availability to achieve optimal project outcomes.",

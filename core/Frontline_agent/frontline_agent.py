@@ -193,6 +193,9 @@ class FrontlineAgent(BaseAgent):
                 'citations': knowledge_result.get('citations', []),
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f"Error generating answer: {e}", exc_info=True)
             # Fallback to direct answer from knowledge base
             return {
@@ -259,6 +262,9 @@ class FrontlineAgent(BaseAgent):
                 return q
             return rewritten
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning("Contextualise-with-history failed: %s", exc)
             return question
 
@@ -295,6 +301,9 @@ class FrontlineAgent(BaseAgent):
                 return None
             return rewritten
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning("Query rewrite failed: %s", exc)
             return None
 
@@ -337,6 +346,9 @@ class FrontlineAgent(BaseAgent):
             data = _json.loads(raw)
             return data
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.warning(f"Ticket intent extraction failed: {e}")
             return None
 
@@ -387,8 +399,10 @@ class FrontlineAgent(BaseAgent):
                 result['formatted_response'] = formatted_response
                 logger.info(f"Ticket {result['ticket_id']} auto-resolved with formatted response")
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 logger.warning(f"Error formatting auto-resolution response: {e}")
-                # Use direct resolution text
                 result['formatted_response'] = result.get('resolution', '')
         
         return result

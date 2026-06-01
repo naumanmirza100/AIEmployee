@@ -910,6 +910,9 @@ INSTRUCTIONS:
             
             return result
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error answering question", {"error": str(e)})
             return {
                 "success": False,
@@ -984,6 +987,9 @@ Provide a clear, step-by-step explanation of how this workflow works."""
                 "explanation": explanation
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {
                 "success": False,
                 "error": str(e)
@@ -1022,8 +1028,11 @@ Provide a clear, step-by-step explanation of how this workflow works."""
             )
             return {"success": True, "project_id": project_id, "summary": summary}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {"success": False, "error": str(e)}
-    
+
     def provide_insights(self, project_id: int) -> Dict:
         """
         Provide insights based on project patterns.

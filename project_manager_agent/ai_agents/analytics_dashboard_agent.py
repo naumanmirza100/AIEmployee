@@ -492,6 +492,9 @@ Use markdown formatting. Keep it concise."""
                 "generated_at": timezone.now().isoformat(),
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {"success": False, "error": str(e)}
 
     def calculate_health_score(self, project_id: int, company_user=None) -> Dict:

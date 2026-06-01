@@ -75,16 +75,16 @@ def _hr_get_or_create_user_for_company_user(company_user):
     """Get or create a Django User for a CompanyUser. Mirrors the Frontline
     helper — needed because the `uploaded_by` FK on HRDocument points at
     `auth.User`, not `core.CompanyUser`."""
-    try:
-        return User.objects.get(email=company_user.email)
-    except User.DoesNotExist:
-        username = f"company_user_{company_user.id}_{company_user.email}"
-        return User.objects.create_user(
-            username=username, email=company_user.email, password=None,
-            first_name=(company_user.full_name.split()[0] if company_user.full_name else ''),
-            last_name=(' '.join(company_user.full_name.split()[1:])
-                       if company_user.full_name and len(company_user.full_name.split()) > 1 else ''),
-        )
+    user = User.objects.filter(email=company_user.email).first()
+    if user:
+        return user
+    username = f"company_user_{company_user.id}_{company_user.email}"
+    return User.objects.create_user(
+        username=username, email=company_user.email, password=None,
+        first_name=(company_user.full_name.split()[0] if company_user.full_name else ''),
+        last_name=(' '.join(company_user.full_name.split()[1:])
+                   if company_user.full_name and len(company_user.full_name.split()) > 1 else ''),
+    )
 
 
 # ============================================================================

@@ -447,6 +447,8 @@ def process_cvs(request):
                 'total': len(ranked)
             })
             
+        except KeyServiceError:
+            raise
         except Exception as e:
             # Clean up temp files on error
             for temp_path in temp_paths:
@@ -454,7 +456,7 @@ def process_cvs(request):
                     temp_path.unlink()
                 except Exception:
                     pass
-            
+
             logger.error(f"CV processing error: {e}")
             return Response({
                 'status': 'error',

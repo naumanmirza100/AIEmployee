@@ -211,7 +211,7 @@ Rules:
         Returns backward-compatible dict + extended 'category' and 'action' keys.
         """
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent, CAT_POSITIVE, CAT_WANTS_MORE
-        result = EmailAssistantAgent().classify_reply(reply_text)
+        result = EmailAssistantAgent(company=self._company).classify_reply(reply_text)
 
         # Map category → legacy sentiment for backward-compat callers
         cat = result['category']

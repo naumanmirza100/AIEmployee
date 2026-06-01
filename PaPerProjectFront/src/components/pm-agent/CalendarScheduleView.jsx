@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, CalendarDays, AlertTriangle, Clock, User } from 'lucide-react';
 
@@ -62,7 +63,7 @@ export default function CalendarScheduleView() {
       const data = res?.data?.data || res?.data || {};
       setSchedule(data);
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to generate schedule', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to generate schedule'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }

@@ -247,8 +247,10 @@ class BaseAgent:
                 duration_ms=int((_time.time() - _start) * 1000),
                 success=False,
             )
-            # Try fallback model if primary fails
-            if self.fallback_model and self.fallback_model != effective_model:
+            # Try fallback model only when provider is groq — fallback_model is a Groq
+            # model name; reusing an OpenAI client with it would cause model-not-found.
+            _provider = getattr(key_ctx, 'provider', 'groq') if key_ctx else 'groq'
+            if self.fallback_model and self.fallback_model != effective_model and _provider == 'groq':
                 logger.warning(f"{self.agent_name}: Primary model '{effective_model}' failed ({e}), trying fallback '{self.fallback_model}'")
                 _fallback_start = _time.time()
                 try:

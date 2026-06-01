@@ -72,7 +72,10 @@ Reply with ONLY "yes" or "no". Answer "yes" if the text contains any of: discuss
                         "The AI will extract: summary, action items, key decisions, risks, and follow-ups."
                     )
                 }
-        except Exception:
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             pass  # If validation fails, proceed with analysis anyway
 
         # Validate mentioned people against project team members (only if a project is selected)
@@ -124,7 +127,10 @@ If no names found, return: []"""
                                 f"or select a different project that these members belong to."
                             )
                         }
-            except (json.JSONDecodeError, Exception):
+            except (json.JSONDecodeError, Exception) as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 pass  # If name extraction fails, proceed with analysis
 
         context_str = ""
@@ -201,6 +207,9 @@ Return ONLY the JSON."""
             except (json.JSONDecodeError, IndexError):
                 return {"success": True, "answer": response}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error summarizing meeting", {"error": str(e)})
             return {"success": False, "error": str(e)}
 
@@ -241,6 +250,9 @@ Return ONLY the JSON array."""
             except (json.JSONDecodeError, IndexError):
                 return {"success": True, "answer": response}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {"success": False, "error": str(e)}
 
     def process(self, action: str = "summarize", **kwargs) -> Dict:
