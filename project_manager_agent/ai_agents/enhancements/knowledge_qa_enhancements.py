@@ -12,18 +12,15 @@ import math
 
 logger = logging.getLogger(__name__)
 
-# Try to import OpenAI for embeddings
+# OpenAI embeddings are resolved per-company through the key service, not env vars.
+# This module-level client is intentionally None; callers that need embeddings
+# must pass their own company-resolved client.
 try:
-    from openai import OpenAI
-    from django.conf import settings
-    OPENAI_AVAILABLE = bool(getattr(settings, 'OPENAI_API_KEY', None))
-    if OPENAI_AVAILABLE:
-        openai_client = OpenAI(api_key=getattr(settings, 'OPENAI_API_KEY', None))
-    else:
-        openai_client = None
-except (ImportError, AttributeError):
+    from openai import OpenAI  # noqa: F401 — import check only
+    OPENAI_AVAILABLE = True
+except ImportError:
     OPENAI_AVAILABLE = False
-    openai_client = None
+openai_client = None  # Never pre-created from env; always resolved per-company at runtime.
 
 
 class KnowledgeQAEnhancements:

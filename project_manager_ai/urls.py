@@ -10,6 +10,7 @@ from project_manager_agent.views import (
     generate_subtasks, view_task_subtasks
 )
 from marketing_agent import views_email_tracking
+from ai_sdr_agent.views_booking import book_meeting
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -64,6 +65,9 @@ urlpatterns = [
     path('token/', views_email_tracking.simple_track_open, name='root_simple_track_open'),
     path('token/<str:tracking_token>/', views_email_tracking.simple_track_click, name='root_simple_track_click'),
     
+    # Public meeting booking page (no auth — token in URL)
+    path('book/<uuid:token>/', book_meeting, name='sdr_book_meeting'),
+
     # API Routes
     path('api/', include('api.urls')),
     

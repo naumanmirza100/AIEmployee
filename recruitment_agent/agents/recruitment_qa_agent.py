@@ -381,7 +381,12 @@ FORMATTING (when your answer has multiple parts or a list):
 - Keep headings short; put details in lists or short paragraphs under them."""
 
     def __init__(self, groq_client: Optional[GroqClient] = None):
-        self.groq_client = groq_client or GroqClient()
+        if groq_client is None:
+            raise ValueError(
+                "RecruitmentQAAgent requires an explicit groq_client resolved via "
+                "resolve_for_call(). Keys are never sourced from environment variables."
+            )
+        self.groq_client = groq_client
 
     def process(
         self,

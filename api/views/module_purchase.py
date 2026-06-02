@@ -32,6 +32,8 @@ MODULE_PRICES = {
     'operations_agent': 179,
     'reply_draft_agent': 79,
     'hr_agent': 129,
+    'ai_sdr_agent': 199,
+    'crm_sync_agent': 99,
 }
 
 MODULE_DISPLAY_NAMES = {
@@ -42,6 +44,8 @@ MODULE_DISPLAY_NAMES = {
     'operations_agent': 'Operations Agent',
     'reply_draft_agent': 'Reply Draft Agent',
     'hr_agent': 'HR Support Agent',
+    'ai_sdr_agent': 'AI SDR Agent',
+    'crm_sync_agent': 'CRM & System Sync Agent',
 }
 
 # Subscription duration (30 days per purchase)

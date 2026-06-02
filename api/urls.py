@@ -627,6 +627,8 @@ urlpatterns = [
     re_path(r'^admin/companies-list/?$', admin_api_keys.list_companies_simple, name='admin_list_companies'),  # GET
 
     # AI SDR Agent endpoints
+    re_path(r'^sdr/scheduler-status/?$', sdr_api.sdr_scheduler_status, name='sdr_scheduler_status'),  # GET
+    re_path(r'^sdr/leads/bulk-delete/?$', sdr_api.sdr_bulk_delete_leads, name='sdr_bulk_delete_leads'),  # POST
     re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET
     re_path(r'^sdr/analytics/?$', sdr_api.sdr_analytics, name='sdr_analytics'),  # GET
     re_path(r'^sdr/analytics/send-summary/?$', sdr_api.sdr_send_daily_summary, name='sdr_send_daily_summary'),  # POST
@@ -658,6 +660,7 @@ urlpatterns = [
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/generate-prep/?$', sdr_api.sdr_generate_meeting_prep, name='sdr_generate_meeting_prep'),  # POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/resend-scheduling/?$', sdr_api.sdr_resend_scheduling_email, name='sdr_resend_scheduling_email'),  # POST
     re_path(r'^sdr/check-all-replies/?$', sdr_api.sdr_check_all_replies, name='sdr_check_all_replies'),  # POST
+    re_path(r'^sdr/settings/?$', sdr_api.sdr_agent_settings, name='sdr_agent_settings'),  # GET, POST
     # Google Calendar OAuth (one-time setup)
     re_path(r'^sdr/google-auth/?$', sdr_api.sdr_google_auth_start, name='sdr_google_auth_start'),
     re_path(r'^sdr/google-auth/callback/?$', sdr_api.sdr_google_auth_callback, name='sdr_google_auth_callback'),

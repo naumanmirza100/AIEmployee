@@ -229,11 +229,12 @@ def process_cvs(request):
                 except Exception as parse_exc:
                     # Check if it's an API key expiration error
                     from recruitment_agent.core import GroqClientError
-                    if isinstance(parse_exc, GroqClientError) and parse_exc.is_auth_error:
-                        logger.error(f"Groq API key expired during CV parsing for {uploaded_file.name}")
+                    from core.api_key_service import BadAPIKey
+                    if isinstance(parse_exc, (GroqClientError, BadAPIKey)) and getattr(parse_exc, 'is_auth_error', False):
+                        logger.error(f"API key rejected during CV parsing for {uploaded_file.name}")
                         return Response({
                             'status': 'error',
-                            'message': 'Groq API key expired or invalid. Please update GROQ_REC_API_KEY in environment variables and try again.',
+                            'message': 'API key rejected by provider. Please update your key in API Keys settings (BYOK) or contact your admin to refresh the managed key.',
                             'error_type': 'api_key_expired'
                         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                     else:

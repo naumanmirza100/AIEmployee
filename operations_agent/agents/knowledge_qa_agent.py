@@ -123,11 +123,14 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             if not getattr(self, 'groq_client', None):
                 return {
                     'success': False,
-                    'error': 'AI service is not configured. Please set GROQ_API_KEY.',
+                    'error': (
+                        'No API key available for this agent. Please add a BYOK key in '
+                        'API Keys settings or ask your admin to assign a managed key.'
+                    ),
                     'answer': (
                         "I'm unable to reach the AI service right now. "
-                        "An administrator needs to configure the GROQ_API_KEY. "
-                        "Once configured you can ask me anything about your uploaded operations documents."
+                        "Please configure an API key in the platform's API Keys settings "
+                        "(BYOK) or contact your admin to assign a managed key."
                     ),
                     'sources': [],
                 }

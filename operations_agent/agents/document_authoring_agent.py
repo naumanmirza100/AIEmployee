@@ -228,7 +228,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 return
 
             if not getattr(self, 'groq_client', None):
-                yield ('error', {'message': 'AI service is not configured. Please set GROQ_API_KEY.'})
+                yield ('error', {'message': 'No API key available. Please add a BYOK key in API Keys settings or ask your admin to assign a managed key.'})
                 return
 
             yield ('meta', {
@@ -341,7 +341,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             return {'ok': False, 'error': 'Prompt is required.'}
 
         if not getattr(self, 'groq_client', None):
-            return {'ok': False, 'error': 'AI service is not configured. Please set GROQ_API_KEY.'}
+            return {'ok': False, 'error': 'No API key available. Please add a BYOK key in API Keys settings or ask your admin to assign a managed key.'}
 
         template_info = TEMPLATE_GUIDES.get(template_type) or TEMPLATE_GUIDES['custom']
         tone_guide = TONE_GUIDES.get(tone, TONE_GUIDES['formal'])
