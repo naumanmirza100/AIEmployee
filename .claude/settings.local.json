@@ -90,7 +90,8 @@
       "Bash(dir core\\\\migrations\\\\*.py /b)",
       "Read(//d/University/work/AI_Employyes/ReplyAgent/AIEmployee/core/migrations/**)",
       "Bash(git commit -m ' *)",
-      "Bash(npm list *)"
+      "Bash(npm list *)",
+      "Bash(Get-ChildItem -Path \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\PaPerProjectFront\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")"
     ]
   }
 }
