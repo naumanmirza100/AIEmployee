@@ -633,66 +633,6 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
               </span>
               <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
               {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
-
-              {/* Inline details — only when active and managedKey available */}
-              {isActive && managedKey && (
-                <>
-                  <span className="text-white/15 text-base leading-none mx-0.5">·</span>
-                  {/* Payment */}
-                  {(r.amount_paid != null || r.key_cost_snapshot > 0) && (
-                    <>
-                      <span className="text-[9px] text-white/40">
-                        Paid <span className="text-emerald-300 font-semibold">${(r.amount_paid ?? (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0)).toFixed(2)}</span>
-                        <span className="text-white/25 ml-1">(${(r.key_cost_snapshot ?? 0).toFixed(2)} + ${(r.service_charge_snapshot ?? 0).toFixed(2)} svc)</span>
-                      </span>
-                      <span className="text-white/15 text-base leading-none mx-0.5">·</span>
-                    </>
-                  )}
-                  {/* Billing plan */}
-                  <span className="text-[9px] text-white/40">
-                    <span className="text-white/25">Plan: </span>
-                    <span className="text-violet-300 font-medium capitalize">
-                      {managedKey.renewal_period === 'none' || !managedKey.renewal_period ? 'One-time' : managedKey.renewal_period}
-                    </span>
-                  </span>
-                  <span className="text-white/15 text-base leading-none mx-0.5">·</span>
-                  {/* Token reset */}
-                  <span className="text-[9px] text-white/40">
-                    <span className="text-white/25">Reset: </span>
-                    {managedKey.renewal_period && managedKey.renewal_period !== 'none'
-                      ? <span className="text-emerald-400 font-medium">
-                          {quota?.next_reset_at ? new Date(quota.next_reset_at).toLocaleDateString() : 'Every 7d'}
-                        </span>
-                      : <span className="text-white/30">None</span>
-                    }
-                  </span>
-                  {/* Tokens/week */}
-                  {managedKey.tokens_per_period > 0 && (
-                    <>
-                      <span className="text-white/15 text-base leading-none mx-0.5">·</span>
-                      <span className="text-[9px] text-white/40">
-                        <span className="text-white/25">Tokens/wk: </span>
-                        <span className="text-violet-300 font-medium">{Number(managedKey.tokens_per_period).toLocaleString()}</span>
-                      </span>
-                    </>
-                  )}
-                  {/* Expiry */}
-                  {managedKey.valid_until && (() => {
-                    const expiry = new Date(managedKey.valid_until);
-                    const daysLeft = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
-                    const urgent = daysLeft <= 7;
-                    return (
-                      <>
-                        <span className="text-white/15 text-base leading-none mx-0.5">·</span>
-                        <span className={`text-[9px] font-medium ${urgent ? 'text-amber-400' : 'text-white/40'}`}>
-                          <span className="text-white/25">Expires: </span>
-                          {expiry.toLocaleDateString()}{urgent && ` ⚠ ${daysLeft}d`}
-                        </span>
-                      </>
-                    );
-                  })()}
-                </>
-              )}
             </div>
 
             {!r._synthetic && r.note && <p className="text-xs text-white/50 mt-1 italic">Your note: "{r.note}"</p>}
@@ -779,21 +719,21 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                 {(latest.amount_paid != null || latest.key_cost_snapshot > 0) && (
                   <>
                     <span className="text-white/15 text-sm">·</span>
-                    <span className="text-[9px] text-white/40">
+                    <span className="text-[10px] text-white/40">
                       Paid <span className="text-emerald-300 font-semibold">${(latest.amount_paid ?? (latest.key_cost_snapshot ?? 0) + (latest.service_charge_snapshot ?? 0)).toFixed(2)}</span>
                       <span className="text-white/25 ml-1">(${(latest.key_cost_snapshot ?? 0).toFixed(2)} + ${(latest.service_charge_snapshot ?? 0).toFixed(2)} svc)</span>
                     </span>
                   </>
                 )}
                 <span className="text-white/15 text-sm">·</span>
-                <span className="text-[9px] text-white/40">
+                <span className="text-[11px] text-white/40">
                   <span className="text-white/25">Plan: </span>
                   <span className="text-violet-300 font-medium capitalize">
                     {managedKey.renewal_period === 'none' || !managedKey.renewal_period ? 'One-time' : managedKey.renewal_period}
                   </span>
                 </span>
                 <span className="text-white/15 text-sm">·</span>
-                <span className="text-[9px] text-white/40">
+                <span className="text-[11px] text-white/40">
                   <span className="text-white/25">Reset: </span>
                   {managedKey.renewal_period && managedKey.renewal_period !== 'none'
                     ? <span className="text-emerald-400 font-medium">{quota?.next_reset_at ? new Date(quota.next_reset_at).toLocaleDateString() : 'Every 7d'}</span>
@@ -803,7 +743,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                 {managedKey.tokens_per_period > 0 && (
                   <>
                     <span className="text-white/15 text-sm">·</span>
-                    <span className="text-[9px] text-white/40">
+                    <span className="text-[11px] text-white/40">
                       <span className="text-white/25">Tokens/wk: </span>
                       <span className="text-violet-300 font-medium">{Number(managedKey.tokens_per_period).toLocaleString()}</span>
                     </span>
@@ -816,7 +756,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                   return (
                     <>
                       <span className="text-white/15 text-sm">·</span>
-                      <span className={`text-[9px] font-medium ${urgent ? 'text-amber-400' : 'text-white/40'}`}>
+                      <span className={`text-[11px] font-medium ${urgent ? 'text-amber-400' : 'text-white/40'}`}>
                         <span className="text-white/25">Expires: </span>
                         {expiry.toLocaleDateString()}{urgent && ` ⚠ ${daysLeft}d`}
                       </span>
