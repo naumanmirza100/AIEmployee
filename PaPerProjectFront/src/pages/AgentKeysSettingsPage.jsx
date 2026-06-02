@@ -197,13 +197,15 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
     if (p === 'free') return 'free';
     if (p === 'managed') {
       if (hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
-      return 'platform';
+      // preferred managed but no managed key exists — fall back to free tokens
+      return 'free';
     }
     // BYOK wins when preferred_pool is 'byok' or unset (backend Step 1)
     // cap-hit still counts as 'byok' — it IS the active key, just blocked by cap
     if (p === 'byok' || (!p && agent.byok)) return 'byok';
     if (hasManagedKey) return q?.managed_is_exhausted ? 'blocked' : 'managed';
-    return 'platform';
+    // No BYOK, no managed key — free platform tokens are active
+    return 'free';
   })();
 
   return (

@@ -197,6 +197,11 @@ def upsert_byok_key(request):
     if len(api_key) < 10:
         return Response({'status': 'error', 'message': 'API key looks too short to be valid'},
                         status=status.HTTP_400_BAD_REQUEST)
+    try:
+        api_key.encode('latin-1')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return Response({'status': 'error', 'message': 'API key contains invalid characters. Please paste only the plain key text.'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
     has_purchase = CompanyModulePurchase.objects.filter(
         company=company, module_name=agent_name, status='active'

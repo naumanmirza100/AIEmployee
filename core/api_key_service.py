@@ -24,6 +24,7 @@ from typing import Optional
 
 from django.db import transaction
 from django.db.models import F
+from django.utils import timezone
 
 from core.models import (
     AGENT_CHOICES,
@@ -169,30 +170,25 @@ def _ensure_quota(company, agent_name: str) -> AgentTokenQuota:
 
 
 def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIKey') -> None:
-    """Reset managed_used_tokens every 7 days while the key is active and has renewal.
-
-    Called inside resolve_for_call before the quota gate so the reset is
-    transparent to the caller — they just see a fresh counter.
-    Weekly reset fires regardless of whether the billing period is monthly or yearly;
-    the billing period only controls valid_until (when the key expires and
-    company must renew/pay again).
-    """
+    """Reset managed_used_tokens every 7 days while the key is active and has renewal."""
     import logging
+    from datetime import timedelta
     _log = logging.getLogger(__name__)
     now = timezone.now()
 
-    # Only reset when the managed key has an active renewal and tokens_per_period set
-    if managed_key.renewal_period == 'none' or managed_key.tokens_per_period <= 0:
+    if not managed_key.renewal_period or managed_key.renewal_period == 'none':
+        return
+    if not managed_key.tokens_per_period or managed_key.tokens_per_period <= 0:
         return
     if quota.next_reset_at is None:
         return
     if now < quota.next_reset_at:
         return
 
-    # Reset is due — advance next_reset_at by 7-day steps until it's in the future
+    # Advance next_reset_at by 7-day steps until it is in the future
     next_reset = quota.next_reset_at
     while next_reset <= now:
-        next_reset = next_reset + timezone.timedelta(days=7)
+        next_reset = next_reset + timedelta(days=7)
 
     AgentTokenQuota.objects.filter(pk=quota.pk).update(
         managed_used_tokens=0,
@@ -203,21 +199,18 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
         managed_notified_90pct=False,
         managed_notified_100pct=False,
     )
-    # Refresh the in-memory object so the quota gate below reads fresh values
     quota.managed_used_tokens = 0
     quota.managed_included_tokens = managed_key.tokens_per_period
     quota.next_reset_at = next_reset
     _log.info(
-        "Weekly token reset applied: company=%s agent=%s tokens=%s next_reset=%s",
-        company.id, agent_name, managed_key.tokens_per_period, next_reset,
+        "Weekly token reset applied: key=%s tokens=%s next_reset=%s",
+        managed_key.id, managed_key.tokens_per_period, next_reset,
     )
-    # Notify company about the reset
     try:
-        from core.notification_utils import notify_company_quota as _ncq  # noqa: avoid circular at module level
         from project_manager_agent.models import PMNotification
         from core.models import CompanyUser
         agent_label = managed_key.get_agent_name_display()
-        for cu in CompanyUser.objects.filter(company=company, is_active=True):
+        for cu in CompanyUser.objects.filter(company=managed_key.company, is_active=True):
             PMNotification.objects.create(
                 company_user=cu,
                 notification_type='custom',

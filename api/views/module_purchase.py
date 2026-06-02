@@ -94,7 +94,9 @@ def _fulfill_purchase_from_metadata(metadata):
         )
         logger.info('Module %s purchased for company %s (ID: %s)', module_name, company.name, company.id)
 
-    # Fresh quota on every purchase/re-purchase — clean slate regardless of history
+    # Ensure quota exists — create only if missing, never overwrite existing.
+    # If admin deleted history before, quota was deleted too so this creates fresh.
+    # If quota exists (history kept), leave it untouched — preserve tokens/usage.
     from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
     try:
         cfg = AdminPricingConfig.objects.get(agent_name=module_name)
@@ -102,34 +104,15 @@ def _fulfill_purchase_from_metadata(metadata):
     except AdminPricingConfig.DoesNotExist:
         free_tokens = DEFAULT_FREE_TOKENS
 
-    quota, created = AgentTokenQuota.objects.get_or_create(
+    _, created = AgentTokenQuota.objects.get_or_create(
         company=company,
         agent_name=module_name,
         defaults={'included_tokens': free_tokens},
     )
-    if not created:
-        AgentTokenQuota.objects.filter(pk=quota.pk).update(
-            included_tokens=free_tokens,
-            used_tokens=0,
-            managed_included_tokens=0,
-            managed_used_tokens=0,
-            byok_tokens_info=0,
-            byok_token_limit=0,
-            preferred_pool='managed',
-            next_reset_at=None,
-            notified_80pct=False,
-            notified_90pct=False,
-            notified_100pct=False,
-            managed_notified_80pct=False,
-            managed_notified_90pct=False,
-            managed_notified_100pct=False,
-            byok_notified_80pct=False,
-            byok_notified_90pct=False,
-            byok_notified_100pct=False,
-        )
-        logger.info('Quota reset for %s company %s on re-purchase', module_name, company.name)
-    else:
+    if created:
         logger.info('Fresh quota created for %s company %s', module_name, company.name)
+    else:
+        logger.info('Quota preserved for %s company %s on re-purchase', module_name, company.name)
 
     return True, module_name
 

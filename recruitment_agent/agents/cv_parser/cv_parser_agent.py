@@ -290,8 +290,17 @@ class CVParserAgent:
     def _clean_text(self, text: str) -> str:
         """
         Normalize whitespace and remove non-informative characters.
+        Encode to ASCII-safe UTF-8 so downstream HTTP clients never hit latin-1 issues.
         """
         cleaned = text.replace("\xa0", " ")
+        # Replace common Unicode bullet/arrow symbols with ASCII equivalents
+        bullet_map = {
+            '●': '-', '•': '-', '◦': '-', '‣': '-',
+            '▪': '-', '▫': '-', '–': '-', '—': '-',
+            '’': "'", '‘': "'", '“': '"', '”': '"',
+        }
+        for char, replacement in bullet_map.items():
+            cleaned = cleaned.replace(char, replacement)
         cleaned = re.sub(r"[ \t]+", " ", cleaned)
         cleaned = re.sub(r"\n{2,}", "\n", cleaned)
         cleaned = cleaned.strip()

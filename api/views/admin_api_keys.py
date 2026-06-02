@@ -173,6 +173,11 @@ def assign_managed_key(request):
         return Response({'status': 'error', 'message': 'API key looks too short'},
                         status=status.HTTP_400_BAD_REQUEST)
     try:
+        api_key.encode('latin-1')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return Response({'status': 'error', 'message': 'API key contains invalid characters. Paste only the plain key text.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
         company = Company.objects.get(pk=company_id)
     except Company.DoesNotExist:
         return Response({'status': 'error', 'message': 'Company not found'},

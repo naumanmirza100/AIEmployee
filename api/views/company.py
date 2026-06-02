@@ -398,8 +398,11 @@ def toggle_company_agent_status(request, purchaseId):
                 purchase.expires_at = timezone.now() + timedelta(days=30)
                 purchase.save()
 
-                # Re-activation: create fresh quota with free tokens from pricing config.
-                # If a quota row already exists (history was kept), reset it to fresh state.
+                # Re-activation quota handling:
+                # - history kept (keep_history=True): quota row still exists with all
+                #   original tokens/usage — leave it completely untouched.
+                # - history deleted (keep_history=False): quota was deleted above,
+                #   so get_or_create will make a fresh row.
                 from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
                 company = purchase.company
                 agent_name = purchase.module_name
@@ -409,32 +412,21 @@ def toggle_company_agent_status(request, purchaseId):
                 except AdminPricingConfig.DoesNotExist:
                     free_tokens = DEFAULT_FREE_TOKENS
 
-                quota, created = AgentTokenQuota.objects.get_or_create(
+                # Only create if missing — never overwrite existing quota when history was kept
+                quota_obj, created = AgentTokenQuota.objects.get_or_create(
                     company=company,
                     agent_name=agent_name,
                     defaults={'included_tokens': free_tokens},
                 )
-                if not created:
-                    # Reset to fresh state — clear all usage and notification flags
-                    AgentTokenQuota.objects.filter(pk=quota.pk).update(
-                        included_tokens=free_tokens,
-                        used_tokens=0,
-                        managed_included_tokens=0,
-                        managed_used_tokens=0,
-                        byok_tokens_info=0,
-                        byok_token_limit=0,
-                        preferred_pool='managed',
-                        next_reset_at=None,
-                        notified_80pct=False,
-                        notified_90pct=False,
-                        notified_100pct=False,
-                        managed_notified_80pct=False,
-                        managed_notified_90pct=False,
-                        managed_notified_100pct=False,
-                        byok_notified_80pct=False,
-                        byok_notified_90pct=False,
-                        byok_notified_100pct=False,
-                    )
+                # If quota existed with preferred_pool='managed' but no managed key,
+                # reset to None so frontend shows free tokens as active automatically
+                if not created and quota_obj.preferred_pool == 'managed':
+                    from core.models import CompanyAPIKey as _CAK
+                    has_managed = _CAK.objects.filter(
+                        company=company, agent_name=agent_name, mode='managed', status='active'
+                    ).exists()
+                    if not has_managed:
+                        AgentTokenQuota.objects.filter(pk=quota_obj.pk).update(preferred_pool=None)
 
         return Response({
             'status': 'success',
