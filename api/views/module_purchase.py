@@ -80,6 +80,7 @@ def _fulfill_purchase_from_metadata(metadata):
         existing.expires_at = expires_at
         existing.cancelled_at = None
         existing.cancelled_reason = None
+        existing.history_kept = None
         existing.save()
         logger.info('Module %s re-activated for company %s (ID: %s)', module_name, company.name, company.id)
     else:
@@ -92,6 +93,44 @@ def _fulfill_purchase_from_metadata(metadata):
             expires_at=expires_at,
         )
         logger.info('Module %s purchased for company %s (ID: %s)', module_name, company.name, company.id)
+
+    # Fresh quota on every purchase/re-purchase — clean slate regardless of history
+    from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
+    try:
+        cfg = AdminPricingConfig.objects.get(agent_name=module_name)
+        free_tokens = cfg.free_tokens_on_purchase
+    except AdminPricingConfig.DoesNotExist:
+        free_tokens = DEFAULT_FREE_TOKENS
+
+    quota, created = AgentTokenQuota.objects.get_or_create(
+        company=company,
+        agent_name=module_name,
+        defaults={'included_tokens': free_tokens},
+    )
+    if not created:
+        AgentTokenQuota.objects.filter(pk=quota.pk).update(
+            included_tokens=free_tokens,
+            used_tokens=0,
+            managed_included_tokens=0,
+            managed_used_tokens=0,
+            byok_tokens_info=0,
+            byok_token_limit=0,
+            preferred_pool='managed',
+            next_reset_at=None,
+            notified_80pct=False,
+            notified_90pct=False,
+            notified_100pct=False,
+            managed_notified_80pct=False,
+            managed_notified_90pct=False,
+            managed_notified_100pct=False,
+            byok_notified_80pct=False,
+            byok_notified_90pct=False,
+            byok_notified_100pct=False,
+        )
+        logger.info('Quota reset for %s company %s on re-purchase', module_name, company.name)
+    else:
+        logger.info('Fresh quota created for %s company %s', module_name, company.name)
+
     return True, module_name
 
 
@@ -180,6 +219,7 @@ def get_purchased_modules(request):
                 'expires_at': purchase.expires_at.isoformat() if purchase.expires_at else None,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
                 'cancelled_reason': purchase.cancelled_reason,
+                'history_kept': purchase.history_kept,
                 'price_paid': float(purchase.price_paid) if purchase.price_paid else None,
                 'purchased_by_name': purchase.purchased_by.full_name if purchase.purchased_by else None,
                 'is_expired': is_expired,

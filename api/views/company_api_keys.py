@@ -78,6 +78,9 @@ def _serialize_key(key: CompanyAPIKey):
         'masked': key.masked_display,
         'status': key.status,
         'assigned_by': key.assigned_by.username if key.assigned_by else None,
+        'renewal_period': key.renewal_period,
+        'valid_until': key.valid_until.isoformat() if key.valid_until else None,
+        'tokens_per_period': key.tokens_per_period,
         'updated_at': key.updated_at.isoformat(),
     }
 
@@ -111,6 +114,8 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
         'byok_token_limit': quota.byok_token_limit,
         'provider_breakdown': provider_breakdown,
         'default_provider': default_provider,
+        'next_reset_at': quota.next_reset_at.isoformat() if quota.next_reset_at else None,
+        'last_reset_at': quota.last_reset_at.isoformat() if quota.last_reset_at else None,
     }
 
 
@@ -326,9 +331,22 @@ def set_byok_limit(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_key_requests(request):
-    """List this company's KeyRequests (all statuses)."""
+    """List this company's KeyRequests — only for agents with active purchases."""
+    from django.db.models import OuterRef, Exists
     company = request.user.company
-    reqs = KeyRequest.objects.filter(company=company).select_related('requested_by', 'resolved_by').order_by('-created_at')
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company=company,
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    reqs = (
+        KeyRequest.objects
+        .filter(company=company)
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+        .select_related('requested_by', 'resolved_by')
+        .order_by('-created_at')
+    )
 
     data = []
     for r in reqs:
@@ -341,6 +359,7 @@ def list_key_requests(request):
             'agent_label': r.get_agent_name_display(),
             'provider': r.provider,
             'note': r.note,
+            'preferred_duration': r.preferred_duration,
             'status': r.status,
             'was_assigned': was_assigned,
             'revoked_at': r.updated_at.isoformat() if was_assigned else None,
@@ -370,6 +389,9 @@ def create_key_request(request):
     agent_name = (request.data.get('agent_name') or '').strip()
     provider = (request.data.get('provider') or 'openai').strip()
     note = (request.data.get('note') or '').strip()
+    preferred_duration = (request.data.get('preferred_duration') or 'monthly').strip()
+    if preferred_duration not in ('monthly', 'yearly'):
+        preferred_duration = 'monthly'
 
     if agent_name not in VALID_AGENTS:
         return Response({'status': 'error', 'message': 'Invalid agent_name'},
@@ -403,6 +425,7 @@ def create_key_request(request):
         agent_name=agent_name,
         provider=provider,
         note=note,
+        preferred_duration=preferred_duration,
     )
 
     # Broadcast to admins so they see it without polling the dashboard

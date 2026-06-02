@@ -91,7 +91,8 @@
       "Read(//d/University/work/AI_Employyes/ReplyAgent/AIEmployee/core/migrations/**)",
       "Bash(git commit -m ' *)",
       "Bash(npm list *)",
-      "Bash(Get-ChildItem -Path \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\PaPerProjectFront\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")"
+      "Bash(Get-ChildItem -Path \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\PaPerProjectFront\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")",
+      "Bash(del \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\core\\\\migrations\\\\0079_add_history_kept.py\")"
     ]
   }
 }

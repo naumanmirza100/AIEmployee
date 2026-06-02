@@ -529,14 +529,26 @@ const PricingRow = ({ row, onSave, saving }) => {
     service_charge_usd: row.service_charge_usd,
     free_tokens_on_purchase: row.free_tokens_on_purchase,
     managed_key_tokens: row.managed_key_tokens ?? 0,
+    yearly_discount_pct: row.yearly_discount_pct ?? '0',
   });
   const dirty = useMemo(() =>
     String(draft.monthly_flat_usd) !== String(row.monthly_flat_usd) ||
     String(draft.service_charge_usd) !== String(row.service_charge_usd) ||
     Number(draft.free_tokens_on_purchase) !== Number(row.free_tokens_on_purchase) ||
-    Number(draft.managed_key_tokens) !== Number(row.managed_key_tokens ?? 0),
+    Number(draft.managed_key_tokens) !== Number(row.managed_key_tokens ?? 0) ||
+    String(draft.yearly_discount_pct) !== String(row.yearly_discount_pct ?? '0'),
     [draft, row]
   );
+
+  // Live price calculations
+  const monthly = parseFloat(draft.monthly_flat_usd) || 0;
+  const svc = parseFloat(draft.service_charge_usd) || 0;
+  const discountPct = Math.min(100, Math.max(0, parseFloat(draft.yearly_discount_pct) || 0));
+  const monthlyTotal = monthly + svc;
+  const yearlyFull = monthlyTotal * 12;
+  const yearlyTotal = yearlyFull * (1 - discountPct / 100);
+  const yearlySaving = yearlyFull - yearlyTotal;
+
   return (
     <div className={`${ROW_CLASS} rounded-lg p-4`}>
       <div className="flex items-center justify-between mb-3">
@@ -545,22 +557,66 @@ const PricingRow = ({ row, onSave, saving }) => {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
         <div>
-          <Label className="text-white/60 text-xs">Key Cost (USD) <span className="text-white/30">— pre-filled in Approve modal</span></Label>
-          <Input
-            type="number" step="0.01"
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-            value={draft.monthly_flat_usd}
-            onChange={(e) => setDraft({ ...draft, monthly_flat_usd: e.target.value })}
-          />
+          <Label className="text-white/60 text-xs">
+            Key Cost <span className="text-violet-300 font-semibold">/ month</span>
+            <span className="text-white/30 ml-1">— pre-filled in Approve modal</span>
+          </Label>
+          <div className="relative mt-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
+            <Input
+              type="number" step="0.01"
+              className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+              value={draft.monthly_flat_usd}
+              onChange={(e) => setDraft({ ...draft, monthly_flat_usd: e.target.value })}
+            />
+          </div>
         </div>
         <div>
-          <Label className="text-white/60 text-xs">Service Charge (USD) <span className="text-white/30">— pre-filled in Approve modal</span></Label>
+          <Label className="text-white/60 text-xs">
+            Service Charge <span className="text-violet-300 font-semibold">/ month</span>
+            <span className="text-white/30 ml-1">— platform fee</span>
+          </Label>
+          <div className="relative mt-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
+            <Input
+              type="number" step="0.01"
+              className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+              value={draft.service_charge_usd}
+              onChange={(e) => setDraft({ ...draft, service_charge_usd: e.target.value })}
+            />
+          </div>
+        </div>
+        <div>
+          <Label className="text-white/60 text-xs">
+            Yearly Discount <span className="text-white/30">— % off when company pays yearly (0 = no discount)</span>
+          </Label>
+          <div className="relative mt-1">
+            <Input
+              type="number" min="0" max="100" step="1"
+              className="bg-[#1a1333] border-[#3a295a] text-white pr-7"
+              value={draft.yearly_discount_pct}
+              onChange={(e) => {
+                const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                setDraft({ ...draft, yearly_discount_pct: String(v) });
+              }}
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">%</span>
+          </div>
+          <p className="text-[10px] text-white/40 mt-1">
+            0% = no discount · 20% = 20% off · 100% = free
+          </p>
+        </div>
+        <div>
+          <Label className="text-white/60 text-xs">
+            Managed Key Tokens <span className="text-white/30">— per weekly reset</span>
+          </Label>
           <Input
-            type="number" step="0.01"
+            type="number"
             className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-            value={draft.service_charge_usd}
-            onChange={(e) => setDraft({ ...draft, service_charge_usd: e.target.value })}
+            value={draft.managed_key_tokens}
+            onChange={(e) => setDraft({ ...draft, managed_key_tokens: e.target.value })}
           />
+          <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.managed_key_tokens))} tokens / week</p>
         </div>
         <div>
           <Label className="text-white/60 text-xs">Free Platform Tokens <span className="text-white/30">— included with agent purchase</span></Label>
@@ -572,17 +628,31 @@ const PricingRow = ({ row, onSave, saving }) => {
           />
           <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.free_tokens_on_purchase))} — updates all existing quotas on save</p>
         </div>
-        <div>
-          <Label className="text-white/60 text-xs">Managed Key Tokens <span className="text-white/30">— granted when paid key is assigned</span></Label>
-          <Input
-            type="number"
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-            value={draft.managed_key_tokens}
-            onChange={(e) => setDraft({ ...draft, managed_key_tokens: e.target.value })}
-          />
-          <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.managed_key_tokens))}</p>
-        </div>
       </div>
+
+      {/* Live price calculator */}
+      {monthlyTotal > 0 && (
+        <div className="grid grid-cols-2 gap-2 mb-3 p-3 bg-violet-500/5 border border-violet-500/20 rounded-lg">
+          <div>
+            <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Monthly plan</p>
+            <p className="text-white font-bold">${monthlyTotal.toFixed(2)}<span className="text-white/40 font-normal text-[10px]"> /mo</span></p>
+            <p className="text-[10px] text-white/40">(${monthly.toFixed(2)} key + ${svc.toFixed(2)} svc)</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">
+              Yearly plan {discountPct > 0 && <span className="text-emerald-400">({discountPct}% off)</span>}
+            </p>
+            <p className="text-white font-bold">${yearlyTotal.toFixed(2)}<span className="text-white/40 font-normal text-[10px]"> /yr</span></p>
+            {yearlySaving > 0 && (
+              <p className="text-[10px] text-emerald-400">saves ${yearlySaving.toFixed(2)} vs monthly</p>
+            )}
+            {discountPct === 0 && (
+              <p className="text-[10px] text-white/30">same as monthly × 12</p>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-white/30">
           Last updated: {row.updated_by ? `${row.updated_by} • ` : ''}{new Date(row.updated_at).toLocaleString()}
@@ -1069,7 +1139,7 @@ const SuperAdminApiKeysPage = () => {
   const [requestFilter, setRequestFilter] = useState({});
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
-  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '' });
+  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '' });
   const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', admin_note: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
@@ -1171,13 +1241,18 @@ const SuperAdminApiKeysPage = () => {
 
   const openAssign = (existingOrRequest, prefill = null) => {
     if (prefill) {
+      const duration = prefill.preferred_duration || 'monthly';
+      const p = pricing.find(x => x.agent_name === prefill.agent_name);
+      const defaultTokens = p?.managed_key_tokens ? String(p.managed_key_tokens) : '';
       setAssignForm({
         company_id: prefill.company_id,
         agent_name: prefill.agent_name,
         provider: prefill.provider || 'openai',
         api_key: '',
         reset_tokens: true,
-        managed_tokens: '',
+        managed_tokens: defaultTokens,
+        renewal_period: duration,
+        duration_months: duration === 'yearly' ? '12' : duration === 'monthly' ? '1' : '',
       });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: prefill });
     } else if (existingOrRequest) {
@@ -1191,10 +1266,12 @@ const SuperAdminApiKeysPage = () => {
         managed_tokens: existingOrRequest.quota?.managed_included_tokens > 0
           ? String(existingOrRequest.quota.managed_included_tokens)
           : '',
+        renewal_period: existingOrRequest.renewal_period || 'none',
+        duration_months: '',
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -1212,8 +1289,10 @@ const SuperAdminApiKeysPage = () => {
         provider: assignForm.provider,
         api_key: assignForm.api_key,
         reset_tokens: assignForm.reset_tokens,
+        renewal_period: assignForm.renewal_period,
       };
       if (assignForm.managed_tokens.trim() !== '') payload.managed_tokens = assignForm.managed_tokens;
+      if (assignForm.duration_months.trim() !== '') payload.duration_months = Number(assignForm.duration_months);
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
       toast({ title: 'Key assigned', description: 'Company can now use this managed key.' });
@@ -1249,6 +1328,7 @@ const SuperAdminApiKeysPage = () => {
         service_charge_usd: draft.service_charge_usd,
         free_tokens_on_purchase: Number(draft.free_tokens_on_purchase),
         managed_key_tokens: Number(draft.managed_key_tokens),
+        yearly_discount_pct: Number(draft.yearly_discount_pct),
       });
       toast({ title: 'Pricing saved' });
       const p = await adminApiKeysService.listPricing();
@@ -1398,7 +1478,17 @@ const SuperAdminApiKeysPage = () => {
                 pricing={pricing}
                 onApprove={(r) => {
                   const p = pricing.find(x => x.agent_name === r.agent_name);
-                  setApproveModal({ open: true, request: r, key_cost: String(p?.monthly_flat_usd ?? ''), service_charge: String(p?.service_charge_usd ?? ''), admin_note: '' });
+                  const duration = r.preferred_duration || 'monthly';
+                  const discountPct = parseFloat(p?.yearly_discount_pct || 0);
+                  const monthlyKey = parseFloat(p?.monthly_flat_usd || 0);
+                  const monthlySvc = parseFloat(p?.service_charge_usd || 0);
+                  const keyCost = duration === 'yearly'
+                    ? (monthlyKey * 12 * (1 - discountPct / 100)).toFixed(2)
+                    : String(p?.monthly_flat_usd ?? '');
+                  const svcCharge = duration === 'yearly'
+                    ? (monthlySvc * 12 * (1 - discountPct / 100)).toFixed(2)
+                    : String(p?.service_charge_usd ?? '');
+                  setApproveModal({ open: true, request: r, key_cost: keyCost, service_charge: svcCharge, admin_note: '' });
                 }}
                 onAssignKey={(r) => openAssign(null, r)}
                 onReject={(r) => setRejectModal({ open: true, request: r, note: '' })}
@@ -1425,118 +1515,226 @@ const SuperAdminApiKeysPage = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-3">
-            {/* LEFT — target fields */}
-            <div className="space-y-4">
-              <div>
-                <Label className="text-white/60 text-xs uppercase tracking-wider">Company</Label>
-                <div className="mt-1">
-                  <CompanyPicker
-                    value={assignForm.company_id}
-                    onChange={(id) => setAssignForm({ ...assignForm, company_id: id })}
+          <div className="py-3 space-y-4">
+
+            {/* Row 1 — 2 columns: Company+Agent | API Key+Provider */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+              {/* COL 1 — Company + Agent */}
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Company</Label>
+                  <div className="mt-1">
+                    <CompanyPicker
+                      value={assignForm.company_id}
+                      onChange={(id) => setAssignForm({ ...assignForm, company_id: id })}
+                      disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
+                      lockedLabel={(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Agent</Label>
+                  <Select
+                    value={assignForm.agent_name}
+                    onValueChange={(v) => setAssignForm({ ...assignForm, agent_name: v })}
                     disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
-                    lockedLabel={(assignModal.replacingKey?.company_name) || (assignModal.prefillRequest?.company_name)}
+                  >
+                    <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                      {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* COL 2 — Provider + API Key */}
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Provider</Label>
+                  <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
+                    <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                      {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">API Key</Label>
+                  <Input
+                    type="password" autoComplete="off" placeholder="sk-..."
+                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
+                    value={assignForm.api_key}
+                    onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
                   />
                 </div>
               </div>
-              <div>
-                <Label className="text-white/60 text-xs uppercase tracking-wider">Agent</Label>
-                <Select
-                  value={assignForm.agent_name}
-                  onValueChange={(v) => setAssignForm({ ...assignForm, agent_name: v })}
-                  disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
-                >
-                  <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                    {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
-            {/* RIGHT — key + provider + options */}
-            <div className="space-y-4">
-              <div>
-                <Label className="text-white/60 text-xs uppercase tracking-wider">API Key</Label>
-                <Input
-                  type="password" autoComplete="off" placeholder="sk-..."
-                  className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
-                  value={assignForm.api_key}
-                  onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label className="text-white/60 text-xs uppercase tracking-wider">Provider</Label>
-                <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
-                  <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                    {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              {/* <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
-                <Info className="w-3.5 h-3.5 text-violet-300 mt-0.5 shrink-0" />
-                <p className="text-xs text-white/55">
-                  Free tokens applied from{' '}
-                  <span className="text-violet-300 font-semibold">Pricing</span> config.
-                  {(() => {
-                    const p = pricing.find(x => x.agent_name === assignForm.agent_name);
-                    return p ? (
-                      <span className="block mt-1 text-white/80 font-semibold">
-                        Will grant: {formatTokens(p.free_tokens_on_purchase)} tokens
-                      </span>
-                    ) : null;
-                  })()}
-                </p>
-              </div> */}
-              {assignModal.replacingKey && (
-                <>
-                  <div
-                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
-                      assignForm.reset_tokens
-                        ? 'border-amber-500/40 bg-amber-500/8'
-                        : 'border-white/10 bg-white/3 hover:border-white/20'
-                    }`}
-                    onClick={() => setAssignForm((f) => ({ ...f, reset_tokens: !f.reset_tokens }))}
-                  >
-                    <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                      assignForm.reset_tokens ? 'bg-amber-500 border-amber-500' : 'border-white/30'
-                    }`}>
-                      {assignForm.reset_tokens && (
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12">
-                          <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-sm text-white font-medium">Reset token usage to 0</p>
-                      <p className="text-xs text-white/50 mt-0.5">
-                        {assignModal.replacingKey.quota?.managed_used_tokens > 0
-                          ? `Currently ${formatTokens(assignModal.replacingKey.quota.managed_used_tokens)} used — uncheck to keep history.`
-                          : 'No tokens used yet.'}
-                      </p>
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-white/60 text-xs uppercase tracking-wider">
-                      Managed token limit <span className="text-white/30 normal-case"></span>
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder={`Default from pricing: ${formatTokens(pricing.find(p => p.agent_name === assignForm.agent_name)?.managed_key_tokens ?? 0)}`}
-                      className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-                      value={assignForm.managed_tokens}
-                      onChange={(e) => setAssignForm((f) => ({ ...f, managed_tokens: e.target.value }))}
-                    />
-                    {assignForm.managed_tokens && !isNaN(parseInt(assignForm.managed_tokens)) && (
-                      <p className="text-[10px] text-violet-300/70 mt-1">
-                        Will grant: {formatTokens(parseInt(assignForm.managed_tokens))} tokens
-                      </p>
+            {/* Replace key options — full width */}
+            {assignModal.replacingKey && (
+              <div className="grid grid-cols-2 gap-x-6">
+                <div
+                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                    assignForm.reset_tokens ? 'border-amber-500/40 bg-amber-500/8' : 'border-white/10 bg-white/3 hover:border-white/20'
+                  }`}
+                  onClick={() => setAssignForm((f) => ({ ...f, reset_tokens: !f.reset_tokens }))}
+                >
+                  <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                    assignForm.reset_tokens ? 'bg-amber-500 border-amber-500' : 'border-white/30'
+                  }`}>
+                    {assignForm.reset_tokens && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12">
+                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
                     )}
                   </div>
-                </>
-              )}
-            </div>
+                  <div>
+                    <p className="text-sm text-white font-medium">Reset token usage to 0</p>
+                    <p className="text-xs text-white/50 mt-0.5">
+                      {assignModal.replacingKey.quota?.managed_used_tokens > 0
+                        ? `Currently ${formatTokens(assignModal.replacingKey.quota.managed_used_tokens)} used — uncheck to keep history.`
+                        : 'No tokens used yet.'}
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Managed token limit</Label>
+                  <Input
+                    type="number"
+                    placeholder={`Default from pricing: ${formatTokens(pricing.find(p => p.agent_name === assignForm.agent_name)?.managed_key_tokens ?? 0)}`}
+                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                    value={assignForm.managed_tokens}
+                    onChange={(e) => setAssignForm((f) => ({ ...f, managed_tokens: e.target.value }))}
+                  />
+                  {assignForm.managed_tokens && !isNaN(parseInt(assignForm.managed_tokens)) && (
+                    <p className="text-[10px] text-violet-300/70 mt-1">
+                      Will grant: {formatTokens(parseInt(assignForm.managed_tokens))} tokens / week
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Replace mode — existing key info: full width */}
+            {assignModal.replacingKey && (() => {
+              const rk = assignModal.replacingKey;
+              const renewal = rk.renewal_period;
+              const validUntil = rk.valid_until ? new Date(rk.valid_until) : null;
+              const daysLeft = validUntil ? Math.ceil((validUntil - new Date()) / (1000 * 60 * 60 * 24)) : null;
+              const urgent = daysLeft !== null && daysLeft <= 7;
+              return (
+                <div className="grid grid-cols-3 gap-4 p-4 bg-[#1a1333] border border-amber-500/20 rounded-xl">
+                  <div className="col-span-3 flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    <p className="text-[11px] text-amber-300 uppercase tracking-widest font-semibold">Current Key Info</p>
+                  </div>
+                  <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                    <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Billing Plan</p>
+                    <p className="text-sm text-violet-300 font-semibold capitalize">
+                      {!renewal || renewal === 'none' ? 'One-time' : renewal}
+                    </p>
+                    <p className="text-[10px] text-white/40 mt-0.5">
+                      {!renewal || renewal === 'none' ? 'Key never expires' : renewal === 'monthly' ? 'Renews monthly' : 'Renews yearly'}
+                    </p>
+                  </div>
+                  <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                    <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Token Reset</p>
+                    <p className="text-sm font-semibold">
+                      {renewal && renewal !== 'none'
+                        ? <span className="text-emerald-400">Every 7 days</span>
+                        : <span className="text-white/40">No reset</span>
+                      }
+                    </p>
+                    <p className="text-[10px] text-white/40 mt-0.5">
+                      {rk.tokens_per_period > 0 ? `${formatTokens(rk.tokens_per_period)} / week` : '—'}
+                    </p>
+                  </div>
+                  <div className={`bg-[#120d22] rounded-lg p-3 border ${urgent ? 'border-amber-500/40' : 'border-[#2d2342]'}`}>
+                    <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Key Valid Until</p>
+                    {validUntil ? (
+                      <>
+                        <p className={`text-sm font-semibold ${urgent ? 'text-amber-400' : 'text-white/70'}`}>
+                          {validUntil.toLocaleDateString()}
+                        </p>
+                        <p className={`text-[10px] mt-0.5 ${urgent ? 'text-amber-400' : 'text-white/40'}`}>
+                          {daysLeft > 0 ? `${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining` : 'Expired'}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-white/40 font-semibold">Never expires</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Row 2 — Billing plan: full width */}
+            {/* {assignModal.prefillRequest ? (
+              <div className="grid grid-cols-3 gap-4 p-4 bg-[#1a1333] border border-violet-500/30 rounded-xl">
+                <div className="col-span-3 flex items-center gap-2 mb-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+                  <p className="text-[11px] text-violet-300 uppercase tracking-widest font-semibold">Requested by company</p>
+                </div>
+                <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                  <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Billing Plan</p>
+                  <p className="text-sm text-violet-300 font-semibold">
+                    {assignForm.renewal_period === 'none' ? 'One-time' : assignForm.renewal_period === 'monthly' ? 'Monthly' : 'Yearly'}
+                  </p>
+                  <p className="text-[10px] text-white/40 mt-0.5">
+                    {assignForm.renewal_period === 'none' ? 'Key never expires' : assignForm.renewal_period === 'monthly' ? 'Key expires after 1 month' : 'Key expires after 1 year'}
+                  </p>
+                </div>
+                <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                  <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Token Reset</p>
+                  <p className="text-sm text-emerald-400 font-semibold">
+                    {assignForm.renewal_period === 'none' ? 'No reset' : 'Every 7 days'}
+                  </p>
+                  <p className="text-[10px] text-white/40 mt-0.5">
+                    {assignForm.renewal_period === 'none' ? 'One-time tokens only' : 'Automatic weekly reset'}
+                  </p>
+                </div>
+                <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                  <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Key Valid For</p>
+                  <p className="text-sm text-violet-300 font-semibold">
+                    {assignForm.duration_months ? `${assignForm.duration_months} month${parseInt(assignForm.duration_months) !== 1 ? 's' : ''}` : 'Auto'}
+                  </p>
+                  <p className="text-[10px] text-white/40 mt-0.5">Set by company request</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-x-6">
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Billing Plan — Key Expiry</Label>
+                  <Select value={assignForm.renewal_period} onValueChange={(v) => setAssignForm({ ...assignForm, renewal_period: v })}>
+                    <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                      <SelectItem value="none">One-time — key never expires</SelectItem>
+                      <SelectItem value="monthly">Monthly — key expires after 1 month</SelectItem>
+                      <SelectItem value="yearly">Yearly — key expires after 1 year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-emerald-400/70 mt-1">
+                    {assignForm.renewal_period === 'none' ? 'Tokens are one-time — no weekly reset.' : '✓ Tokens reset automatically every 7 days.'}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Key Valid For (months)</Label>
+                  <Input
+                    type="number" min="1"
+                    placeholder={assignForm.renewal_period === 'yearly' ? '12' : assignForm.renewal_period === 'monthly' ? '1' : '—'}
+                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                    value={assignForm.duration_months}
+                    onChange={(e) => setAssignForm((f) => ({ ...f, duration_months: e.target.value }))}
+                  />
+                  <p className="text-[10px] text-white/40 mt-1">Leave blank to auto-set from billing plan</p>
+                  {assignForm.duration_months && !isNaN(parseInt(assignForm.duration_months)) && (
+                    <p className="text-[10px] text-amber-400/80 mt-1">
+                      ⚠ Key expires after {assignForm.duration_months} month{parseInt(assignForm.duration_months) !== 1 ? 's' : ''} — company must renew
+                    </p>
+                  )}
+                </div>
+              </div>
+            )} */}
           </div>
 
           <DialogFooter className="pt-2 border-t border-white/8">
@@ -1613,6 +1811,18 @@ const SuperAdminApiKeysPage = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Duration badge — what company requested */}
+            {approveModal.request?.preferred_duration && (
+              <div className="flex items-center gap-2 p-2.5 bg-violet-500/10 border border-violet-500/20 rounded-lg">
+                <Clock className="w-4 h-4 text-violet-300 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-white/70">
+                    Company requested a <span className="text-violet-300 font-semibold capitalize">{approveModal.request.preferred_duration}</span> key.
+                    Price has been auto-calculated from global pricing below.
+                  </p>
+                </div>
+              </div>
+            )}
             {(() => {
               const p = pricing.find(x => x.agent_name === approveModal.request?.agent_name);
               const notSet = !p || (Number(p.monthly_flat_usd) === 0 && Number(p.service_charge_usd) === 0);
@@ -1628,28 +1838,50 @@ const SuperAdminApiKeysPage = () => {
             })()}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-white/70 text-sm">Key Cost (USD)</Label>
-                <Input
-                  type="number" min="0" step="0.01" placeholder="0.00"
-                  className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-                  value={approveModal.key_cost}
-                  onChange={(e) => setApproveModal({ ...approveModal, key_cost: e.target.value })}
-                />
+                <Label className="text-white/70 text-sm">
+                  Key Cost (USD)
+                  <span className="text-white/30 font-normal ml-1 text-[10px]">
+                    {approveModal.request?.preferred_duration === 'yearly' ? '— yearly total' : '— monthly'}
+                  </span>
+                </Label>
+                <div className="relative mt-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
+                  <Input
+                    type="number" min="0" step="0.01" placeholder="0.00"
+                    className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+                    value={approveModal.key_cost}
+                    onChange={(e) => setApproveModal({ ...approveModal, key_cost: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
-                <Label className="text-white/70 text-sm">Service Charge (USD)</Label>
-                <Input
-                  type="number" min="0" step="0.01" placeholder="0.00"
-                  className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-                  value={approveModal.service_charge}
-                  onChange={(e) => setApproveModal({ ...approveModal, service_charge: e.target.value })}
-                />
+                <Label className="text-white/70 text-sm">
+                  Service Charge (USD)
+                  <span className="text-white/30 font-normal ml-1 text-[10px]">
+                    {approveModal.request?.preferred_duration === 'yearly' ? '— yearly total' : '— monthly'}
+                  </span>
+                </Label>
+                <div className="relative mt-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
+                  <Input
+                    type="number" min="0" step="0.01" placeholder="0.00"
+                    className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+                    value={approveModal.service_charge}
+                    onChange={(e) => setApproveModal({ ...approveModal, service_charge: e.target.value })}
+                  />
+                </div>
               </div>
             </div>
             {(Number(approveModal.key_cost) + Number(approveModal.service_charge)) > 0 && (
-              <p className="text-sm text-emerald-300 font-semibold">
-                Total due: ${(Number(approveModal.key_cost || 0) + Number(approveModal.service_charge || 0)).toFixed(2)}
-              </p>
+              <div className="flex items-center justify-between px-3 py-2 bg-emerald-500/8 border border-emerald-500/20 rounded-lg">
+                <span className="text-sm text-white/70">Total due</span>
+                <span className="text-emerald-300 font-bold text-base">
+                  ${(Number(approveModal.key_cost || 0) + Number(approveModal.service_charge || 0)).toFixed(2)}
+                  <span className="text-white/30 text-[10px] font-normal ml-1">
+                    {approveModal.request?.preferred_duration === 'yearly' ? '/year' : '/month'}
+                  </span>
+                </span>
+              </div>
             )}
             <div>
               <Label className="text-white/70 text-sm">Admin note <span className="text-white/40 font-normal">(shown to company)</span></Label>

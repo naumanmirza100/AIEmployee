@@ -49,6 +49,9 @@ def _serialize_admin_key(key: CompanyAPIKey):
         'masked': key.masked_display,
         'status': key.status,
         'assigned_by': key.assigned_by.username if key.assigned_by else None,
+        'renewal_period': key.renewal_period,
+        'valid_until': key.valid_until.isoformat() if key.valid_until else None,
+        'tokens_per_period': key.tokens_per_period,
         'created_at': key.created_at.isoformat(),
         'updated_at': key.updated_at.isoformat(),
     }
@@ -61,8 +64,25 @@ def list_all_keys(request):
 
     Query params:
       - company_id, agent_name, mode, status, provider, search (company name)
+
+    Only shows keys where the company has an active purchase for that agent.
+    Deactivated agents (cancelled/admin_deactivated) are excluded automatically.
     """
-    qs = CompanyAPIKey.objects.select_related('company', 'assigned_by').order_by('-updated_at')
+    # Only show keys where the company has an active purchase for that agent.
+    # Uses EXISTS subquery — efficient regardless of purchase count.
+    from django.db.models import OuterRef, Exists
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company_id=OuterRef('company_id'),
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    qs = (
+        CompanyAPIKey.objects
+        .select_related('company', 'assigned_by')
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+        .order_by('-updated_at')
+    )
 
     company_id = request.GET.get('company_id')
     if company_id:
@@ -119,15 +139,32 @@ def list_all_keys(request):
 def assign_managed_key(request):
     """Assign (or replace) a managed key for a (company, agent).
 
-    Body: { company_id, agent_name, provider, api_key, request_id? }
+    Body: {
+      company_id, agent_name, provider, api_key, request_id?,
+      managed_tokens?,       # tokens per weekly reset cycle
+      renewal_period?,       # 'none' | 'monthly' | 'yearly'  (default 'none')
+      duration_months?,      # integer — how many months valid (used to compute valid_until)
+      reset_tokens?          # bool, default True
+    }
     If `request_id` is passed, the matching KeyRequest is marked approved.
+    Tokens always reset weekly when renewal_period != 'none'.
     """
+    from datetime import timedelta as _td
     company_id = request.data.get('company_id')
     agent_name = (request.data.get('agent_name') or '').strip()
     provider = (request.data.get('provider') or 'openai').strip()
     api_key = (request.data.get('api_key') or '').strip()
     request_id = request.data.get('request_id')
     reset_tokens = bool(request.data.get('reset_tokens', True))
+    renewal_period = (request.data.get('renewal_period') or 'none').strip()
+    if renewal_period not in ('none', 'monthly', 'yearly'):
+        renewal_period = 'none'
+
+    # duration_months: how long the key is valid (admin input)
+    try:
+        duration_months = int(request.data.get('duration_months') or 0)
+    except (TypeError, ValueError):
+        duration_months = 0
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
@@ -142,7 +179,7 @@ def assign_managed_key(request):
                         status=status.HTTP_404_NOT_FOUND)
 
     pricing_conf = AdminPricingConfig.objects.filter(agent_name=agent_name).first()
-    # Allow caller to override the token limit; fall back to pricing config
+    # tokens_per_period: per weekly reset; fall back to pricing config default
     managed_tokens_override = request.data.get('managed_tokens')
     if managed_tokens_override is not None and str(managed_tokens_override).strip() != '':
         try:
@@ -151,6 +188,21 @@ def assign_managed_key(request):
             token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
     else:
         token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
+
+    # Compute valid_until from duration_months (or from renewal_period default)
+    now = timezone.now()
+    if duration_months > 0:
+        # Approximate: 30 days per month
+        valid_until = now + _td(days=duration_months * 30)
+    elif renewal_period == 'monthly':
+        valid_until = now + _td(days=30)
+    elif renewal_period == 'yearly':
+        valid_until = now + _td(days=365)
+    else:
+        valid_until = None  # one-time, never expires
+
+    # next weekly reset = 7 days from now (only when renewal active)
+    next_reset_at = (now + _td(days=7)) if renewal_period != 'none' else None
 
     with transaction.atomic():
         key, _ = CompanyAPIKey.objects.get_or_create(
@@ -161,6 +213,9 @@ def assign_managed_key(request):
         key.status = 'active'
         key.set_plaintext_key(api_key)
         key.assigned_by = request.user
+        key.renewal_period = renewal_period
+        key.valid_until = valid_until
+        key.tokens_per_period = token_limit
         key.save()
 
         # Set managed token quota on the AgentTokenQuota row
@@ -172,6 +227,7 @@ def assign_managed_key(request):
             quota_update['managed_notified_80pct'] = False
             quota_update['managed_notified_90pct'] = False
             quota_update['managed_notified_100pct'] = False
+        quota_update['next_reset_at'] = next_reset_at
         AgentTokenQuota.objects.filter(pk=quota.pk).update(**quota_update)
 
         approved_req = None
@@ -227,30 +283,48 @@ def assign_managed_key(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def revoke_key(request, key_id):
-    """Revoke (soft) any key — managed or BYOK. Sets status='revoked'."""
+    """Revoke (soft) any key — managed or BYOK. Sets status='revoked'.
+
+    Body: { keep_history?: bool }
+      keep_history=True  (default) — preserve AgentTokenQuota + KeyRequest history.
+      keep_history=False            — delete KeyRequests, all keys, and quota for this agent.
+    """
+    keep_history = request.data.get('keep_history', True)
+    if isinstance(keep_history, str):
+        keep_history = keep_history.lower() not in ('false', '0', 'no')
+
     try:
         key = CompanyAPIKey.objects.get(pk=key_id)
     except CompanyAPIKey.DoesNotExist:
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
-    was_managed_active = key.mode == 'managed' and key.status == 'active'
-    key.status = 'revoked'
-    key.save(update_fields=['status', 'updated_at'])
 
-    # Mark the most-recent approved/key_assigned KeyRequest as revoked.
-    # Use individual save() so updated_at captures the exact revocation time
-    # (bulk .update() bypasses auto_now and loses the timestamp).
-    if was_managed_active:
-        for req in KeyRequest.objects.filter(
-            company=key.company, agent_name=key.agent_name, status__in=['approved', 'key_assigned']
-        ):
-            req.status = 'revoked'
-            req.save(update_fields=['status', 'updated_at'])
+    was_managed_active = key.mode == 'managed' and key.status == 'active'
+    company = key.company
+    agent_name = key.agent_name
+
+    with transaction.atomic():
+        if not keep_history:
+            # Delete KeyRequest first (FK to CompanyAPIKey via linked_key_id)
+            KeyRequest.objects.filter(company=company, agent_name=agent_name).delete()
+            CompanyAPIKey.objects.filter(company=company, agent_name=agent_name).delete()
+            from core.models import AgentTokenQuota
+            AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).delete()
+        else:
+            key.status = 'revoked'
+            key.save(update_fields=['status', 'updated_at'])
+
+            if was_managed_active:
+                for req in KeyRequest.objects.filter(
+                    company=company, agent_name=agent_name, status__in=['approved', 'key_assigned']
+                ):
+                    req.status = 'revoked'
+                    req.save(update_fields=['status', 'updated_at'])
 
     if was_managed_active:
         try:
             from core.models import CompanyUser
             from project_manager_agent.models import PMNotification
-            for cu in CompanyUser.objects.filter(company=key.company, is_active=True):
+            for cu in CompanyUser.objects.filter(company=company, is_active=True):
                 PMNotification.objects.create(
                     company_user=cu,
                     notification_type='custom',
@@ -265,7 +339,7 @@ def revoke_key(request, key_id):
         except Exception as exc:
             logger.warning("Failed to notify company on key revoke: %s", exc)
 
-    return Response({'status': 'success'})
+    return Response({'status': 'success', 'history_kept': keep_history})
 
 
 # ----------------------------------------------------------------------------
@@ -273,6 +347,12 @@ def revoke_key(request, key_id):
 # ----------------------------------------------------------------------------
 
 def _serialize_pricing(p: AdminPricingConfig):
+    monthly = float(p.monthly_flat_usd)
+    svc = float(p.service_charge_usd)
+    discount_pct = float(p.yearly_discount_pct)
+    yearly_full = (monthly + svc) * 12           # no discount
+    yearly_total = round(yearly_full * (1 - discount_pct / 100), 2)
+    yearly_saving = round(yearly_full - yearly_total, 2)
     return {
         'agent_name': p.agent_name,
         'agent_label': p.get_agent_name_display(),
@@ -280,6 +360,11 @@ def _serialize_pricing(p: AdminPricingConfig):
         'service_charge_usd': str(p.service_charge_usd),
         'free_tokens_on_purchase': p.free_tokens_on_purchase,
         'managed_key_tokens': p.managed_key_tokens,
+        'yearly_discount_pct': str(p.yearly_discount_pct),
+        # Pre-calculated for the UI
+        'monthly_total_usd': round(monthly + svc, 2),
+        'yearly_total_usd': yearly_total,
+        'yearly_saving_usd': yearly_saving,
         'updated_by': p.updated_by.username if p.updated_by else None,
         'updated_at': p.updated_at.isoformat(),
     }
@@ -313,8 +398,13 @@ def update_pricing(request, agent_name):
             p.free_tokens_on_purchase = int(request.data['free_tokens_on_purchase'])
         if 'managed_key_tokens' in request.data:
             p.managed_key_tokens = int(request.data['managed_key_tokens'])
-    except (TypeError, ValueError):
-        return Response({'status': 'error', 'message': 'Bad numeric value'},
+        if 'yearly_discount_pct' in request.data:
+            val = float(request.data['yearly_discount_pct'])
+            if not (0 <= val <= 100):
+                raise ValueError("yearly_discount_pct must be between 0 and 100")
+            p.yearly_discount_pct = val
+    except (TypeError, ValueError) as exc:
+        return Response({'status': 'error', 'message': f'Bad numeric value: {exc}'},
                         status=status.HTTP_400_BAD_REQUEST)
     p.updated_by = request.user
     p.save()
@@ -370,7 +460,20 @@ def _serialize_quota_admin(q: AgentTokenQuota):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_quotas(request):
-    qs = AgentTokenQuota.objects.select_related('company').prefetch_related('provider_usage').order_by('-updated_at')
+    from django.db.models import OuterRef, Exists
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company_id=OuterRef('company_id'),
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    qs = (
+        AgentTokenQuota.objects
+        .select_related('company')
+        .prefetch_related('provider_usage')
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+        .order_by('-updated_at')
+    )
     search = request.GET.get('search')
     if search:
         qs = qs.filter(company__name__icontains=search)
@@ -471,6 +574,7 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None):
         'agent_label': r.get_agent_name_display(),
         'provider': r.provider,
         'status': r.status,
+        'preferred_duration': r.preferred_duration,
         'was_assigned': was_assigned,
         'revoked_at': r.updated_at.isoformat() if was_assigned else None,
         'note': r.note,
@@ -489,7 +593,19 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_requests(request):
-    qs = KeyRequest.objects.select_related('company', 'requested_by', 'resolved_by').order_by('-created_at')
+    from django.db.models import OuterRef, Exists
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company_id=OuterRef('company_id'),
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    qs = (
+        KeyRequest.objects
+        .select_related('company', 'requested_by', 'resolved_by')
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+        .order_by('-created_at')
+    )
     status_filter = request.GET.get('status')
     if status_filter:
         qs = qs.filter(status=status_filter)

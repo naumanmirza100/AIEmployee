@@ -168,6 +168,107 @@ def _ensure_quota(company, agent_name: str) -> AgentTokenQuota:
     )
 
 
+def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIKey') -> None:
+    """Reset managed_used_tokens every 7 days while the key is active and has renewal.
+
+    Called inside resolve_for_call before the quota gate so the reset is
+    transparent to the caller — they just see a fresh counter.
+    Weekly reset fires regardless of whether the billing period is monthly or yearly;
+    the billing period only controls valid_until (when the key expires and
+    company must renew/pay again).
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+    now = timezone.now()
+
+    # Only reset when the managed key has an active renewal and tokens_per_period set
+    if managed_key.renewal_period == 'none' or managed_key.tokens_per_period <= 0:
+        return
+    if quota.next_reset_at is None:
+        return
+    if now < quota.next_reset_at:
+        return
+
+    # Reset is due — advance next_reset_at by 7-day steps until it's in the future
+    next_reset = quota.next_reset_at
+    while next_reset <= now:
+        next_reset = next_reset + timezone.timedelta(days=7)
+
+    AgentTokenQuota.objects.filter(pk=quota.pk).update(
+        managed_used_tokens=0,
+        managed_included_tokens=managed_key.tokens_per_period,
+        next_reset_at=next_reset,
+        last_reset_at=now,
+        managed_notified_80pct=False,
+        managed_notified_90pct=False,
+        managed_notified_100pct=False,
+    )
+    # Refresh the in-memory object so the quota gate below reads fresh values
+    quota.managed_used_tokens = 0
+    quota.managed_included_tokens = managed_key.tokens_per_period
+    quota.next_reset_at = next_reset
+    _log.info(
+        "Weekly token reset applied: company=%s agent=%s tokens=%s next_reset=%s",
+        company.id, agent_name, managed_key.tokens_per_period, next_reset,
+    )
+    # Notify company about the reset
+    try:
+        from core.notification_utils import notify_company_quota as _ncq  # noqa: avoid circular at module level
+        from project_manager_agent.models import PMNotification
+        from core.models import CompanyUser
+        agent_label = managed_key.get_agent_name_display()
+        for cu in CompanyUser.objects.filter(company=company, is_active=True):
+            PMNotification.objects.create(
+                company_user=cu,
+                notification_type='custom',
+                severity='info',
+                title=f"Weekly tokens reset — {agent_label}",
+                message=(
+                    f"Your weekly token quota for {agent_label} has been reset. "
+                    f"{managed_key.tokens_per_period:,} tokens are available again. "
+                    f"Next reset: {next_reset.strftime('%d %b %Y')}."
+                ),
+            )
+    except Exception as exc:
+        _log.warning("Failed to send weekly reset notification: %s", exc)
+
+
+def _check_key_expiry(managed_key: 'CompanyAPIKey', company, agent_name: str) -> None:
+    """Auto-expire a managed key when valid_until has passed.
+
+    Sets status='expired', notifies company. Caller should then treat the key
+    as unavailable and fall through to the quota/free path or raise NoKeyAvailable.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+    if managed_key.valid_until is None:
+        return
+    if timezone.now() <= managed_key.valid_until:
+        return
+
+    # Key has expired — mark it
+    CompanyAPIKey.objects.filter(pk=managed_key.pk).update(status='expired')
+    managed_key.status = 'expired'
+    _log.info("Managed key expired: company=%s agent=%s", company.id, agent_name)
+    try:
+        from project_manager_agent.models import PMNotification
+        from core.models import CompanyUser
+        agent_label = managed_key.get_agent_name_display()
+        for cu in CompanyUser.objects.filter(company=company, is_active=True):
+            PMNotification.objects.create(
+                company_user=cu,
+                notification_type='custom',
+                severity='critical',
+                title=f"Managed key expired — {agent_label}",
+                message=(
+                    f"Your managed key for {agent_label} has expired. "
+                    f"Please request a new key from the admin to continue using this agent."
+                ),
+            )
+    except Exception as exc:
+        _log.warning("Failed to send key expiry notification: %s", exc)
+
+
 def resolve_for_call(company, agent_name: str) -> CallContext:
     """Pick the key to use for one LLM call. Raises on hard-block.
 
@@ -231,28 +332,36 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     if managed:
         managed_plaintext = managed.get_plaintext_key()
         if managed_plaintext:
-            quota = _ensure_quota(company, agent_name)
-            preferred_pool = quota.preferred_pool  # 'free' | 'managed' | None
+            # Check expiry first — auto-expire if valid_until has passed
+            _check_key_expiry(managed, company, agent_name)
+            if managed.status != 'active':
+                managed_plaintext = None  # treat as unavailable, fall through
+            else:
+                quota = _ensure_quota(company, agent_name)
+                preferred_pool = quota.preferred_pool  # 'free' | 'managed' | None
 
-            # If user explicitly chose the free pool, skip managed entirely.
-            # In ALL other cases: if managed key exists and its quota is exhausted,
-            # hard-block immediately — never auto-switch to a different pool.
-            if preferred_pool != 'free':
-                if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
-                    # Managed key quota is exhausted — hard-block regardless of preferred_pool.
-                    # No silent fallback to free/platform.  Company must either reset the quota
-                    # (admin action) or add a BYOK key to continue.
-                    raise ManagedQuotaExhausted()
-                else:
-                    return CallContext(
-                        company_id=company.id,
-                        agent_name=agent_name,
-                        mode='managed',
-                        provider=managed.provider,
-                        api_key=managed_plaintext,
-                        key_id=managed.id,
-                        quota_id=quota.id,
-                    )
+                # Apply weekly token reset before checking exhaustion
+                _apply_weekly_reset_if_due(quota, managed)
+
+                # If user explicitly chose the free pool, skip managed entirely.
+                # In ALL other cases: if managed key exists and its quota is exhausted,
+                # hard-block immediately — never auto-switch to a different pool.
+                if preferred_pool != 'free':
+                    if quota.managed_included_tokens > 0 and quota.managed_used_tokens >= quota.managed_included_tokens:
+                        # Managed key quota is exhausted — hard-block regardless of preferred_pool.
+                        # No silent fallback to free/platform.  Company must either reset the quota
+                        # (admin action) or add a BYOK key to continue.
+                        raise ManagedQuotaExhausted()
+                    else:
+                        return CallContext(
+                            company_id=company.id,
+                            agent_name=agent_name,
+                            mode='managed',
+                            provider=managed.provider,
+                            api_key=managed_plaintext,
+                            key_id=managed.id,
+                            quota_id=quota.id,
+                        )
 
     # Step 3 — quota gate (platform-key / free-token path)
     if quota is None:

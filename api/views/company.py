@@ -305,6 +305,7 @@ def list_company_agents(request):
                 'expires_at': purchase.expires_at.isoformat() if purchase.expires_at else None,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
                 'cancelled_reason': purchase.cancelled_reason,
+                'history_kept': purchase.history_kept,
                 'time_remaining': time_remaining,
                 'time_ended_ago': time_ended_ago,
                 'active_label': active_label,
@@ -367,18 +368,73 @@ def toggle_company_agent_status(request, purchaseId):
                 'message': 'Status must be either "active" or "cancelled"'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        purchase.status = new_status
-        if new_status == 'cancelled':
-            purchase.cancelled_at = timezone.now()
-            purchase.cancelled_reason = 'admin_deactivated'
-        else:
-            purchase.cancelled_at = None
-            purchase.cancelled_reason = None
-            # Reset expires_at to 30 days from now when reactivating
-            from datetime import timedelta
-            purchase.purchased_at = timezone.now()
-            purchase.expires_at = timezone.now() + timedelta(days=30)
-        purchase.save()
+        keep_history = request.data.get('keep_history', True)
+        if isinstance(keep_history, str):
+            keep_history = keep_history.lower() not in ('false', '0', 'no')
+
+        from django.db import transaction as db_transaction
+        with db_transaction.atomic():
+            purchase.status = new_status
+            if new_status == 'cancelled':
+                purchase.cancelled_at = timezone.now()
+                purchase.cancelled_reason = 'admin_deactivated'
+                purchase.history_kept = keep_history
+                purchase.save()
+
+                if not keep_history:
+                    from core.models import AgentTokenQuota, CompanyAPIKey, KeyRequest
+                    company = purchase.company
+                    agent_name = purchase.module_name
+                    # Delete KeyRequest first — it has a FK to CompanyAPIKey (linked_key_id)
+                    KeyRequest.objects.filter(company=company, agent_name=agent_name).delete()
+                    CompanyAPIKey.objects.filter(company=company, agent_name=agent_name).delete()
+                    AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).delete()
+            else:
+                purchase.cancelled_at = None
+                purchase.cancelled_reason = None
+                purchase.history_kept = None
+                from datetime import timedelta
+                purchase.purchased_at = timezone.now()
+                purchase.expires_at = timezone.now() + timedelta(days=30)
+                purchase.save()
+
+                # Re-activation: create fresh quota with free tokens from pricing config.
+                # If a quota row already exists (history was kept), reset it to fresh state.
+                from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
+                company = purchase.company
+                agent_name = purchase.module_name
+                try:
+                    cfg = AdminPricingConfig.objects.get(agent_name=agent_name)
+                    free_tokens = cfg.free_tokens_on_purchase
+                except AdminPricingConfig.DoesNotExist:
+                    free_tokens = DEFAULT_FREE_TOKENS
+
+                quota, created = AgentTokenQuota.objects.get_or_create(
+                    company=company,
+                    agent_name=agent_name,
+                    defaults={'included_tokens': free_tokens},
+                )
+                if not created:
+                    # Reset to fresh state — clear all usage and notification flags
+                    AgentTokenQuota.objects.filter(pk=quota.pk).update(
+                        included_tokens=free_tokens,
+                        used_tokens=0,
+                        managed_included_tokens=0,
+                        managed_used_tokens=0,
+                        byok_tokens_info=0,
+                        byok_token_limit=0,
+                        preferred_pool='managed',
+                        next_reset_at=None,
+                        notified_80pct=False,
+                        notified_90pct=False,
+                        notified_100pct=False,
+                        managed_notified_80pct=False,
+                        managed_notified_90pct=False,
+                        managed_notified_100pct=False,
+                        byok_notified_80pct=False,
+                        byok_notified_90pct=False,
+                        byok_notified_100pct=False,
+                    )
 
         return Response({
             'status': 'success',
@@ -390,6 +446,7 @@ def toggle_company_agent_status(request, purchaseId):
                 'status': purchase.status,
                 'company_name': purchase.company.name,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
+                'history_kept': purchase.history_kept,
             }
         }, status=status.HTTP_200_OK)
 

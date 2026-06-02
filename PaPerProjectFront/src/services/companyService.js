@@ -83,9 +83,12 @@ export const getCompanyAgents = async (params = {}) => {
 /**
  * Toggle company AI agent status (Admin only)
  */
-export const toggleCompanyAgentStatus = async (purchaseId, newStatus) => {
+export const toggleCompanyAgentStatus = async (purchaseId, newStatus, keepHistory = true) => {
   try {
-    const response = await api.patch(`/admin/company-agents/${purchaseId}/toggle-status`, { status: newStatus });
+    const response = await api.patch(`/admin/company-agents/${purchaseId}/toggle-status`, {
+      status: newStatus,
+      keep_history: keepHistory,
+    });
     return response;
   } catch (error) {
     console.error('Toggle company agent status error:', error);
