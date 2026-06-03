@@ -142,8 +142,11 @@ def list_agent_keys(request):
     # Active keys first — these always win
     for k in CompanyAPIKey.objects.filter(company=company, status='active'):
         keys_by_agent.setdefault(k.agent_name, {})[k.mode] = k
-    # Show the most-recently revoked managed key only when no active managed key exists,
-    # so the company can see "revoked by admin" instead of a blank slot.
+    # Show expired managed key when no active managed key exists (so Renew button appears)
+    for k in CompanyAPIKey.objects.filter(company=company, mode='managed', status='expired').order_by('-updated_at'):
+        if 'managed' not in keys_by_agent.get(k.agent_name, {}):
+            keys_by_agent.setdefault(k.agent_name, {})['managed'] = k
+    # Show the most-recently revoked managed key only when no active/expired managed key exists
     for k in CompanyAPIKey.objects.filter(company=company, mode='managed', status='revoked').order_by('-updated_at'):
         if 'managed' not in keys_by_agent.get(k.agent_name, {}):
             keys_by_agent.setdefault(k.agent_name, {})['managed'] = k
@@ -353,6 +356,13 @@ def list_key_requests(request):
         .order_by('-created_at')
     )
 
+    # Bulk-fetch linked key statuses to avoid N+1
+    linked_key_ids = [r.linked_key_id for r in reqs if r.linked_key_id]
+    linked_key_statuses = {}
+    if linked_key_ids:
+        for pk, st, vu in CompanyAPIKey.objects.filter(pk__in=linked_key_ids).values_list('pk', 'status', 'valid_until'):
+            linked_key_statuses[pk] = {'status': st, 'valid_until': vu.isoformat() if vu else None}
+
     data = []
     for r in reqs:
         # was_assigned: record was once key_assigned/approved then revoked.
@@ -365,6 +375,7 @@ def list_key_requests(request):
             'provider': r.provider,
             'note': r.note,
             'preferred_duration': r.preferred_duration,
+            'is_renewal': r.is_renewal,
             'status': r.status,
             'was_assigned': was_assigned,
             'revoked_at': r.updated_at.isoformat() if was_assigned else None,
@@ -375,8 +386,11 @@ def list_key_requests(request):
             'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
             'key_cost_snapshot': float(r.key_cost_snapshot) if r.key_cost_snapshot is not None else None,
             'service_charge_snapshot': float(r.service_charge_snapshot) if r.service_charge_snapshot is not None else None,
+            'discount_pct_snapshot': float(r.discount_pct_snapshot) if r.discount_pct_snapshot is not None else 0,
             'amount_paid': float(r.amount_paid) if r.amount_paid is not None else None,
             'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+            'linked_key_status': linked_key_statuses.get(r.linked_key_id, {}).get('status'),
+            'linked_key_valid_until': linked_key_statuses.get(r.linked_key_id, {}).get('valid_until'),
         })
     return Response({'status': 'success', 'requests': data})
 
@@ -387,8 +401,9 @@ def list_key_requests(request):
 def create_key_request(request):
     """Raise a KeyRequest: user asks admin to assign a managed key.
 
-    Body: { agent_name, provider?, note? }
+    Body: { agent_name, provider?, note?, preferred_duration?, is_renewal? }
     Only one pending request per (company, agent) — if one exists, we return it.
+    is_renewal=true: request is for renewing an expired key (same flow, tagged differently).
     """
     company = request.user.company
     agent_name = (request.data.get('agent_name') or '').strip()
@@ -397,6 +412,7 @@ def create_key_request(request):
     preferred_duration = (request.data.get('preferred_duration') or 'monthly').strip()
     if preferred_duration not in ('monthly', 'yearly'):
         preferred_duration = 'monthly'
+    is_renewal = bool(request.data.get('is_renewal', False))
 
     if agent_name not in VALID_AGENTS:
         return Response({'status': 'error', 'message': 'Invalid agent_name'},
@@ -431,18 +447,19 @@ def create_key_request(request):
         provider=provider,
         note=note,
         preferred_duration=preferred_duration,
+        is_renewal=is_renewal,
     )
 
-    # Broadcast to admins so they see it without polling the dashboard
     from core.notification_utils import notify_admins
+    action = "renewal" if is_renewal else "request"
     notify_admins(
-        title=f"New managed-key request — {company.name}",
-        message=f"{company.name} is requesting a managed {provider.upper()} key for {req.get_agent_name_display()}.",
+        title=f"New managed-key {action} — {company.name}",
+        message=f"{company.name} is requesting a {'renewal of' if is_renewal else 'managed'} {provider.upper()} key for {req.get_agent_name_display()}.",
         action_url='/admin/api-keys',
         notification_type='key_request_new',
     )
 
-    return Response({'status': 'success', 'request_id': req.id})
+    return Response({'status': 'success', 'request_id': req.id, 'is_renewal': is_renewal})
 
 
 @api_view(['POST'])

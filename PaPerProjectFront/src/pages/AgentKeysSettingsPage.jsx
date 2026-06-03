@@ -272,6 +272,14 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                   : 'Request key'}
               </Button>
             )}
+            {agent.managed?.status === 'expired' && (
+              <Button size="sm" variant="outline"
+                className="h-7 border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 text-xs px-3"
+                onClick={() => onRequest(agent, true)} disabled={!!pendingReq}>
+                <RefreshCw className="w-3 h-3 mr-1" />
+                {pendingReq ? 'Pending' : 'Renew Key'}
+              </Button>
+            )}
             {agent.byok && (
               <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-white/30 hover:text-white/60" onClick={() => onSetByokLimit(agent)} title="Set BYOK spending cap">
                 <Settings className="w-3.5 h-3.5" />
@@ -437,22 +445,20 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                   <div className="min-w-0 flex-1">
                     <p className="text-[10px] text-white/55 uppercase font-medium leading-none">{agent.managed.provider}</p>
                   </div>
+                    {agent.managed.renewal_period && agent.managed.renewal_period !== 'none' && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[9px] px-1.5 py-0.5 text-violet-300 capitalize">
+                      {agent.managed.renewal_period}
+                    </span>
+                   
+                  </div>
+                )}
                   <span className="text-[8px] text-white/20 shrink-0">admin</span>
                 </div>
                 {/* Renewal period badge */}
-                {agent.managed.renewal_period && agent.managed.renewal_period !== 'none' && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/20 text-violet-300 capitalize">
-                      {agent.managed.renewal_period}
-                    </span>
-                    {agent.quota?.next_reset_at && (
-                      <span className="text-[9px] text-white/35">
-                        Next reset: {new Date(agent.quota.next_reset_at).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                )}
+              
                 {/* Expiry date */}
+                <div className="flex items-center justify-between gap-2 mt-0.5">
                 {agent.managed.valid_until && (() => {
                   const expiry = new Date(agent.managed.valid_until);
                   const daysLeft = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
@@ -465,6 +471,12 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     </p>
                   );
                 })()}
+                 {agent.quota?.next_reset_at && (
+                      <span className="text-[9px] text-white/35">
+                        Next reset: {new Date(agent.quota.next_reset_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    </div>
               </div>
             )}
             {agent.managed?.status === 'expired' && (
@@ -529,6 +541,7 @@ const REQUEST_STATUS_META = {
   approved:         { label: 'Approved',          cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30', Icon: CheckCircle2 },
   rejected:         { label: 'Rejected',          cls: 'text-red-300 bg-red-500/10 border-red-500/30',           Icon: XCircle },
   revoked:          { label: 'Revoked',           cls: 'text-orange-300 bg-orange-500/10 border-orange-500/30',  Icon: XCircle },
+  key_expired:      { label: 'Key Expired',       cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30',    Icon: Clock },
 };
 
 const FLOW_STAGES = [
@@ -589,13 +602,54 @@ const RequestTimeline = ({ r }) => {
 };
 
 // Expand requests: split was_assigned records into (Key Assigned) + (Revoked) nodes
+// Also inject a synthetic "Key Expired" node when key is expired
 function expandRequestEntries(requests) {
+  const sorted = [...requests].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  // Find the latest key_assigned request id — only this one is "active"
+  const latestAssignedId = [...sorted].reverse().find(r => r.status === 'key_assigned')?.id;
+
   const entries = [];
-  for (const r of requests) {
+  for (const r of sorted) {
     if (r.was_assigned) {
       entries.push({ ...r, status: 'key_assigned', _ts: r.resolved_at });
       entries.push({ ...r, _syntheticId: `${r.id}_revoked`, status: 'revoked', _ts: r.revoked_at, _synthetic: true });
+    } else if (r.status === 'key_assigned' && r.id !== latestAssignedId) {
+      // Older key_assigned — show as assigned then synthetically expired
+      entries.push({ ...r, _ts: r.resolved_at });
+      entries.push({
+        ...r,
+        _syntheticId: `${r.id}_expired`,
+        status: 'key_expired',
+        _ts: r.linked_key_valid_until || r.resolved_at,
+        _synthetic: true,
+        note: null,
+        admin_note: null,
+      });
+    } else if (r.status === 'key_assigned' && r.linked_key_status === 'expired') {
+      // Latest key_assigned but key has since expired
+      entries.push({ ...r, _ts: r.resolved_at });
+      entries.push({
+        ...r,
+        _syntheticId: `${r.id}_expired`,
+        status: 'key_expired',
+        _ts: r.linked_key_valid_until || r.resolved_at,
+        _synthetic: true,
+        note: null,
+        admin_note: null,
+      });
     } else {
+      // Inject synthetic "Key Expired" node before a renewal request
+      if (r.is_renewal) {
+        entries.push({
+          ...r,
+          _syntheticId: `${r.id}_expired`,
+          status: 'key_expired',
+          _ts: r.created_at,
+          _synthetic: true,
+          note: null,
+          admin_note: null,
+        });
+      }
       entries.push(r);
     }
   }
@@ -608,7 +662,7 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
   const { Icon } = meta;
   const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
   const displayTime = r._ts || r.resolved_at || r.created_at;
-  const isActive = r.status === 'key_assigned' && !r._synthetic;
+  const isActive = r.status === 'key_assigned' && !r._synthetic && r.linked_key_status !== 'expired';
   const isNegative = ['rejected', 'revoked'].includes(r.status);
   const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
   const dotColor = isActive
@@ -635,6 +689,8 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
               </span>
               <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
               {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
+              {r.status === 'key_assigned' && !r._synthetic && r.linked_key_status === 'expired' && <span className="text-[9px] text-amber-400/70 font-medium">● EXPIRED</span>}
+              {r.is_renewal && !r._synthetic && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-500/40 text-sky-300 font-medium">RENEWAL</span>}
             </div>
 
             {!r._synthetic && r.note && <p className="text-xs text-white/50 mt-1 italic">Your note: "{r.note}"</p>}
@@ -652,6 +708,16 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
                   <span className="text-white/60 font-medium">${(r.service_charge_snapshot ?? 0).toFixed(2)}</span>
                 </div>
                 <span className="text-white/15 text-base leading-none">·</span>
+                {(r.discount_pct_snapshot > 0) && (
+                  <>
+                    <span className="text-white/15 text-base leading-none">·</span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-emerald-400/60 uppercase tracking-wide font-semibold" style={{fontSize:'8px'}}>Discount</span>
+                      <span className="text-emerald-400 font-medium">{r.discount_pct_snapshot}% off</span>
+                    </div>
+                  </>
+                )}
+                <span className="text-white/15 text-base leading-none">·</span>
                 <div className="flex flex-col gap-0.5">
                   <span className="text-yellow-400/60 uppercase tracking-wide font-semibold" style={{fontSize:'8px'}}>Total due</span>
                   <span className="text-yellow-300 font-bold">${total.toFixed(2)}</span>
@@ -665,7 +731,9 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
             )}
 
             <p className="text-[10px] text-white/25 mt-1">
-              {r._synthetic
+              {r._synthetic && r.status === 'key_expired'
+                ? <span className="text-amber-300/50">{displayTime ? new Date(displayTime).toLocaleString() : 'Key expired'}</span>
+                : r._synthetic
                 ? <span className="italic text-orange-300/50">Key revoked by admin</span>
                 : new Date(displayTime).toLocaleString()
               }
@@ -696,9 +764,12 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
   const [expanded, setExpanded] = useState(hasPending);
 
   const latest = entries[entries.length - 1];
-  const latestMeta = REQUEST_STATUS_META[latest.status] || REQUEST_STATUS_META.pending;
+  const latestReal = [...entries].reverse().find(e => !e._synthetic) || latest;
+  const isKeyExpired = latestReal.status === 'key_assigned' && latestReal.linked_key_status === 'expired';
+  const effectiveStatus = isKeyExpired ? 'key_expired' : latest.status;
+  const latestMeta = REQUEST_STATUS_META[effectiveStatus] || REQUEST_STATUS_META.pending;
   const { Icon: LatestIcon } = latestMeta;
-  const isActive = latest.status === 'key_assigned' && !latest._synthetic;
+  const isActive = latestReal.status === 'key_assigned' && !isKeyExpired;
 
   return (
     <div className="bg-[#0f0a20] border border-[#2d2342] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors">
@@ -712,28 +783,31 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
             <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${latestMeta.cls}`}>
               <LatestIcon className="w-3 h-3" />{latestMeta.label}
             </span>
+            {latestReal.preferred_duration && latestReal.preferred_duration !== 'none' && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 font-medium capitalize">{latestReal.preferred_duration}</span>
+            )}
             {isActive && (
               <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">Active</span>
             )}
-            {/* Key details — only when active, shown once in header */}
-            {isActive && managedKey && (
+            {/* Key details — shown when active or expired */}
+            {(isActive || isKeyExpired) && managedKey && (
               <>
-                {(latest.amount_paid != null || latest.key_cost_snapshot > 0) && (
+                {(latestReal.amount_paid != null || latestReal.key_cost_snapshot > 0) && (
                   <>
                     <span className="text-white/15 text-sm">·</span>
                     <span className="text-[10px] text-white/40">
-                      Paid <span className="text-emerald-300 font-semibold">${(latest.amount_paid ?? (latest.key_cost_snapshot ?? 0) + (latest.service_charge_snapshot ?? 0)).toFixed(2)}</span>
-                      <span className="text-white/25 ml-1">(${(latest.key_cost_snapshot ?? 0).toFixed(2)} + ${(latest.service_charge_snapshot ?? 0).toFixed(2)} svc)</span>
+                      Paid <span className="text-emerald-300 font-semibold">${(latestReal.amount_paid ?? (latestReal.key_cost_snapshot ?? 0) + (latestReal.service_charge_snapshot ?? 0)).toFixed(2)}</span>
+                      <span className="text-white/25 ml-1">(${(latestReal.key_cost_snapshot ?? 0).toFixed(2)} + ${(latestReal.service_charge_snapshot ?? 0).toFixed(2)} svc)</span>
                     </span>
                   </>
                 )}
                 <span className="text-white/15 text-sm">·</span>
-                <span className="text-[11px] text-white/40">
+                {/* <span className="text-[11px] text-white/40">
                   <span className="text-white/25">Plan: </span>
                   <span className="text-violet-300 font-medium capitalize">
                     {managedKey.renewal_period === 'none' || !managedKey.renewal_period ? 'One-time' : managedKey.renewal_period}
                   </span>
-                </span>
+                </span> */}
                 <span className="text-white/15 text-sm">·</span>
                 <span className="text-[11px] text-white/40">
                   <span className="text-white/25">Reset: </span>
@@ -806,7 +880,7 @@ const AgentKeysSettingsPage = () => {
   const [requests, setRequests] = useState([]);
 
   const [byokModal, setByokModal] = useState({ open: false, agent: null, provider: 'openai', apiKey: '', error: '' });
-  const [requestModal, setRequestModal] = useState({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly' });
+  const [requestModal, setRequestModal] = useState({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false });
   const [payModal, setPayModal] = useState({ open: false, request: null });
   const [submitting, setSubmitting] = useState(false);
   const [paying, setPaying] = useState(false);
@@ -873,7 +947,7 @@ const AgentKeysSettingsPage = () => {
   }, []);
 
   const openByok = (agent) => setByokModal({ open: true, agent, provider: agent.byok?.provider || 'openai', apiKey: '', error: '' });
-  const openRequest = (agent) => setRequestModal({ open: true, agent, provider: 'openai', note: '', preferred_duration: 'monthly' });
+  const openRequest = (agent, isRenewal = false) => setRequestModal({ open: true, agent, provider: agent.managed?.provider || 'openai', note: '', preferred_duration: 'monthly', is_renewal: isRenewal });
 
   const submitByok = async () => {
     if (!byokModal.apiKey || byokModal.apiKey.length < 10) {
@@ -958,12 +1032,13 @@ const AgentKeysSettingsPage = () => {
         provider: requestModal.provider,
         note: requestModal.note,
         preferred_duration: requestModal.preferred_duration,
+        is_renewal: requestModal.is_renewal,
       });
       toast({
-        title: res.already_pending ? 'Request already pending' : 'Request sent',
-        description: 'Admin will review and assign a managed key.',
+        title: res.already_pending ? 'Request already pending' : requestModal.is_renewal ? 'Renewal requested' : 'Request sent',
+        description: requestModal.is_renewal ? 'Admin will review and assign a renewed key.' : 'Admin will review and assign a managed key.',
       });
-      setRequestModal({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly' });
+      setRequestModal({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false });
       loadData({ silent: true });
     } catch (e) {
       toast({ title: 'Request failed', description: String(e.message || e), variant: 'destructive' });
@@ -1236,6 +1311,20 @@ const AgentKeysSettingsPage = () => {
                   </div>
                   <span className="text-white font-semibold text-sm">${(payModal.request?.service_charge_snapshot ?? 0).toFixed(2)}</span>
                 </div>
+                {(payModal.request?.discount_pct_snapshot > 0) && (
+                  <div className="flex justify-between items-center px-4 py-3 border-b border-[#2d2342] bg-emerald-500/5">
+                    <div>
+                      <p className="text-emerald-300 text-sm">Discount</p>
+                      <p className="text-emerald-400/60 text-xs">{payModal.request.discount_pct_snapshot}% off applied by admin</p>
+                    </div>
+                    <span className="text-emerald-400 font-semibold text-sm">
+                      -{(() => {
+                        const full = (payModal.request.key_cost_snapshot + payModal.request.service_charge_snapshot) / (1 - payModal.request.discount_pct_snapshot / 100);
+                        return (full - payModal.request.key_cost_snapshot - payModal.request.service_charge_snapshot).toFixed(2);
+                      })()}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center px-4 py-3 bg-violet-500/5">
                   <span className="text-white font-bold">Total due</span>
                   <span className="text-violet-300 font-bold text-lg">
@@ -1283,11 +1372,17 @@ const AgentKeysSettingsPage = () => {
         <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
-              <Send className="w-5 h-5 text-violet-400" />
-              Request Managed Key
+              {requestModal.is_renewal
+                ? <><RefreshCw className="w-5 h-5 text-amber-400" /> Renew Managed Key</>
+                : <><Send className="w-5 h-5 text-violet-400" /> Request Managed Key</>
+              }
             </DialogTitle>
             <DialogDescription className="text-white/60">
-              {requestModal.agent?.agent_label} — admin will review and assign a platform key on approval.
+              {requestModal.agent?.agent_label} —
+              {requestModal.is_renewal
+                ? ' your key has expired. Admin will assign a new key after payment.'
+                : ' admin will review and assign a platform key on approval.'
+              }
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-3">
@@ -1306,7 +1401,7 @@ const AgentKeysSettingsPage = () => {
                 <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
                   <SelectItem value="monthly">Monthly — key expires after 1 month, pay to renew</SelectItem>
-                  <SelectItem value="yearly">Yearly — key expires after 1 year, pay once</SelectItem>
+                  {/* <SelectItem value="yearly">Yearly — key expires after 1 year, pay once</SelectItem> */}
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-emerald-400/80 flex items-center gap-1">

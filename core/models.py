@@ -2041,8 +2041,10 @@ class KeyRequest(models.Model):
         max_length=10, choices=DURATION_CHOICES, default='monthly',
         help_text='Duration company is requesting: monthly or yearly.',
     )
+    is_renewal = models.BooleanField(default=False, help_text='True when this request is a renewal of an expired key.')
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     linked_key_id = models.BigIntegerField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
@@ -2092,6 +2094,11 @@ class AdminPricingConfig(models.Model):
     managed_key_tokens = models.BigIntegerField(
         default=0,
         help_text='Default tokens per weekly reset cycle when admin assigns a managed key.',
+    )
+    # Monthly discount percentage — e.g. 10 means 10% off the monthly price
+    monthly_discount_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text='Discount % on monthly plan (0 = no discount, 10 = 10% off, max 100).',
     )
     # Yearly discount percentage — e.g. 20 means 20% off the annual price (monthly × 12)
     yearly_discount_pct = models.DecimalField(

@@ -92,7 +92,9 @@
       "Bash(git commit -m ' *)",
       "Bash(npm list *)",
       "Bash(Get-ChildItem -Path \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\PaPerProjectFront\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")",
-      "Bash(del \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\core\\\\migrations\\\\0079_add_history_kept.py\")"
+      "Bash(del \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\core\\\\migrations\\\\0079_add_history_kept.py\")",
+      "Bash(Get-ChildItem \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/api/views/\")",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/PaPerProjectFront/src/pages/SuperAdminApiKeysPage.jsx\" -Pattern \"managed_tokens|token limit|Managed token|assignForm|setAssign\" | Select-Object -First 15 | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })"
     ]
   }
 }

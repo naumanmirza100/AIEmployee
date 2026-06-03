@@ -354,10 +354,10 @@ def revoke_key(request, key_id):
 def _serialize_pricing(p: AdminPricingConfig):
     monthly = float(p.monthly_flat_usd)
     svc = float(p.service_charge_usd)
-    discount_pct = float(p.yearly_discount_pct)
-    yearly_full = (monthly + svc) * 12           # no discount
-    yearly_total = round(yearly_full * (1 - discount_pct / 100), 2)
-    yearly_saving = round(yearly_full - yearly_total, 2)
+    monthly_discount_pct = float(p.monthly_discount_pct)
+    monthly_full = monthly + svc
+    monthly_discounted = round(monthly_full * (1 - monthly_discount_pct / 100), 2)
+    monthly_saving = round(monthly_full - monthly_discounted, 2)
     return {
         'agent_name': p.agent_name,
         'agent_label': p.get_agent_name_display(),
@@ -366,10 +366,11 @@ def _serialize_pricing(p: AdminPricingConfig):
         'free_tokens_on_purchase': p.free_tokens_on_purchase,
         'managed_key_tokens': p.managed_key_tokens,
         'yearly_discount_pct': str(p.yearly_discount_pct),
+        'monthly_discount_pct': str(p.monthly_discount_pct),
         # Pre-calculated for the UI
-        'monthly_total_usd': round(monthly + svc, 2),
-        'yearly_total_usd': yearly_total,
-        'yearly_saving_usd': yearly_saving,
+        'monthly_total_usd': monthly_full,
+        'monthly_discounted_usd': monthly_discounted,
+        'monthly_saving_usd': monthly_saving,
         'updated_by': p.updated_by.username if p.updated_by else None,
         'updated_at': p.updated_at.isoformat(),
     }
@@ -408,6 +409,11 @@ def update_pricing(request, agent_name):
             if not (0 <= val <= 100):
                 raise ValueError("yearly_discount_pct must be between 0 and 100")
             p.yearly_discount_pct = val
+        if 'monthly_discount_pct' in request.data:
+            val = float(request.data['monthly_discount_pct'])
+            if not (0 <= val <= 100):
+                raise ValueError("monthly_discount_pct must be between 0 and 100")
+            p.monthly_discount_pct = val
     except (TypeError, ValueError) as exc:
         return Response({'status': 'error', 'message': f'Bad numeric value: {exc}'},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -565,7 +571,7 @@ def adjust_quota(request, quota_id):
 # Key Requests
 # ----------------------------------------------------------------------------
 
-def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None):
+def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None, linked_key_statuses: dict = None):
     # was_assigned: True when status='revoked' but resolved_at is set, meaning this
     # record was once key_assigned/approved and was later revoked.  The frontend
     # splits it into two timeline nodes: one "Assigned" and one "Revoked".
@@ -580,6 +586,7 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None):
         'provider': r.provider,
         'status': r.status,
         'preferred_duration': r.preferred_duration,
+        'is_renewal': r.is_renewal,
         'was_assigned': was_assigned,
         'revoked_at': r.updated_at.isoformat() if was_assigned else None,
         'note': r.note,
@@ -590,8 +597,11 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None):
         'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
         'key_cost_snapshot': float(r.key_cost_snapshot) if r.key_cost_snapshot is not None else None,
         'service_charge_snapshot': float(r.service_charge_snapshot) if r.service_charge_snapshot is not None else None,
+        'discount_pct_snapshot': float(r.discount_pct_snapshot) if r.discount_pct_snapshot is not None else 0,
         'amount_paid': float(r.amount_paid) if r.amount_paid is not None else None,
         'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+        'linked_key_status': (linked_key_statuses or {}).get(r.linked_key_id, {}).get('status') if r.linked_key_id else None,
+        'linked_key_valid_until': (linked_key_statuses or {}).get(r.linked_key_id, {}).get('valid_until') if r.linked_key_id else None,
     }
 
 
@@ -624,12 +634,19 @@ def list_requests(request):
     start = (page - 1) * limit
     items = list(qs[start:start + limit])
 
+    # Bulk-fetch linked key statuses and valid_until
+    linked_key_ids = [r.linked_key_id for r in items if r.linked_key_id]
+    linked_key_statuses = {}
+    if linked_key_ids:
+        for pk, st, vu in CompanyAPIKey.objects.filter(pk__in=linked_key_ids).values_list('pk', 'status', 'valid_until'):
+            linked_key_statuses[pk] = {'status': st, 'valid_until': vu.isoformat() if vu else None}
+
     return Response({
         'status': 'success',
         'total': total,
         'page': page,
         'limit': limit,
-        'requests': [_serialize_request_admin(r) for r in items],
+        'requests': [_serialize_request_admin(r, linked_key_statuses=linked_key_statuses) for r in items],
     })
 
 
@@ -654,6 +671,7 @@ def approve_key_request(request, request_id):
     try:
         key_cost = float(request.data.get('key_cost', 0) or 0)
         service_charge = float(request.data.get('service_charge', 0) or 0)
+        discount_pct = min(100, max(0, float(request.data.get('discount_pct', 0) or 0)))
     except (TypeError, ValueError):
         return Response({'status': 'error', 'message': 'Invalid price values'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -663,6 +681,7 @@ def approve_key_request(request, request_id):
     req.status = 'payment_pending'
     req.key_cost_snapshot = key_cost
     req.service_charge_snapshot = service_charge
+    req.discount_pct_snapshot = discount_pct
     req.resolved_by = request.user
     req.resolved_at = timezone.now()
     if admin_note:
