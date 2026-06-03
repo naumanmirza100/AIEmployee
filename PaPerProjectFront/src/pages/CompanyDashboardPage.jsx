@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
-import { companyApi } from '@/services/companyAuthService';
+import { companyApi, logoutCompany } from '@/services/companyAuthService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 import companyUserManagementService from '@/services/companyUserManagementService';
@@ -848,10 +848,8 @@ const CompanyDashboardPage = () => {
     });
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('company_auth_token');
-    localStorage.removeItem('company_user');
-    localStorage.removeItem('company_purchased_modules');
+  const handleLogout = async () => {
+    await logoutCompany();
     navigate('/company/login');
   };
 

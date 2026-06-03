@@ -210,12 +210,25 @@ export const companyApi = {
   },
 };
 
-export { getCompanyToken, getCompanyUser };
+const logoutCompany = async () => {
+  try {
+    await companyApi.post('/company/logout/', {});
+  } catch (_) {
+    // Even if the server call fails, clear local storage
+  } finally {
+    localStorage.removeItem('company_auth_token');
+    localStorage.removeItem('company_user');
+    localStorage.removeItem('company_purchased_modules');
+  }
+};
+
+export { getCompanyToken, getCompanyUser, logoutCompany };
 
 export default {
   verifyToken,
   registerCompany,
   loginCompany,
+  logoutCompany,
   getCompanyToken,
   getCompanyUser,
   companyApi,

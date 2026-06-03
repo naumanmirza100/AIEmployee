@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logoutCompany } from '@/services/companyAuthService';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -177,15 +178,11 @@ const ProjectManagerDashboardPage = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (isCompanyUser()) {
-      // Company user logout
-      localStorage.removeItem('company_auth_token');
-      localStorage.removeItem('company_user');
-      localStorage.removeItem('company_purchased_modules');
+      await logoutCompany();
       navigate('/company/login');
     } else {
-      // Regular user logout
       logout().then(() => {
         navigate('/login');
       }).catch((error) => {
