@@ -808,7 +808,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                     {managedKey.renewal_period === 'none' || !managedKey.renewal_period ? 'One-time' : managedKey.renewal_period}
                   </span>
                 </span> */}
-                <span className="text-white/15 text-sm">·</span>
+                {/* <span className="text-white/15 text-sm">·</span> */}
                 <span className="text-[11px] text-white/40">
                   <span className="text-white/25">Reset: </span>
                   {managedKey.renewal_period && managedKey.renewal_period !== 'none'
