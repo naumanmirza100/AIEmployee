@@ -413,6 +413,9 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             logger.info(f"Parsed meeting request: {parsed}")
             return parsed
         except (json.JSONDecodeError, Exception) as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             logger.error(f"Failed to parse meeting request: {e}\nRaw response: {response[:500] if 'response' in dir() else 'N/A'}")
             return {
                 "is_meeting_request": True,

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot } from 'lucide-react';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
@@ -145,7 +146,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
         throw new Error(response.message || 'Failed to process request');
       }
     } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to process request', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(error, 'Failed to process request'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }

@@ -447,6 +447,8 @@ def process_cvs(request):
                 'total': len(ranked)
             })
             
+        except KeyServiceError:
+            raise
         except Exception as e:
             # Clean up temp files on error
             for temp_path in temp_paths:
@@ -454,7 +456,7 @@ def process_cvs(request):
                     temp_path.unlink()
                 except Exception:
                     pass
-            
+
             logger.error(f"CV processing error: {e}")
             return Response({
                 'status': 'error',
@@ -637,10 +639,6 @@ def create_job_description(request):
     try:
         company_user = request.user
         company = company_user.company
-        
-        agents = _make_agents(company)
-        job_desc_agent = agents['job_desc_agent']
-        log_service = agents['log_service']
 
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
@@ -652,7 +650,7 @@ def create_job_description(request):
         is_active = request.data.get('is_active', True)
         if isinstance(is_active, str):
             is_active = is_active.lower() in ('true', '1', 'yes')
-        
+
         if not title or not description:
             return Response({
                 'status': 'error',
@@ -695,16 +693,19 @@ def create_job_description(request):
                         'status': 'error',
                         'message': err
                     }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Parse keywords if requested
+
+        # Parse keywords if requested — this is optional and must never block saving.
+        # If token quota is exhausted (KeyServiceError) or any other AI failure, we
+        # save the job without keywords rather than rejecting the user's data.
         keywords_json = None
         if parse_keywords:
             try:
-                parsed = job_desc_agent.parse_text(description)
+                agents = _make_agents(company)
+                parsed = agents['job_desc_agent'].parse_text(description)
                 keywords_json = json.dumps(parsed)
             except Exception as exc:
-                log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc)})
-        
+                logger.warning("Job keyword parsing skipped (quota/key issue): %s", exc)
+
         job_desc = JobDescription.objects.create(
             title=title,
             description=description,
@@ -717,7 +718,7 @@ def create_job_description(request):
             type=job_type,
             requirements=requirements,
         )
-        
+
         return Response({
             'status': 'success',
             'message': 'Job description created successfully',
@@ -729,9 +730,7 @@ def create_job_description(request):
                 'created_at': job_desc.created_at.isoformat(),
             }
         }, status=status.HTTP_201_CREATED)
-    
-    except KeyServiceError:
-        raise
+
     except Exception as e:
         logger.error(f"Error creating job description: {e}")
         return Response({
@@ -758,10 +757,6 @@ def update_job_description(request, job_description_id):
                 'status': 'error',
                 'message': 'Job description not found'
             }, status=status.HTTP_404_NOT_FOUND)
-        
-        agents = _make_agents(company_user.company)
-        job_desc_agent = agents['job_desc_agent']
-        log_service = agents['log_service']
 
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
@@ -771,12 +766,12 @@ def update_job_description(request, job_description_id):
         job_type = request.data.get('type', job_desc.type).strip()
         requirements = request.data.get('requirements', '').strip() or None
         description_updated = 'description' in request.data
-        
+
         if title:
             job_desc.title = title
         if description:
             job_desc.description = description
-        
+
         job_desc.is_active = is_active
         if location is not None:
             job_desc.location = location
@@ -786,17 +781,19 @@ def update_job_description(request, job_description_id):
             job_desc.type = job_type
         if requirements is not None:
             job_desc.requirements = requirements
-        
-        # When description is updated, always regenerate keywords
+
+        # When description is updated, regenerate keywords — but never block saving if
+        # token quota is exhausted or the AI call fails for any reason.
         if description_updated and job_desc.description:
             try:
-                parsed = job_desc_agent.parse_text(job_desc.description)
+                agents = _make_agents(company_user.company)
+                parsed = agents['job_desc_agent'].parse_text(job_desc.description)
                 job_desc.keywords_json = json.dumps(parsed)
             except Exception as exc:
-                log_service.log_error("job_description_keyword_parsing_failed", {"error": str(exc)})
-        
+                logger.warning("Job keyword parsing skipped on update (quota/key issue): %s", exc)
+
         job_desc.save()
-        
+
         return Response({
             'status': 'success',
             'message': 'Job description updated successfully',
@@ -808,9 +805,7 @@ def update_job_description(request, job_description_id):
                 'updated_at': job_desc.updated_at.isoformat(),
             }
         })
-    
-    except KeyServiceError:
-        raise
+
     except Exception as e:
         logger.error(f"Error updating job description: {e}")
         return Response({

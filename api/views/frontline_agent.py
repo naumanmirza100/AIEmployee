@@ -394,20 +394,20 @@ def _get_or_create_user_for_company_user(company_user):
     This is needed because some models use User, not CompanyUser.
     """
     try:
-        # Try to find existing user with matching email
-        user = User.objects.get(email=company_user.email)
-        return user
-    except User.DoesNotExist:
-        # Create a new User for this company user
+        user = User.objects.filter(email=company_user.email).first()
+        if user:
+            return user
         username = f"company_user_{company_user.id}_{company_user.email}"
         user = User.objects.create_user(
             username=username,
             email=company_user.email,
-            password=None,  # Password not used for company users
+            password=None,
             first_name=company_user.full_name.split()[0] if company_user.full_name else '',
             last_name=' '.join(company_user.full_name.split()[1:]) if company_user.full_name and len(company_user.full_name.split()) > 1 else ''
         )
         return user
+    except Exception:
+        return None
 
 
 def _ensure_handoff_system_user():
@@ -4876,6 +4876,8 @@ def frontline_analytics(request):
                 if nar_result.get('success') and nar_result.get('narrative'):
                     data['narrative'] = nar_result['narrative']
             except Exception as nar_err:
+                if isinstance(nar_err, KeyServiceError):
+                    raise
                 logger.warning("Analytics narrative generation failed: %s", nar_err)
         return Response({
             'status': 'success',
@@ -5949,6 +5951,9 @@ def suggest_ticket_reply(request, ticket_id):
                 max_tokens=500,
             )
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.exception("suggest-reply LLM call failed")
             return Response(
                 {'status': 'error', 'message': f'LLM call failed: {exc}'},
@@ -5970,6 +5975,8 @@ def suggest_ticket_reply(request, ticket_id):
                 'messages_considered': len(thread_parts),
             },
         })
+    except KeyServiceError:
+        raise
     except Exception:
         logger.exception("suggest_ticket_reply failed")
         return Response({'status': 'error', 'message': 'Failed to draft reply'},

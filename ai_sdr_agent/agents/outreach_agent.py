@@ -37,21 +37,19 @@ _SYSTEM_PROMPT = (
 class OutreachAgent:
     """Generates personalised outreach, sends campaign steps, detects replies."""
 
-    def __init__(self):
-        groq_key = (
-            getattr(settings, 'GROQ_API_KEY', None)
-            or getattr(settings, 'GROQ_REC_API_KEY', None)
-            or os.environ.get('GROQ_API_KEY', '')
-            or os.environ.get('GROQ_REC_API_KEY', '')
-        ).strip()
-
+    def __init__(self, company=None):
+        self._key_ctx = None
         self.groq_client = None
-        if groq_key:
-            try:
-                from groq import Groq
-                self.groq_client = Groq(api_key=groq_key)
-            except Exception as exc:
-                logger.error("Groq init failed in OutreachAgent: %s", exc)
+        self._company = company
+
+        if company is not None:
+            from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
+            self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
+        else:
+            logger.warning(
+                "OutreachAgent initialised without a company — no LLM key resolved. "
+                "Pass company= so the platform key service can resolve the correct key."
+            )
 
         self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
 
@@ -64,6 +62,9 @@ class OutreachAgent:
             try:
                 return self._ai_generate_steps(campaign, icp)
             except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
                 logger.warning("AI step generation failed, using defaults: %s", exc)
         return self._default_steps(campaign)
 
@@ -99,6 +100,8 @@ Rules:
             temperature=0.3,
             max_tokens=1200,
         )
+        from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
+        record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
 
         raw = resp.choices[0].message.content.strip()
         if "```" in raw:
@@ -199,7 +202,8 @@ Rules:
         # Delegate to EmailAssistantAgent for consistent, high-quality personalisation
         try:
             from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-            improved = EmailAssistantAgent().improve_email(
+            _company = getattr(self, '_company', None)
+            improved = EmailAssistantAgent(company=_company).improve_email(
                 subject=subject,
                 body=body,
                 lead=lead,
@@ -224,7 +228,7 @@ Rules:
         Returns backward-compatible dict + extended 'category' and 'action' keys.
         """
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent, CAT_POSITIVE, CAT_WANTS_MORE
-        result = EmailAssistantAgent().classify_reply(reply_text)
+        result = EmailAssistantAgent(company=self._company).classify_reply(reply_text)
 
         # Map category → legacy sentiment for backward-compat callers
         cat = result['category']

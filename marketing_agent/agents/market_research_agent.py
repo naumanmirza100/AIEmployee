@@ -65,8 +65,6 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
         t = topic.strip()
         if not t:
             return 'greeting'
-        if not self.groq_client:
-            return 'research'
         try:
             prompt = f'User message: "{t[:500]}"'
             out = self._call_llm_for_reasoning(
@@ -112,11 +110,6 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
 
     def _get_short_definition(self, topic: str) -> str:
         """Return a short (1-3 sentence) definition for the term the user asked about. Handles typos like 'meanin gof aws'."""
-        if not self.groq_client:
-            return (
-                "This agent does **market and competitive research** only. For the meaning of terms (e.g. AWS = Amazon Web Services), "
-                "try a quick search. If you want a research report on a topic, ask e.g. 'market trends for cloud computing' or 'competitor analysis for AWS'."
-            )
         try:
             prompt = f"""The user asked for the meaning or definition of something. They may have typos (e.g. "meanin gof aws" = meaning of AWS).
 Reply with a brief, clear definition in 1-3 sentences. If it's an abbreviation, give the full form first (e.g. "AWS = Amazon Web Services. It is ...").

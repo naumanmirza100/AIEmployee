@@ -1397,15 +1397,21 @@ def generate_draft(request):
         return Response({'status': 'error', 'message': 'Provide only one of original_email_id / inbox_email_id'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
-    result = agent.generate_draft(
-        original_email_id=original_email_id,
-        inbox_email_id=inbox_email_id,
-        user_context=payload.get('user_context', ''),
-        tone=payload.get('tone', 'professional'),
-        length=payload.get('length'),
-        email_account_id=payload.get('email_account_id'),
-    )
+    try:
+        agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
+        result = agent.generate_draft(
+            original_email_id=original_email_id,
+            inbox_email_id=inbox_email_id,
+            user_context=payload.get('user_context', ''),
+            tone=payload.get('tone', 'professional'),
+            length=payload.get('length'),
+            email_account_id=payload.get('email_account_id'),
+        )
+    except KeyServiceError:
+        raise
+    except Exception as exc:
+        logger.exception("generate_draft failed")
+        return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     if not result.get('success'):
         return Response({'status': 'error', 'message': result.get('error')},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -1572,13 +1578,19 @@ def regenerate_draft(request, draft_id):
     user = _get_or_create_user_for_company_user(request.user)
 
     payload = request.data or {}
-    agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
-    result = agent.regenerate_draft(
-        draft_id=draft_id,
-        new_instructions=payload.get('new_instructions', ''),
-        tone=payload.get('tone'),
-        length=payload.get('length'),
-    )
+    try:
+        agent = ReplyDraftAgent(user=user, company_id=request.user.company_id)
+        result = agent.regenerate_draft(
+            draft_id=draft_id,
+            new_instructions=payload.get('new_instructions', ''),
+            tone=payload.get('tone'),
+            length=payload.get('length'),
+        )
+    except KeyServiceError:
+        raise
+    except Exception as exc:
+        logger.exception("regenerate_draft failed")
+        return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     if not result.get('success'):
         return Response({'status': 'error', 'message': result.get('error')},
                         status=status.HTTP_400_BAD_REQUEST)

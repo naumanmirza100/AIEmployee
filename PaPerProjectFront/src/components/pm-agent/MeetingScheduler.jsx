@@ -190,8 +190,12 @@ export default function MeetingScheduler() {
           c.id === selectedChatId ? { ...c, messages: c.messages.filter((m) => m !== tempUserMsg) } : c
         ));
       }
+      const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block === true;
+      const errContent = isHardBlock
+        ? (err?.data?.message || 'Your token quota has been exhausted. Please add a key or contact your admin.')
+        : 'Sorry, something went wrong. Please try again.';
       const userMsg = { role: 'user', content: msg };
-      const assistantMsg = { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' };
+      const assistantMsg = { role: 'assistant', content: errContent };
       await addMessagePairToChat(userMsg, assistantMsg, msg);
     } finally {
       setLoading(false);

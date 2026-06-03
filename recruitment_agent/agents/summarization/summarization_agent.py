@@ -24,13 +24,7 @@ class SummarizationAgent:
     ) -> None:
         self.groq_client = groq_client
         self.log_service = log_service or LogService()
-        self.use_llm = use_llm
-        if use_llm and not self.groq_client:
-            try:
-                self.groq_client = GroqClient()
-            except Exception:
-                self.use_llm = False
-                self._log_step("llm_disabled", {"reason": "GroqClient initialization failed"})
+        self.use_llm = use_llm and groq_client is not None
 
     def summarize(self, parsed_cv: Dict[str, Any], job_keywords: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -191,9 +185,7 @@ class SummarizationAgent:
                     if isinstance(llm_exc, GroqClientError):
                         if llm_exc.is_auth_error:
                             self._log_error("llm_api_key_expired", llm_exc)
-                            # Disable LLM for future calls in this session
-                            self.use_llm = False
-                            # Fall through to rule-based fallback
+                            raise  # hard-block — propagate to view layer for proper 402/403
                         elif llm_exc.is_rate_limit:
                             # Rate limit error - try retry with exponential backoff
                             self._log_error("llm_rate_limit", llm_exc)

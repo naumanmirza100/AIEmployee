@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { Loader2, Calendar, BarChart3, Clock, AlertCircle, Settings, Layers, ChevronDown, ChevronUp, BrainCircuit, TrendingUp } from 'lucide-react';
 import {
   PieChart,
@@ -89,7 +90,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
       console.error('Timeline/Gantt error:', error);
       toast({
         title: 'Error',
-        description: error.message || 'Failed to process timeline request',
+        description: apiErrorMessage(error, 'Failed to process timeline request'),
         variant: 'destructive',
       });
     } finally {

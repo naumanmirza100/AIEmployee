@@ -87,21 +87,17 @@ _POSITIVE = [
 class EmailAssistantAgent:
     """Reads, classifies, and responds to prospect emails intelligently."""
 
-    def __init__(self):
-        groq_key = (
-            getattr(settings, 'GROQ_API_KEY', None)
-            or getattr(settings, 'GROQ_REC_API_KEY', None)
-            or os.environ.get('GROQ_API_KEY', '')
-            or os.environ.get('GROQ_REC_API_KEY', '')
-        ).strip()
-
+    def __init__(self, company=None):
+        self._key_ctx = None
         self.groq_client = None
-        if groq_key:
-            try:
-                from groq import Groq
-                self.groq_client = Groq(api_key=groq_key)
-            except Exception as exc:
-                logger.warning('EmailAssistantAgent: Groq init failed: %s', exc)
+
+        if company is not None:
+            from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
+            self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
+        else:
+            logger.warning(
+                "EmailAssistantAgent initialised without a company — no LLM key resolved."
+            )
 
         self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
 
@@ -188,6 +184,8 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 temperature=0.4,
                 max_tokens=600,
             )
+            from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
+            record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
             content = resp.choices[0].message.content.strip()
             if '```' in content:
                 content = content.split('```')[1].lstrip('json').strip()
@@ -197,6 +195,9 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 'body': data.get('body', body),
             }
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning('EmailAssistantAgent.improve_email failed: %s', exc)
             return {'subject': subject, 'body': body}
 
@@ -241,6 +242,8 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 temperature=0.5,
                 max_tokens=500,
             )
+            from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
+            record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
             content = resp.choices[0].message.content.strip()
             if '```' in content:
                 content = content.split('```')[1].lstrip('json').strip()
@@ -250,6 +253,9 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 'body': data.get('body', ''),
             }
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning('EmailAssistantAgent.generate_more_info_email failed: %s', exc)
             return {
                 'subject': f"Re: More about {campaign.sender_company}",
@@ -284,6 +290,8 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
                 temperature=0.1,
                 max_tokens=120,
             )
+            from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
+            record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
             content = resp.choices[0].message.content.strip()
             if '```' in content:
                 content = content.split('```')[1].lstrip('json').strip()
@@ -293,6 +301,9 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
                 cat = CAT_NEUTRAL
             return self._result(cat, confidence='high', reason=data.get('reason', 'AI classified'))
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
             logger.warning('EmailAssistantAgent._ai_classify failed: %s', exc)
             return self._result(CAT_NEUTRAL, confidence='low', reason='AI classification failed')
 

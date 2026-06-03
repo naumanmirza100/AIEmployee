@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, Activity, TrendingUp, AlertTriangle, CheckCircle, Clock, FileText } from 'lucide-react';
 
@@ -73,7 +74,7 @@ export default function ProjectHealthDashboard() {
       const data = res?.data?.data || res?.data || {};
       setHealth(data);
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to fetch health score', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to fetch health score'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -91,7 +92,7 @@ export default function ProjectHealthDashboard() {
       const data = res?.data?.data || res?.data || {};
       setStatusReport(data);
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to generate report', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to generate report'), variant: 'destructive' });
     } finally {
       setReportLoading(false);
     }

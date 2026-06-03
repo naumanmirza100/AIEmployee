@@ -362,6 +362,9 @@ Return JSON array with optimized dates:
                 ai_optimizations = json.loads(response)
                 optimization_map = {opt['task_id']: opt for opt in ai_optimizations}
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 self.log_action("AI optimization failed, using fallback", {"error": str(e)})
                 optimization_map = {}
         else:
@@ -1076,6 +1079,9 @@ Return JSON:
                 
                 ai_summary = ai_resolutions.get('summary', '')
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 self.log_action("AI conflict resolution failed", {"error": str(e)})
                 ai_summary = None
         else:
@@ -1244,6 +1250,9 @@ Return JSON array:
                 suggestions.append(sug)
                 
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("AI suggestions failed, using fallback", {"error": str(e)})
             # Fallback to rule-based suggestions
         for task in tasks:
@@ -1518,6 +1527,9 @@ CALCULATE AND RETURN JSON:
             
             ai_estimates = json.loads(response)
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("AI estimation failed, using fallback", {"error": str(e)})
             ai_estimates = None
         
@@ -2044,6 +2056,9 @@ Return JSON:
                 
                 ai_analysis = json.loads(deps_response)
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 self.log_action("AI dependency analysis failed", {"error": str(e)})
                 ai_analysis = None
         else:
@@ -2422,6 +2437,9 @@ Return JSON:
             
             ai_insights = json.loads(insights_response)
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("AI insights generation failed", {"error": str(e)})
             ai_insights = None
         

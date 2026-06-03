@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, FileText, CheckSquare, AlertTriangle, Users, Lightbulb } from 'lucide-react';
 
@@ -39,7 +40,7 @@ export default function MeetingNotesAgent() {
       const data = res?.data?.data || res?.data || {};
       setResult(data);
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to process notes', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to process notes'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }

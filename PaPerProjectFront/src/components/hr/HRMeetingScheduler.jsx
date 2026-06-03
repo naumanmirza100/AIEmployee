@@ -211,9 +211,13 @@ export default function HRMeetingScheduler() {
           c.id === selectedChatId ? { ...c, messages: c.messages.filter((m) => m !== tempUser) } : c,
         ));
       }
+      const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block === true;
+      const errMsg = isHardBlock
+        ? (err?.data?.message || 'Your token quota has been exhausted. Please add a key or contact your admin.')
+        : 'Sorry, I had trouble with that. Please try again.';
       await persistTurn(
         { role: 'user', content: msg },
-        { role: 'assistant', content: 'Sorry, I had trouble with that. Please try again.' },
+        { role: 'assistant', content: errMsg },
         msg,
       );
     } finally {

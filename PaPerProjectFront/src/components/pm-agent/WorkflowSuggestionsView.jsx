@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import {
   Loader2, Workflow, CheckSquare, Square, ArrowRight, Lightbulb,
@@ -61,7 +62,7 @@ export default function WorkflowSuggestionsView() {
         setExpandedPhase(data.current_phase);
       }
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to get suggestions', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to get suggestions'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -80,7 +81,7 @@ export default function WorkflowSuggestionsView() {
       const data = res?.data?.data || res?.data || {};
       setChecklist(data);
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to generate checklist', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to generate checklist'), variant: 'destructive' });
     } finally {
       setChecklistLoading(false);
     }
@@ -98,7 +99,7 @@ export default function WorkflowSuggestionsView() {
       const data = res?.data?.data || res?.data || {};
       setValidation(data);
     } catch (e) {
-      toast({ title: 'Error', description: e.message || 'Failed to validate workflow', variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to validate workflow'), variant: 'destructive' });
     } finally {
       setValidateLoading(false);
     }

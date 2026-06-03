@@ -200,6 +200,9 @@ Use markdown formatting. Be concise. If a member has no activity, note it briefl
                 },
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error generating standup", {"error": str(e)})
             return {"success": False, "error": str(e)}
 
@@ -267,6 +270,9 @@ Use markdown. Keep it under 300 words."""
                 },
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {"success": False, "error": str(e)}
 
     def process(self, action: str = "daily", **kwargs) -> Dict:

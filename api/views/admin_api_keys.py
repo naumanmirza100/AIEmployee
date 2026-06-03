@@ -633,15 +633,16 @@ def reject_request(request, request_id):
 # ----------------------------------------------------------------------------
 
 def _serialize_platform(p: PlatformAPIKey):
+    is_active = p.status == 'active' and bool(p.encrypted_key)
     return {
         'id': p.id,
         'provider': p.provider,
         'provider_label': p.get_provider_display(),
-        'masked': p.masked_display,
+        'masked': p.masked_display if is_active else '',
         'status': p.status,
         'updated_by': p.updated_by.username if p.updated_by else None,
         'updated_at': p.updated_at.isoformat(),
-        'configured': bool(p.encrypted_key),
+        'configured': is_active,
     }
 
 
@@ -695,7 +696,8 @@ def revoke_platform_key(request, provider):
         return Response({'status': 'error', 'message': 'Not found'},
                         status=status.HTTP_404_NOT_FOUND)
     p.status = 'revoked'
-    p.save(update_fields=['status', 'updated_at'])
+    p.encrypted_key = ''
+    p.save(update_fields=['status', 'encrypted_key', 'updated_at'])
     return Response({'status': 'success'})
 
 

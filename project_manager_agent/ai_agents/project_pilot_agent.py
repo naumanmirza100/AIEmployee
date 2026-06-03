@@ -421,6 +421,9 @@ RULES:
                         "question": question
                     }
             except Exception as e:
+                from core.api_key_service import KeyServiceError
+                if isinstance(e, KeyServiceError):
+                    raise
                 return {"success": False, "error": str(e), "answer": "Error generating sprint plan."}
 
         if is_action_request:
@@ -1452,6 +1455,9 @@ Return a helpful text response (NOT JSON) explaining this."""
                     "question": question
                 }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             import traceback
             error_detail = traceback.format_exc()
             self.log_action("Error handling action request", {"error": str(e), "traceback": error_detail})
