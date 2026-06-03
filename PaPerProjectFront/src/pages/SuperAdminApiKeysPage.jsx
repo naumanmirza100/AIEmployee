@@ -1832,21 +1832,20 @@ const SuperAdminApiKeysPage = () => {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-x-6">
-                <div>
+                {/* <div>
                   <Label className="text-white/60 text-xs uppercase tracking-wider">Billing Plan — Key Expiry</Label>
                   <Select value={assignForm.renewal_period} onValueChange={(v) => setAssignForm({ ...assignForm, renewal_period: v })}>
                     <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
                       <SelectItem value="none">One-time — key never expires</SelectItem>
                       <SelectItem value="monthly">Monthly — key expires after 1 month</SelectItem>
-                      {/* <SelectItem value="yearly">Yearly — key expires after 1 year</SelectItem> */}
                     </SelectContent>
                   </Select>
                   <p className="text-[10px] text-emerald-400/70 mt-1">
                     {assignForm.renewal_period === 'none' ? 'Tokens are one-time — no weekly reset.' : '✓ Tokens reset automatically every 7 days.'}
                   </p>
-                </div>
-                <div>
+                </div> */}
+                {/* <div>
                   <Label className="text-white/60 text-xs uppercase tracking-wider">Key Valid For (months)</Label>
                   <Input
                     type="number" min="1"
@@ -1861,7 +1860,7 @@ const SuperAdminApiKeysPage = () => {
                       ⚠ Key expires after {assignForm.duration_months} month{parseInt(assignForm.duration_months) !== 1 ? 's' : ''} — company must renew
                     </p>
                   )}
-                </div>
+                </div> */}
               </div>
             )}
           </div>

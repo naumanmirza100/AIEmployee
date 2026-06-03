@@ -548,10 +548,18 @@ def adjust_quota(request, quota_id):
         elif action == 'add_tokens':
             q.included_tokens = max(0, q.included_tokens + int(request.data.get('value')))
         elif action == 'set_managed':
-            q.managed_included_tokens = max(0, int(request.data.get('value')))
+            new_tokens = max(0, int(request.data.get('value')))
+            q.managed_included_tokens = new_tokens
             q.managed_notified_80pct = False
             q.managed_notified_90pct = False
             q.managed_notified_100pct = False
+            # Sync to key so next weekly reset uses the new value
+            CompanyAPIKey.objects.filter(
+                company=q.company,
+                agent_name=q.agent_name,
+                mode='managed',
+                status='active',
+            ).update(tokens_per_period=new_tokens)
         elif action == 'reset_managed':
             q.managed_used_tokens = 0
             q.managed_notified_80pct = False
