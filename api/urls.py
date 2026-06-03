@@ -240,6 +240,7 @@ urlpatterns = [
     re_path(r'^project-manager/ai/meeting-scheduler/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_meeting_scheduler_chat, name='pm_meeting_scheduler_chats_delete'),
     re_path(r'^project-manager/ai/audit-logs/?$', pm_agent.list_audit_logs, name='pm_audit_logs'),
     re_path(r'^project-manager/health/?$', pm_agent.pm_health_check, name='pm_health_check'),
+    re_path(r'^project-manager/health/detailed/?$', pm_agent.pm_health_check_detailed, name='pm_health_check_detailed'),
 
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST

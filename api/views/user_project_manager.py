@@ -248,9 +248,21 @@ def create_project_manager_task(request):
                 'message': 'project_id is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Verify project exists and user has access (user must have at least one task in this project)
-        project = get_object_or_404(Project, id=project_id)
-        
+        # L1 — tenant gate. The existing membership check below was role-based
+        # only (creator/owner/has-task); a user accidentally attached to a
+        # foreign-company project would have full access. Filter by company at
+        # the lookup so that path is closed even before the membership check runs.
+        user_company = getattr(getattr(user, 'profile', None), 'company', None)
+        project_qs = Project.objects.filter(id=project_id)
+        if user_company is not None:
+            project_qs = project_qs.filter(company=user_company)
+        project = project_qs.first()
+        if not project:
+            return Response({
+                'status': 'error',
+                'message': 'Project not found',
+            }, status=status.HTTP_404_NOT_FOUND)
+
         # Check if user has access to this project (has at least one task assigned)
         user_has_access = Task.objects.filter(project=project, assignee=user).exists()
         if not user_has_access and project.project_manager != user and project.owner != user:
@@ -492,16 +504,27 @@ def update_project_manager_project(request, project_id):
                 'message': 'Access denied. Project manager role required.'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        # Get project and verify user has access (is project manager, owner, or has tasks in it)
-        project = get_object_or_404(Project, id=project_id)
-        
+        # L1 — tenant gate. Same belt-and-suspenders as create_project_manager_task:
+        # filter the lookup by company so a stray cross-tenant project_id can't
+        # reach the role-based membership check below.
+        user_company = getattr(getattr(user, 'profile', None), 'company', None)
+        project_qs = Project.objects.filter(id=project_id)
+        if user_company is not None:
+            project_qs = project_qs.filter(company=user_company)
+        project = project_qs.first()
+        if not project:
+            return Response({
+                'status': 'error',
+                'message': 'Project not found',
+            }, status=status.HTTP_404_NOT_FOUND)
+
         # Check if user has access
         user_has_access = (
-            project.project_manager == user or 
-            project.owner == user or 
+            project.project_manager == user or
+            project.owner == user or
             Task.objects.filter(project=project, assignee=user).exists()
         )
-        
+
         if not user_has_access:
             return Response({
                 'status': 'error',

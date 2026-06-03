@@ -59,8 +59,19 @@ except ImportError:
     logger.warning("python-docx not available. DOCX extraction will not work.")
 
 
+# L5 — module-level counter for audit-log write failures. Ops can scrape this
+# (or poll via the detailed health endpoint) to detect a silent regression
+# without it taking down user-facing requests. Reset never — monotonic count
+# of failures since process start.
+_PM_AUDIT_FAILURES = {'count': 0, 'last_error': None, 'last_failed_at': None}
+
+
 def _audit_log(company_user, action, model_name='', object_id=None, object_title='', details=None):
-    """Create an audit log entry. Fails silently."""
+    """Create an audit log entry. Failures are intentionally non-fatal — a
+    logging glitch must not roll back the main mutation — but they're no
+    longer silent. The module-level `_PM_AUDIT_FAILURES` counter increments,
+    the failure is logged with stack trace, and the detailed health endpoint
+    surfaces the count so ops can alert on it."""
     try:
         from project_manager_agent.models import PMAuditLog
         PMAuditLog.objects.create(
@@ -68,8 +79,20 @@ def _audit_log(company_user, action, model_name='', object_id=None, object_title
             object_id=object_id, object_title=str(object_title)[:255],
             details=details,
         )
-    except Exception:
-        pass  # Audit logging should never break the main flow
+    except Exception as exc:
+        _PM_AUDIT_FAILURES['count'] += 1
+        _PM_AUDIT_FAILURES['last_error'] = f"{type(exc).__name__}: {exc}"[:300]
+        _PM_AUDIT_FAILURES['last_failed_at'] = timezone.now().isoformat()
+        # Full stack trace at WARNING so ops sees both the volume (via counter)
+        # AND the root cause (via log aggregator). Previously this was a silent
+        # `pass`, so a permission flip or schema drift would have erased the
+        # audit trail without anyone noticing.
+        logger.warning(
+            "_audit_log failed (action=%s model=%s object_id=%s): %s. "
+            "Total failures since process start: %d",
+            action, model_name, object_id, exc, _PM_AUDIT_FAILURES['count'],
+            exc_info=True,
+        )
 
 
 class PMLLMThrottle(SimpleRateThrottle):
@@ -2065,7 +2088,54 @@ def knowledge_qa(request):
             # Generate session ID from company user ID
             session_id = f"company_user_{company_user.id}"
 
-        chat_history = request.data.get("chat_history") or []
+        # L3 + L4 — chat history sourcing.
+        #
+        # Two paths, in priority order:
+        #   (a) If the caller supplied a `chat_id`, hydrate the last N messages
+        #       from PMKnowledgeQAChat server-side. The client-supplied
+        #       `chat_history` is IGNORED on this path. This closes both gaps:
+        #       (1) injection vector — the LLM can't be fed fake "assistant"
+        #       turns crafted by a malicious client; (2) statelessness — a
+        #       fresh browser session still gets carry-over context.
+        #
+        #   (b) If no `chat_id` is given (one-shot Q&A), fall back to the
+        #       client-supplied `chat_history` BUT filter out any non-user
+        #       turns. A client can no longer fabricate prior assistant
+        #       responses to manipulate the model's behaviour. The user-only
+        #       turns are still useful for follow-up phrasing context.
+        chat_history = []
+        chat_id = request.data.get("chat_id")
+        if chat_id:
+            try:
+                hydrated_chat = PMKnowledgeQAChat.objects.filter(
+                    company_user=company_user, id=chat_id,
+                ).first()
+                if hydrated_chat:
+                    # Last 20 messages, oldest-first for the prompt.
+                    chat_history = [
+                        {"role": m.role, "content": m.content}
+                        for m in hydrated_chat.messages.order_by('-created_at')[:20][::-1]
+                    ]
+            except Exception:
+                logger.warning(
+                    "knowledge_qa: failed to hydrate chat_id=%s for company_user=%s — falling back to no history",
+                    chat_id, company_user.id,
+                )
+                chat_history = []
+        else:
+            raw_history = request.data.get("chat_history") or []
+            if isinstance(raw_history, list):
+                # User-only filter — drop "assistant" / "system" turns the
+                # client supplied. We trust the LLM's own model state, not the
+                # caller's claim about what we previously said.
+                chat_history = [
+                    {"role": "user", "content": str(turn.get("content") or "")[:4000]}
+                    for turn in raw_history[-20:]
+                    if isinstance(turn, dict)
+                    and (turn.get("role") or "").lower() == "user"
+                    and turn.get("content")
+                ]
+
         agent = AgentRegistry.get_agent("knowledge_qa")
         agent.company_id = getattr(company_user, 'company_id', None)
         agent.agent_key_name = 'project_manager_agent'
@@ -2192,10 +2262,23 @@ Output format:
   "orientation": "horizontal" | "vertical"  (only for bar charts; omit for other types)
 }
 
-Rules:
-- bar/pie: data must be object with string keys and number values.
-- line/area: data must be array of objects with "label" and "value".
+CRITICAL RULE — user intent always wins:
+- If the user's request explicitly names a chart type ("pie chart", "as a pie",
+  "line graph", "trend line", "area chart", "bar chart"), you MUST use that
+  exact chart_type. Do not "default" to bar.
+
+Data shape rules:
+- bar/pie: `data` must be an object {string: number}.
+- line/area: `data` must be an array [{"label": "x", "value": y}].
+- If the user picks pie/bar but only time-series data is relevant, still honour
+  their pie request — aggregate the time series into a single object {label: count}.
+
+Other rules:
 - Only use numbers from the provided data summary; do not invent values.
+- Default mapping (only when user does NOT specify a type):
+    * "over time" / "trend" / "daily" / "by date" → "line"
+    * "distribution" / "share" / "breakdown" / "split" → "pie"
+    * "by status" / "by priority" / "by project" / "compare" → "bar"
 - For "projects by status" use projects_by_status_obj.
 - For "projects by priority" use projects_by_priority_obj.
 - For "tasks by status" use tasks_by_status_obj.
@@ -2217,9 +2300,11 @@ Rules:
     )
     raw = _pm_repair_llm_json(raw, analytics_data)
     chart_config = None
+    parse_failed = False
     try:
         chart_config = _pm_extract_first_json(raw)
     except Exception:
+        parse_failed = True
         try:
             raw_preview = (raw or "")
             raw_preview = raw_preview[:800] + ("..." if len(raw_preview) > 800 else "")
@@ -2227,19 +2312,62 @@ Rules:
         except Exception:
             pass
         chart_config = {
-            'chart_type': 'bar',
+            'chart_type': 'bar',  # placeholder — overwritten below by user-intent detection
             'title': 'Tasks by Status',
-            'data': analytics_data.get('tasks_by_status_obj') or {'No data': 0},
+            'data': None,
             'orientation': 'horizontal',
             'colors': ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"],
             'insights': 'Unable to parse a valid chart JSON from the model response. Showing a default chart instead.',
         }
 
-    chart_type = chart_config.get('chart_type') or 'bar'
+    # Accept either `chart_type` (documented) or `type` (some models shorten it).
+    raw_type = (chart_config.get('chart_type')
+                or chart_config.get('type')
+                or 'bar')
+    chart_type = str(raw_type).strip().lower()
+    if chart_type not in {'bar', 'pie', 'line', 'area'}:
+        chart_type = 'bar'
+
+    # User-intent override — if the user explicitly named a type, honour it
+    # even when the LLM picked something else (or the parse failed). This is
+    # the safety net for the "always returns bar" bug.
+    _p = (prompt or '').lower()
+    explicit_type = None
+    if 'area chart' in _p or 'area graph' in _p:
+        explicit_type = 'area'
+    elif ('line chart' in _p or 'line graph' in _p or 'line plot' in _p
+          or 'as a line' in _p or 'trend line' in _p):
+        explicit_type = 'line'
+    elif ('pie chart' in _p or 'pie graph' in _p or 'as a pie' in _p
+          or 'donut' in _p):
+        explicit_type = 'pie'
+    elif ('bar chart' in _p or 'bar graph' in _p or 'as a bar' in _p
+          or 'as bars' in _p):
+        explicit_type = 'bar'
+    if explicit_type and explicit_type != chart_type:
+        logger.info(
+            "PM graph: overriding chart_type=%r with explicit user request=%r (parse_failed=%s)",
+            chart_type, explicit_type, parse_failed,
+        )
+        chart_type = explicit_type
+
     title = chart_config.get('title') or 'Project Manager Graph'
     chart_data = chart_config.get('data')
     if chart_data is None:
-        chart_data = analytics_data.get('tasks_by_status_obj') or {'No data': 0}
+        # Sensible default per chart type — line/area expect arrays, not objects.
+        if chart_type in ('line', 'area'):
+            # PM doesn't have a built-in time-series array yet; emit an empty
+            # array so the renderer shows "No data" instead of mis-rendering
+            # status counts as a line.
+            chart_data = []
+        else:
+            chart_data = analytics_data.get('tasks_by_status_obj') or {'No data': 0}
+
+    # Coerce data shape to match chart_type. If the LLM emitted object data
+    # for a line chart (or array data for pie), convert rather than render
+    # empty. Same helper pattern as Frontline.
+    chart_data = _pm_coerce_chart_data(chart_data, chart_type, analytics_data)
+
     colors = chart_config.get('colors') or ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
 
     chart_out = {
@@ -2256,6 +2384,44 @@ Rules:
         'chart': chart_out,
         'insights': chart_config.get('insights') or '',
     }
+
+
+def _pm_coerce_chart_data(chart_data, chart_type: str, source_data: dict):
+    """Reconcile the LLM's `data` payload with the chosen chart_type.
+
+    Object → array for line/area; array → object for bar/pie. Same approach
+    Frontline uses (`core/Frontline_agent/frontline_agent.py:_coerce_chart_data`).
+    """
+    wants_array = chart_type in ('line', 'area')
+    wants_object = chart_type in ('bar', 'pie')
+
+    if wants_array and isinstance(chart_data, list):
+        return chart_data
+    if wants_object and isinstance(chart_data, dict):
+        return chart_data
+
+    if wants_array and isinstance(chart_data, dict):
+        return [{"label": str(k), "value": v} for k, v in chart_data.items()]
+
+    if wants_object and isinstance(chart_data, list):
+        out = {}
+        for item in chart_data:
+            if not isinstance(item, dict):
+                continue
+            k = (item.get('label') or item.get('category') or item.get('status')
+                 or item.get('priority') or item.get('date') or item.get('key')
+                 or item.get('name'))
+            v = item.get('value') if item.get('value') is not None else item.get('count')
+            if k is not None and v is not None:
+                out[str(k)] = v
+        if out:
+            return out
+
+    # Last-ditch fallback — prefer a sensible shape for the type rather than
+    # rendering bad data the chart component will reject.
+    if wants_array:
+        return []
+    return source_data.get('tasks_by_status_obj') or {"No data": 0}
 
 
 @api_view(["POST"])
@@ -4414,6 +4580,43 @@ def meeting_schedule(request):
                 names_str = ", ".join(f"**{n}**" for n in invitee_names)
                 return Response({"status": "success", "data": {"action": "not_found", "response": f"I couldn't find an active meeting with {names_str} to reschedule.", "meeting": None}}, status=status.HTTP_200_OK)
 
+            # M-F2 — reschedule guards. Two checks:
+            #   1. Reject reschedule to the past (unless `?force=1` for HR
+            #      back-fill). "Past" = more than 5 minutes ago, so clock skew
+            #      between client and server doesn't trip a legitimate
+            #      "schedule for 30s from now" call.
+            #   2. Conflict detection — warn if any participant has another
+            #      accepted/pending meeting overlapping the new window. The
+            #      reschedule still proceeds (force-pattern is non-blocking)
+            #      but we surface the conflict in the response.
+            force = str(request.data.get('force') or '').lower() in ('1', 'true', 'yes')
+            past_threshold = timezone.now() - timedelta(minutes=5)
+            if new_time < past_threshold and not force:
+                return Response({
+                    "status": "error",
+                    "message": (
+                        f"Reschedule to {new_time.strftime('%Y-%m-%d %H:%M')} is in the past. "
+                        "Pass `force=true` to override (e.g. recording a meeting that already happened)."
+                    ),
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Conflict detection — same participants, overlapping window.
+            window_end = new_time + timedelta(minutes=int(meeting.duration_minutes or 30))
+            participant_user_ids = list(meeting.participants.values_list('user_id', flat=True))
+            conflict_qs = ScheduledMeeting.objects.exclude(pk=meeting.pk).filter(
+                status__in=['pending', 'accepted', 'partially_accepted', 'counter_proposed'],
+                proposed_time__lt=window_end,
+            ).filter(
+                Q(participants__user_id__in=participant_user_ids) | Q(invitee_id__in=participant_user_ids),
+            ).distinct()
+            conflict_warnings = []
+            for c in conflict_qs[:5]:  # cap to 5 for response size
+                c_end = c.proposed_time + timedelta(minutes=int(c.duration_minutes or 30))
+                if c_end > new_time:  # actual overlap
+                    conflict_warnings.append(
+                        f'"{c.title}" at {c.proposed_time.strftime("%Y-%m-%d %H:%M")}'
+                    )
+
             old_time = meeting.proposed_time.strftime("%A, %B %d at %I:%M %p") if meeting.proposed_time else "unknown"
             meeting.proposed_time = new_time
             meeting.save(update_fields=['proposed_time', 'updated_at'])
@@ -4436,12 +4639,23 @@ def meeting_schedule(request):
                         body_html=f"<p><strong>{company_user.full_name}</strong> rescheduled <strong>\"{meeting.title}\"</strong> from {old_time} to <strong>{new_time_display}</strong>.</p>",
                     )
 
+            response_text = (
+                f"**Meeting Rescheduled!**\n\n**{meeting.title}** has been moved from "
+                f"{old_time} to **{new_time_display}**.\n\nAll participants have been notified."
+            )
+            if conflict_warnings:
+                response_text += (
+                    "\n\n⚠️ Conflicts with existing meetings: "
+                    + "; ".join(conflict_warnings)
+                    + ". Reschedule still went through; review participant availability."
+                )
             return Response({
                 "status": "success",
                 "data": {
                     "action": "rescheduled",
-                    "response": f"**Meeting Rescheduled!**\n\n**{meeting.title}** has been moved from {old_time} to **{new_time_display}**.\n\nAll participants have been notified.",
+                    "response": response_text,
                     "meeting": _serialize_meeting(meeting),
+                    "conflict_warnings": conflict_warnings,
                 }
             }, status=status.HTTP_200_OK)
 
@@ -4983,15 +5197,12 @@ def list_audit_logs(request):
         return Response({'status': 'error', 'message': 'An internal error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# ==================== HEALTH CHECK ENDPOINT ====================
+# ==================== HEALTH CHECK ENDPOINTS ====================
 
-@api_view(["GET"])
-def pm_health_check(request):
-    """
-    Health check endpoint for the PM Agent system.
-    Returns system status, database connectivity, and LLM availability.
-    No authentication required — used by monitoring/load balancers.
-    """
+def _run_pm_health_checks():
+    """Shared health probe — used by both the public (slim) and authenticated
+    (detailed) endpoints below. Returns the same dict; callers decide which
+    fields to expose to whom."""
     import time as _time
     checks = {}
 
@@ -5031,8 +5242,50 @@ def pm_health_check(request):
     except Exception as e:
         checks['agents'] = {'status': 'error', 'error': str(type(e).__name__)}
 
-    overall = 'healthy' if all(c.get('status') == 'ok' for c in checks.values()) else 'degraded'
+    # Audit-log write failures since process start (L5). Surfaces in detailed
+    # health so ops can alert when the counter is non-zero or climbing.
+    checks['audit_log'] = {
+        'status': 'ok' if _PM_AUDIT_FAILURES['count'] == 0 else 'degraded',
+        'failures_since_startup': _PM_AUDIT_FAILURES['count'],
+        'last_error': _PM_AUDIT_FAILURES['last_error'],
+        'last_failed_at': _PM_AUDIT_FAILURES['last_failed_at'],
+    }
 
+    return checks
+
+
+@api_view(["GET"])
+def pm_health_check(request):
+    """
+    Public health probe — used by load balancers / uptime monitors.
+    Intentionally minimal: returns `{status: ok|degraded|error}` only, no DB
+    latency, no model names, no project counts. The detailed payload is
+    behind auth at /pm/health-detailed/ (see below).
+    """
+    try:
+        checks = _run_pm_health_checks()
+        if all(c.get('status') == 'ok' for c in checks.values()):
+            overall = 'ok'
+        elif any(c.get('status') == 'error' for c in checks.values()):
+            overall = 'error'
+        else:
+            overall = 'degraded'
+        return Response({'status': overall})
+    except Exception:
+        # Even the probe shouldn't 500 — return degraded so the load balancer
+        # decides to pull this instance out of rotation rather than crash.
+        return Response({'status': 'error'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_health_check_detailed(request):
+    """Detailed health check — DB latency, LLM model, registered agent names.
+    Authenticated only so attackers can't fingerprint the stack via the public
+    probe."""
+    checks = _run_pm_health_checks()
+    overall = 'healthy' if all(c.get('status') == 'ok' for c in checks.values()) else 'degraded'
     return Response({
         'status': overall,
         'checks': checks,
