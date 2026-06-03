@@ -1680,6 +1680,9 @@ Provide a comprehensive JSON response explaining why THIS EXECUTION STRATEGY is 
                 return {"success": False, "error": f"Unknown action: {action}"}
                 
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action(f"Error processing {action}", {"error": str(e)})
             return {"success": False, "error": str(e)}
 

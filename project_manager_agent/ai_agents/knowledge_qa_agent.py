@@ -962,6 +962,9 @@ INSTRUCTIONS:
                 "count": len(results),
             }
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error in search_project_history", {"error": str(e)})
             return {"success": False, "error": str(e)}
     
@@ -1072,8 +1075,11 @@ Provide a clear, step-by-step explanation of how this workflow works."""
 
             return {"success": True, "project_id": project_id, "insights": insights}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             return {"success": False, "error": str(e)}
-    
+
     def process(self, question: str, **kwargs) -> Dict:
         """
         Main processing method for Q&A agent.
