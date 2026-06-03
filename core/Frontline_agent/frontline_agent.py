@@ -695,12 +695,23 @@ Output format:
   "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
 }
 
-Rules:
-- bar/pie: data must be object with string keys and number values.
-- line/area: data must be array of objects with "label" and "value" (use tickets_by_date_line for trends).
+CRITICAL RULE — user intent always wins:
+- If the user's request explicitly names a chart type ("pie chart", "as a pie",
+  "line graph", "trend line", "area chart", "bar chart"), you MUST use that
+  exact chart_type. Do not "default" to bar.
+
+Data shape rules:
+- bar/pie: `data` must be an object {string: number} (e.g. {"Open": 10, "Closed": 5}).
+- line/area: `data` must be an array [{"label": "x", "value": y}] (use tickets_by_date_line for trends).
+- If the user picks pie/bar but only time-series data is relevant (e.g. "show daily counts as a pie"),
+  still honour their pie request — aggregate the time series into a single object {date: count}.
+
+Other rules:
 - Only use data from the provided summary; do not invent numbers.
-- For "over time", "trend", "daily", "by date" use chart_type "line" or "area" and tickets_by_date_line.
-- For "by status", "by category", "by priority" use chart_type "bar" or "pie" and the corresponding _obj data.
+- Default mapping (only when user does NOT specify a type):
+    * "over time" / "trend" / "daily" / "by date" → "line"
+    * "distribution" / "share" / "breakdown" / "split" → "pie"
+    * "by status" / "by category" / "by priority" / "compare" → "bar"
 - If user asks "top N", limit to N items (sorted by value descending).
 - Sort bar/pie by value descending unless chronological order is requested.
 """
@@ -724,11 +735,49 @@ Rules:
             if raw.startswith("json"):
                 raw = raw[4:].strip()
             chart_config = _json.loads(raw)
-            chart_type = chart_config.get("chart_type") or "bar"
+            # Accept either `chart_type` (documented) or `type` (some models
+            # shorten the key on their own). Lower-cased + whitelisted.
+            raw_type = (chart_config.get("chart_type")
+                        or chart_config.get("type")
+                        or "bar")
+            chart_type = str(raw_type).strip().lower()
+            if chart_type not in {"bar", "pie", "line", "area"}:
+                chart_type = "bar"
+
+            # User-intent override — if the user explicitly named a type,
+            # honour it even when the LLM picked something else. This is the
+            # safety net for the "always returns bar" bug.
+            _p = (prompt or "").lower()
+            explicit_type = None
+            # Order matters: check more specific phrases first.
+            if "area chart" in _p or "area graph" in _p:
+                explicit_type = "area"
+            elif "line chart" in _p or "line graph" in _p or "line plot" in _p \
+                    or "as a line" in _p or "trend line" in _p:
+                explicit_type = "line"
+            elif "pie chart" in _p or "pie graph" in _p or "as a pie" in _p \
+                    or "donut" in _p:
+                explicit_type = "pie"
+            elif "bar chart" in _p or "bar graph" in _p or "as a bar" in _p \
+                    or "as bars" in _p:
+                explicit_type = "bar"
+            if explicit_type and explicit_type != chart_type:
+                logger.info(
+                    "generate_analytics_chart: overriding LLM chart_type=%r with explicit user request=%r",
+                    chart_type, explicit_type,
+                )
+                chart_type = explicit_type
+
             title = chart_config.get("title") or "Frontline Analytics"
             chart_data = chart_config.get("data")
             if chart_data is None:
                 chart_data = data.get("tickets_by_status_obj") or {"New": 0}
+
+            # Coerce data shape to match chart_type. If the LLM picked pie/bar
+            # but emitted array data (line shape) — or vice versa — convert
+            # rather than render an empty chart.
+            chart_data = self._coerce_chart_data(chart_data, chart_type, data)
+
             colors = chart_config.get("colors") or ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
             color = colors[0] if colors else "#3b82f6"
             return {
@@ -746,17 +795,73 @@ Rules:
             if isinstance(e, KeyServiceError):
                 raise
             logger.warning(f"generate_analytics_chart failed: {e}", exc_info=True)
-            # Fallback: bar chart by status
+            # Fallback when the LLM call or JSON parse blows up. Honour the
+            # user's explicit type when they named one, so failure mode doesn't
+            # silently flip pie/line requests to bar.
+            _p = (prompt or "").lower()
+            fallback_type = "bar"
+            if "pie chart" in _p or "as a pie" in _p or "donut" in _p:
+                fallback_type = "pie"
+            elif "line chart" in _p or "line graph" in _p or "as a line" in _p or "trend" in _p:
+                fallback_type = "line"
+            elif "area chart" in _p or "area graph" in _p:
+                fallback_type = "area"
             status_obj = analytics_data.get("tickets_by_status_obj") or {}
             if not status_obj and analytics_data.get("tickets_by_status"):
                 status_obj = {item.get("status", ""): item.get("count", 0) for item in analytics_data["tickets_by_status"]}
+            time_series = analytics_data.get("tickets_by_date_line") or []
+            fallback_data = (time_series if fallback_type in ("line", "area") and time_series
+                             else (status_obj or {"No data": 0}))
             return {
                 "chart": {
-                    "type": "bar",
-                    "title": "Tickets by Status",
-                    "data": status_obj or {"No data": 0},
+                    "type": fallback_type,
+                    "title": "Tickets by Status" if fallback_type in ("bar", "pie") else "Tickets over time",
+                    "data": fallback_data,
                     "colors": ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"],
                     "color": "#3b82f6",
                 },
                 "insights": f"Total tickets in range: {analytics_data.get('total_tickets', 0)}.",
             }
+
+    def _coerce_chart_data(self, chart_data, chart_type: str, source_data: Dict):
+        """Reconcile the LLM's `data` payload with the chosen chart_type.
+
+        The LLM sometimes picks chart_type="pie" but returns array data (line
+        shape), or picks "line" with object data. Without coercion the
+        frontend renders "No data available" because the chart component
+        type-checks the shape. We convert between the two shapes so the
+        user's intended chart still renders.
+        """
+        wants_array = chart_type in ('line', 'area')
+        wants_object = chart_type in ('bar', 'pie')
+
+        # Already-correct shape — pass through.
+        if wants_array and isinstance(chart_data, list):
+            return chart_data
+        if wants_object and isinstance(chart_data, dict):
+            return chart_data
+
+        # Object → array: each {key: value} becomes {"label": key, "value": value}.
+        if wants_array and isinstance(chart_data, dict):
+            return [{"label": str(k), "value": v} for k, v in chart_data.items()]
+
+        # Array → object: each {label, value} (or {category, count} etc) becomes a key.
+        if wants_object and isinstance(chart_data, list):
+            out = {}
+            for item in chart_data:
+                if not isinstance(item, dict):
+                    continue
+                k = (item.get('label') or item.get('category') or item.get('status')
+                     or item.get('priority') or item.get('date') or item.get('key'))
+                v = item.get('value') if item.get('value') is not None else item.get('count')
+                if k is not None and v is not None:
+                    out[str(k)] = v
+            if out:
+                return out
+
+        # Last-ditch fallback — pick something that matches the type rather than
+        # returning bad data the renderer will reject. Prefer the time series
+        # for line/area, status counts for bar/pie.
+        if wants_array:
+            return source_data.get('tickets_by_date_line') or []
+        return source_data.get('tickets_by_status_obj') or {"No data": 0}

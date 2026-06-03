@@ -39,7 +39,22 @@ def send_meeting_reminders():
 
     for meeting in upcoming:
         minutes_until = (meeting.proposed_time - now).total_seconds() / 60
-        time_display = meeting.proposed_time.strftime('%I:%M %p')
+        # M-F1 — render local time in the meeting's timezone, not the server's.
+        # `meeting.timezone_name` defaults to UTC; reminders previously formatted
+        # in whatever the worker process happened to use, mis-leading recipients
+        # about when the meeting actually starts in their wall clock.
+        try:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            tz_name = (getattr(meeting, 'timezone_name', None) or 'UTC').strip() or 'UTC'
+            try:
+                local_dt = meeting.proposed_time.astimezone(ZoneInfo(tz_name))
+                tz_label = tz_name
+            except (ZoneInfoNotFoundError, Exception):
+                local_dt = meeting.proposed_time
+                tz_label = 'UTC'
+            time_display = f"{local_dt.strftime('%I:%M %p')} {tz_label}"
+        except Exception:
+            time_display = meeting.proposed_time.strftime('%I:%M %p')
 
         # Determine reminder type
         if 55 <= minutes_until <= 65:

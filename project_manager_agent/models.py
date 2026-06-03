@@ -276,6 +276,10 @@ class ScheduledMeeting(models.Model):
     agenda = models.JSONField(null=True, blank=True, help_text='Structured agenda items: [{"item": "...", "done": false}]')
     proposed_time = models.DateTimeField(help_text='Currently proposed meeting time')
     duration_minutes = models.IntegerField(default=30)
+    timezone_name = models.CharField(
+        max_length=64, default='UTC',
+        help_text='IANA timezone the proposed_time was set in. Reminders + emails render local time using this.',
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     # Recurrence fields
     recurrence = models.CharField(max_length=20, choices=RECURRENCE_CHOICES, default='none')
