@@ -290,7 +290,7 @@ class BaseAgent:
                 except Exception as fallback_err:
                     from core.api_key_service import KeyServiceError, raise_if_auth_error
                     if isinstance(fallback_err, KeyServiceError):
-                        raise
+                        raise fallback_err
                     logger.error(f"{self.agent_name}: Fallback model also failed: {fallback_err}")
                     _record_llm_usage(
                         company_id=getattr(self, 'company_id', None),

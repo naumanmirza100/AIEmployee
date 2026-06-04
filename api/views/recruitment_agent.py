@@ -53,9 +53,14 @@ def _make_agents(company):
       global DRF handler (core/drf_exceptions.py) which returns 402/403 JSON.
     - Env key is NEVER used as a silent fallback.
     """
-    from core.api_key_service import resolve_for_call
+    from core.api_key_service import resolve_for_call, BadAPIKey
     # All exceptions (NoKeyAvailable, QuotaExhausted, etc.) propagate — no env fallback
     ctx = resolve_for_call(company, 'recruitment_agent')
+    # Validate key is ASCII-safe before use — non-ASCII in headers causes UnicodeEncodeError
+    try:
+        ctx.api_key.encode('latin-1')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        raise BadAPIKey(mode=ctx.mode)
     groq_client = QuotaAwareGroqClient(api_key=ctx.api_key, key_ctx=ctx)
 
     log_service = LogService()

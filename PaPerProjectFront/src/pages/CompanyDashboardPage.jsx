@@ -28,7 +28,7 @@ import {
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw, KeyRound
+  Ticket, RotateCcw, KeyRound, RefreshCw
 } from 'lucide-react';
 import { createCheckoutSession } from '@/services/modulePurchaseService';
 
@@ -50,6 +50,15 @@ const CompanyDashboardPage = () => {
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
   const { purchasedModules, allPurchases, refetch: refetchModules } = usePurchasedModules();
+  const [agentsRefreshing, setAgentsRefreshing] = useState(false);
+
+  // Auto-reload AI Agents every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => refetchModules(), 30_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') refetchModules(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, [refetchModules]);
   const [purchasingModule, setPurchasingModule] = useState(null);
 
   // User management state
@@ -1763,15 +1772,29 @@ const CompanyDashboardPage = () => {
                         View all your AI agent purchases, their current status, and timeline
                       </CardDescription>
                     </div>
-                    {allPurchases.length > 0 && (
+                    <div className="flex items-center gap-2 shrink-0">
                       <Button
-                        onClick={() => navigate('/#ai-modules')}
-                        className="bg-violet-600 hover:bg-violet-700 text-white shrink-0"
+                        variant="outline"
+                        size="sm"
+                        className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white"
+                        onClick={async () => { setAgentsRefreshing(true); await refetchModules(); setAgentsRefreshing(false); }}
+                        disabled={agentsRefreshing}
                       >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Browse More Agents
+                        {agentsRefreshing
+                          ? <Loader2 className="h-4 w-4 animate-spin" />
+                          : <RefreshCw className="h-4 w-4" />
+                        }
                       </Button>
-                    )}
+                      {allPurchases.length > 0 && (
+                        <Button
+                          onClick={() => navigate('/#ai-modules')}
+                          className="bg-violet-600 hover:bg-violet-700 text-white"
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Browse More Agents
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -1936,6 +1959,11 @@ const CompanyDashboardPage = () => {
                                           {isDeactivatedByAdmin ? 'Deactivated by Admin' : 'Cancelled'}
                                         </p>
                                         <p className="text-xs text-white/40">{formatDate(agent.cancelled_at)}</p>
+                                        {isDeactivatedByAdmin && agent.history_kept != null && (
+                                          <p className={`text-xs font-medium mt-1 ${agent.history_kept ? 'text-blue-400' : 'text-red-400'}`}>
+                                            {agent.history_kept ? '✓ Token & key history preserved' : '✕ Token & key history deleted'}
+                                          </p>
+                                        )}
                                       </div>
                                     )}
 

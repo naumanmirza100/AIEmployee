@@ -15,13 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 def _user_for_company_user(company_user: CompanyUser) -> User:
-    """Map a CompanyUser to the paired Django User, creating one if needed."""
+    """Map a CompanyUser to the paired Django User, creating one if needed.
+    Uses a stable username keyed on company_user.id so two companies with
+    the same email never collide.
+    """
+    username = f"company_user_{company_user.id}"
     try:
-        return User.objects.get(email=company_user.email)
+        return User.objects.get(username=username)
     except User.DoesNotExist:
         name_parts = (company_user.full_name or '').split()
         return User.objects.create_user(
-            username=f"company_user_{company_user.id}_{company_user.email}",
+            username=username,
             email=company_user.email,
             password=None,
             first_name=name_parts[0] if name_parts else '',

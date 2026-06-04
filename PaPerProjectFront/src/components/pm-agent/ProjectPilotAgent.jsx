@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
-import { apiErrorMessage } from '@/utils/apiErrorMessage';
+import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot } from 'lucide-react';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
