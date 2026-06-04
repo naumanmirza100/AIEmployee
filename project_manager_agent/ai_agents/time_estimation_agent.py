@@ -105,6 +105,9 @@ Return ONLY the JSON."""
             except (json.JSONDecodeError, IndexError):
                 return {"success": True, "answer": response}
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error estimating tasks", {"error": str(e)})
             return {"success": False, "error": str(e)}
 

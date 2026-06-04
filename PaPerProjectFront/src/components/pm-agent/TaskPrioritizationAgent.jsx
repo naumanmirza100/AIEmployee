@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { Loader2, Target, ListChecks, AlertTriangle, Users } from 'lucide-react';
 import {
   PieChart,
@@ -73,7 +74,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       console.error('Task Prioritization error:', error);
       toast({
         title: 'Error',
-        description: error.message || 'Failed to analyze tasks',
+        description: apiErrorMessage(error, 'Failed to analyze tasks'),
         variant: 'destructive',
       });
     } finally {
@@ -114,7 +115,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       console.error('Generate Subtasks error:', error);
       toast({
         title: 'Error',
-        description: error.message || 'Failed to generate subtasks',
+        description: apiErrorMessage(error, 'Failed to generate subtasks'),
         variant: 'destructive',
       });
     } finally {

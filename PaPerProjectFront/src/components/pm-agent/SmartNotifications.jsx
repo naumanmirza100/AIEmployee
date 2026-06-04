@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, Bell, AlertTriangle, AlertCircle, Info, CheckCircle, RefreshCw, Eye } from 'lucide-react';
 
@@ -60,7 +61,7 @@ export default function SmartNotifications() {
       });
       fetchNotifications();
     } catch (e) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+      toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to scan for issues'), variant: 'destructive' });
     } finally {
       setScanning(false);
     }

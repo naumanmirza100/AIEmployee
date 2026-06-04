@@ -120,21 +120,6 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                     'sources': [],
                 }
 
-            if not getattr(self, 'groq_client', None):
-                return {
-                    'success': False,
-                    'error': (
-                        'No API key available for this agent. Please add a BYOK key in '
-                        'API Keys settings or ask your admin to assign a managed key.'
-                    ),
-                    'answer': (
-                        "I'm unable to reach the AI service right now. "
-                        "Please configure an API key in the platform's API Keys settings "
-                        "(BYOK) or contact your admin to assign a managed key."
-                    ),
-                    'sources': [],
-                }
-
             # Route: "list/show all documents" style meta-questions answered from metadata
             meta_answer = self._maybe_answer_meta(question, company_id)
             if meta_answer is not None:

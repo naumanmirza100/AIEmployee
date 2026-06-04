@@ -233,6 +233,11 @@ class BaseAgent:
             return response.choices[0].message.content
 
         except Exception as e:
+            # KeyServiceError (QuotaExhausted, NoKeyAvailable, etc.) must propagate
+            # immediately — no point retrying a different model with the same blocked key.
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             # Record the failed attempt before attempting fallback
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
@@ -242,8 +247,10 @@ class BaseAgent:
                 duration_ms=int((_time.time() - _start) * 1000),
                 success=False,
             )
-            # Try fallback model if primary fails
-            if self.fallback_model and self.fallback_model != effective_model:
+            # Try fallback model only when provider is groq — fallback_model is a Groq
+            # model name; reusing an OpenAI client with it would cause model-not-found.
+            _provider = getattr(key_ctx, 'provider', 'groq') if key_ctx else 'groq'
+            if self.fallback_model and self.fallback_model != effective_model and _provider == 'groq':
                 logger.warning(f"{self.agent_name}: Primary model '{effective_model}' failed ({e}), trying fallback '{self.fallback_model}'")
                 _fallback_start = _time.time()
                 try:
@@ -281,6 +288,9 @@ class BaseAgent:
                             logger.warning("quota decrement failed on fallback: %s", e)
                     return response.choices[0].message.content
                 except Exception as fallback_err:
+                    from core.api_key_service import KeyServiceError, raise_if_auth_error
+                    if isinstance(fallback_err, KeyServiceError):
+                        raise
                     logger.error(f"{self.agent_name}: Fallback model also failed: {fallback_err}")
                     _record_llm_usage(
                         company_id=getattr(self, 'company_id', None),
@@ -290,7 +300,6 @@ class BaseAgent:
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
                         success=False,
                     )
-                    from core.api_key_service import raise_if_auth_error
                     raise_if_auth_error(fallback_err, key_ctx)
                     raise
             logger.error(f"Error in {self.agent_name} LLM call: {str(e)}")

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -239,7 +240,7 @@ export default function FrontlineAIGraphs() {
         throw new Error(response.message || 'Failed to generate graph');
       }
     } catch (error) {
-      toast({ title: 'Generation failed', description: error.message || 'Try a different prompt.', variant: 'destructive' });
+      toast({ title: 'Generation failed', description: apiErrorMessage(error, 'Try a different prompt.'), variant: 'destructive' });
     } finally {
       setGenerating(false);
     }

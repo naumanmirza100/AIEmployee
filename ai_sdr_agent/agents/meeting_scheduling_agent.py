@@ -492,21 +492,17 @@ class MeetingSchedulingAgent:
     for meetings triggered by positive outreach replies.
     """
 
-    def __init__(self):
-        groq_key = (
-            getattr(settings, 'GROQ_API_KEY', None)
-            or getattr(settings, 'GROQ_REC_API_KEY', None)
-            or os.environ.get('GROQ_API_KEY', '')
-            or os.environ.get('GROQ_REC_API_KEY', '')
-        ).strip()
-
+    def __init__(self, company=None):
+        self._key_ctx = None
         self.groq_client = None
-        if groq_key:
-            try:
-                from groq import Groq
-                self.groq_client = Groq(api_key=groq_key)
-            except Exception as exc:
-                logger.error("Groq init failed in MeetingSchedulingAgent: %s", exc)
+
+        if company is not None:
+            from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
+            self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
+        else:
+            logger.warning(
+                "MeetingSchedulingAgent initialised without a company — no LLM key resolved."
+            )
 
         self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
 
@@ -519,6 +515,9 @@ class MeetingSchedulingAgent:
             try:
                 return self._ai_prep_notes(lead, enrollment, reply_text)
             except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
                 logger.warning("AI prep notes failed, using defaults: %s", exc)
         return self._default_prep_notes(lead, reply_text)
 
@@ -567,6 +566,8 @@ Return exactly this JSON:
             temperature=0.3,
             max_tokens=700,
         )
+        from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
+        record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
         raw = resp.choices[0].message.content.strip()
         if "```" in raw:
             m = re.search(r'```(?:json)?\s*([\s\S]*?)```', raw)

@@ -118,10 +118,9 @@ def _get_or_create_user_for_company_user(company_user):
     Uses get_or_create on `username` (the unique column) so concurrent first-visit
     requests can't race each other into a UNIQUE-constraint violation on auth_user.
     """
-    try:
-        return User.objects.get(email=company_user.email)
-    except User.DoesNotExist:
-        pass
+    existing = User.objects.filter(email=company_user.email).first()
+    if existing:
+        return existing
     username = f"company_user_{company_user.id}_{company_user.email}"
     first_name = company_user.full_name.split()[0] if company_user.full_name else ''
     last_name = (

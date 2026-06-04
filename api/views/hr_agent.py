@@ -45,6 +45,7 @@ from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
 )
 from core.HR_agent.hr_agent import HRAgent
+from core.api_key_service import KeyServiceError
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
 
@@ -74,16 +75,16 @@ def _hr_get_or_create_user_for_company_user(company_user):
     """Get or create a Django User for a CompanyUser. Mirrors the Frontline
     helper — needed because the `uploaded_by` FK on HRDocument points at
     `auth.User`, not `core.CompanyUser`."""
-    try:
-        return User.objects.get(email=company_user.email)
-    except User.DoesNotExist:
-        username = f"company_user_{company_user.id}_{company_user.email}"
-        return User.objects.create_user(
-            username=username, email=company_user.email, password=None,
-            first_name=(company_user.full_name.split()[0] if company_user.full_name else ''),
-            last_name=(' '.join(company_user.full_name.split()[1:])
-                       if company_user.full_name and len(company_user.full_name.split()) > 1 else ''),
-        )
+    user = User.objects.filter(email=company_user.email).first()
+    if user:
+        return user
+    username = f"company_user_{company_user.id}_{company_user.email}"
+    return User.objects.create_user(
+        username=username, email=company_user.email, password=None,
+        first_name=(company_user.full_name.split()[0] if company_user.full_name else ''),
+        last_name=(' '.join(company_user.full_name.split()[1:])
+                   if company_user.full_name and len(company_user.full_name.split()) > 1 else ''),
+    )
 
 
 # ============================================================================
@@ -538,6 +539,8 @@ def hr_knowledge_qa(request):
             # Logging failure must never break the user's Q&A response.
             logger.exception("hr_knowledge_qa: failed to log document access for citations")
         return Response({'status': 'success', 'data': result})
+    except KeyServiceError:
+        raise
     except Exception:
         logger.exception("hr_knowledge_qa failed")
         return Response({'status': 'error', 'message': 'Failed to answer question'},
@@ -955,6 +958,8 @@ def summarize_hr_document(request, document_id):
         return Response({'status': 'success', 'data': {
             'document_id': d.id, 'title': d.title, 'summary': result.get('summary'),
         }})
+    except KeyServiceError:
+        raise
     except Exception:
         logger.exception("summarize_hr_document failed")
         return Response({'status': 'error', 'message': 'Failed to summarize document'},
@@ -988,6 +993,8 @@ def extract_hr_document(request, document_id):
         return Response({'status': 'success', 'data': {
             'document_id': d.id, 'extracted': result.get('data'),
         }})
+    except KeyServiceError:
+        raise
     except Exception:
         logger.exception("extract_hr_document failed")
         return Response({'status': 'error', 'message': 'Failed to extract from document'},
@@ -2251,6 +2258,8 @@ def hr_meeting_schedule(request):
                 ),
                 temperature=0.1, max_tokens=600,
             )
+        except KeyServiceError:
+            raise
         except Exception as exc:
             logger.exception("hr_meeting_schedule: LLM call failed")
             return Response({'status': 'error',
@@ -2313,6 +2322,8 @@ def hr_meeting_schedule(request):
             'meeting': meeting_payload,
             'parsed': parsed,
         }})
+    except KeyServiceError:
+        raise
     except Exception:
         logger.exception("hr_meeting_schedule failed")
         return Response({'status': 'error', 'message': 'Failed to schedule meeting'},
@@ -2465,6 +2476,8 @@ def extract_hr_meeting_action_items(request, meeting_id):
             system_prompt="You extract structured action items. Output valid JSON only.",
             temperature=0.0, max_tokens=900,
         )
+    except KeyServiceError:
+        raise
     except Exception as exc:
         logger.exception("extract_hr_meeting_action_items LLM failed")
         return Response({'status': 'error', 'message': f'LLM call failed: {exc}'},

@@ -13,9 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
-  Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,
-  BrainCircuit, Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,
-  Zap, Coins, Settings
+  Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,BrainCircuit, 
+  Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,Zap, Coins, Settings
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
@@ -393,16 +392,14 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     <Activity className="w-2.5 h-2.5 inline mr-0.5" />Platform
                   </span>
                 )}
-                {q?.managed_is_exhausted && actualPool === 'blocked' && (
-                  <span className="text-[9px] text-red-400/80 self-center" title="Managed quota exhausted — calls are blocked. Contact your admin to top up, or add a BYOK key.">blocked</span>
-                )}
+
                 {/* No Key / Disable option */}
                 <button
-                  onClick={() => onSetPool(agent.agent_name, actualPool === 'disabled' ? 'managed' : 'none')}
-                  title={actualPool === 'disabled' ? 'Agent is disabled — click to re-enable' : 'Disable this agent (no LLM calls will be made)'}
+                  onClick={() => { if (actualPool !== 'disabled') onSetPool(agent.agent_name, 'none'); }}
+                  title={actualPool === 'disabled' ? 'Agent is disabled — contact admin to re-enable' : 'Disable this agent (no LLM calls will be made)'}
                   className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
                     actualPool === 'disabled'
-                      ? 'bg-gray-500/20 border-gray-400/50 text-gray-300'
+                      ? 'bg-gray-500/20 border-gray-400/50 text-gray-300 cursor-not-allowed'
                       : 'border-white/10 text-white/25 hover:border-red-500/30 hover:text-red-400/70'
                   }`}
                 >

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
+import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, ChevronsLeft, ChevronsRight, Bot, Search, BarChart2, Maximize2 } from 'lucide-react';
 import { renderChart } from '../recruitment/ChartRenderer';
 
@@ -303,7 +304,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
       console.error('Knowledge Q&A error:', error);
       toast({
         title: 'Error',
-        description: error?.message || 'Something went wrong. Please try again.',
+        description: apiErrorMessage(error, 'Something went wrong. Please try again.'),
         variant: 'destructive',
       });
     } finally {

@@ -1838,6 +1838,7 @@ AGENT_CHOICES = [
     ('operations_agent', 'Operations Agent'),
     ('reply_draft_agent', 'Reply Draft Agent'),
     ('hr_agent', 'HR Support Agent'),
+    ('ai_sdr_agent', 'AI SDR Agent'),
 ]
 
 PROVIDER_CHOICES = [
@@ -2165,4 +2166,5 @@ AGENT_DEFAULT_PROVIDER = {
     'operations_agent': 'groq',
     'reply_draft_agent': 'groq',
     'hr_agent': 'groq',
+    'ai_sdr_agent': 'groq',
 }

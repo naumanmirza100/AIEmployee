@@ -63,7 +63,9 @@ def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float 
         from project_manager_agent.models import PMNotification
 
         recipients = CompanyUser.objects.filter(company=company, is_active=True)
-        display_pct = actual_pct if actual_pct is not None else pct
+        raw_pct = actual_pct if actual_pct is not None else float(pct)
+        capped = min(100.0, raw_pct)
+        display_pct = int(capped) if capped == int(capped) else round(capped, 1)
 
         if pool == 'managed':
             pool_label = 'managed key tokens'
