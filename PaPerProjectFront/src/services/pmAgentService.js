@@ -467,6 +467,71 @@ export const deleteMeetingSchedulerChat = async (chatId) => {
   } catch (error) { console.error('Delete meeting chat error:', error); throw error; }
 };
 
+// ---- Notification Channels (N-F2) ----------------------------------------
+export const listNotificationChannels = async () => {
+  try {
+    const response = await companyApi.get('/project-manager/notification-channels');
+    return response?.data || {};
+  } catch (error) { console.error('List notification channels error:', error); throw error; }
+};
+
+export const createNotificationChannel = async (payload) => {
+  try {
+    const response = await companyApi.post('/project-manager/notification-channels', payload);
+    return response?.data || {};
+  } catch (error) { console.error('Create notification channel error:', error); throw error; }
+};
+
+export const updateNotificationChannel = async (channelId, payload) => {
+  try {
+    const response = await companyApi.patch(`/project-manager/notification-channels/${channelId}`, payload);
+    return response?.data || {};
+  } catch (error) { console.error('Update notification channel error:', error); throw error; }
+};
+
+export const deleteNotificationChannel = async (channelId) => {
+  try {
+    const response = await companyApi.delete(`/project-manager/notification-channels/${channelId}`);
+    return response?.data || {};
+  } catch (error) { console.error('Delete notification channel error:', error); throw error; }
+};
+
+export const testNotificationChannel = async (channelId) => {
+  try {
+    const response = await companyApi.post(`/project-manager/notification-channels/${channelId}/test`);
+    return response?.data || {};
+  } catch (error) { console.error('Test notification channel error:', error); throw error; }
+};
+
+// ---- Notification Templates (N-F1) ---------------------------------------
+export const listNotificationTemplates = async () => {
+  try {
+    const response = await companyApi.get('/project-manager/notification-templates');
+    return response?.data || {};
+  } catch (error) { console.error('List notification templates error:', error); throw error; }
+};
+
+export const createNotificationTemplate = async (payload) => {
+  try {
+    const response = await companyApi.post('/project-manager/notification-templates', payload);
+    return response?.data || {};
+  } catch (error) { console.error('Create notification template error:', error); throw error; }
+};
+
+export const updateNotificationTemplate = async (templateId, payload) => {
+  try {
+    const response = await companyApi.patch(`/project-manager/notification-templates/${templateId}`, payload);
+    return response?.data || {};
+  } catch (error) { console.error('Update notification template error:', error); throw error; }
+};
+
+export const deleteNotificationTemplate = async (templateId) => {
+  try {
+    const response = await companyApi.delete(`/project-manager/notification-templates/${templateId}`);
+    return response?.data || {};
+  } catch (error) { console.error('Delete notification template error:', error); throw error; }
+};
+
 export default {
   projectPilot,
   projectPilotFromFile,
@@ -501,6 +566,17 @@ export default {
   createMeetingSchedulerChat,
   updateMeetingSchedulerChat,
   deleteMeetingSchedulerChat,
+  // Notification channels (N-F2)
+  listNotificationChannels,
+  createNotificationChannel,
+  updateNotificationChannel,
+  deleteNotificationChannel,
+  testNotificationChannel,
+  // Notification templates (N-F1)
+  listNotificationTemplates,
+  createNotificationTemplate,
+  updateNotificationTemplate,
+  deleteNotificationTemplate,
 };
 
 

@@ -5291,3 +5291,265 @@ def pm_health_check_detailed(request):
         'checks': checks,
         'timestamp': timezone.now().isoformat(),
     })
+
+
+# ---------------------------------------------------------------------------
+# Notification Channels (N-F2) and Templates (N-F1)
+# ---------------------------------------------------------------------------
+
+def _serialize_pm_channel(ch):
+    return {
+        'id': ch.id,
+        'name': ch.name,
+        'channel_type': ch.channel_type,
+        'target': ch.target,
+        'severities': ch.severities,
+        'types': ch.types,
+        'is_active': ch.is_active,
+        'last_used_at': ch.last_used_at.isoformat() if ch.last_used_at else None,
+        'last_error': ch.last_error or '',
+        'created_at': ch.created_at.isoformat() if ch.created_at else None,
+    }
+
+
+_PM_CHANNEL_TYPES = {'slack', 'teams', 'email'}
+_PM_SEVERITY_VALUES = {'info', 'warning', 'critical'}
+
+
+def _validate_channel_payload(data, partial=False):
+    """Returns (cleaned_dict, error_response_or_none)."""
+    cleaned = {}
+    name = data.get('name')
+    if name is not None:
+        name = str(name).strip()
+        if not name:
+            return None, Response({'status': 'error', 'message': 'name is required'}, status=400)
+        cleaned['name'] = name[:120]
+    elif not partial:
+        return None, Response({'status': 'error', 'message': 'name is required'}, status=400)
+
+    channel_type = data.get('channel_type')
+    if channel_type is not None:
+        if channel_type not in _PM_CHANNEL_TYPES:
+            return None, Response({'status': 'error', 'message': f'channel_type must be one of {sorted(_PM_CHANNEL_TYPES)}'}, status=400)
+        cleaned['channel_type'] = channel_type
+    elif not partial:
+        return None, Response({'status': 'error', 'message': 'channel_type is required'}, status=400)
+
+    target = data.get('target')
+    if target is not None:
+        target = str(target).strip()
+        if not target:
+            return None, Response({'status': 'error', 'message': 'target is required'}, status=400)
+        ct = cleaned.get('channel_type') or channel_type
+        if ct in ('slack', 'teams') and not (target.startswith('http://') or target.startswith('https://')):
+            return None, Response({'status': 'error', 'message': 'Webhook target must be a URL'}, status=400)
+        if ct == 'email' and '@' not in target:
+            return None, Response({'status': 'error', 'message': 'Email target must be an email address'}, status=400)
+        cleaned['target'] = target[:512]
+    elif not partial:
+        return None, Response({'status': 'error', 'message': 'target is required'}, status=400)
+
+    severities = data.get('severities')
+    if severities is not None:
+        if isinstance(severities, list):
+            sevs = [str(s).strip() for s in severities if str(s).strip()]
+        else:
+            sevs = [s.strip() for s in str(severities).split(',') if s.strip()]
+        bad = [s for s in sevs if s not in _PM_SEVERITY_VALUES]
+        if bad:
+            return None, Response({'status': 'error', 'message': f'Invalid severities: {bad}'}, status=400)
+        cleaned['severities'] = ','.join(sorted(set(sevs))) if sevs else 'info,warning,critical'
+
+    types = data.get('types')
+    if types is not None:
+        if isinstance(types, list):
+            type_list = [str(t).strip() for t in types if str(t).strip()]
+        else:
+            type_list = [t.strip() for t in str(types).split(',') if t.strip()]
+        cleaned['types'] = ','.join(type_list)
+
+    if 'is_active' in data:
+        raw = data['is_active']
+        cleaned['is_active'] = bool(raw) if isinstance(raw, bool) else str(raw).lower() in ('1', 'true', 'yes')
+
+    return cleaned, None
+
+
+@api_view(["GET", "POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_notification_channels_list(request):
+    """List or create PM notification channels for the authenticated CompanyUser."""
+    from project_manager_agent.models import PMNotificationChannel
+    company_user = request.user
+
+    if request.method == 'GET':
+        channels = PMNotificationChannel.objects.filter(company_user=company_user)
+        return Response({'status': 'success', 'data': [_serialize_pm_channel(c) for c in channels]})
+
+    cleaned, err = _validate_channel_payload(request.data or {}, partial=False)
+    if err is not None:
+        return err
+    ch = PMNotificationChannel.objects.create(
+        company_user=company_user,
+        name=cleaned['name'],
+        channel_type=cleaned['channel_type'],
+        target=cleaned['target'],
+        severities=cleaned.get('severities', 'info,warning,critical'),
+        types=cleaned.get('types', ''),
+        is_active=cleaned.get('is_active', True),
+    )
+    _audit_log(company_user, 'project_updated', model_name='PMNotificationChannel', object_id=ch.id, object_title=ch.name)
+    return Response({'status': 'success', 'data': _serialize_pm_channel(ch)}, status=201)
+
+
+@api_view(["PUT", "PATCH", "DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_notification_channel_detail(request, channel_id):
+    from project_manager_agent.models import PMNotificationChannel
+    try:
+        ch = PMNotificationChannel.objects.get(id=channel_id, company_user=request.user)
+    except PMNotificationChannel.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Channel not found'}, status=404)
+
+    if request.method == 'DELETE':
+        ch.delete()
+        return Response({'status': 'success', 'message': 'Channel deleted'})
+
+    cleaned, err = _validate_channel_payload(request.data or {}, partial=True)
+    if err is not None:
+        return err
+    for field, val in cleaned.items():
+        setattr(ch, field, val)
+    ch.save()
+    return Response({'status': 'success', 'data': _serialize_pm_channel(ch)})
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_notification_channel_test(request, channel_id):
+    """Send a test message to verify a channel works end-to-end."""
+    from project_manager_agent.models import PMNotificationChannel
+    from project_manager_agent.notifications import _post_slack, _post_teams, _send_email_channel
+    try:
+        ch = PMNotificationChannel.objects.get(id=channel_id, company_user=request.user)
+    except PMNotificationChannel.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Channel not found'}, status=404)
+
+    title = "PM Test Notification"
+    msg = "If you can read this, your channel is configured correctly."
+    try:
+        if ch.channel_type == 'slack':
+            _post_slack(ch, title, msg, 'info')
+        elif ch.channel_type == 'teams':
+            _post_teams(ch, title, msg, 'info')
+        elif ch.channel_type == 'email':
+            _send_email_channel(ch, title, msg)
+        ch.last_used_at = timezone.now()
+        ch.last_error = ''
+        ch.save(update_fields=['last_used_at', 'last_error', 'updated_at'])
+        return Response({'status': 'success', 'message': 'Test message sent'})
+    except Exception as exc:
+        err = f"{type(exc).__name__}: {exc}"[:280]
+        ch.last_error = err
+        ch.save(update_fields=['last_error', 'updated_at'])
+        return Response({'status': 'error', 'message': err}, status=502)
+
+
+# --- Notification Templates (N-F1) ------------------------------------------
+
+def _serialize_pm_template(t):
+    return {
+        'id': t.id,
+        'notification_type': t.notification_type,
+        'name': t.name,
+        'title_template': t.title_template,
+        'message_template': t.message_template,
+        'default_severity': t.default_severity,
+        'is_active': t.is_active,
+        'created_at': t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+def _validate_template_payload(data, partial=False):
+    cleaned = {}
+    fields = {
+        'notification_type': (lambda v: str(v).strip(), 50, True),
+        'name': (lambda v: str(v).strip(), 120, True),
+        'title_template': (lambda v: str(v), 255, True),
+        'message_template': (lambda v: str(v), 100000, True),
+        'default_severity': (lambda v: str(v), 20, False),
+    }
+    for key, (coerce, maxlen, required) in fields.items():
+        if key in data and data[key] is not None:
+            val = coerce(data[key])
+            if isinstance(val, str) and not val.strip() and required:
+                return None, Response({'status': 'error', 'message': f'{key} cannot be empty'}, status=400)
+            cleaned[key] = val[:maxlen] if isinstance(val, str) else val
+        elif required and not partial:
+            return None, Response({'status': 'error', 'message': f'{key} is required'}, status=400)
+    if 'default_severity' in cleaned and cleaned['default_severity'] not in _PM_SEVERITY_VALUES:
+        return None, Response({'status': 'error', 'message': f'default_severity must be one of {sorted(_PM_SEVERITY_VALUES)}'}, status=400)
+    if 'is_active' in data:
+        raw = data['is_active']
+        cleaned['is_active'] = bool(raw) if isinstance(raw, bool) else str(raw).lower() in ('1', 'true', 'yes')
+    return cleaned, None
+
+
+@api_view(["GET", "POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_notification_templates_list(request):
+    from project_manager_agent.models import PMNotificationTemplate
+    company_user = request.user
+    company = getattr(company_user, 'company', None)
+    if company is None:
+        return Response({'status': 'error', 'message': 'CompanyUser has no company'}, status=400)
+
+    if request.method == 'GET':
+        templates = PMNotificationTemplate.objects.filter(company=company)
+        return Response({'status': 'success', 'data': [_serialize_pm_template(t) for t in templates]})
+
+    cleaned, err = _validate_template_payload(request.data or {}, partial=False)
+    if err is not None:
+        return err
+    try:
+        t = PMNotificationTemplate.objects.create(
+            company=company,
+            notification_type=cleaned['notification_type'],
+            name=cleaned['name'],
+            title_template=cleaned['title_template'],
+            message_template=cleaned['message_template'],
+            default_severity=cleaned.get('default_severity', 'info'),
+            is_active=cleaned.get('is_active', True),
+        )
+    except Exception as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=400)
+    return Response({'status': 'success', 'data': _serialize_pm_template(t)}, status=201)
+
+
+@api_view(["PUT", "PATCH", "DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def pm_notification_template_detail(request, template_id):
+    from project_manager_agent.models import PMNotificationTemplate
+    company = getattr(request.user, 'company', None)
+    try:
+        t = PMNotificationTemplate.objects.get(id=template_id, company=company)
+    except PMNotificationTemplate.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Template not found'}, status=404)
+
+    if request.method == 'DELETE':
+        t.delete()
+        return Response({'status': 'success', 'message': 'Template deleted'})
+
+    cleaned, err = _validate_template_payload(request.data or {}, partial=True)
+    if err is not None:
+        return err
+    for field, val in cleaned.items():
+        setattr(t, field, val)
+    t.save()
+    return Response({'status': 'success', 'data': _serialize_pm_template(t)})

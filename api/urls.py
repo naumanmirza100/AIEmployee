@@ -74,6 +74,9 @@ urlpatterns = [
     re_path(r'^user/project-manager/projects/(?P<project_id>\d+)/update/?$', user_project_manager.update_project_manager_project, name='update_project_manager_project'),  # PUT/PATCH
     re_path(r'^user/project-manager/tasks/create/?$', user_project_manager.create_project_manager_task, name='create_project_manager_task'),  # POST
     re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/update/?$', user_project_manager.update_project_manager_task, name='update_project_manager_task'),  # PUT/PATCH
+    re_path(r'^user/project-manager/tasks/bulk-update/?$', user_project_manager.bulk_update_project_manager_tasks, name='bulk_update_project_manager_tasks'),  # POST
+    re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/dependencies/?$', user_project_manager.set_project_manager_task_dependencies, name='set_project_manager_task_dependencies'),  # PUT/PATCH
+    re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/recurrence/?$', user_project_manager.project_manager_task_recurrence, name='project_manager_task_recurrence'),  # GET/PUT/PATCH/DELETE
     re_path(r'^user/project-manager/company-users/?$', user_project_manager.get_company_users_for_pm, name='get_company_users_for_pm'),  # GET
     
     # Project endpoints
@@ -242,6 +245,13 @@ urlpatterns = [
     re_path(r'^project-manager/ai/audit-logs/?$', pm_agent.list_audit_logs, name='pm_audit_logs'),
     re_path(r'^project-manager/health/?$', pm_agent.pm_health_check, name='pm_health_check'),
     re_path(r'^project-manager/health/detailed/?$', pm_agent.pm_health_check_detailed, name='pm_health_check_detailed'),
+
+    # PM notification channels (N-F2) and templates (N-F1)
+    re_path(r'^project-manager/notification-channels/?$', pm_agent.pm_notification_channels_list, name='pm_notification_channels_list'),
+    re_path(r'^project-manager/notification-channels/(?P<channel_id>\d+)/?$', pm_agent.pm_notification_channel_detail, name='pm_notification_channel_detail'),
+    re_path(r'^project-manager/notification-channels/(?P<channel_id>\d+)/test/?$', pm_agent.pm_notification_channel_test, name='pm_notification_channel_test'),
+    re_path(r'^project-manager/notification-templates/?$', pm_agent.pm_notification_templates_list, name='pm_notification_templates_list'),
+    re_path(r'^project-manager/notification-templates/(?P<template_id>\d+)/?$', pm_agent.pm_notification_template_detail, name='pm_notification_template_detail'),
 
     # Chatbot endpoints
     re_path(r'^chatbot/conversations/?$', chatbot.create_conversation, name='create_conversation'),  # POST

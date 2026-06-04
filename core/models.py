@@ -131,6 +131,44 @@ class Task(models.Model):
         self.save()
 
 
+class TaskRecurrence(models.Model):
+    """
+    Recurring task template (T-F2).
+    A TaskRecurrence is attached to a "template" Task. When `next_run_date` is
+    reached, the Celery beat task generates a fresh Task that clones the
+    template's title/description/project/assignee/priority and sets due_date to
+    the run date. The template itself is never modified.
+    """
+    FREQUENCY_CHOICES = [
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+    ]
+
+    template_task = models.OneToOneField(
+        'Task', on_delete=models.CASCADE, related_name='recurrence',
+        help_text='The task that future occurrences are cloned from.'
+    )
+    frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES, default='weekly')
+    interval = models.PositiveIntegerField(default=1, help_text='Every N days/weeks/months.')
+    weekdays = models.CharField(
+        max_length=32, blank=True, default='',
+        help_text='Weekly only. Comma-separated weekday indices, Monday=0..Sunday=6. Empty = every day of the chosen interval.'
+    )
+    starts_on = models.DateField(help_text='Date of the first occurrence.')
+    ends_on = models.DateField(null=True, blank=True, help_text='Optional cutoff. No occurrences are generated past this date.')
+    max_occurrences = models.PositiveIntegerField(null=True, blank=True, help_text='Optional cap on number of generated tasks.')
+    count_generated = models.PositiveIntegerField(default=0)
+    last_generated_on = models.DateField(null=True, blank=True)
+    next_run_date = models.DateField(help_text='Date of the next planned occurrence.')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Recurrence({self.frequency}/{self.interval}) for {self.template_task_id}"
+
+
 class Subtask(models.Model):
     """Subtask model for breaking down tasks into smaller actionable items"""
     STATUS_CHOICES = [
