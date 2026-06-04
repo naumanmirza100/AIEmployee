@@ -77,25 +77,21 @@ def send_meeting_reminders():
         ).exists()
 
         if not already_notified_organizer:
-            PMNotification.objects.create(
+            from project_manager_agent.notifications import dispatch_pm_notification
+            dispatch_pm_notification(
                 company_user=meeting.organizer,
                 notification_type='custom',
                 severity='info',
                 title=f"Meeting Reminder: {meeting.title}",
                 message=f'Your meeting "{meeting.title}" starts {reminder_text}.',
                 data={'meeting_id': meeting.id, 'type': 'meeting_reminder', 'reminder_key': reminder_key},
+                context={
+                    'meeting_title': meeting.title,
+                    'reminder_text': reminder_text,
+                    'time_display': time_display,
+                },
+                extra_emails=[meeting.organizer.email] if meeting.organizer.email else [],
             )
-            # Email organizer
-            try:
-                send_mail(
-                    subject=f"Reminder: {meeting.title} starts {reminder_text}",
-                    message=f'Your meeting "{meeting.title}" starts {reminder_text}.',
-                    from_email=from_email,
-                    recipient_list=[meeting.organizer.email],
-                    fail_silently=True,
-                )
-            except Exception:
-                pass
             reminders_sent += 1
 
         # Notify each participant (project User)
@@ -173,13 +169,18 @@ def check_stale_meetings():
         if not pending_names:
             continue
 
-        PMNotification.objects.create(
+        from project_manager_agent.notifications import dispatch_pm_notification
+        dispatch_pm_notification(
             company_user=meeting.organizer,
             notification_type='custom',
             severity='warning',
             title=f"No Response: {meeting.title}",
             message=f'No response for "{meeting.title}" from {", ".join(pending_names)} after 48 hours. Consider sending a reminder or withdrawing.',
             data={'meeting_id': meeting.id, 'type': 'stale_meeting', 'reminder_key': reminder_key},
+            context={
+                'meeting_title': meeting.title,
+                'pending_names': ', '.join(pending_names),
+            },
         )
 
         # Send reminder to pending participants
@@ -205,13 +206,15 @@ def check_stale_meetings():
         meeting.status = 'withdrawn'
         meeting.save(update_fields=['status', 'updated_at'])
 
-        PMNotification.objects.create(
+        from project_manager_agent.notifications import dispatch_pm_notification
+        dispatch_pm_notification(
             company_user=meeting.organizer,
             notification_type='custom',
             severity='info',
             title=f"Meeting Auto-Withdrawn: {meeting.title}",
             message=f'"{meeting.title}" was automatically withdrawn after 7 days with no response.',
             data={'meeting_id': meeting.id, 'type': 'auto_withdrawn'},
+            context={'meeting_title': meeting.title},
         )
         for p in meeting.participants.all():
             Notification.objects.create(
@@ -225,6 +228,113 @@ def check_stale_meetings():
 
     logger.info(f"[STALE MEETINGS] Sent {reminders_sent} stale reminders, auto-withdrew {auto_withdrawn} meetings")
     return {'reminders_sent': reminders_sent, 'auto_withdrawn': auto_withdrawn}
+
+
+def _advance_recurrence_date(rec):
+    """Compute the next run date for a TaskRecurrence after generating one."""
+    from datetime import timedelta as _td
+    cur = rec.next_run_date
+    if rec.frequency == 'daily':
+        return cur + _td(days=max(1, rec.interval))
+    if rec.frequency == 'weekly':
+        # If weekdays are specified, pick the next matching weekday across `interval` weeks.
+        if rec.weekdays.strip():
+            try:
+                wanted = sorted({int(w) for w in rec.weekdays.split(',') if w.strip() != ''})
+            except ValueError:
+                wanted = []
+            if wanted:
+                # Look ahead up to 7 * interval days
+                step = 1
+                horizon = 7 * max(1, rec.interval)
+                while step <= horizon:
+                    candidate = cur + _td(days=step)
+                    if candidate.weekday() in wanted:
+                        return candidate
+                    step += 1
+        return cur + _td(weeks=max(1, rec.interval))
+    if rec.frequency == 'monthly':
+        # Add N months — clamp day if the target month is shorter.
+        n = max(1, rec.interval)
+        year = cur.year + (cur.month - 1 + n) // 12
+        month = (cur.month - 1 + n) % 12 + 1
+        # Clamp day
+        import calendar as _cal
+        day = min(cur.day, _cal.monthrange(year, month)[1])
+        from datetime import date as _date
+        return _date(year, month, day)
+    # Fallback
+    return cur + _td(days=1)
+
+
+@shared_task(name='project_manager_agent.generate_recurring_tasks')
+def generate_recurring_tasks():
+    """
+    Materialise pending recurring task occurrences (T-F2).
+    Runs daily. For every active TaskRecurrence whose `next_run_date` is on or
+    before today, clones the template task as a new Task with status='todo' and
+    advances the recurrence schedule.
+    """
+    from core.models import TaskRecurrence, Task
+    from django.db import transaction
+
+    today = timezone.localdate()
+    generated = 0
+    deactivated = 0
+
+    active_recurrences = TaskRecurrence.objects.filter(
+        is_active=True, next_run_date__lte=today,
+    ).select_related('template_task', 'template_task__project', 'template_task__assignee')
+
+    for rec in active_recurrences:
+        # Cap-by-end-date
+        if rec.ends_on and rec.next_run_date > rec.ends_on:
+            rec.is_active = False
+            rec.save(update_fields=['is_active', 'updated_at'])
+            deactivated += 1
+            continue
+        if rec.max_occurrences is not None and rec.count_generated >= rec.max_occurrences:
+            rec.is_active = False
+            rec.save(update_fields=['is_active', 'updated_at'])
+            deactivated += 1
+            continue
+
+        template = rec.template_task
+        try:
+            with transaction.atomic():
+                from datetime import datetime as _dt, time as _time
+                # New occurrence due_date = the planned run date at end-of-day in local time.
+                due_dt = timezone.make_aware(
+                    _dt.combine(rec.next_run_date, _time(hour=23, minute=59)),
+                    timezone.get_current_timezone(),
+                )
+                new_task = Task.objects.create(
+                    title=template.title,
+                    description=template.description,
+                    project=template.project,
+                    assignee=template.assignee,
+                    status='todo',
+                    priority=template.priority,
+                    due_date=due_dt,
+                    estimated_hours=template.estimated_hours,
+                )
+                rec.count_generated += 1
+                rec.last_generated_on = rec.next_run_date
+                rec.next_run_date = _advance_recurrence_date(rec)
+                # Re-check cutoff after advancing
+                if rec.ends_on and rec.next_run_date > rec.ends_on:
+                    rec.is_active = False
+                if rec.max_occurrences is not None and rec.count_generated >= rec.max_occurrences:
+                    rec.is_active = False
+                rec.save(update_fields=[
+                    'count_generated', 'last_generated_on', 'next_run_date', 'is_active', 'updated_at',
+                ])
+                generated += 1
+        except Exception as exc:
+            logger.exception(f"[RECURRING TASKS] Failed to generate from recurrence {rec.id}: {exc}")
+
+    logger.info(f"[RECURRING TASKS] Generated {generated} new tasks; deactivated {deactivated} recurrences")
+    return {'generated': generated, 'deactivated': deactivated}
 
 
 @shared_task(name='project_manager_agent.cleanup_old_notifications')

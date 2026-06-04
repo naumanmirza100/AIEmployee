@@ -19,6 +19,7 @@ import { API_BASE_URL } from '@/config/apiConfig';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { 
   ListTodo, 
   FolderKanban, 
@@ -40,7 +41,8 @@ import {
   CalendarPlus,
   CheckCircle,
   XCircle,
-  ArrowRightLeft
+  ArrowRightLeft,
+  RotateCw
 } from 'lucide-react';
 
 // Helper function to format role for display
@@ -69,6 +71,43 @@ const UserDashboardPage = () => {
   const [allProjectTasksLoading, setAllProjectTasksLoading] = useState(false);
   const [pmProjects, setPmProjects] = useState([]);
   const [expandedProjects, setExpandedProjects] = useState(new Set());
+
+  // Bulk-update state for the "All Project Tasks" tab
+  const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkAction, setBulkAction] = useState({
+    status: '',
+    priority: '',
+    assignee_id: '',
+    due_date: '',
+  });
+
+  // Dependency editor (T-F1)
+  const [depDialog, setDepDialog] = useState({
+    open: false,
+    task: null,
+    projectId: null,
+    siblings: [],
+    selected: new Set(),
+    saving: false,
+  });
+
+  // Recurrence editor (T-F2)
+  const [recDialog, setRecDialog] = useState({
+    open: false,
+    task: null,
+    saving: false,
+    form: {
+      frequency: 'weekly',
+      interval: 1,
+      weekdays: '',
+      starts_on: '',
+      ends_on: '',
+      max_occurrences: '',
+      is_active: true,
+    },
+    isExisting: false,
+  });
 
   // Meeting state
   const [meetings, setMeetings] = useState([]);
@@ -619,6 +658,233 @@ const UserDashboardPage = () => {
     });
   };
 
+  const toggleTaskSelection = (taskId) => {
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  const toggleProjectTaskSelection = (project) => {
+    const projectTaskIds = (project.tasks || []).map(t => t.id);
+    const allSelected = projectTaskIds.length > 0 && projectTaskIds.every(id => selectedTaskIds.has(id));
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        projectTaskIds.forEach(id => next.delete(id));
+      } else {
+        projectTaskIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const clearBulkSelection = () => {
+    setSelectedTaskIds(new Set());
+    setBulkAction({ status: '', priority: '', assignee_id: '', due_date: '' });
+  };
+
+  const handleBulkUpdate = async () => {
+    if (selectedTaskIds.size === 0) return;
+    const payload = { ids: Array.from(selectedTaskIds) };
+    if (bulkAction.status) payload.status = bulkAction.status;
+    if (bulkAction.priority) payload.priority = bulkAction.priority;
+    if (bulkAction.assignee_id) {
+      payload.assignee_id = bulkAction.assignee_id === 'none' ? null : bulkAction.assignee_id;
+    }
+    if (bulkAction.due_date) payload.due_date = bulkAction.due_date;
+
+    if (Object.keys(payload).length === 1) {
+      toast({
+        title: 'Nothing to change',
+        description: 'Pick at least one field (status, priority, assignee, or due date).',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setBulkUpdating(true);
+      const response = await userProjectManagerService.bulkUpdateTasks(payload);
+      if (response.status === 'success') {
+        const s = response.summary || {};
+        toast({
+          title: 'Bulk update complete',
+          description: `Updated ${s.updated || 0} · Skipped ${s.skipped || 0} · Not found ${s.not_found || 0}`,
+        });
+        clearBulkSelection();
+        fetchAllProjectTasks();
+        fetchTasks();
+      } else {
+        toast({
+          title: 'Bulk update failed',
+          description: response.message || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to bulk update tasks',
+        variant: 'destructive',
+      });
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const openDependencyDialog = (task, project) => {
+    const siblings = (project.tasks || []).filter(t => t.id !== task.id);
+    setDepDialog({
+      open: true,
+      task,
+      projectId: project.id,
+      siblings,
+      selected: new Set((task.depends_on_ids || []).map(Number)),
+      saving: false,
+    });
+  };
+
+  const closeDependencyDialog = () => {
+    setDepDialog(prev => ({ ...prev, open: false, task: null, siblings: [], selected: new Set() }));
+  };
+
+  const toggleDependencyCandidate = (taskId) => {
+    setDepDialog(prev => {
+      const next = new Set(prev.selected);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return { ...prev, selected: next };
+    });
+  };
+
+  const openRecurrenceDialog = (task) => {
+    const existing = task.recurrence;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    setRecDialog({
+      open: true,
+      task,
+      saving: false,
+      isExisting: Boolean(existing),
+      form: existing
+        ? {
+            frequency: existing.frequency,
+            interval: existing.interval,
+            weekdays: existing.weekdays || '',
+            starts_on: existing.starts_on || todayIso,
+            ends_on: existing.ends_on || '',
+            max_occurrences: existing.max_occurrences ?? '',
+            is_active: existing.is_active,
+          }
+        : {
+            frequency: 'weekly',
+            interval: 1,
+            weekdays: '',
+            starts_on: todayIso,
+            ends_on: '',
+            max_occurrences: '',
+            is_active: true,
+          },
+    });
+  };
+
+  const closeRecurrenceDialog = () => {
+    setRecDialog(prev => ({ ...prev, open: false, task: null }));
+  };
+
+  const updateRecForm = (patch) => {
+    setRecDialog(prev => ({ ...prev, form: { ...prev.form, ...patch } }));
+  };
+
+  const saveRecurrence = async () => {
+    if (!recDialog.task) return;
+    const f = recDialog.form;
+    if (!f.starts_on) {
+      toast({ title: 'Start date required', variant: 'destructive' });
+      return;
+    }
+    const payload = {
+      frequency: f.frequency,
+      interval: Number(f.interval) || 1,
+      weekdays: f.frequency === 'weekly' ? (f.weekdays || '') : '',
+      starts_on: f.starts_on,
+      is_active: f.is_active,
+    };
+    if (f.ends_on) payload.ends_on = f.ends_on;
+    if (f.max_occurrences !== '' && f.max_occurrences != null) {
+      payload.max_occurrences = Number(f.max_occurrences);
+    }
+    try {
+      setRecDialog(prev => ({ ...prev, saving: true }));
+      const response = await userProjectManagerService.setTaskRecurrence(recDialog.task.id, payload);
+      if (response.status === 'success') {
+        toast({ title: 'Recurrence saved' });
+        closeRecurrenceDialog();
+        fetchAllProjectTasks();
+      } else {
+        toast({ title: 'Could not save recurrence', description: response.message || 'Unknown error', variant: 'destructive' });
+        setRecDialog(prev => ({ ...prev, saving: false }));
+      }
+    } catch (error) {
+      const msg = error?.response?.data?.message || error.message || 'Failed to save recurrence';
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+      setRecDialog(prev => ({ ...prev, saving: false }));
+    }
+  };
+
+  const removeRecurrence = async () => {
+    if (!recDialog.task) return;
+    try {
+      setRecDialog(prev => ({ ...prev, saving: true }));
+      const response = await userProjectManagerService.deleteTaskRecurrence(recDialog.task.id);
+      if (response.status === 'success') {
+        toast({ title: 'Recurrence removed' });
+        closeRecurrenceDialog();
+        fetchAllProjectTasks();
+      } else {
+        setRecDialog(prev => ({ ...prev, saving: false }));
+      }
+    } catch (error) {
+      setRecDialog(prev => ({ ...prev, saving: false }));
+    }
+  };
+
+  const saveDependencies = async () => {
+    if (!depDialog.task) return;
+    try {
+      setDepDialog(prev => ({ ...prev, saving: true }));
+      const response = await userProjectManagerService.setTaskDependencies(
+        depDialog.task.id,
+        Array.from(depDialog.selected),
+      );
+      if (response.status === 'success') {
+        toast({
+          title: 'Dependencies updated',
+          description: `${response.data?.depends_on_ids?.length || 0} prerequisite(s) set.`,
+        });
+        closeDependencyDialog();
+        fetchAllProjectTasks();
+      } else {
+        toast({
+          title: 'Could not update dependencies',
+          description: response.message || 'Unknown error',
+          variant: 'destructive',
+        });
+        setDepDialog(prev => ({ ...prev, saving: false }));
+      }
+    } catch (error) {
+      const msg = error?.response?.data?.message || error.message || 'Failed to update dependencies';
+      toast({
+        title: 'Error',
+        description: msg,
+        variant: 'destructive',
+      });
+      setDepDialog(prev => ({ ...prev, saving: false }));
+    }
+  };
+
   // Get user role and format it for display
   const userRole = user?.role || 'user';
   const formattedRole = formatRole(userRole);
@@ -1055,6 +1321,66 @@ const UserDashboardPage = () => {
           {/* All Project Tasks Tab (Project Manager Only) */}
           {isProjectManager && (
             <TabsContent value="all-project-tasks" className="space-y-4 mt-6">
+              {selectedTaskIds.size > 0 && (
+                <Card className="sticky top-4 z-20 border-primary bg-background shadow-md">
+                  <CardContent className="py-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Badge variant="default" className="text-sm">
+                        {selectedTaskIds.size} selected
+                      </Badge>
+                      <Select value={bulkAction.status} onValueChange={(v) => setBulkAction(prev => ({ ...prev, status: v }))}>
+                        <SelectTrigger className="w-[160px]">
+                          <SelectValue placeholder="Status..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todo">To Do</SelectItem>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="review">Review</SelectItem>
+                          <SelectItem value="done">Done</SelectItem>
+                          <SelectItem value="blocked">Blocked</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={bulkAction.priority} onValueChange={(v) => setBulkAction(prev => ({ ...prev, priority: v }))}>
+                        <SelectTrigger className="w-[140px]">
+                          <SelectValue placeholder="Priority..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={bulkAction.assignee_id} onValueChange={(v) => setBulkAction(prev => ({ ...prev, assignee_id: v }))}>
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="Assignee..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Unassigned</SelectItem>
+                          {companyUsers.map((cu) => (
+                            <SelectItem key={cu.id} value={String(cu.id)}>
+                              {cu.full_name || cu.username || cu.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="date"
+                        value={bulkAction.due_date}
+                        onChange={(e) => setBulkAction(prev => ({ ...prev, due_date: e.target.value }))}
+                        className="w-[160px]"
+                        placeholder="Due date"
+                      />
+                      <Button onClick={handleBulkUpdate} disabled={bulkUpdating} className="ml-auto">
+                        {bulkUpdating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                        Apply to {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? '' : 's'}
+                      </Button>
+                      <Button variant="ghost" onClick={clearBulkSelection} disabled={bulkUpdating}>
+                        Clear
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               {allProjectTasksLoading ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin" />
@@ -1078,6 +1404,14 @@ const UserDashboardPage = () => {
                          <CardHeader>
                            <div className="flex items-center justify-between">
                              <div className="flex items-center gap-2 flex-1">
+                               {project.tasks && project.tasks.length > 0 && (
+                                 <Checkbox
+                                   checked={project.tasks.every(t => selectedTaskIds.has(t.id))}
+                                   onCheckedChange={() => toggleProjectTaskSelection(project)}
+                                   onClick={(e) => e.stopPropagation()}
+                                   aria-label={`Select all tasks in ${project.name}`}
+                                 />
+                               )}
                                <Button
                                  variant="ghost"
                                  size="sm"
@@ -1117,9 +1451,15 @@ const UserDashboardPage = () => {
                              {project.tasks && project.tasks.length > 0 ? (
                                <div className="space-y-3">
                                  {project.tasks.map((task) => (
-                                   <Card key={task.id} className="bg-muted/30">
+                                   <Card key={task.id} className={`bg-muted/30 ${selectedTaskIds.has(task.id) ? 'ring-2 ring-primary' : ''}`}>
                                      <CardContent className="pt-4">
-                                       <div className="flex justify-between items-start">
+                                       <div className="flex justify-between items-start gap-3">
+                                         <Checkbox
+                                           checked={selectedTaskIds.has(task.id)}
+                                           onCheckedChange={() => toggleTaskSelection(task.id)}
+                                           className="mt-1"
+                                           aria-label={`Select task ${task.title}`}
+                                         />
                                          <div className="flex-1">
                                            <div className="flex items-center gap-2">
                                              <p className="font-medium">{task.title}</p>
@@ -1130,6 +1470,26 @@ const UserDashboardPage = () => {
                                                className="h-6 w-6 p-0"
                                              >
                                                <Edit className="h-3 w-3" />
+                                             </Button>
+                                             <Button
+                                               variant="ghost"
+                                               size="sm"
+                                               onClick={() => openDependencyDialog(task, project)}
+                                               className="h-6 px-2 text-xs"
+                                               title="Manage dependencies"
+                                             >
+                                               <ArrowRightLeft className="h-3 w-3 mr-1" />
+                                               Deps{task.depends_on_ids?.length ? ` (${task.depends_on_ids.length})` : ''}
+                                             </Button>
+                                             <Button
+                                               variant="ghost"
+                                               size="sm"
+                                               onClick={() => openRecurrenceDialog(task)}
+                                               className="h-6 px-2 text-xs"
+                                               title="Set up recurrence"
+                                             >
+                                               <RotateCw className="h-3 w-3 mr-1" />
+                                               {task.recurrence?.is_active ? 'Recurring' : 'Repeat'}
                                              </Button>
                                            </div>
                                            {task.description && (
@@ -1161,6 +1521,18 @@ const UserDashboardPage = () => {
                                                </span>
                                              )}
                                            </div>
+                                           {task.is_blocked && task.blocked_by && task.blocked_by.length > 0 && (
+                                             <div className="mt-2 flex flex-wrap items-center gap-1">
+                                               <Badge variant="destructive" className="text-xs">
+                                                 Blocked by
+                                               </Badge>
+                                               {task.blocked_by.map(b => (
+                                                 <Badge key={b.id} variant="outline" className="text-xs">
+                                                   {b.title}
+                                                 </Badge>
+                                               ))}
+                                             </div>
+                                           )}
                                          </div>
                                        </div>
                                      </CardContent>
@@ -1623,6 +1995,153 @@ const UserDashboardPage = () => {
                   </Button>
                 </div>
               </form>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Task Dependencies Dialog (T-F1) */}
+        {isProjectManager && (
+          <Dialog open={depDialog.open} onOpenChange={(open) => { if (!open) closeDependencyDialog(); }}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Task Dependencies</DialogTitle>
+                <DialogDescription>
+                  {depDialog.task ? (
+                    <>Pick prerequisite tasks for <strong>{depDialog.task.title}</strong>. The task can&apos;t move to In Progress or Done until these are Done.</>
+                  ) : null}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto py-2">
+                {depDialog.siblings.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No other tasks in this project to depend on yet.</p>
+                ) : (
+                  depDialog.siblings.map((sib) => (
+                    <label key={sib.id} className="flex items-start gap-3 p-2 rounded hover:bg-muted cursor-pointer">
+                      <Checkbox
+                        checked={depDialog.selected.has(sib.id)}
+                        onCheckedChange={() => toggleDependencyCandidate(sib.id)}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{sib.title}</p>
+                        <div className="flex gap-2 mt-1">
+                          <Badge variant="outline" className="text-xs capitalize">{(sib.status || '').replace('_', ' ')}</Badge>
+                          {sib.priority && (
+                            <Badge variant="secondary" className="text-xs">{sib.priority}</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={closeDependencyDialog} disabled={depDialog.saving}>
+                  Cancel
+                </Button>
+                <Button onClick={saveDependencies} disabled={depDialog.saving}>
+                  {depDialog.saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Save dependencies
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Recurring Task Dialog (T-F2) */}
+        {isProjectManager && (
+          <Dialog open={recDialog.open} onOpenChange={(open) => { if (!open) closeRecurrenceDialog(); }}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Recurring Task</DialogTitle>
+                <DialogDescription>
+                  {recDialog.task ? (
+                    <>A copy of <strong>{recDialog.task.title}</strong> will be created on each scheduled date.</>
+                  ) : null}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label>Frequency</Label>
+                  <Select value={recDialog.form.frequency} onValueChange={(v) => updateRecForm({ frequency: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Every N (interval)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={recDialog.form.interval}
+                    onChange={(e) => updateRecForm({ interval: e.target.value })}
+                  />
+                </div>
+                {recDialog.form.frequency === 'weekly' && (
+                  <div className="space-y-1">
+                    <Label>Weekdays (optional, 0=Mon … 6=Sun, e.g. "0,2,4")</Label>
+                    <Input
+                      placeholder="0,2,4"
+                      value={recDialog.form.weekdays}
+                      onChange={(e) => updateRecForm({ weekdays: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label>First occurrence</Label>
+                  <Input
+                    type="date"
+                    value={recDialog.form.starts_on}
+                    onChange={(e) => updateRecForm({ starts_on: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>End date (optional)</Label>
+                  <Input
+                    type="date"
+                    value={recDialog.form.ends_on}
+                    onChange={(e) => updateRecForm({ ends_on: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Max occurrences (optional)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={recDialog.form.max_occurrences}
+                    onChange={(e) => updateRecForm({ max_occurrences: e.target.value })}
+                  />
+                </div>
+                <label className="flex items-center gap-2 pt-2 cursor-pointer">
+                  <Checkbox
+                    checked={recDialog.form.is_active}
+                    onCheckedChange={(v) => updateRecForm({ is_active: Boolean(v) })}
+                  />
+                  <span className="text-sm">Active</span>
+                </label>
+              </div>
+              <div className="flex justify-between gap-2 pt-3">
+                <div>
+                  {recDialog.isExisting && (
+                    <Button variant="destructive" onClick={removeRecurrence} disabled={recDialog.saving}>
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={closeRecurrenceDialog} disabled={recDialog.saving}>
+                    Cancel
+                  </Button>
+                  <Button onClick={saveRecurrence} disabled={recDialog.saving}>
+                    {recDialog.saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                    Save
+                  </Button>
+                </div>
+              </div>
             </DialogContent>
           </Dialog>
         )}

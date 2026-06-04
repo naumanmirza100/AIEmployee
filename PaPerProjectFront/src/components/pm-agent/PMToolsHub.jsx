@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Calendar, Activity, FileText, Users, Timer, Workflow, CalendarDays, Bell,
-  CalendarPlus, ChevronLeft,
+  CalendarPlus, ChevronLeft, Settings,
 } from 'lucide-react';
 import DailyStandupAgent from './DailyStandupAgent';
 import ProjectHealthDashboard from './ProjectHealthDashboard';
@@ -12,6 +12,7 @@ import TimeEstimationView from './TimeEstimationView';
 import WorkflowSuggestionsView from './WorkflowSuggestionsView';
 import CalendarScheduleView from './CalendarScheduleView';
 import SmartNotifications from './SmartNotifications';
+import NotificationSettings from './NotificationSettings';
 
 const TOOLS = [
   {
@@ -93,6 +94,16 @@ const TOOLS = [
     bgColor: 'rgba(248,113,113,0.15)',
     borderHover: 'rgba(248,113,113,0.4)',
     component: SmartNotifications,
+  },
+  {
+    key: 'notification-settings',
+    title: 'Notification Settings',
+    desc: 'Slack/Teams webhooks and custom notification templates',
+    icon: Settings,
+    color: '#94a3b8',
+    bgColor: 'rgba(148,163,184,0.15)',
+    borderHover: 'rgba(148,163,184,0.4)',
+    component: NotificationSettings,
   },
 ];
 

@@ -808,6 +808,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 172800}
     },
 
+    # Recurring tasks generator (T-F2) - runs daily
+    # Materialises new Task records from TaskRecurrence rows whose next_run_date <= today
+    'generate-recurring-tasks': {
+        'task': 'project_manager_agent.generate_recurring_tasks',
+        'schedule': 86400.0,  # Every 24 hours
+        'options': {'expires': 172800}
+    },
+
     # Wake snoozed frontline tickets - runs every 5 minutes
     # Clears snoozed_until on tickets whose snooze time has passed
     'frontline-wake-snoozed-tickets': {

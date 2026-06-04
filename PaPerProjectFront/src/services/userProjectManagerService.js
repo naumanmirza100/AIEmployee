@@ -104,6 +104,74 @@ const userProjectManagerService = {
       throw error;
     }
   },
+
+  /**
+   * Bulk update tasks (status / priority / assignee / due_date).
+   * @param {object} payload - { ids: number[], status?, priority?, assignee_id?, due_date? }
+   * @returns {Promise} API response with { updated, skipped, not_found, summary }
+   */
+  async bulkUpdateTasks(payload) {
+    try {
+      const response = await api.post('/user/project-manager/tasks/bulk-update', payload);
+      return response;
+    } catch (error) {
+      console.error('Error bulk-updating tasks:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Replace the dependency set for a task (T-F1).
+   * @param {number} taskId
+   * @param {number[]} dependsOnIds - prerequisite task IDs (pass [] to clear)
+   * @returns {Promise} API response
+   */
+  async setTaskDependencies(taskId, dependsOnIds) {
+    try {
+      const response = await api.put(
+        `/user/project-manager/tasks/${taskId}/dependencies`,
+        { depends_on_ids: dependsOnIds }
+      );
+      return response;
+    } catch (error) {
+      console.error('Error setting task dependencies:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Set or update a task's recurrence (T-F2).
+   * @param {number} taskId
+   * @param {object} recurrence - { frequency, interval?, weekdays?, starts_on, ends_on?, max_occurrences?, is_active? }
+   */
+  async setTaskRecurrence(taskId, recurrence) {
+    try {
+      const response = await api.put(
+        `/user/project-manager/tasks/${taskId}/recurrence`,
+        recurrence,
+      );
+      return response;
+    } catch (error) {
+      console.error('Error setting task recurrence:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Remove a task's recurrence (T-F2).
+   * @param {number} taskId
+   */
+  async deleteTaskRecurrence(taskId) {
+    try {
+      const response = await api.delete(
+        `/user/project-manager/tasks/${taskId}/recurrence`,
+      );
+      return response;
+    } catch (error) {
+      console.error('Error deleting task recurrence:', error);
+      throw error;
+    }
+  },
 };
 
 export default userProjectManagerService;

@@ -1,0 +1,319 @@
+import React, { useEffect, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/components/ui/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
+import pmAgentService from '@/services/pmAgentService';
+import { Loader2, Trash2, Send, Plus } from 'lucide-react';
+
+const CHANNEL_TYPES = [
+  { value: 'slack', label: 'Slack (webhook)' },
+  { value: 'teams', label: 'Microsoft Teams (webhook)' },
+  { value: 'email', label: 'Extra Email Recipient' },
+];
+
+const SEVERITY_OPTIONS = ['info', 'warning', 'critical'];
+
+const NOTIFICATION_TYPES = [
+  'overdue_task', 'blocked_task', 'unassigned_high_priority', 'deadline_approaching',
+  'workload_imbalance', 'project_at_risk', 'member_inactive', 'milestone_due',
+  'sprint_overloaded', 'custom',
+];
+
+export default function NotificationSettings() {
+  const { toast } = useToast();
+
+  // ---------------- Channels ----------------
+  const [channels, setChannels] = useState([]);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [newChannel, setNewChannel] = useState({
+    name: '', channel_type: 'slack', target: '', severities: 'info,warning,critical', types: '', is_active: true,
+  });
+  const [savingChannel, setSavingChannel] = useState(false);
+
+  // ---------------- Templates ---------------
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [newTemplate, setNewTemplate] = useState({
+    notification_type: 'overdue_task', name: '', title_template: '', message_template: '', default_severity: 'info', is_active: true,
+  });
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
+  useEffect(() => {
+    refreshChannels();
+    refreshTemplates();
+  }, []);
+
+  const refreshChannels = async () => {
+    setChannelsLoading(true);
+    try {
+      const res = await pmAgentService.listNotificationChannels();
+      setChannels(res?.data || []);
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Failed to load channels', variant: 'destructive' });
+    } finally {
+      setChannelsLoading(false);
+    }
+  };
+
+  const refreshTemplates = async () => {
+    setTemplatesLoading(true);
+    try {
+      const res = await pmAgentService.listNotificationTemplates();
+      setTemplates(res?.data || []);
+    } catch (e) {
+      toast({ title: 'Error', description: e.message || 'Failed to load templates', variant: 'destructive' });
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  const createChannel = async () => {
+    if (!newChannel.name.trim() || !newChannel.target.trim()) {
+      toast({ title: 'Missing fields', description: 'Name and target are required', variant: 'destructive' });
+      return;
+    }
+    setSavingChannel(true);
+    try {
+      await pmAgentService.createNotificationChannel(newChannel);
+      toast({ title: 'Channel created' });
+      setNewChannel({ name: '', channel_type: 'slack', target: '', severities: 'info,warning,critical', types: '', is_active: true });
+      refreshChannels();
+    } catch (e) {
+      toast({ title: 'Error', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setSavingChannel(false);
+    }
+  };
+
+  const toggleChannelActive = async (ch) => {
+    try {
+      await pmAgentService.updateNotificationChannel(ch.id, { is_active: !ch.is_active });
+      refreshChannels();
+    } catch (e) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const removeChannel = async (id) => {
+    if (!window.confirm('Delete this channel?')) return;
+    try {
+      await pmAgentService.deleteNotificationChannel(id);
+      refreshChannels();
+    } catch (e) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const testChannel = async (id) => {
+    try {
+      const res = await pmAgentService.testNotificationChannel(id);
+      if (res.status === 'success') {
+        toast({ title: 'Test sent', description: 'Check your channel for the test message.' });
+      } else {
+        toast({ title: 'Test failed', description: res.message || 'Unknown error', variant: 'destructive' });
+      }
+      refreshChannels();
+    } catch (e) {
+      toast({ title: 'Test failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    }
+  };
+
+  const createTemplate = async () => {
+    if (!newTemplate.name.trim() || !newTemplate.title_template.trim() || !newTemplate.message_template.trim()) {
+      toast({ title: 'Missing fields', description: 'Name, title, and message are required', variant: 'destructive' });
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      await pmAgentService.createNotificationTemplate(newTemplate);
+      toast({ title: 'Template created' });
+      setNewTemplate({ notification_type: 'overdue_task', name: '', title_template: '', message_template: '', default_severity: 'info', is_active: true });
+      refreshTemplates();
+    } catch (e) {
+      toast({ title: 'Error', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const toggleTemplateActive = async (t) => {
+    try {
+      await pmAgentService.updateNotificationTemplate(t.id, { is_active: !t.is_active });
+      refreshTemplates();
+    } catch (e) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const removeTemplate = async (id) => {
+    if (!window.confirm('Delete this template?')) return;
+    try {
+      await pmAgentService.deleteNotificationTemplate(id);
+      refreshTemplates();
+    } catch (e) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Channels */}
+      <Card className="bg-gray-900/50 border-gray-700">
+        <CardHeader>
+          <CardTitle className="text-lg text-violet-300">Notification Channels</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-gray-400">
+            Fan out PM notifications to Slack, Microsoft Teams, or extra emails. Add a webhook URL from the corresponding app.
+          </p>
+
+          {/* New channel form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-gray-700 bg-gray-900/50">
+            <div>
+              <Label>Name</Label>
+              <Input value={newChannel.name} onChange={(e) => setNewChannel({ ...newChannel, name: e.target.value })} placeholder="#pm-alerts" />
+            </div>
+            <div>
+              <Label>Type</Label>
+              <Select value={newChannel.channel_type} onValueChange={(v) => setNewChannel({ ...newChannel, channel_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CHANNEL_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2">
+              <Label>{newChannel.channel_type === 'email' ? 'Email address' : 'Webhook URL'}</Label>
+              <Input value={newChannel.target} onChange={(e) => setNewChannel({ ...newChannel, target: e.target.value })} placeholder={newChannel.channel_type === 'email' ? 'alerts@example.com' : 'https://hooks.slack.com/services/...'} />
+            </div>
+            <div>
+              <Label>Severities (comma-separated)</Label>
+              <Input value={newChannel.severities} onChange={(e) => setNewChannel({ ...newChannel, severities: e.target.value })} placeholder="info,warning,critical" />
+            </div>
+            <div>
+              <Label>Notification types filter (optional)</Label>
+              <Input value={newChannel.types} onChange={(e) => setNewChannel({ ...newChannel, types: e.target.value })} placeholder="empty = all" />
+            </div>
+            <div className="md:col-span-2 flex justify-end">
+              <Button onClick={createChannel} disabled={savingChannel}>
+                {savingChannel ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                Add Channel
+              </Button>
+            </div>
+          </div>
+
+          {channelsLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+          ) : channels.length === 0 ? (
+            <p className="text-sm text-gray-500">No channels configured yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {channels.map((ch) => (
+                <div key={ch.id} className="flex flex-wrap items-center gap-3 p-3 rounded border border-gray-700 bg-gray-900/40">
+                  <Checkbox checked={ch.is_active} onCheckedChange={() => toggleChannelActive(ch)} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{ch.name}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {ch.channel_type} · {ch.target}
+                    </p>
+                    <p className="text-xs text-gray-500">severities: {ch.severities || 'all'}{ch.types ? ` · types: ${ch.types}` : ''}</p>
+                    {ch.last_error && (
+                      <p className="text-xs text-red-400 mt-1">Last error: {ch.last_error}</p>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => testChannel(ch.id)}>
+                    <Send className="w-3 h-3 mr-1" /> Test
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => removeChannel(ch.id)}>
+                    <Trash2 className="w-3 h-3 text-red-400" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Templates */}
+      <Card className="bg-gray-900/50 border-gray-700">
+        <CardHeader>
+          <CardTitle className="text-lg text-violet-300">Notification Templates</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-gray-400">
+            Override the wording for a given notification type. Use <code>{'{placeholders}'}</code> like <code>{'{meeting_title}'}</code>, <code>{'{pending_names}'}</code>, <code>{'{reminder_text}'}</code>, <code>{'{time_display}'}</code>.
+          </p>
+
+          {/* New template form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-gray-700 bg-gray-900/50">
+            <div>
+              <Label>Notification type</Label>
+              <Select value={newTemplate.notification_type} onValueChange={(v) => setNewTemplate({ ...newTemplate, notification_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {NOTIFICATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Template name</Label>
+              <Input value={newTemplate.name} onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })} placeholder="Polite reminder" />
+            </div>
+            <div className="md:col-span-2">
+              <Label>Title template</Label>
+              <Input value={newTemplate.title_template} onChange={(e) => setNewTemplate({ ...newTemplate, title_template: e.target.value })} placeholder="Reminder: {meeting_title} starts soon" />
+            </div>
+            <div className="md:col-span-2">
+              <Label>Message template</Label>
+              <Textarea value={newTemplate.message_template} onChange={(e) => setNewTemplate({ ...newTemplate, message_template: e.target.value })} placeholder="Hi! Your meeting {meeting_title} starts {reminder_text}." rows={3} />
+            </div>
+            <div>
+              <Label>Default severity</Label>
+              <Select value={newTemplate.default_severity} onValueChange={(v) => setNewTemplate({ ...newTemplate, default_severity: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SEVERITY_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2 flex justify-end">
+              <Button onClick={createTemplate} disabled={savingTemplate}>
+                {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                Add Template
+              </Button>
+            </div>
+          </div>
+
+          {templatesLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-gray-500">No custom templates yet — defaults will be used.</p>
+          ) : (
+            <div className="space-y-2">
+              {templates.map((t) => (
+                <div key={t.id} className="flex items-start gap-3 p-3 rounded border border-gray-700 bg-gray-900/40">
+                  <Checkbox checked={t.is_active} onCheckedChange={() => toggleTemplateActive(t)} className="mt-1" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">
+                      {t.name} <span className="text-xs text-gray-500">· {t.notification_type} · {t.default_severity}</span>
+                    </p>
+                    <p className="text-xs text-gray-400 truncate mt-1">{t.title_template}</p>
+                    <p className="text-xs text-gray-500 line-clamp-2">{t.message_template}</p>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => removeTemplate(t.id)}>
+                    <Trash2 className="w-3 h-3 text-red-400" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -412,3 +412,106 @@ class MeetingResponse(models.Model):
 
     def __str__(self):
         return f"{self.responded_by} → {self.action} ({self.meeting.title})"
+
+
+class PMNotificationChannel(models.Model):
+    """
+    Outbound channel for fan-out of PMNotification events (N-F2).
+    Each CompanyUser can register Slack/Teams webhooks (or extra email aliases)
+    so notifications go beyond the in-app inbox.
+    """
+    CHANNEL_CHOICES = [
+        ('slack', 'Slack'),
+        ('teams', 'Microsoft Teams'),
+        ('email', 'Email (extra recipient)'),
+    ]
+    company_user = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.CASCADE, related_name='pm_notification_channels'
+    )
+    name = models.CharField(max_length=120, help_text='Friendly label, e.g. "#pm-alerts" or "PM Lead Email"')
+    channel_type = models.CharField(max_length=20, choices=CHANNEL_CHOICES)
+    target = models.CharField(
+        max_length=512,
+        help_text='Webhook URL for slack/teams, or email address for email channels.',
+    )
+    severities = models.CharField(
+        max_length=64, default='info,warning,critical',
+        help_text='Comma-separated subset of severities to forward (info,warning,critical).',
+    )
+    types = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Optional comma-separated subset of notification_types to forward. Empty = all.',
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.channel_type}: {self.name}"
+
+
+class PMNotificationTemplate(models.Model):
+    """
+    Customisable notification templates (N-F1). A template is owned by a
+    Company and overrides the default title/body for a given notification_type.
+    Title/message support `{placeholders}` resolved against an extras dict at
+    render time (str.format-style, with missing keys silently substituted with
+    empty strings to avoid runtime crashes).
+    """
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE, related_name='pm_notification_templates'
+    )
+    notification_type = models.CharField(
+        max_length=50,
+        help_text="The PMNotification.notification_type this template applies to."
+    )
+    name = models.CharField(max_length=120, help_text='Internal label for this template.')
+    title_template = models.CharField(max_length=255)
+    message_template = models.TextField()
+    default_severity = models.CharField(
+        max_length=20,
+        choices=PMNotification.SEVERITY_CHOICES,
+        default='info',
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        ordering = ['notification_type', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['company', 'notification_type', 'name'],
+                name='uniq_company_type_name',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.notification_type}: {self.name} ({'on' if self.is_active else 'off'})"
+
+    def render(self, context):
+        """
+        Safely render the template against `context` (dict). Missing keys are
+        replaced with empty strings — we never want a template typo to kill a
+        notification.
+        """
+        class _SafeDict(dict):
+            def __missing__(self, key):
+                return ''
+        safe = _SafeDict(context or {})
+        try:
+            title = self.title_template.format_map(safe)
+        except Exception:
+            title = self.title_template
+        try:
+            message = self.message_template.format_map(safe)
+        except Exception:
+            message = self.message_template
+        return title, message
