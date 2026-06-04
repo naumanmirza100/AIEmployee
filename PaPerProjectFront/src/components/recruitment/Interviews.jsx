@@ -23,6 +23,7 @@ const Interviews = ({ onUpdate }) => {
   const [jobFilter, setJobFilter] = useState('');
   const [jobs, setJobs] = useState([]);
   const [updatingId, setUpdatingId] = useState(null);
+  const [pendingChange, setPendingChange] = useState(null); // { interview, type: 'status'|'outcome', value, label }
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleInterviewObj, setRescheduleInterviewObj] = useState(null);
   const [reschedulePickedDate, setReschedulePickedDate] = useState(null);
@@ -96,43 +97,34 @@ const Interviews = ({ onUpdate }) => {
     return <Badge className={variants[outcome] || 'bg-gray-500'}>{labels[outcome] || outcome}</Badge>;
   };
 
-  const handleStatusChange = async (interviewId, newStatus) => {
-    try {
-      setUpdatingId(interviewId);
-      const response = await updateInterview(interviewId, { status: newStatus });
-      if (response.status === 'success') {
-        toast({ title: 'Updated', description: 'Interview status updated' });
-        fetchInterviews();
-        if (onUpdate) onUpdate();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update status',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingId(null);
-    }
+  const STATUS_LABELS = { PENDING: 'Pending', SCHEDULED: 'Scheduled', COMPLETED: 'Completed', CANCELLED: 'Cancelled', RESCHEDULED: 'Rescheduled' };
+  const OUTCOME_LABELS = { ONSITE_INTERVIEW: 'Onsite Interview', HIRED: 'Hired', PASSED: 'Passed', REJECTED: 'Rejected', '': 'None' };
+
+  const handleStatusChange = (interview, newStatus) => {
+    setPendingChange({ interview, type: 'status', value: newStatus, label: STATUS_LABELS[newStatus] || newStatus });
   };
 
-  const handleOutcomeChange = async (interviewId, newOutcome) => {
+  const handleOutcomeChange = (interview, newOutcome) => {
+    setPendingChange({ interview, type: 'outcome', value: newOutcome, label: OUTCOME_LABELS[newOutcome] || newOutcome || 'None' });
+  };
+
+  const handleConfirmChange = async () => {
+    if (!pendingChange) return;
+    const { interview, type, value } = pendingChange;
     try {
-      setUpdatingId(interviewId);
-      const response = await updateInterview(interviewId, { outcome: newOutcome || '' });
+      setUpdatingId(interview.id);
+      const payload = type === 'status' ? { status: value } : { outcome: value || '' };
+      const response = await updateInterview(interview.id, payload);
       if (response.status === 'success') {
-        toast({ title: 'Updated', description: 'Interview outcome updated' });
+        toast({ title: 'Updated', description: `Interview ${type} updated successfully` });
         fetchInterviews();
         if (onUpdate) onUpdate();
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update outcome',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message || `Failed to update ${type}`, variant: 'destructive' });
     } finally {
       setUpdatingId(null);
+      setPendingChange(null);
     }
   };
 
@@ -342,7 +334,7 @@ const Interviews = ({ onUpdate }) => {
                       <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Status</Label>
                       <Select
                         value={interview.status}
-                        onValueChange={(value) => handleStatusChange(interview.id, value)}
+                        onValueChange={(value) => handleStatusChange(interview, value)}
                         disabled={updatingId === interview.id}
                       >
                         <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
@@ -367,7 +359,7 @@ const Interviews = ({ onUpdate }) => {
                         <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Decision</Label>
                         <Select
                           value={interview.outcome || 'none'}
-                          onValueChange={(value) => handleOutcomeChange(interview.id, value === 'none' ? '' : value)}
+                          onValueChange={(value) => handleOutcomeChange(interview, value === 'none' ? '' : value)}
                           disabled={updatingId === interview.id}
                         >
                           <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
@@ -500,6 +492,47 @@ const Interviews = ({ onUpdate }) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirm Status / Decision Change Modal */}
+      {pendingChange && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setPendingChange(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-white mb-1">Confirm Change</h3>
+            <p className="text-sm text-white/60 mb-1">
+              {pendingChange.type === 'status' ? 'Change interview status' : 'Change interview decision'} for{' '}
+              <span className="text-white font-medium">{pendingChange.interview.candidate_name}</span>?
+            </p>
+            <p className="text-sm text-white/50 mb-5">
+              New {pendingChange.type}:{' '}
+              <span className="font-semibold text-violet-300">{pendingChange.label}</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setPendingChange(null)}
+                className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmChange}
+                disabled={!!updatingId}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
+                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+              >
+                {updatingId ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yes, Update'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

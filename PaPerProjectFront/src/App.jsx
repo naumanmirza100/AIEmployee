@@ -57,6 +57,7 @@ import HRMyProfilePage from '@/components/hr/HRMyProfilePage';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
+import JobApplicationPage from '@/pages/JobApplicationPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
@@ -136,6 +137,9 @@ import { useTranslation } from 'react-i18next';
               <Route path="email-accounts" element={<EmailAccountsPage />} />
             </Route>
             
+            {/* Public job application (no auth) */}
+            <Route path="/jobs/apply/:jobId" element={<JobApplicationPage />} />
+
             {/* Recruitment Agent routes without header/footer */}
             <Route path="/recruitment" element={<Navigate to="/recruitment/dashboard" replace />} />
             <Route path="/recruitment/dashboard" element={<RecruitmentAgentPage />} />

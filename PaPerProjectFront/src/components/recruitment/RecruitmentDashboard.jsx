@@ -82,6 +82,7 @@ const RecruitmentDashboard = () => {
   const pathSegment = (location.pathname.match(/\/recruitment\/?([^/]*)/) || [])[1] || 'dashboard';
   const activeTab = PATH_TO_TAB[pathSegment] || 'dashboard';
   const [loading, setLoading] = useState(true);
+  const [pendingSettingsJobId, setPendingSettingsJobId] = useState(null);
   const [stats, setStats] = useState({
     totalCVs: 0,
     totalInterviews: 0,
@@ -519,7 +520,10 @@ const RecruitmentDashboard = () => {
         </TabsContent>
 
         <TabsContent value="jobs">
-          <JobDescriptions onUpdate={fetchStats} />
+          <JobDescriptions
+            onUpdate={fetchStats}
+            onGoToSettings={(jobId) => { setPendingSettingsJobId(jobId || null); navigate('/recruitment/settings/interview'); }}
+          />
         </TabsContent>
 
         <TabsContent value="candidates">
@@ -531,7 +535,10 @@ const RecruitmentDashboard = () => {
         </TabsContent>
 
         <TabsContent value="settings">
-          <RecruiterSettings />
+          <RecruiterSettings
+            settingsJobId={pendingSettingsJobId}
+            onSettingsJobConsumed={() => setPendingSettingsJobId(null)}
+          />
         </TabsContent>
       </Tabs>
     </div>

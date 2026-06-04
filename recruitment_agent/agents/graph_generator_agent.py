@@ -72,15 +72,11 @@ class GraphGeneratorAgent:
         ).select_related('job_description')
         
         # Get interviews
-        interviews = Interview.objects.filter(
-            Q(company_user=self.company_user) |
-            Q(recruiter=self.company_user.user if hasattr(self.company_user, 'user') else None)
-        )
-        
+        interviews = Interview.objects.filter(company_user=self.company_user)
+
         # Get interview settings for jobs
         interview_settings = RecruiterInterviewSettings.objects.filter(
-            Q(company_user=self.company_user) |
-            Q(recruiter=self.company_user.user if hasattr(self.company_user, 'user') else None)
+            company_user=self.company_user
         ).select_related('job')
         
         # Time ranges

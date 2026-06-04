@@ -191,9 +191,11 @@ class JobDescription(models.Model):
     company = models.ForeignKey('core.Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='job_positions')
     company_user = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_jobs', help_text='Company user who created this job')
     is_active = models.BooleanField(default=True, help_text="Whether this job description is currently active/being used")
+    application_open_date = models.DateField(null=True, blank=True, help_text="Date from which applications are accepted")
+    application_close_date = models.DateField(null=True, blank=True, help_text="Deadline date after which applications are no longer accepted")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'ppp_recruitment_agent_jobdescription'
         ordering = ['-created_at']
@@ -236,6 +238,45 @@ class CVRecord(models.Model):
     
     def __str__(self):
         return f"{self.file_name} (ID: {self.id})"
+
+
+class JobApplication(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('reviewed', 'Reviewed'),
+        ('shortlisted', 'Shortlisted'),
+        ('rejected', 'Rejected'),
+    ]
+
+    job = models.ForeignKey(JobDescription, on_delete=models.CASCADE, related_name='applications')
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=30)
+    current_location = models.CharField(max_length=255, blank=True, null=True)
+    salary_expectation = models.CharField(max_length=100, blank=True, null=True)
+    education = models.TextField(blank=True, null=True)
+    previous_company = models.CharField(max_length=255, blank=True, null=True)
+    previous_salary = models.CharField(max_length=100, blank=True, null=True)
+    linkedin_url = models.URLField(max_length=500, blank=True, null=True)
+    github_url = models.URLField(max_length=500, blank=True, null=True)
+    other_links = models.TextField(blank=True, null=True)
+    cover_letter = models.TextField(blank=True, null=True)
+    cv_file = models.FileField(upload_to='job_applications/cvs/', null=True, blank=True)
+    cv_file_name = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    applied_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ppp_recruitment_job_applications'
+        constraints = [
+            models.UniqueConstraint(fields=['job', 'email'], name='unique_job_app_email'),
+            models.UniqueConstraint(fields=['job', 'phone'], name='unique_job_app_phone'),
+        ]
+        ordering = ['-applied_at']
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} → {self.job.title}"
 
 
 class Interview(models.Model):

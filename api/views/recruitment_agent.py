@@ -617,6 +617,8 @@ def list_job_descriptions(request):
                 'requirements': jd.requirements,
                 'is_active': jd.is_active,
                 'keywords_json': jd.keywords_json,
+                'application_open_date': jd.application_open_date.isoformat() if jd.application_open_date else None,
+                'application_close_date': jd.application_close_date.isoformat() if jd.application_close_date else None,
                 'created_at': jd.created_at.isoformat() if jd.created_at else None,
                 'updated_at': jd.updated_at.isoformat() if jd.updated_at else None,
             })
@@ -711,6 +713,9 @@ def create_job_description(request):
             except Exception as exc:
                 logger.warning("Job keyword parsing skipped (quota/key issue): %s", exc)
 
+        application_open_date = request.data.get('application_open_date') or None
+        application_close_date = request.data.get('application_close_date') or None
+
         job_desc = JobDescription.objects.create(
             title=title,
             description=description,
@@ -722,6 +727,8 @@ def create_job_description(request):
             department=department,
             type=job_type,
             requirements=requirements,
+            application_open_date=application_open_date,
+            application_close_date=application_close_date,
         )
 
         return Response({
@@ -786,6 +793,11 @@ def update_job_description(request, job_description_id):
             job_desc.type = job_type
         if requirements is not None:
             job_desc.requirements = requirements
+
+        if 'application_open_date' in request.data:
+            job_desc.application_open_date = request.data.get('application_open_date') or None
+        if 'application_close_date' in request.data:
+            job_desc.application_close_date = request.data.get('application_close_date') or None
 
         # When description is updated, regenerate keywords — but never block saving if
         # token quota is exhausted or the AI call fails for any reason.

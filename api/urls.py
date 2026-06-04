@@ -42,12 +42,17 @@ from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
 from api.views.health import health_check
+from api.views import public_jobs
 
 app_name = 'api'
 
 urlpatterns = [
     # Health check
     re_path(r'^health/?$', health_check, name='health_check'),
+
+    # Public Job Application (no auth required)
+    re_path(r'^public/jobs/(?P<job_id>\d+)/?$', public_jobs.public_job_detail, name='public_job_detail'),
+    re_path(r'^public/jobs/(?P<job_id>\d+)/apply/?$', public_jobs.public_job_apply, name='public_job_apply'),
     
     # Authentication endpoints
     re_path(r'^auth/register/?$', auth.register, name='register'),
