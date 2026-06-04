@@ -165,6 +165,7 @@ urlpatterns = [
     re_path(r'^company/verify-token/?$', company_auth.verify_registration_token, name='verify_registration_token'),
     re_path(r'^company/register/?$', company_auth.register_company_user, name='register_company_user'),
     re_path(r'^company/login/?$', company_auth.login_company_user, name='login_company_user'),
+    re_path(r'^company/logout/?$', company_auth.logout_company_user, name='logout_company_user'),
     
     # Career endpoints
     re_path(r'^careers/positions/?$', career.list_job_positions, name='list_job_positions'),

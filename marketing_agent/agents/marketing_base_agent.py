@@ -79,10 +79,10 @@ class MarketingBaseAgent:
         ctx = resolve_for_call(company, agent_key_name)
         if ctx.provider == 'groq':
             from groq import Groq
-            return Groq(api_key=ctx.api_key), ctx
+            return Groq(api_key=ctx.api_key, timeout=30.0), ctx
         if ctx.provider == 'openai':
             from openai import OpenAI
-            return OpenAI(api_key=ctx.api_key), ctx
+            return OpenAI(api_key=ctx.api_key, timeout=30.0), ctx
         raise ValueError(f"Unsupported provider '{ctx.provider}' configured for company key")
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
@@ -320,7 +320,8 @@ class MarketingBaseAgent:
                     model=effective_model,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    timeout=30.0,
                 )
                 usage = getattr(response, 'usage', None)
                 content = response.choices[0].message.content
@@ -367,6 +368,7 @@ class MarketingBaseAgent:
                 last_error = e
                 err_str = str(e)
                 is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower()
+                is_timeout = "timeout" in err_str.lower() or "timed out" in err_str.lower() or "ReadTimeout" in err_str
                 if is_rate_limit and attempt < max_retries:
                     wait_sec = 4
                     match = re.search(r"try again in (\d+(?:\.\d+)?)\s*s", err_str, re.IGNORECASE)
@@ -378,6 +380,8 @@ class MarketingBaseAgent:
                     logger.error(f"Error in {self.agent_name} Groq Q&A call: {err_str}")
                     if is_rate_limit:
                         raise RuntimeError("The service is busy. Please try again in a moment.")
+                    if is_timeout:
+                        raise RuntimeError("The AI took too long to respond. Please try again.")
                     from core.api_key_service import raise_if_auth_error
                     raise_if_auth_error(e, key_ctx)
                     raise

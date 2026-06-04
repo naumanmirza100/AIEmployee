@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
@@ -8,6 +8,8 @@ from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password
 from rest_framework.authtoken.models import Token
 
+from api.authentication import CompanyUserTokenAuthentication
+from api.permissions import IsCompanyUserOnly
 from core.models import Company, CompanyUser, CompanyRegistrationToken, CompanyUserToken
 
 
@@ -237,4 +239,16 @@ def login_company_user(request):
             'message': 'Failed to login',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def logout_company_user(request):
+    """Invalidate the company user's auth token."""
+    try:
+        CompanyUserToken.objects.filter(company_user=request.user).delete()
+    except Exception:
+        pass
+    return Response({'status': 'success', 'message': 'Logged out successfully.'}, status=status.HTTP_200_OK)
 

@@ -85,6 +85,11 @@ class LeadQualificationAgent:
             "warm_threshold": icp.warm_threshold,
         }
 
+        # Use company_size_range as fallback when company_size int is not available
+        size_int = _get_field(lead, 'company_size', None)
+        size_range = _get_field(lead, 'company_size_range', '')
+        size_display = str(size_int) if size_int else (size_range or 'unknown')
+
         lead_data = {
             "name": (
                 _get_field(lead, 'display_name')
@@ -95,50 +100,38 @@ class LeadQualificationAgent:
             "seniority_level": _get_field(lead, 'seniority_level'),
             "company_name": _get_field(lead, 'company_name'),
             "company_industry": _get_field(lead, 'company_industry'),
-            "company_size": _get_field(lead, 'company_size', None),
+            "company_size": size_display,
             "company_location": _get_field(lead, 'company_location'),
-            "company_technologies": _get_field(lead, 'company_technologies', []),
             "buying_signals": _get_field(lead, 'buying_signals', []),
-            "recent_news": _get_field(lead, 'recent_news', []),
         }
 
-        # Compact ICP summary to reduce token usage
         icp_summary = (
             f"Industries: {', '.join(icp.industries) or 'any'} | "
             f"Titles: {', '.join(icp.job_titles) or 'any'} | "
-            f"Size: {icp.company_size_min or 0}-{icp.company_size_max or 99999} | "
+            f"Size: {icp.company_size_min or 0}-{icp.company_size_max or 99999} employees | "
             f"Locations: {', '.join(icp.locations) or 'any'} | "
             f"Hot>={icp.hot_threshold} Warm>={icp.warm_threshold}"
         )
         lead_summary = (
             f"Name: {lead_data['name']} | Title: {lead_data['job_title']} | "
-            f"Company: {lead_data['company_name']} | Industry: {lead_data['company_industry']} | "
-            f"Size: {lead_data['company_size']} | Location: {lead_data['company_location']} | "
+            f"Company: {lead_data['company_name']} | Industry: {lead_data['company_industry'] or 'unknown'} | "
+            f"Size: {lead_data['company_size']} | Location: {lead_data['company_location'] or 'unknown'} | "
             f"Signals: {'; '.join(lead_data['buying_signals'][:2]) or 'none'}"
         )
 
-        prompt = f"""Score this B2B lead vs ICP (0-100). Return JSON only.
+        prompt = f"""Score this B2B sales lead against the ICP. Respond with ONLY a JSON object, no other text.
 
 ICP: {icp_summary}
 Lead: {lead_summary}
 
-Scoring: industry(0-30), job_title(0-30), company_size(0-20), location(0-10), buying_signals(0-10)
+Scoring rubric: industry match (0-30 pts), job title match (0-30 pts), company size fit (0-20 pts), location match (0-10 pts), buying signals (0-10 pts).
 
-Return exactly this JSON:
-{{
-  "score": <integer 0-100>,
-  "temperature": "<hot|warm|cold>",
-  "breakdown": {{
-    "industry": <0-30>,
-    "job_title": <0-30>,
-    "company_size": <0-20>,
-    "location": <0-10>,
-    "buying_signals": <0-10>
-  }},
-  "reasoning": "<2-3 concise sentences>",
-  "key_strengths": ["<strength1>", "<strength2>"],
-  "concerns": ["<concern1>"]
-}}"""
+IMPORTANT: Use real numeric scores based on how well the lead matches the ICP. Do NOT return 0 unless there is truly zero match. If a field is unknown, give partial credit.
+
+Example output (use this exact structure, replace values with your scores):
+{{"score": 72, "temperature": "warm", "breakdown": {{"industry": 20, "job_title": 28, "company_size": 12, "location": 7, "buying_signals": 5}}, "reasoning": "Strong title match but industry unclear.", "key_strengths": ["Senior decision maker"], "concerns": ["Industry unverified"]}}
+
+Now score the lead above:"""
 
         resp = self.groq_client.chat.completions.create(
             model=self.model,
@@ -154,14 +147,23 @@ Return exactly this JSON:
 
         raw = resp.choices[0].message.content.strip()
 
+        # Strip markdown code fences
         if "```" in raw:
             m = re.search(r'```(?:json)?\s*([\s\S]*?)```', raw)
             if m:
                 raw = m.group(1).strip()
 
+        # Extract JSON object even if the model added surrounding text
+        if not raw.startswith('{'):
+            m = re.search(r'\{[\s\S]*\}', raw)
+            if m:
+                raw = m.group(0)
+
         result = json.loads(raw)
 
-        score = max(0, min(100, int(result.get('score', 0))))
+        raw_score = result.get('score', 0)
+        # Guard against string scores like "72" or floats
+        score = max(0, min(100, int(float(str(raw_score)))))
         temperature = self._score_to_temp(score, icp)
 
         return {
