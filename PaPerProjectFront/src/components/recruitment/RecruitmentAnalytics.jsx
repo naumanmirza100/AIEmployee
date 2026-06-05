@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, TrendingUp, Users, Calendar, BarChart3, PieChart, Activity, Target, ArrowUpRight } from 'lucide-react';
-import { getRecruitmentAnalytics, getJobDescriptions } from '@/services/recruitmentAgentService';
+import { Loader2, TrendingUp, Users, Calendar, BarChart3, PieChart, Activity, Target, ArrowUpRight, Download, FileSpreadsheet } from 'lucide-react';
+import { getRecruitmentAnalytics, getJobDescriptions, exportCandidatesCSV, exportInterviewsCSV } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
 
 const RecruitmentAnalytics = () => {
@@ -14,6 +14,7 @@ const RecruitmentAnalytics = () => {
   const [timeRange, setTimeRange] = useState({ days: 30, months: 6 });
   const [selectedJobId, setSelectedJobId] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [exportingType, setExportingType] = useState(null);
 
   useEffect(() => {
     fetchJobs();
@@ -54,6 +55,19 @@ const RecruitmentAnalytics = () => {
       setAnalytics(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async (type) => {
+    setExportingType(type);
+    try {
+      const jobId = selectedJobId || null;
+      if (type === 'candidates') await exportCandidatesCSV(jobId);
+      else await exportInterviewsCSV(jobId);
+    } catch (e) {
+      toast({ title: 'Export Failed', description: e.message || 'Could not export data.', variant: 'destructive' });
+    } finally {
+      setExportingType(null);
     }
   };
 
@@ -248,7 +262,7 @@ const RecruitmentAnalytics = () => {
     );
   }
 
-  const { overview, cv_statistics, interview_statistics } = analytics;
+  const { overview, cv_statistics, interview_statistics, funnel } = analytics;
 
   const chartColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
@@ -276,6 +290,26 @@ const RecruitmentAnalytics = () => {
             ) : (
               <span className="text-sm text-muted-foreground">Showing analytics for all jobs</span>
             )}
+            <div className="flex gap-2 sm:ml-auto flex-wrap">
+              <button
+                onClick={() => handleExport('candidates')}
+                disabled={!!exportingType}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all disabled:opacity-50"
+                style={{ background: 'rgba(96,165,250,0.08)', borderColor: 'rgba(96,165,250,0.3)', color: '#60a5fa' }}
+              >
+                {exportingType === 'candidates' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+                Export Candidates
+              </button>
+              <button
+                onClick={() => handleExport('interviews')}
+                disabled={!!exportingType}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all disabled:opacity-50"
+                style={{ background: 'rgba(52,211,153,0.08)', borderColor: 'rgba(52,211,153,0.3)', color: '#34d399' }}
+              >
+                {exportingType === 'interviews' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                Export Interviews
+              </button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -340,6 +374,59 @@ const RecruitmentAnalytics = () => {
           </div>
         ))}
       </div>
+
+      {/* Recruitment Funnel */}
+      {funnel && funnel.length > 0 && (
+        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+          <CardHeader className="px-4 sm:px-6 pb-2">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
+              <span>Recruitment Funnel</span>
+            </CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Candidate drop-off at each stage</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 sm:px-6 pt-2 pb-6">
+            <div className="space-y-2">
+              {funnel.map((stage, idx) => {
+                const maxCount = funnel[0]?.count || 1;
+                const widthPct = maxCount > 0 ? Math.max(8, (stage.count / maxCount) * 100) : 8;
+                const dropOff = idx > 0 ? funnel[idx - 1].count - stage.count : 0;
+                return (
+                  <div key={stage.stage} className="flex items-center gap-3">
+                    <div className="w-24 sm:w-28 text-xs text-white/60 text-right shrink-0">{stage.stage}</div>
+                    <div className="flex-1 relative h-9 flex items-center">
+                      <div
+                        className="h-full rounded-md flex items-center px-3 transition-all duration-500"
+                        style={{ width: `${widthPct}%`, background: stage.color + '28', border: `1px solid ${stage.color}55` }}
+                      >
+                        <span className="text-xs font-bold whitespace-nowrap" style={{ color: stage.color }}>
+                          {stage.count}
+                        </span>
+                      </div>
+                      {idx > 0 && dropOff > 0 && (
+                        <span className="ml-2 text-[10px] text-white/35">▼ {dropOff} dropped</span>
+                      )}
+                    </div>
+                    <div className="w-14 text-right shrink-0">
+                      <span className="text-xs font-semibold" style={{ color: stage.color }}>
+                        {idx === 0 ? '100%' : `${stage.conversion}%`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-4 pt-3 border-t border-white/[0.06]">
+              {funnel.map(stage => (
+                <div key={stage.stage} className="flex items-center gap-1.5">
+                  <div className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
+                  <span className="text-[11px] text-white/50">{stage.stage}: <span className="text-white/80 font-medium">{stage.count}</span></span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* CV Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">

@@ -549,6 +549,42 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
   }
 };
 
+/**
+ * Download candidates CSV export
+ */
+export const exportCandidatesCSV = async (jobId = null) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const { getCompanyToken } = await import('@/services/companyAuthService');
+  const token = getCompanyToken();
+  const url = `${API_BASE_URL}/recruitment/export/candidates/${jobId ? `?job_id=${jobId}` : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `candidates_${jobId || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/**
+ * Download interviews CSV export
+ */
+export const exportInterviewsCSV = async (jobId = null) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const { getCompanyToken } = await import('@/services/companyAuthService');
+  const token = getCompanyToken();
+  const url = `${API_BASE_URL}/recruitment/export/interviews/${jobId ? `?job_id=${jobId}` : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `interviews_${jobId || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 // ========== AI Graph Generator APIs ==========
 
 /**

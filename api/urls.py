@@ -305,6 +305,8 @@ urlpatterns = [
     re_path(r'^recruitment/settings/interview/?$', recruitment_agent.interview_settings, name='recruitment_interview_settings'),  # GET/POST
     re_path(r'^recruitment/settings/qualification/?$', recruitment_agent.qualification_settings, name='recruitment_qualification_settings'),  # GET/POST
     re_path(r'^recruitment/analytics/?$', recruitment_agent.recruitment_analytics, name='recruitment_analytics'),  # GET
+    re_path(r'^recruitment/export/candidates/?$', recruitment_agent.export_candidates_csv, name='recruitment_export_candidates'),  # GET
+    re_path(r'^recruitment/export/interviews/?$', recruitment_agent.export_interviews_csv, name='recruitment_export_interviews'),  # GET
     
     # AI Graph Generator endpoints
     re_path(r'^recruitment/ai/generate-graph/?$', recruitment_agent.api_generate_graph, name='recruitment_generate_graph'),  # POST

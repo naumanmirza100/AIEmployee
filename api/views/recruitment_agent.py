@@ -2412,6 +2412,26 @@ def recruitment_analytics(request):
             for interview in recent_interviews
         ]
         
+        # ========== RECRUITMENT FUNNEL ==========
+        funnel_applied = total_cvs
+        funnel_screened = CVRecord.objects.filter(
+            cv_base_filter
+        ).exclude(qualification_decision__isnull=True).exclude(qualification_decision='').count()
+        funnel_shortlisted = cv_decisions.get('INTERVIEW', 0)
+        funnel_interviewed = total_interviews
+        funnel_hired = Interview.objects.filter(interview_base_filter, outcome='HIRED').count()
+
+        def _conv(current, previous):
+            return round(current / previous * 100, 1) if previous > 0 else 0
+
+        funnel_data = [
+            {'stage': 'Applied',      'count': funnel_applied,      'conversion': 100,                                     'color': '#60a5fa'},
+            {'stage': 'Screened',     'count': funnel_screened,     'conversion': _conv(funnel_screened, funnel_applied),   'color': '#a78bfa'},
+            {'stage': 'Shortlisted',  'count': funnel_shortlisted,  'conversion': _conv(funnel_shortlisted, funnel_screened), 'color': '#34d399'},
+            {'stage': 'Interviewed',  'count': funnel_interviewed,  'conversion': _conv(funnel_interviewed, funnel_shortlisted), 'color': '#fbbf24'},
+            {'stage': 'Hired',        'count': funnel_hired,        'conversion': _conv(funnel_hired, funnel_interviewed),  'color': '#10b981'},
+        ]
+
         return Response({
             'status': 'success',
             'data': {
@@ -2450,6 +2470,7 @@ def recruitment_analytics(request):
                     'recent_cvs': recent_cvs_list,
                     'recent_interviews': recent_interviews_list,
                 },
+                'funnel': funnel_data,
             }
         })
     
@@ -2461,6 +2482,88 @@ def recruitment_analytics(request):
             'status': 'error',
             'message': f'Failed to generate analytics: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def export_candidates_csv(request):
+    """Export CVRecord candidates as CSV, optionally filtered by job_id."""
+    import csv
+    from django.http import HttpResponse
+    company_user = request.user
+    job_id = request.query_params.get('job_id')
+
+    qs = CVRecord.objects.filter(
+        job_description__company_user=company_user
+    ).select_related('job_description').order_by('-created_at')
+    if job_id:
+        qs = qs.filter(job_description_id=job_id)
+
+    response = HttpResponse(content_type='text/csv')
+    fname = f'candidates_{job_id or "all"}.csv'
+    response['Content-Disposition'] = f'attachment; filename="{fname}"'
+
+    writer = csv.writer(response)
+    writer.writerow(['ID', 'File Name', 'Job Title', 'Role Fit Score', 'Rank',
+                     'Qualification Decision', 'Qualification Confidence', 'Created At'])
+    for cv in qs:
+        import json as _json
+        parsed = {}
+        try:
+            parsed = _json.loads(cv.parsed_json) if cv.parsed_json else {}
+        except Exception:
+            pass
+        writer.writerow([
+            cv.id,
+            parsed.get('name') or cv.file_name,
+            cv.job_description.title if cv.job_description else '',
+            cv.role_fit_score or '',
+            cv.rank or '',
+            cv.qualification_decision or '',
+            cv.qualification_confidence or '',
+            cv.created_at.strftime('%Y-%m-%d %H:%M') if cv.created_at else '',
+        ])
+    return response
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def export_interviews_csv(request):
+    """Export interviews as CSV, optionally filtered by job_id."""
+    import csv
+    from django.http import HttpResponse
+    company_user = request.user
+    job_id = request.query_params.get('job_id')
+
+    qs = Interview.objects.filter(company_user=company_user).order_by('-created_at')
+    if job_id:
+        qs = qs.filter(cv_record__job_description_id=job_id)
+
+    response = HttpResponse(content_type='text/csv')
+    fname = f'interviews_{job_id or "all"}.csv'
+    response['Content-Disposition'] = f'attachment; filename="{fname}"'
+
+    writer = csv.writer(response)
+    writer.writerow(['ID', 'Candidate Name', 'Candidate Email', 'Candidate Phone',
+                     'Job Role', 'Interview Type', 'Status', 'Outcome',
+                     'Scheduled Date/Time', 'Selected Slot', 'Created At'])
+    for iv in qs:
+        writer.writerow([
+            iv.id,
+            iv.candidate_name or '',
+            iv.candidate_email or '',
+            iv.candidate_phone or '',
+            iv.job_role or '',
+            iv.interview_type or '',
+            iv.status or '',
+            iv.outcome or '',
+            iv.scheduled_datetime.strftime('%Y-%m-%d %H:%M') if iv.scheduled_datetime else '',
+            iv.selected_slot or '',
+            iv.created_at.strftime('%Y-%m-%d %H:%M') if iv.created_at else '',
+        ])
+    return response
 
 
 # ---------- AI Interview Questions (no history saved) ----------
