@@ -78,6 +78,9 @@ def _serialize_key(key: CompanyAPIKey):
         'masked': key.masked_display,
         'status': key.status,
         'assigned_by': key.assigned_by.username if key.assigned_by else None,
+        'renewal_period': key.renewal_period,
+        'valid_until': key.valid_until.isoformat() if key.valid_until else None,
+        'tokens_per_period': key.tokens_per_period,
         'updated_at': key.updated_at.isoformat(),
     }
 
@@ -111,6 +114,8 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
         'byok_token_limit': quota.byok_token_limit,
         'provider_breakdown': provider_breakdown,
         'default_provider': default_provider,
+        'next_reset_at': quota.next_reset_at.isoformat() if quota.next_reset_at else None,
+        'last_reset_at': quota.last_reset_at.isoformat() if quota.last_reset_at else None,
     }
 
 
@@ -137,8 +142,11 @@ def list_agent_keys(request):
     # Active keys first — these always win
     for k in CompanyAPIKey.objects.filter(company=company, status='active'):
         keys_by_agent.setdefault(k.agent_name, {})[k.mode] = k
-    # Show the most-recently revoked managed key only when no active managed key exists,
-    # so the company can see "revoked by admin" instead of a blank slot.
+    # Show expired managed key when no active managed key exists (so Renew button appears)
+    for k in CompanyAPIKey.objects.filter(company=company, mode='managed', status='expired').order_by('-updated_at'):
+        if 'managed' not in keys_by_agent.get(k.agent_name, {}):
+            keys_by_agent.setdefault(k.agent_name, {})['managed'] = k
+    # Show the most-recently revoked managed key only when no active/expired managed key exists
     for k in CompanyAPIKey.objects.filter(company=company, mode='managed', status='revoked').order_by('-updated_at'):
         if 'managed' not in keys_by_agent.get(k.agent_name, {}):
             keys_by_agent.setdefault(k.agent_name, {})['managed'] = k
@@ -191,6 +199,11 @@ def upsert_byok_key(request):
                         status=status.HTTP_400_BAD_REQUEST)
     if len(api_key) < 10:
         return Response({'status': 'error', 'message': 'API key looks too short to be valid'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        api_key.encode('latin-1')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return Response({'status': 'error', 'message': 'API key contains invalid characters. Please paste only the plain key text.'},
                         status=status.HTTP_400_BAD_REQUEST)
 
     has_purchase = CompanyModulePurchase.objects.filter(
@@ -326,9 +339,29 @@ def set_byok_limit(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_key_requests(request):
-    """List this company's KeyRequests (all statuses)."""
+    """List this company's KeyRequests — only for agents with active purchases."""
+    from django.db.models import OuterRef, Exists
     company = request.user.company
-    reqs = KeyRequest.objects.filter(company=company).select_related('requested_by', 'resolved_by').order_by('-created_at')
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company=company,
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    reqs = (
+        KeyRequest.objects
+        .filter(company=company)
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+        .select_related('requested_by', 'resolved_by')
+        .order_by('-created_at')
+    )
+
+    # Bulk-fetch linked key statuses to avoid N+1
+    linked_key_ids = [r.linked_key_id for r in reqs if r.linked_key_id]
+    linked_key_statuses = {}
+    if linked_key_ids:
+        for pk, st, vu in CompanyAPIKey.objects.filter(pk__in=linked_key_ids).values_list('pk', 'status', 'valid_until'):
+            linked_key_statuses[pk] = {'status': st, 'valid_until': vu.isoformat() if vu else None}
 
     data = []
     for r in reqs:
@@ -341,6 +374,8 @@ def list_key_requests(request):
             'agent_label': r.get_agent_name_display(),
             'provider': r.provider,
             'note': r.note,
+            'preferred_duration': r.preferred_duration,
+            'is_renewal': r.is_renewal,
             'status': r.status,
             'was_assigned': was_assigned,
             'revoked_at': r.updated_at.isoformat() if was_assigned else None,
@@ -351,8 +386,11 @@ def list_key_requests(request):
             'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
             'key_cost_snapshot': float(r.key_cost_snapshot) if r.key_cost_snapshot is not None else None,
             'service_charge_snapshot': float(r.service_charge_snapshot) if r.service_charge_snapshot is not None else None,
+            'discount_pct_snapshot': float(r.discount_pct_snapshot) if r.discount_pct_snapshot is not None else 0,
             'amount_paid': float(r.amount_paid) if r.amount_paid is not None else None,
             'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+            'linked_key_status': linked_key_statuses.get(r.linked_key_id, {}).get('status'),
+            'linked_key_valid_until': linked_key_statuses.get(r.linked_key_id, {}).get('valid_until'),
         })
     return Response({'status': 'success', 'requests': data})
 
@@ -363,16 +401,18 @@ def list_key_requests(request):
 def create_key_request(request):
     """Raise a KeyRequest: user asks admin to assign a managed key.
 
-    Body: { agent_name, provider?, note? }
+    Body: { agent_name, provider?, note?, preferred_duration?, is_renewal? }
     Only one pending request per (company, agent) — if one exists, we return it.
+    is_renewal=true: request is for renewing an expired key (same flow, tagged differently).
     """
-    try:
-        company = getattr(request.user, 'company', None)
-        if company is None:
-            return Response(
-                {'status': 'error', 'message': 'No company linked to this user.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    company = request.user.company
+    agent_name = (request.data.get('agent_name') or '').strip()
+    provider = (request.data.get('provider') or 'openai').strip()
+    note = (request.data.get('note') or '').strip()
+    preferred_duration = (request.data.get('preferred_duration') or 'monthly').strip()
+    if preferred_duration not in ('monthly', 'yearly'):
+        preferred_duration = 'monthly'
+    is_renewal = bool(request.data.get('is_renewal', False))
 
         agent_name = (request.data.get('agent_name') or '').strip()
         provider = (request.data.get('provider') or 'openai').strip()
@@ -433,24 +473,26 @@ def create_key_request(request):
                 req.id, notify_exc, exc_info=True,
             )
 
-        return Response({'status': 'success', 'request_id': req.id})
+    req = KeyRequest.objects.create(
+        company=company,
+        requested_by=request.user,
+        agent_name=agent_name,
+        provider=provider,
+        note=note,
+        preferred_duration=preferred_duration,
+        is_renewal=is_renewal,
+    )
 
-    except Exception as exc:
-        # Log full traceback to the Django server console so we can diagnose
-        # the actual cause instead of returning a bare 500 with no detail.
-        logger.error(
-            "create_key_request failed (user=%s, payload=%s): %s",
-            getattr(request.user, 'id', None), request.data, exc,
-            exc_info=True,
-        )
-        return Response(
-            {
-                'status': 'error',
-                'message': 'Could not create the key request. Please try again.',
-                'detail': str(exc),
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+    from core.notification_utils import notify_admins
+    action = "renewal" if is_renewal else "request"
+    notify_admins(
+        title=f"New managed-key {action} — {company.name}",
+        message=f"{company.name} is requesting a {'renewal of' if is_renewal else 'managed'} {provider.upper()} key for {req.get_agent_name_display()}.",
+        action_url='/admin/api-keys',
+        notification_type='key_request_new',
+    )
+
+    return Response({'status': 'success', 'request_id': req.id, 'is_renewal': is_renewal})
 
 
 @api_view(['POST'])

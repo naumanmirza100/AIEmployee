@@ -694,6 +694,7 @@ class CompanyModulePurchase(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True, help_text="Subscription expiration date (null for lifetime)")
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancelled_reason = models.CharField(max_length=50, blank=True, null=True, help_text="Reason for cancellation (e.g., 'admin_deactivated', 'user_cancelled')")
+    history_kept = models.BooleanField(null=True, blank=True, help_text="When deactivated by admin: True = history preserved, False = history deleted, None = not applicable")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -1861,6 +1862,12 @@ class CompanyAPIKey(models.Model):
       - `managed`: admin assigned a platform-owned key to this company/agent
         combination; usage is metered against AgentTokenQuota and hard-blocked
         when the included quota is exhausted.
+
+    Renewal fields (managed keys only):
+      - renewal_period: how often the token quota resets (weekly always resets
+        regardless of billing period — monthly/yearly just affect billing).
+      - valid_until: when this key expires and company must renew (pay again).
+      - tokens_per_period: tokens granted at each weekly reset cycle.
     """
     MODE_CHOICES = [
         ('byok', 'Bring Your Own Key'),
@@ -1869,6 +1876,12 @@ class CompanyAPIKey(models.Model):
     STATUS_CHOICES = [
         ('active', 'Active'),
         ('revoked', 'Revoked'),
+        ('expired', 'Expired'),
+    ]
+    RENEWAL_PERIOD_CHOICES = [
+        ('none',    'One-time (no renewal)'),
+        ('monthly', 'Monthly'),
+        ('yearly',  'Yearly'),
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='api_keys')
@@ -1884,9 +1897,19 @@ class CompanyAPIKey(models.Model):
         related_name='assigned_api_keys',
         help_text='Superadmin who assigned this managed key (null for BYOK)',
     )
-    renewal_period = models.CharField(max_length=10, default='monthly')
-    tokens_per_period = models.BigIntegerField(default=0)
-    valid_until = models.DateTimeField(null=True, blank=True)
+    # Renewal / expiry fields — managed keys only
+    renewal_period = models.CharField(
+        max_length=10, choices=RENEWAL_PERIOD_CHOICES, default='none',
+        help_text='Billing renewal cycle. Token quota resets weekly regardless.',
+    )
+    valid_until = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Key expiry date. After this date the key is auto-expired and company must renew.',
+    )
+    tokens_per_period = models.BigIntegerField(
+        default=0,
+        help_text='Tokens to grant at each weekly reset. 0 = use managed_included_tokens as a one-time set.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1978,7 +2001,12 @@ class AgentTokenQuota(models.Model):
     byok_notified_90pct = models.BooleanField(default=False)
     byok_notified_100pct = models.BooleanField(default=False)
     last_reset_at = models.DateTimeField(auto_now_add=True)
-    next_reset_at = models.DateTimeField(null=True, blank=True)
+    # Weekly auto-reset: tokens reset every 7 days when a renewal key is active.
+    # Set to None when the key has no renewal (one-time).
+    next_reset_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Next weekly token reset timestamp. Null = no recurring reset.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1986,6 +2014,7 @@ class AgentTokenQuota(models.Model):
         unique_together = ['company', 'agent_name']
         indexes = [
             models.Index(fields=['company', 'agent_name']),
+            models.Index(fields=['next_reset_at']),
         ]
         verbose_name = 'Agent Token Quota'
         verbose_name_plural = 'Agent Token Quotas'
@@ -2034,11 +2063,23 @@ class KeyRequest(models.Model):
         ('revoked', 'Revoked'),
     ]
 
+    DURATION_CHOICES = [
+        ('monthly', 'Monthly'),
+        ('yearly',  'Yearly'),
+    ]
+
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
     requested_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='key_requests')
     agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     note = models.TextField(blank=True)
+    # Company specifies how long they want the key (monthly / yearly).
+    # Admin uses this to calculate price and set valid_until when assigning.
+    preferred_duration = models.CharField(
+        max_length=10, choices=DURATION_CHOICES, default='monthly',
+        help_text='Duration company is requesting: monthly or yearly.',
+    )
+    is_renewal = models.BooleanField(default=False, help_text='True when this request is a renewal of an expired key.')
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -2076,7 +2117,11 @@ class AdminPricingConfig(models.Model):
     should snapshot the numbers they were sold at.
     """
     agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES, unique=True)
-    monthly_flat_usd = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Pricing label shown on admin pricing page as "per month"
+    monthly_flat_usd = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text='Key cost per month (shown as "/month" on pricing page).',
+    )
     service_charge_usd = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
         help_text='Platform service fee added on top of provider cost (managed mode).',
@@ -2088,7 +2133,17 @@ class AdminPricingConfig(models.Model):
     )
     managed_key_tokens = models.BigIntegerField(
         default=0,
-        help_text='Tokens granted when admin assigns a paid managed key via the request flow.',
+        help_text='Default tokens per weekly reset cycle when admin assigns a managed key.',
+    )
+    # Monthly discount percentage — e.g. 10 means 10% off the monthly price
+    monthly_discount_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text='Discount % on monthly plan (0 = no discount, 10 = 10% off, max 100).',
+    )
+    # Yearly discount percentage — e.g. 20 means 20% off the annual price (monthly × 12)
+    yearly_discount_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text='Discount % on yearly plan (0 = no discount, 20 = 20% off, max 100).',
     )
     updated_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,

@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
-import { apiErrorMessage } from '@/utils/apiErrorMessage';
+import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Target, ListChecks, AlertTriangle, Users } from 'lucide-react';
 import {
   PieChart,
@@ -72,11 +72,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       }
     } catch (error) {
       console.error('Task Prioritization error:', error);
-      toast({
-        title: 'Error',
-        description: apiErrorMessage(error, 'Failed to analyze tasks'),
-        variant: 'destructive',
-      });
+      toast(toastForError(error, 'Failed to analyze tasks'));
     } finally {
       setLoading(false);
     }

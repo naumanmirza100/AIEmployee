@@ -305,6 +305,7 @@ def list_company_agents(request):
                 'expires_at': purchase.expires_at.isoformat() if purchase.expires_at else None,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
                 'cancelled_reason': purchase.cancelled_reason,
+                'history_kept': purchase.history_kept,
                 'time_remaining': time_remaining,
                 'time_ended_ago': time_ended_ago,
                 'active_label': active_label,
@@ -367,18 +368,65 @@ def toggle_company_agent_status(request, purchaseId):
                 'message': 'Status must be either "active" or "cancelled"'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        purchase.status = new_status
-        if new_status == 'cancelled':
-            purchase.cancelled_at = timezone.now()
-            purchase.cancelled_reason = 'admin_deactivated'
-        else:
-            purchase.cancelled_at = None
-            purchase.cancelled_reason = None
-            # Reset expires_at to 30 days from now when reactivating
-            from datetime import timedelta
-            purchase.purchased_at = timezone.now()
-            purchase.expires_at = timezone.now() + timedelta(days=30)
-        purchase.save()
+        keep_history = request.data.get('keep_history', True)
+        if isinstance(keep_history, str):
+            keep_history = keep_history.lower() not in ('false', '0', 'no')
+
+        from django.db import transaction as db_transaction
+        with db_transaction.atomic():
+            purchase.status = new_status
+            if new_status == 'cancelled':
+                purchase.cancelled_at = timezone.now()
+                purchase.cancelled_reason = 'admin_deactivated'
+                purchase.history_kept = keep_history
+                purchase.save()
+
+                if not keep_history:
+                    from core.models import AgentTokenQuota, CompanyAPIKey, KeyRequest
+                    company = purchase.company
+                    agent_name = purchase.module_name
+                    # Delete KeyRequest first — it has a FK to CompanyAPIKey (linked_key_id)
+                    KeyRequest.objects.filter(company=company, agent_name=agent_name).delete()
+                    CompanyAPIKey.objects.filter(company=company, agent_name=agent_name).delete()
+                    AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).delete()
+            else:
+                purchase.cancelled_at = None
+                purchase.cancelled_reason = None
+                purchase.history_kept = None
+                from datetime import timedelta
+                purchase.purchased_at = timezone.now()
+                purchase.expires_at = timezone.now() + timedelta(days=30)
+                purchase.save()
+
+                # Re-activation quota handling:
+                # - history kept (keep_history=True): quota row still exists with all
+                #   original tokens/usage — leave it completely untouched.
+                # - history deleted (keep_history=False): quota was deleted above,
+                #   so get_or_create will make a fresh row.
+                from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
+                company = purchase.company
+                agent_name = purchase.module_name
+                try:
+                    cfg = AdminPricingConfig.objects.get(agent_name=agent_name)
+                    free_tokens = cfg.free_tokens_on_purchase
+                except AdminPricingConfig.DoesNotExist:
+                    free_tokens = DEFAULT_FREE_TOKENS
+
+                # Only create if missing — never overwrite existing quota when history was kept
+                quota_obj, created = AgentTokenQuota.objects.get_or_create(
+                    company=company,
+                    agent_name=agent_name,
+                    defaults={'included_tokens': free_tokens},
+                )
+                # If quota existed with preferred_pool='managed' but no managed key,
+                # reset to None so frontend shows free tokens as active automatically
+                if not created and quota_obj.preferred_pool == 'managed':
+                    from core.models import CompanyAPIKey as _CAK
+                    has_managed = _CAK.objects.filter(
+                        company=company, agent_name=agent_name, mode='managed', status='active'
+                    ).exists()
+                    if not has_managed:
+                        AgentTokenQuota.objects.filter(pk=quota_obj.pk).update(preferred_pool=None)
 
         return Response({
             'status': 'success',
@@ -390,6 +438,7 @@ def toggle_company_agent_status(request, purchaseId):
                 'status': purchase.status,
                 'company_name': purchase.company.name,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
+                'history_kept': purchase.history_kept,
             }
         }, status=status.HTTP_200_OK)
 

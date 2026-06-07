@@ -91,7 +91,23 @@
       "Read(//d/University/work/AI_Employyes/ReplyAgent/AIEmployee/core/migrations/**)",
       "Bash(git commit -m ' *)",
       "Bash(npm list *)",
-      "Bash(Get-ChildItem -Path \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\PaPerProjectFront\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")"
+      "Bash(Get-ChildItem -Path \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\PaPerProjectFront\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")",
+      "Bash(del \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\\\\core\\\\migrations\\\\0079_add_history_kept.py\")",
+      "Bash(Get-ChildItem \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/api/views/\")",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/PaPerProjectFront/src/pages/SuperAdminApiKeysPage.jsx\" -Pattern \"managed_tokens|token limit|Managed token|assignForm|setAssign\" | Select-Object -First 15 | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/api/views/pm_agent.py\" -Pattern \"task.prioriti|KeyServiceError|QuotaExhausted|key_service\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 15)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/PaPerProjectFront/src/services/pmAgentService.js\" -Pattern \"taskPrioritization|throw|status|402|403\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 15)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/PaPerProjectFront/src/services/companyAuthService.js\" -Pattern \"companyApi|interceptor|402|403|hard_block|response\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 20)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/api/views/pm_agent.py\" -Pattern \"cannot_do|quota|KeyServiceError|agent.company_id|agent_key_name\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 30)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/base_agent.py\" -Pattern \"company_id|agent_key_name|key_service|KeyServiceError|_call_llm|resolve_key\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 20)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/task_prioritization_agent.py\" -Pattern \"except|cannot_do|KeyServiceError|process\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 15)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/knowledge_qa_agent.py\" -Pattern \"except Exception as e:\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -Last 3)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/knowledge_qa_agent.py\" -Pattern \"def process\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/knowledge_qa_agent.py\" -Pattern \"def process|except Exception\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/PaPerProjectFront/src/pages/ProjectManagerDashboardPage.jsx\" -Pattern \"team|member|Team|Member|tab|Tab\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -First 20)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/timeline_gantt_agent.py\" -Pattern \"except Exception|def process|KeyServiceError\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" } | Select-Object -Last 10)",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/timeline_gantt_agent.py\" -Pattern \"_call_llm\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })",
+      "PowerShell(Select-String -Path \"d:/University/work/AI_Employyes/ReplyAgent/AIEmployee/project_manager_agent/ai_agents/meeting_scheduler_agent.py\" -Pattern \"couldn't find|could not find|I couldn\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })"
     ]
   }
 }

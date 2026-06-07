@@ -717,6 +717,18 @@ CELERY_TASK_MAX_RETRIES = 3  # Max 3 retries
 # IMPORTANT: Sequence emails run every 5 minutes to check for ready emails
 # Actual email timing respects user-defined delays (delay_days, delay_hours, delay_minutes)
 CELERY_BEAT_SCHEDULE = {
+    # Weekly token quota reset — runs every hour, acts only on quotas whose next_reset_at has passed
+    'reset-weekly-token-quotas': {
+        'task': 'core.tasks.reset_weekly_token_quotas',
+        'schedule': 3600.0,  # Every hour
+        'options': {'expires': 3600},
+    },
+    # Expire managed keys whose valid_until has passed — runs every hour
+    'expire-managed-keys': {
+        'task': 'core.tasks.expire_managed_keys',
+        'schedule': 3600.0,  # Every hour
+        'options': {'expires': 3600},
+    },
     # Send sequence emails - runs every 5 minutes
     # Checks for emails ready to send based on user-defined sequence step delays
     'send-sequence-emails': {

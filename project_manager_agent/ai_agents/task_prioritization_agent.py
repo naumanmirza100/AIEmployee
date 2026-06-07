@@ -324,7 +324,7 @@ Provide a summary JSON with:
 }}"""
             
             try:
-                summary_response = self._call_llm(summary_prompt, self.system_prompt, temperature=0.3, max_tokens=800)
+                summary_response = self._call_llm(summary_prompt, self.system_prompt, temperature=0.3, max_tokens=500)
                 if "```json" in summary_response:
                     json_start = summary_response.find("```json") + 7
                     json_end = summary_response.find("```", json_start)
@@ -547,7 +547,7 @@ Return JSON:
 }}"""
         
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=2500)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
             
             # Extract JSON
             if "```json" in response:
@@ -1055,7 +1055,7 @@ Return JSON:
 }}"""
         
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=3000)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
             
             # Extract JSON
             if "```json" in response:
@@ -1345,7 +1345,7 @@ Return JSON:
 }}"""
         
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=2500)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
             
             # Extract JSON
             if "```json" in response:
@@ -1544,7 +1544,7 @@ Provide a comprehensive JSON response explaining why THIS EXECUTION STRATEGY is 
 }}"""
         
         try:
-            reasoning_response = self._call_llm(overall_reasoning_prompt, self.system_prompt, temperature=0.3, max_tokens=2000)
+            reasoning_response = self._call_llm(overall_reasoning_prompt, self.system_prompt, temperature=0.3, max_tokens=1000)
             if "```json" in reasoning_response:
                 json_start = reasoning_response.find("```json") + 7
                 json_end = reasoning_response.find("```", json_start)
@@ -1680,6 +1680,9 @@ Provide a comprehensive JSON response explaining why THIS EXECUTION STRATEGY is 
                 return {"success": False, "error": f"Unknown action: {action}"}
                 
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action(f"Error processing {action}", {"error": str(e)})
             return {"success": False, "error": str(e)}
 

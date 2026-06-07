@@ -80,6 +80,7 @@ def _fulfill_purchase_from_metadata(metadata):
         existing.expires_at = expires_at
         existing.cancelled_at = None
         existing.cancelled_reason = None
+        existing.history_kept = None
         existing.save()
         logger.info('Module %s re-activated for company %s (ID: %s)', module_name, company.name, company.id)
     else:
@@ -92,6 +93,27 @@ def _fulfill_purchase_from_metadata(metadata):
             expires_at=expires_at,
         )
         logger.info('Module %s purchased for company %s (ID: %s)', module_name, company.name, company.id)
+
+    # Ensure quota exists — create only if missing, never overwrite existing.
+    # If admin deleted history before, quota was deleted too so this creates fresh.
+    # If quota exists (history kept), leave it untouched — preserve tokens/usage.
+    from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
+    try:
+        cfg = AdminPricingConfig.objects.get(agent_name=module_name)
+        free_tokens = cfg.free_tokens_on_purchase
+    except AdminPricingConfig.DoesNotExist:
+        free_tokens = DEFAULT_FREE_TOKENS
+
+    _, created = AgentTokenQuota.objects.get_or_create(
+        company=company,
+        agent_name=module_name,
+        defaults={'included_tokens': free_tokens},
+    )
+    if created:
+        logger.info('Fresh quota created for %s company %s', module_name, company.name)
+    else:
+        logger.info('Quota preserved for %s company %s on re-purchase', module_name, company.name)
+
     return True, module_name
 
 
@@ -180,6 +202,7 @@ def get_purchased_modules(request):
                 'expires_at': purchase.expires_at.isoformat() if purchase.expires_at else None,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
                 'cancelled_reason': purchase.cancelled_reason,
+                'history_kept': purchase.history_kept,
                 'price_paid': float(purchase.price_paid) if purchase.price_paid else None,
                 'purchased_by_name': purchase.purchased_by.full_name if purchase.purchased_by else None,
                 'is_expired': is_expired,

@@ -198,7 +198,7 @@ const DashboardNavbar = ({
                           >
                             <div className="flex items-start gap-2">
                               {!n.is_read && <div className="w-2 h-2 rounded-full bg-violet-500 mt-1.5 shrink-0" />}
-                              <div className="flex-1 min-w-0">
+                              <div className="flex-1 min-w-0" title={`${n.title}\n\n${n.message}`}>
                                 <p className={`text-xs font-medium ${getNotifColor(n.type)} truncate`}>{n.title}</p>
                                 <p className="text-[11px] text-white/50 mt-0.5 line-clamp-2">{n.message}</p>
                                 <p className="text-[10px] text-white/30 mt-1">{formatTimeAgo(n.created_at)}</p>

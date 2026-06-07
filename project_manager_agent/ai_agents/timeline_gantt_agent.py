@@ -345,7 +345,7 @@ Return JSON array with optimized dates:
 ]"""
             
             try:
-                response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=2000)
+                response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
                 
                 # Extract JSON from response
                 if "```json" in response:
@@ -1050,7 +1050,7 @@ Return JSON:
   "summary": "overall conflict analysis and recommendations"
 }}"""
                 
-                resolution_response = self._call_llm(conflict_prompt, self.system_prompt, temperature=0.4, max_tokens=2000)
+                resolution_response = self._call_llm(conflict_prompt, self.system_prompt, temperature=0.4, max_tokens=800)
                 
                 # Extract JSON
                 if "```json" in resolution_response:
@@ -1224,7 +1224,7 @@ Return JSON array:
         
         suggestions = []
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=2500)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=1200)
             
             # Extract JSON
             if "```json" in response:
@@ -1512,7 +1512,7 @@ CALCULATE AND RETURN JSON:
         
         try:
             # Use temperature=0 for consistency (same input = same output)
-            response = self._call_llm(prompt, self.system_prompt, temperature=0, max_tokens=2000)
+            response = self._call_llm(prompt, self.system_prompt, temperature=0, max_tokens=1200)
             
             # Extract JSON
             if "```json" in response:
@@ -2041,7 +2041,7 @@ Return JSON:
   "recommendations": "actionable recommendations for improving dependency structure"
 }}"""
                 
-                deps_response = self._call_llm(deps_prompt, self.system_prompt, temperature=0.4, max_tokens=2000)
+                deps_response = self._call_llm(deps_prompt, self.system_prompt, temperature=0.4, max_tokens=1000)
                 
                 # Extract JSON
                 if "```json" in deps_response:
@@ -2422,7 +2422,7 @@ Return JSON:
   "summary": "brief overall summary and next steps"
 }}"""
             
-            insights_response = self._call_llm(insights_prompt, self.system_prompt, temperature=0.5, max_tokens=2000)
+            insights_response = self._call_llm(insights_prompt, self.system_prompt, temperature=0.5, max_tokens=800)
             
             # Extract JSON
             if "```json" in insights_response:
@@ -2816,6 +2816,9 @@ Return JSON:
                 }
         
         except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
             self.log_action("Error processing action", {"action": action, "error": str(e)})
             return {
                 'success': False,

@@ -38,7 +38,8 @@ import {
   Link as LinkIcon,
   Copy,
   CheckCircle2,
-  Plus
+  Plus,
+  AlertTriangle
 } from 'lucide-react';
 
 const AdminDashboardPage = () => {
@@ -101,6 +102,7 @@ const AdminDashboardPage = () => {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [togglingAgentId, setTogglingAgentId] = useState(null);
   const [confirmActivateAgent, setConfirmActivateAgent] = useState(null);
+  const [deactivateDialog, setDeactivateDialog] = useState({ open: false, agent: null, keepHistory: true });
 
   const { logout, user } = useAuth();
   const { toast } = useToast();
@@ -477,19 +479,25 @@ const AdminDashboardPage = () => {
   const handleToggleAgentStatus = async (agent) => {
     const newStatus = agent.status === 'active' ? 'cancelled' : 'active';
 
-    // Show confirmation modal when activating an expired agent
+    // Activating expired agent — show separate confirmation
     if (agent.status === 'expired' && newStatus === 'active') {
       setConfirmActivateAgent(agent);
       return;
     }
 
-    await performToggleAgentStatus(agent, newStatus);
+    // Deactivating active agent — show keep-history dialog
+    if (newStatus === 'cancelled') {
+      setDeactivateDialog({ open: true, agent, keepHistory: true });
+      return;
+    }
+
+    await performToggleAgentStatus(agent, newStatus, true);
   };
 
-  const performToggleAgentStatus = async (agent, newStatus) => {
+  const performToggleAgentStatus = async (agent, newStatus, keepHistory = true) => {
     setTogglingAgentId(agent.id);
     try {
-      const response = await companyService.toggleCompanyAgentStatus(agent.id, newStatus);
+      const response = await companyService.toggleCompanyAgentStatus(agent.id, newStatus, keepHistory);
       if (response.status === 'success') {
         toast({ title: 'Success', description: response.message });
         fetchAgents();
@@ -1924,6 +1932,11 @@ const AdminDashboardPage = () => {
                           <div className="absolute -left-[31px] top-1 w-4 h-4 rounded-full bg-red-500 border-2 border-background"></div>
                           <p className="text-sm font-medium">{selectedAgent.cancelled_reason === 'admin_deactivated' ? 'Deactivated by Admin' : 'Cancelled'}</p>
                           <p className="text-xs text-muted-foreground">{formatDate(selectedAgent.cancelled_at)}</p>
+                          {selectedAgent.cancelled_reason === 'admin_deactivated' && selectedAgent.history_kept != null && (
+                            <p className={`text-xs font-medium mt-1 flex items-center gap-1 ${selectedAgent.history_kept ? 'text-blue-500' : 'text-red-500'}`}>
+                              {selectedAgent.history_kept ? '✓ Token & key history preserved' : '✕ Token & key history deleted'}
+                            </p>
+                          )}
                         </div>
                       )}
                       <div className="relative flex items-center gap-2">
@@ -2010,6 +2023,113 @@ const AdminDashboardPage = () => {
                     }}
                   >
                     Reactivate Anyway
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Deactivate Agent Dialog — keep or delete history */}
+        {deactivateDialog.open && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={() => setDeactivateDialog(d => ({ ...d, open: false }))}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card border rounded-lg max-w-md w-full"
+            >
+              <div className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-full bg-red-500/10">
+                    <AlertTriangle className="h-6 w-6 text-red-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold">Deactivate Agent</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {deactivateDialog.agent?.module_display_name} — {deactivateDialog.agent?.company_name}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-sm text-muted-foreground mb-4">
+                  Keep token usage, key history, and request records?
+                </p>
+
+                <div className="space-y-3 mb-6">
+                  {/* Keep History */}
+                  <div
+                    onClick={() => setDeactivateDialog(d => ({ ...d, keepHistory: true }))}
+                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      deactivateDialog.keepHistory
+                        ? 'border-blue-500/50 bg-blue-500/8'
+                        : 'border-border hover:border-muted-foreground/50'
+                    }`}
+                  >
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      deactivateDialog.keepHistory ? 'border-blue-500 bg-blue-500' : 'border-muted-foreground'
+                    }`}>
+                      {deactivateDialog.keepHistory && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Yes, keep history</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Token quota, API keys, and all key request records stay intact.
+                        If company re-purchases, they see their full history.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Delete History */}
+                  <div
+                    onClick={() => setDeactivateDialog(d => ({ ...d, keepHistory: false }))}
+                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      !deactivateDialog.keepHistory
+                        ? 'border-red-500/50 bg-red-500/8'
+                        : 'border-border hover:border-muted-foreground/50'
+                    }`}
+                  >
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      !deactivateDialog.keepHistory ? 'border-red-500 bg-red-500' : 'border-muted-foreground'
+                    }`}>
+                      {!deactivateDialog.keepHistory && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">No, delete everything</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Permanently deletes token quota, all keys (BYOK + managed), and all key request history.
+                        If company re-purchases, they start completely fresh with no history.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setDeactivateDialog(d => ({ ...d, open: false }))}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    disabled={togglingAgentId === deactivateDialog.agent?.id}
+                    onClick={() => {
+                      const { agent, keepHistory } = deactivateDialog;
+                      setDeactivateDialog(d => ({ ...d, open: false }));
+                      setSelectedAgent(null);
+                      performToggleAgentStatus(agent, 'cancelled', keepHistory);
+                    }}
+                  >
+                    {togglingAgentId === deactivateDialog.agent?.id
+                      ? 'Deactivating...'
+                      : deactivateDialog.keepHistory ? 'Deactivate' : 'Deactivate & Delete History'
+                    }
                   </Button>
                 </div>
               </div>
