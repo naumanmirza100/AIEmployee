@@ -1884,6 +1884,9 @@ class CompanyAPIKey(models.Model):
         related_name='assigned_api_keys',
         help_text='Superadmin who assigned this managed key (null for BYOK)',
     )
+    renewal_period = models.CharField(max_length=10, default='monthly')
+    tokens_per_period = models.BigIntegerField(default=0)
+    valid_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1975,6 +1978,7 @@ class AgentTokenQuota(models.Model):
     byok_notified_90pct = models.BooleanField(default=False)
     byok_notified_100pct = models.BooleanField(default=False)
     last_reset_at = models.DateTimeField(auto_now_add=True)
+    next_reset_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2037,6 +2041,9 @@ class KeyRequest(models.Model):
     note = models.TextField(blank=True)
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    preferred_duration = models.CharField(max_length=10, default='monthly')
+    is_renewal = models.BooleanField(default=False)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     linked_key_id = models.BigIntegerField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)

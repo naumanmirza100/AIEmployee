@@ -122,6 +122,25 @@ def assign_managed_key(request):
     Body: { company_id, agent_name, provider, api_key, request_id? }
     If `request_id` is passed, the matching KeyRequest is marked approved.
     """
+    try:
+        return _assign_managed_key_impl(request)
+    except Exception as exc:
+        logger.error(
+            "assign_managed_key failed (user=%s, payload=%s): %s",
+            getattr(request.user, 'id', None), request.data, exc,
+            exc_info=True,
+        )
+        return Response(
+            {
+                'status': 'error',
+                'message': 'Could not assign the managed key. Please try again.',
+                'detail': str(exc),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+def _assign_managed_key_impl(request):
     company_id = request.data.get('company_id')
     agent_name = (request.data.get('agent_name') or '').strip()
     provider = (request.data.get('provider') or 'openai').strip()
