@@ -397,6 +397,7 @@ const SDROutreachTab = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null);   // campaign obj to delete
   const [clearLeadsConfirm, setClearLeadsConfirm] = useState(false);
   const [clearingLeads, setClearingLeads] = useState(false);
+  const [clearSelected, setClearSelected] = useState([]);
   const [now, setNow] = useState(new Date());
 
   // Tick every 30 s so countdown timers stay live
@@ -494,13 +495,21 @@ const SDROutreachTab = () => {
   const handleClearLeads = async () => {
     if (!selectedCampaign) return;
     setClearingLeads(true);
-    setClearLeadsConfirm(false);
     try {
-      const resp = await clearCampaignLeads(selectedCampaign.id);
+      const payload = clearSelected.length > 0 && clearSelected.length < enrollments.length
+        ? { enrollment_ids: clearSelected }
+        : {};
+      const resp = await clearCampaignLeads(selectedCampaign.id, payload);
       setSelectedCampaign(resp.data.data);
-      setEnrollments([]);
+      if (payload.enrollment_ids) {
+        setEnrollments(prev => prev.filter(e => !clearSelected.includes(e.id)));
+      } else {
+        setEnrollments([]);
+      }
+      setClearLeadsConfirm(false);
+      setClearSelected([]);
       await loadCampaigns();
-      toast({ title: 'All leads cleared', description: 'Enrollment data and counters reset.' });
+      toast({ title: 'Leads cleared', description: 'Selected leads removed from campaign.' });
     } catch (e) {
       toast({ title: 'Clear failed', description: e.message, variant: 'destructive' });
     } finally { setClearingLeads(false); }
@@ -1061,14 +1070,15 @@ const SDROutreachTab = () => {
       }}>
         <Zap size={13} style={{ flexShrink: 0, color: '#a855f7' }} />
         <span>
-          <b style={{ color: '#c084fc' }}>Automation active</b> —
           {selectedCampaign.status === 'active'
-            ? ' emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.'
+            ? <><b style={{ color: '#10b981' }}>Automation running</b> — emails send automatically every 5 min · inbox checked every 5 min · no manual action needed.</>
             : selectedCampaign.status === 'scheduled'
-            ? ` campaign will auto-start on ${selectedCampaign.start_date} when Celery runs the 15-min check.`
+            ? <><b style={{ color: '#f59e0b' }}>Scheduled</b> — campaign will auto-start on {selectedCampaign.start_date}.</>
             : selectedCampaign.status === 'paused'
-            ? ' campaign is paused. Resume to let Celery continue sending.'
-            : ' campaign is not active.'}
+            ? <><b style={{ color: '#f59e0b' }}>Paused</b> — campaign is paused. Resume to continue sending.</>
+            : selectedCampaign.status === 'completed'
+            ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Enroll new leads to restart.</>
+            : <><b style={{ color: '#6b7280' }}>Draft</b> — campaign has not started yet.</>}
           {selectedCampaign.smtp_host && <span style={{ color: '#60a5fa' }}> · Using {selectedCampaign.smtp_host}</span>}
         </span>
       </div>
@@ -1680,27 +1690,52 @@ const SDROutreachTab = () => {
         );
       })()}
 
-      {/* Clear Leads Confirmation — detail view */}
-      <Dialog open={clearLeadsConfirm} onOpenChange={setClearLeadsConfirm}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', borderRadius: 14, maxWidth: 420 }}>
+      {/* Clear Leads — checkbox selection dialog */}
+      <Dialog open={clearLeadsConfirm} onOpenChange={(o) => { setClearLeadsConfirm(o); if (!o) setClearSelected([]); }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', borderRadius: 14, maxWidth: 480 }}>
           <DialogHeader>
-            <DialogTitle style={{ color: '#e2d9f3', fontSize: 16 }}>Clear All Leads?</DialogTitle>
+            <DialogTitle style={{ color: '#e2d9f3', fontSize: 16 }}>Remove Leads from Campaign</DialogTitle>
           </DialogHeader>
-          <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, marginTop: 4 }}>
-            Are you sure you want to clear all <b style={{ color: '#e2d9f3' }}>{enrollments.length} enrolled lead{enrollments.length !== 1 ? 's' : ''}</b> from this campaign?
-            All outreach logs and meetings will also be removed. Counters will reset to zero.
-            <br /><br />
-            <span style={{ color: '#6b7280', fontSize: 12 }}>
-              The leads themselves will NOT be deleted — only their enrollment in this campaign.
-            </span>
+          <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 4, marginBottom: 10 }}>
+            Select leads to remove. Their enrollment, logs and meetings will be deleted. The leads themselves stay in your database.
           </p>
-          <DialogFooter style={{ marginTop: 16 }}>
-            <Button variant="outline" onClick={() => setClearLeadsConfirm(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>
-              Cancel
-            </Button>
-            <Button onClick={handleClearLeads} disabled={clearingLeads} style={{ background: 'linear-gradient(90deg,#f43f5e,#dc2626)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+
+          {/* Select All */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'rgba(168,85,247,0.06)', borderRadius: 8, marginBottom: 8, cursor: 'pointer' }}
+            onClick={() => setClearSelected(clearSelected.length === enrollments.length ? [] : enrollments.map(e => e.id))}>
+            <input type="checkbox" readOnly
+              checked={clearSelected.length === enrollments.length && enrollments.length > 0}
+              style={{ accentColor: '#a855f7', width: 15, height: 15 }} />
+            <span style={{ color: '#e2d9f3', fontSize: 13, fontWeight: 600 }}>
+              Select All ({enrollments.length} leads)
+            </span>
+          </div>
+
+          {/* Lead list */}
+          <div style={{ maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            {enrollments.map(enr => (
+              <div key={enr.id}
+                onClick={() => setClearSelected(prev => prev.includes(enr.id) ? prev.filter(x => x !== enr.id) : [...prev, enr.id])}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                  background: clearSelected.includes(enr.id) ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${clearSelected.includes(enr.id) ? 'rgba(239,68,68,0.25)' : '#1f1535'}` }}>
+                <input type="checkbox" readOnly checked={clearSelected.includes(enr.id)}
+                  style={{ accentColor: '#ef4444', width: 14, height: 14, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: '#e2d9f3', fontSize: 13, fontWeight: 500 }}>{enr.lead_name || enr.lead_email}</div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>{enr.lead_email} · <span style={{ color: '#a855f7' }}>{enr.status}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter style={{ marginTop: 14 }}>
+            <Button variant="outline" onClick={() => { setClearLeadsConfirm(false); setClearSelected([]); }}
+              style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button onClick={handleClearLeads} disabled={clearingLeads || clearSelected.length === 0}
+              style={{ background: 'linear-gradient(90deg,#f43f5e,#dc2626)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {clearingLeads ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-              Yes, Clear All Leads
+              Remove {clearSelected.length > 0 ? `${clearSelected.length} Lead${clearSelected.length > 1 ? 's' : ''}` : 'Selected'}
             </Button>
           </DialogFooter>
         </DialogContent>

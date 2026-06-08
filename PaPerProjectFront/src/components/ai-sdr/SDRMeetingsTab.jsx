@@ -22,7 +22,7 @@ const STATUS_CONFIG = {
   scheduled: { label: 'Scheduled', color: '#10b981', bg: 'rgba(16,185,129,0.1)'  },
   completed: { label: 'Completed', color: '#6b7280', bg: 'rgba(107,114,128,0.1)' },
   cancelled: { label: 'Cancelled', color: '#ef4444', bg: 'rgba(239,68,68,0.1)'   },
-  no_show:   { label: 'No Show',   color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'  },
+  no_show:   { label: "Didn't Show Up", color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'  },
 };
 
 const TEMP_COLOR = { hot: '#ef4444', warm: '#f59e0b', cold: '#6b7280' };
@@ -284,22 +284,133 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
 }
 
 // ---------------------------------------------------------------------------
+// ClockTimePicker — circular analog clock style picker
+// ---------------------------------------------------------------------------
+
+function ClockTimePicker({ value, onChange }) {
+  const [mode, setMode]   = useState('hour'); // 'hour' | 'minute'
+  const [ampm, setAmpm]   = useState('AM');
+  const [hour, setHour]   = useState(null);
+  const [minute, setMinute] = useState(null);
+  const radius = 90, cx = 110, cy = 110;
+
+  const commit = (h, m, ap) => {
+    if (h === null || m === null) return;
+    let h24 = h % 12;
+    if (ap === 'PM') h24 += 12;
+    onChange(`${String(h24).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+  };
+
+  const pickHour = (h) => { setHour(h); setMode('minute'); commit(h, minute ?? 0, ampm); };
+  const pickMinute = (m) => { setMinute(m); commit(hour ?? 12, m, ampm); };
+  const toggleAmpm = (ap) => { setAmpm(ap); commit(hour ?? 12, minute ?? 0, ap); };
+
+  const hourNums  = [12,1,2,3,4,5,6,7,8,9,10,11];
+  const minuteNums = [0,5,10,15,20,25,30,35,40,45,50,55];
+
+  const getPos = (i, total, r) => {
+    const angle = (i / total) * 2 * Math.PI - Math.PI / 2;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  };
+
+  const nums   = mode === 'hour' ? hourNums : minuteNums;
+  const selNum = mode === 'hour' ? hour : minute;
+  const selPos = selNum !== null ? getPos(nums.indexOf(selNum), nums.length, radius) : null;
+
+  const displayH = hour === null ? '--' : String(hour).padStart(2,'0');
+  const displayM = minute === null ? '--' : String(minute).padStart(2,'0');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      {/* Digital display */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#0d0820', borderRadius: 10, padding: '8px 16px', border: '1px solid #2d1f4a' }}>
+        <span onClick={() => setMode('hour')}
+          style={{ fontSize: 28, fontWeight: 700, cursor: 'pointer', color: mode === 'hour' ? '#a855f7' : '#e2d9f3' }}>{displayH}</span>
+        <span style={{ fontSize: 28, color: '#6b7280', fontWeight: 700 }}>:</span>
+        <span onClick={() => setMode('minute')}
+          style={{ fontSize: 28, fontWeight: 700, cursor: 'pointer', color: mode === 'minute' ? '#a855f7' : '#e2d9f3' }}>{displayM}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 8 }}>
+          {['AM','PM'].map(ap => (
+            <span key={ap} onClick={() => toggleAmpm(ap)}
+              style={{ fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+                background: ampm === ap ? '#a855f7' : 'transparent',
+                color: ampm === ap ? '#fff' : '#6b7280' }}>{ap}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* Clock face */}
+      <svg width={220} height={220}>
+        {/* Face */}
+        <circle cx={cx} cy={cy} r={radius + 18} fill="#0d0820" stroke="#2d1f4a" strokeWidth={1} />
+        <circle cx={cx} cy={cy} r={3} fill="#a855f7" />
+        {/* Hand */}
+        {selPos && <line x1={cx} y1={cy} x2={selPos.x} y2={selPos.y} stroke="#a855f7" strokeWidth={2} strokeLinecap="round" />}
+        {/* Numbers */}
+        {nums.map((n, i) => {
+          const pos = getPos(i, nums.length, radius);
+          const selected = n === selNum;
+          return (
+            <g key={n} onClick={() => mode === 'hour' ? pickHour(n) : pickMinute(n)} style={{ cursor: 'pointer' }}>
+              <circle cx={pos.x} cy={pos.y} r={16} fill={selected ? '#a855f7' : 'transparent'} />
+              <text x={pos.x} y={pos.y + 5} textAnchor="middle" fontSize={12} fontWeight={selected ? 700 : 400}
+                fill={selected ? '#fff' : '#c4b5d4'}>{mode === 'minute' ? String(n).padStart(2,'0') : n}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <p style={{ color: '#6b7280', fontSize: 11, margin: 0 }}>
+        {mode === 'hour' ? 'Select hour' : 'Select minute'}
+      </p>
+    </div>
+  );
+}
+
 // ConfirmModal
 // ---------------------------------------------------------------------------
 
 function ConfirmModal({ meeting, onClose, onConfirmed }) {
-  const [scheduledAt, setScheduledAt] = useState('');
+  const today = new Date();
+  const [selDate, setSelDate] = useState('');
+  const [selTime, setSelTime] = useState('');
   const [duration, setDuration] = useState(String(meeting.duration_minutes || 30));
-  const [notes, setNotes] = useState(meeting.notes || '');
+  const [notes, setNotes]  = useState(meeting.notes || '');
   const [saving, setSaving] = useState(false);
+  const [calMonth, setCalMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const { toast } = useToast();
 
+  // Build calendar days grid
+  const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
+  const firstDay    = (y, m) => new Date(y, m, 1).getDay();
+  const y = calMonth.getFullYear(), mo = calMonth.getMonth();
+  const totalDays = daysInMonth(y, mo);
+  const startBlank = firstDay(y, mo);
+  const cells = [];
+  for (let i = 0; i < startBlank; i++) cells.push(null);
+  for (let d = 1; d <= totalDays; d++) cells.push(d);
+
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  const selectDay = (d) => {
+    if (!d) return;
+    const dd = String(d).padStart(2,'0');
+    const mm = String(mo + 1).padStart(2,'0');
+    setSelDate(`${y}-${mm}-${dd}`);
+  };
+
+  const isToday = (d) => {
+    const t = new Date();
+    return d === t.getDate() && mo === t.getMonth() && y === t.getFullYear();
+  };
+  const isPast = (d) => new Date(y, mo, d) < new Date(new Date().setHours(0,0,0,0));
+
   const handleConfirm = async () => {
-    if (!scheduledAt) { toast({ title: 'Pick a date & time', variant: 'destructive' }); return; }
+    if (!selDate || !selTime) { toast({ title: 'Pick a date & time', variant: 'destructive' }); return; }
     setSaving(true);
     try {
       const resp = await confirmMeeting(meeting.id, {
-        scheduled_at: new Date(scheduledAt).toISOString(),
+        scheduled_at: new Date(`${selDate}T${selTime}`).toISOString(),
         duration_minutes: parseInt(duration),
         notes,
       });
@@ -312,27 +423,77 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
   };
 
   const inp = { width: '100%', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, color: '#e2d9f3', padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
-  const lbl = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 5, display: 'block' };
+  const lbl = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 16, padding: 28, width: 460, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 16, padding: 20, width: 520, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', scrollbarWidth: 'none' }} onClick={e => e.stopPropagation()}>
         <h3 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Confirm Meeting</h3>
-        <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 20px' }}>
+        <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 16px' }}>
           Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>. Confirmation email will be sent automatically.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div><label style={lbl}>Date & Time</label><input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} style={inp} /></div>
-          <div><label style={lbl}>Duration</label>
+
+        {/* ── Calendar + Clock together ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
+
+          {/* Calendar */}
+          <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <button onClick={() => setCalMonth(new Date(y, mo - 1, 1))}
+                style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>‹</button>
+              <span style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 12 }}>{monthNames[mo].slice(0,3)} {y}</span>
+              <button onClick={() => setCalMonth(new Date(y, mo + 1, 1))}
+                style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>›</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1, marginBottom: 3 }}>
+              {dayNames.map(d => <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: 9, fontWeight: 600 }}>{d.slice(0,1)}</div>)}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1 }}>
+              {cells.map((d, i) => {
+                const dateStr = d ? `${y}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}` : '';
+                const selected = dateStr === selDate;
+                const past = d ? isPast(d) : false;
+                const todayD = d ? isToday(d) : false;
+                return (
+                  <div key={i} onClick={() => !past && d && selectDay(d)}
+                    style={{
+                      textAlign: 'center', padding: '5px 0', borderRadius: 4, fontSize: 11,
+                      cursor: d && !past ? 'pointer' : 'default',
+                      background: selected ? '#a855f7' : todayD ? 'rgba(168,85,247,0.15)' : 'transparent',
+                      color: !d ? 'transparent' : past ? '#2d1f4a' : selected ? '#fff' : todayD ? '#a855f7' : '#c4b5d4',
+                      border: todayD && !selected ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
+                    }}>
+                    {d || ''}
+                  </div>
+                );
+              })}
+            </div>
+            {selDate && <p style={{ color: '#10b981', fontSize: 10, marginTop: 6, textAlign: 'center' }}>✓ {new Date(selDate + 'T00:00').toDateString()}</p>}
+          </div>
+
+          {/* Clock */}
+          <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ClockTimePicker value={selTime} onChange={setSelTime} />
+          </div>
+        </div>
+
+        {/* Duration + Notes */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 16 }}>
+          <div>
+            <label style={lbl}>Duration</label>
             <select value={duration} onChange={e => setDuration(e.target.value)} style={inp}>
-              {['15', '30', '45', '60', '90'].map(d => <option key={d} value={d}>{d} min</option>)}
+              {['15','30','45','60','90'].map(d => <option key={d} value={d}>{d} min</option>)}
             </select>
           </div>
-          <div><label style={lbl}>Notes (optional)</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...inp, resize: 'vertical' }} /></div>
+          <div>
+            <label style={lbl}>Notes (optional)</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...inp, resize: 'none' }} />
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <Button variant="outline" onClick={onClose} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
-          <Button onClick={handleConfirm} disabled={saving || !scheduledAt}
+          <Button onClick={handleConfirm} disabled={saving || !selDate || !selTime}
             style={{ background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : <CalendarCheck size={14} />}
             <span style={{ marginLeft: 6 }}>Confirm & Send Email</span>
@@ -425,9 +586,23 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
                 <button disabled={actionLoading === 'status'}
                   style={{ ...btnBase, background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
                   onClick={() => handleStatus('no_show')}>
-                  <XCircle size={12} /> No Show
+                  <XCircle size={12} /> Lead Didn't Show Up
                 </button>
               </>
+            )}
+            {(local.status === 'no_show' || local.status === 'cancelled') && (
+              <button disabled={actionLoading === 'status'}
+                style={{ ...btnBase, background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}
+                onClick={() => handleStatus('pending')}>
+                <CalendarCheck size={12} /> Reschedule
+              </button>
+            )}
+            {local.status === 'completed' && (
+              <button disabled={actionLoading === 'status'}
+                style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
+                onClick={() => handleStatus('pending')}>
+                <RefreshCw size={12} /> Reopen
+              </button>
             )}
             {local.calendar_link && (
               <a href={local.calendar_link} target="_blank" rel="noopener noreferrer"
@@ -479,7 +654,7 @@ const SDRMeetingsTab = () => {
   const [campaignFilter, setCampaignFilter] = useState('');
   const [tempFilter, setTempFilter]         = useState('');
   const [sortBy, setSortBy]                 = useState('created_desc');
-  const [activeOnly, setActiveOnly]         = useState(true);
+  const [activeOnly, setActiveOnly]         = useState(false);
   const [page, setPage]                     = useState(1);
   const [pageSize, setPageSize]             = useState(20);
 
@@ -743,7 +918,7 @@ const SDRMeetingsTab = () => {
                       { key: 'scheduled', label: 'Scheduled',    color: '#10b981', dot: true },
                       { key: 'completed', label: 'Completed',    color: '#6b7280', dot: true },
                       { key: 'cancelled', label: 'Cancelled',    color: '#ef4444', dot: true },
-                      { key: 'no_show',   label: 'No Show',      color: '#8b5cf6', dot: true },
+                      { key: 'no_show',   label: "Didn't Show Up", color: '#8b5cf6', dot: true },
                     ]}
                   />
                 </div>

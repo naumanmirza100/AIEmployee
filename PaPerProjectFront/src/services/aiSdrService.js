@@ -238,9 +238,9 @@ export const deleteCampaign = async (id) => {
   }
 };
 
-export const clearCampaignLeads = async (id) => {
+export const clearCampaignLeads = async (id, payload = {}) => {
   try {
-    return await companyApi.post(`/sdr/campaigns/${id}/clear-leads/`);
+    return await companyApi.post(`/sdr/campaigns/${id}/clear-leads/`, payload);
   } catch (error) {
     console.error('Clear campaign leads error:', error);
     throw error;

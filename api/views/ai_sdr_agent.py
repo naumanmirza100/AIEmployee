@@ -1083,12 +1083,19 @@ def sdr_clear_campaign_leads(request, campaign_id):
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
 
     try:
-        # Cascade: logs and meetings are FK'd to enrollment (on_delete=CASCADE)
-        deleted_count, _ = campaign.enrollments.all().delete()
-        campaign.emails_sent = 0
-        campaign.replies_received = 0
-        campaign.meetings_booked = 0
-        campaign.total_leads = 0
+        # Selective: if enrollment_ids provided, only delete those
+        enrollment_ids = request.data.get('enrollment_ids', [])
+        if enrollment_ids:
+            qs = campaign.enrollments.filter(id__in=enrollment_ids)
+        else:
+            qs = campaign.enrollments.all()
+        deleted_count, _ = qs.delete()
+        # Recount from DB after deletion
+        from django.db.models import Count
+        campaign.total_leads      = campaign.enrollments.count()
+        campaign.emails_sent      = campaign.outreach_logs.filter(status='sent').count()
+        campaign.replies_received = campaign.enrollments.filter(replied_at__isnull=False).count()
+        campaign.meetings_booked  = campaign.meetings.count()
         campaign.save(update_fields=['emails_sent', 'replies_received', 'meetings_booked', 'total_leads'])
         logger.info("SDR: cleared %d enrollments from campaign %s", deleted_count, campaign_id)
         return Response({
@@ -1855,12 +1862,35 @@ def sdr_meeting_detail(request, meeting_id):
     if request.method == 'PUT':
         try:
             d = request.data
+            old_status = meeting.status
             for field in ('title', 'notes', 'status', 'calendar_link', 'duration_minutes'):
                 if field in d:
                     setattr(meeting, field, d[field])
             if 'scheduled_at' in d:
                 meeting.scheduled_at = d['scheduled_at'] or None
             meeting.save()
+
+            # Send "you didn't show up" email when status changes to no_show
+            new_status = meeting.status
+            if old_status != 'no_show' and new_status == 'no_show':
+                try:
+                    if meeting.enrollment and meeting.enrollment.campaign:
+                        campaign = meeting.enrollment.campaign
+                        lead = meeting.lead
+                        outreach = _get_outreach_agent(company_user.company)
+                        subject = "We missed you today"
+                        body = (
+                            f"Hi {lead.first_name or lead.full_name},\n\n"
+                            f"We had a meeting scheduled today but it looks like you weren't able to make it — no worries at all!\n\n"
+                            f"I'd love to find another time that works better for you. "
+                            f"Feel free to pick a new slot here: {campaign.calendar_link or ''}\n\n"
+                            f"Looking forward to connecting,\n"
+                            f"{campaign.sender_name}\n{campaign.sender_title}\n{campaign.sender_company}"
+                        )
+                        outreach.send_email(campaign, lead.email, subject, body)
+                except Exception as mail_exc:
+                    logger.warning("No-show email failed for meeting %s: %s", meeting.id, mail_exc)
+
             return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
         except KeyServiceError:
             raise
