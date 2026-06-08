@@ -33,7 +33,7 @@ const JobApplicationPage = () => {
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    fetch(`${API_BASE}/public/jobs/${jobId}/`)
+    fetch(`${API_BASE}/public/jobs/${jobId}/`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (data.status === 'success') setJob(data.data);

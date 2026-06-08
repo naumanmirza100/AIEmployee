@@ -20,6 +20,16 @@ import {
   getInterviewSettings,
 } from '@/services/recruitmentAgentService';
 
+/** Convert a Date object to 'YYYY-MM-DD' using LOCAL date components — avoids
+ *  timezone-shift bugs that occur with toLocaleDateString(). */
+const toLocaleDateStr = (date) => {
+  const d = date instanceof Date ? date : new Date(date);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const { toast } = useToast();
   const [jobs, setJobs] = useState([]);
@@ -784,7 +794,7 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
             date={formData.application_open_date ? new Date(formData.application_open_date + 'T00:00:00') : null}
             setDate={(date) => setFormData({
               ...formData,
-              application_open_date: date ? date.toLocaleDateString('en-CA') : '',
+              application_open_date: date ? toLocaleDateStr(date) : '',
             })}
             placeholder="Select open date"
           />
@@ -795,7 +805,7 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
             date={formData.application_close_date ? new Date(formData.application_close_date + 'T00:00:00') : null}
             setDate={(date) => setFormData({
               ...formData,
-              application_close_date: date ? date.toLocaleDateString('en-CA') : '',
+              application_close_date: date ? toLocaleDateStr(date) : '',
             })}
             placeholder="Select close date"
           />

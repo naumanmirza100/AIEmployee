@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.utils import timezone
 
 from rest_framework.decorators import api_view, permission_classes, parser_classes
@@ -13,6 +15,10 @@ def _check_job_open(job):
     """
     Returns (ok, error_response) — error_response is None when the job is open.
     Checks: is_active flag, application_open_date, application_close_date.
+
+    A ±1 day tolerance is applied to both date checks to absorb UTC offset
+    differences (server is UTC; applicants may be in UTC+5 or similar zones).
+    If no dates are set the job is freely accessible while active.
     """
     if not job.is_active:
         return False, Response(
@@ -24,9 +30,14 @@ def _check_job_open(job):
             status=status.HTTP_410_GONE,
         )
 
+    if not job.application_open_date and not job.application_close_date:
+        return True, None
+
     today = timezone.now().date()
 
-    if job.application_open_date and today < job.application_open_date:
+    # Block only if today is strictly MORE than 1 day before the open date,
+    # giving a 1-day grace period for UTC+ timezones.
+    if job.application_open_date and today < (job.application_open_date - timedelta(days=1)):
         open_str = job.application_open_date.strftime('%B %d, %Y')
         return False, Response(
             {
@@ -38,7 +49,8 @@ def _check_job_open(job):
             status=status.HTTP_410_GONE,
         )
 
-    if job.application_close_date and today > job.application_close_date:
+    # Block only if today is strictly MORE than 1 day after the close date.
+    if job.application_close_date and today > (job.application_close_date + timedelta(days=1)):
         return False, Response(
             {
                 'status': 'error',
@@ -52,22 +64,29 @@ def _check_job_open(job):
     return True, None
 
 
+def _no_cache(response):
+    """Prevent browsers and proxies from caching job status responses."""
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    response['Pragma'] = 'no-cache'
+    return response
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def public_job_detail(request, job_id):
     try:
         job = JobDescription.objects.select_related('company').get(pk=job_id)
     except JobDescription.DoesNotExist:
-        return Response(
+        return _no_cache(Response(
             {'status': 'error', 'code': 'NOT_FOUND', 'message': 'Job not found.'},
             status=status.HTTP_404_NOT_FOUND,
-        )
+        ))
 
     ok, err = _check_job_open(job)
     if not ok:
-        return err
+        return _no_cache(err)
 
-    return Response({
+    return _no_cache(Response({
         'status': 'success',
         'data': {
             'id': job.id,
@@ -82,7 +101,7 @@ def public_job_detail(request, job_id):
             'application_close_date': job.application_close_date.isoformat() if job.application_close_date else None,
             'created_at': job.created_at.isoformat(),
         },
-    })
+    }))
 
 
 @api_view(['POST'])
