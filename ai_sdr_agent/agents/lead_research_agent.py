@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 APOLLO_SEARCH_URL = "https://api.apollo.io/v1/people/search"
 APIFY_BASE = "https://api.apify.com/v2"
 
-# Default Apify actor — LinkedIn People Search (free, no login needed)
-DEFAULT_APIFY_ACTOR = "curious_coder/linkedin-people-search-scraper"
+# Default Apify actor — Google Search scraper (free, no Bright Data needed)
+DEFAULT_APIFY_ACTOR = "apify/google-search-scraper"
 
 # Apollo employee-range strings
 APOLLO_SIZE_BUCKETS = [
@@ -99,10 +99,10 @@ class LeadResearchAgent:
             return self._search_apollo(icp_profile, count)
         if source == 'ai':
             return self._generate_ai_leads(icp_profile, count)
-        # auto priority
+        # auto priority — apify only if both token AND actor are set
         if self.apollo_api_key:
             return self._search_apollo(icp_profile, count)
-        if self.apify_token:
+        if self.apify_token and self.apify_actor:
             return self._search_apify(icp_profile, count)
         return self._generate_ai_leads(icp_profile, count)
 

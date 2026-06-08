@@ -38,8 +38,17 @@ logger = logging.getLogger(__name__)
 # Per-request agent factories — pass company so keys resolve per-company
 # --------------------------------------------------------------------------
 
-def _get_research_agent(company) -> LeadResearchAgent:
+def _get_research_agent(company, company_user=None) -> LeadResearchAgent:
     """Create a LeadResearchAgent with the correct company key context."""
+    if company_user is not None:
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        if sdr_settings:
+            return LeadResearchAgent(
+                company=company,
+                apollo_api_key=sdr_settings.apollo_api_key or None,
+                apify_token=sdr_settings.apify_api_token or None,
+                apify_actor=sdr_settings.apify_actor_id or None,
+            )
     return LeadResearchAgent(company=company)
 
 
@@ -493,7 +502,7 @@ def research_leads(request):
         )
 
         try:
-            researcher = _get_research_agent(company_user.company)
+            researcher = _get_research_agent(company_user.company, company_user=company_user)
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
