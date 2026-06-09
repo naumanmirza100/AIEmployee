@@ -1747,13 +1747,14 @@ def sdr_meetings_list(request):
 
     if request.method == 'GET':
         try:
-            status_filter  = request.GET.get('status', '').strip()
-            campaign_id    = request.GET.get('campaign_id', '').strip()
-            search         = request.GET.get('search', '').strip()
-            temperature_f  = request.GET.get('temperature', '').strip()
-            # active_only=true (default) → strictly active campaigns only
-            # active_only=false          → all campaigns including ended ones
-            active_only    = request.GET.get('active_only', 'true').lower() != 'false'
+            status_filter    = request.GET.get('status', '').strip()
+            campaign_id      = request.GET.get('campaign_id', '').strip()
+            campaign_status  = request.GET.get('campaign_status', '').strip()
+            search           = request.GET.get('search', '').strip()
+            search_field     = request.GET.get('search_field', 'all').strip()
+            temperature_f    = request.GET.get('temperature', '').strip()
+            # active_only=true → strictly active campaigns only; default false = show all
+            active_only    = request.GET.get('active_only', 'false').lower() == 'true'
             try:
                 page      = max(1, int(request.GET.get('page', 1)))
                 page_size = min(100, max(5, int(request.GET.get('page_size', 20))))
@@ -1779,8 +1780,10 @@ def sdr_meetings_list(request):
             # Always exclude orphaned meetings (campaign or enrollment was deleted)
             qs = qs.filter(enrollment__isnull=False, enrollment__campaign__isnull=False)
 
-            # active_only → strictly active campaigns; False → all existing campaigns
-            if active_only:
+            # campaign_status filter overrides active_only when provided
+            if campaign_status:
+                qs = qs.filter(enrollment__campaign__status=campaign_status)
+            elif active_only:
                 qs = qs.filter(enrollment__campaign__status='active')
 
             if status_filter:
@@ -1793,14 +1796,25 @@ def sdr_meetings_list(request):
                 qs = qs.filter(lead__temperature=temperature_f)
 
             if search:
-                qs = qs.filter(
-                    Q(lead__full_name__icontains=search)
-                    | Q(lead__first_name__icontains=search)
-                    | Q(lead__last_name__icontains=search)
-                    | Q(lead__email__icontains=search)
-                    | Q(lead__company_name__icontains=search)
-                    | Q(lead__job_title__icontains=search)
-                )
+                field_map = {
+                    'name':     Q(lead__full_name__icontains=search) | Q(lead__first_name__icontains=search) | Q(lead__last_name__icontains=search),
+                    'email':    Q(lead__email__icontains=search),
+                    'company':  Q(lead__company_name__icontains=search),
+                    'title':    Q(lead__job_title__icontains=search),
+                    'campaign': Q(enrollment__campaign__name__icontains=search),
+                }
+                if search_field in field_map:
+                    qs = qs.filter(field_map[search_field])
+                else:
+                    qs = qs.filter(
+                        Q(lead__full_name__icontains=search)
+                        | Q(lead__first_name__icontains=search)
+                        | Q(lead__last_name__icontains=search)
+                        | Q(lead__email__icontains=search)
+                        | Q(lead__company_name__icontains=search)
+                        | Q(lead__job_title__icontains=search)
+                        | Q(enrollment__campaign__name__icontains=search)
+                    )
 
             total        = qs.count()
             paginator    = Paginator(qs, page_size)

@@ -3,7 +3,7 @@ import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import {
   Mail, Linkedin, Plus, RefreshCw, Trash2, Users, ChevronLeft,
   Zap, Check, Loader2, Send, MessageSquare, Calendar, Edit2,
-  Flame, Thermometer, Snowflake, Clock, Inbox, Pause, Play,
+  Flame, Thermometer, Snowflake, Clock, Inbox, Pause, Play, Search, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -368,6 +368,8 @@ const SDROutreachTab = () => {
 
   // ── State ──────────────────────────────────────────────────────────────
   const [campaigns, setCampaigns] = useState([]);
+  const [campaignSearch, setCampaignSearch] = useState('');
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [steps, setSteps] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
@@ -649,6 +651,45 @@ const SDROutreachTab = () => {
           </Button>
         </div>
 
+        {/* Search + Filter bar */}
+        {!loading && campaigns.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Search */}
+            <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
+              <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
+              <input
+                placeholder="Search campaigns…"
+                value={campaignSearch}
+                onChange={e => setCampaignSearch(e.target.value)}
+                style={{ width: '100%', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 9, color: '#e2d9f3', padding: '7px 28px 7px 30px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+              />
+              {campaignSearch && (
+                <button onClick={() => setCampaignSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+            {/* Status filter pills */}
+            {[
+              { key: '',          label: 'All'       },
+              { key: 'active',    label: 'Active',    color: '#10b981' },
+              { key: 'paused',    label: 'Paused',    color: '#f59e0b' },
+              { key: 'completed', label: 'Completed', color: '#6b7280' },
+              { key: 'scheduled', label: 'Scheduled', color: '#6366f1' },
+              { key: 'draft',     label: 'Draft',     color: '#4b5563' },
+            ].map(opt => {
+              const isSel = campaignStatusFilter === opt.key;
+              const col = opt.color || '#9ca3af';
+              return (
+                <button key={opt.key} onClick={() => setCampaignStatusFilter(opt.key)}
+                  style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: isSel ? 700 : 400, cursor: 'pointer', border: `1px solid ${isSel ? col : '#2d1f4a'}`, background: isSel ? `${col}20` : 'rgba(255,255,255,0.03)', color: isSel ? col : '#6b7280', transition: 'all 0.15s', whiteSpace: 'nowrap' }}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Campaign grid */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>
@@ -671,7 +712,19 @@ const SDROutreachTab = () => {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-            {campaigns.map(c => {
+            {(() => {
+              const filtered = campaigns.filter(c => {
+                const q = campaignSearch.toLowerCase();
+                const matchSearch = !q || c.name.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q);
+                const matchStatus = !campaignStatusFilter || c.status === campaignStatusFilter;
+                return matchSearch && matchStatus;
+              });
+              if (filtered.length === 0) return [(
+                <div key="empty" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px 0', color: '#4b5563', fontSize: 14 }}>
+                  No campaigns match your search.
+                </div>
+              )];
+              return filtered.map(c => {
               const sc = STATUS_COLORS[c.status] || STATUS_COLORS.draft;
               return (
                 <div key={c.id} style={{ ...cardStyle, padding: 20, cursor: 'pointer', transition: 'border-color 0.2s' }}
@@ -725,7 +778,8 @@ const SDROutreachTab = () => {
                   </div>
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
         )}
 

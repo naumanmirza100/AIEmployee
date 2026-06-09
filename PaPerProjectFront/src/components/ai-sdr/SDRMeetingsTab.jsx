@@ -288,6 +288,44 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
 // ClockTimePicker — circular analog clock style picker
 // ---------------------------------------------------------------------------
 
+function SearchFieldDropdown({ value, onChange, fields }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const selected = fields.find(f => f.key === value) || fields[0];
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', background: 'rgba(168,85,247,0.08)', border: 'none', borderRight: '1px solid #2d1f4a', borderRadius: '9px 0 0 9px', color: '#a855f7', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', height: '100%', outline: 'none' }}>
+        {selected.label}
+        <ChevronDown size={11} style={{ color: '#a855f7', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 100, background: 'linear-gradient(135deg,#0f0a1f,#140830)', border: '1px solid #2d1f4a', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', minWidth: 130, overflow: 'hidden', animation: 'fadeDown 0.12s ease' }}>
+          {fields.map((f, i) => {
+            const isSel = f.key === value;
+            return (
+              <button key={f.key} type="button" onClick={() => { onChange(f.key); setOpen(false); }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none', borderBottom: i < fields.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', cursor: 'pointer', background: isSel ? 'rgba(168,85,247,0.12)' : 'transparent', color: isSel ? '#a855f7' : '#c4b5d4', fontSize: 13, fontWeight: isSel ? 600 : 400, transition: 'background 0.1s', textAlign: 'left' }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}>
+                {isSel && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#a855f7', flexShrink: 0 }} />}
+                {!isSel && <span style={{ width: 6, height: 6, flexShrink: 0 }} />}
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClockTimePicker({ value, onChange, ampm, onAmpmChange, mode, onModeChange }) {
   const radius = 70, cx = 85, cy = 85;
 
@@ -818,6 +856,7 @@ const SDRMeetingsTab = () => {
   // Filters
   const [filtersOpen, setFiltersOpen]       = useState(false);
   const [searchRaw, setSearchRaw]           = useState('');
+  const [searchField, setSearchField]       = useState('all');
   const [statusFilter, setStatusFilter]     = useState('');
   const [campaignFilter, setCampaignFilter] = useState('');
   const [tempFilter, setTempFilter]         = useState('');
@@ -826,32 +865,35 @@ const SDRMeetingsTab = () => {
   const [page, setPage]                     = useState(1);
   const [pageSize, setPageSize]             = useState(20);
 
-  const search = useDebounce(searchRaw, 400);
+  const search = useDebounce(searchRaw, 250);
   const { toast } = useToast();
+
+  // Load campaigns once on mount only
+  useEffect(() => {
+    listCampaigns()
+      .then(r => setCampaigns(r?.data || r || []))
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async (overrides = {}) => {
     setLoading(true);
     try {
-      const [meetingsResp, campaignsResp] = await Promise.all([
-        listMeetings({
-          status:      overrides.status      ?? statusFilter,
-          campaign_id: overrides.campaign_id ?? campaignFilter,
-          search:      overrides.search      ?? search,
-          temperature: overrides.temperature ?? tempFilter,
-          sort:        overrides.sort        ?? sortBy,
-          active_only: overrides.active_only ?? activeOnly,
-          page:        overrides.page        ?? page,
-          page_size:   overrides.page_size   ?? pageSize,
-        }),
-        listCampaigns(),
-      ]);
-      // companyApi returns response.json() directly
+      const meetingsResp = await listMeetings({
+        status:          overrides.status          ?? statusFilter,
+        campaign_status: overrides.campaign_status ?? campaignFilter,
+        search:          overrides.search          ?? search,
+        search_field:    overrides.search_field    ?? searchField,
+        temperature:     overrides.temperature     ?? tempFilter,
+        sort:            overrides.sort            ?? sortBy,
+        active_only:     overrides.active_only     ?? (campaignFilter ? false : activeOnly),
+        page:            overrides.page            ?? page,
+        page_size:       overrides.page_size       ?? pageSize,
+      });
       setData(meetingsResp || { results: [], total: 0, total_pages: 1, page: 1 });
-      setCampaigns(campaignsResp?.data || campaignsResp || []);
     } catch (e) {
       toast({ title: 'Failed to load meetings', description: e.message, variant: 'destructive' });
     } finally { setLoading(false); }
-  }, [search, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, page, pageSize, toast]);
+  }, [search, searchField, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, page, pageSize, toast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -882,7 +924,7 @@ const SDRMeetingsTab = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset to page 1 when any filter changes
-  useEffect(() => { setPage(1); }, [search, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, pageSize]);
+  useEffect(() => { setPage(1); }, [search, searchField, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, pageSize]);
 
   const handleRowUpdate = useCallback((updated) => {
     setData(d => ({
@@ -1000,47 +1042,82 @@ const SDRMeetingsTab = () => {
           {/* Top row: search + filter toggle + sort + page size + refresh */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
 
-            {/* Search */}
-            <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
-              <Search size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
-              <input
-                placeholder="Search name, email, company, title…"
-                value={searchRaw}
-                onChange={e => setSearchRaw(e.target.value)}
-                style={{ ...inp, width: '100%', paddingLeft: 32, paddingRight: searchRaw ? 30 : 12, boxSizing: 'border-box' }}
-              />
-              {searchRaw && (
-                <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
-                  <X size={13} />
-                </button>
-              )}
-            </div>
+            {/* Search — field selector + input */}
+            {(() => {
+              const SEARCH_FIELDS = [
+                { key: 'all',      label: 'All Fields' },
+                { key: 'name',     label: 'Name'       },
+                { key: 'email',    label: 'Email'      },
+                { key: 'company',  label: 'Company'    },
+                { key: 'title',    label: 'Job Title'  },
+                { key: 'campaign', label: 'Campaign'   },
+              ];
+              const placeholders = {
+                all:      'Search all fields…',
+                name:     'Search by name…',
+                email:    'Search by email…',
+                company:  'Search by company…',
+                title:    'Search by job title…',
+                campaign: 'Search by campaign name…',
+              };
+              return (
+                <div style={{ display: 'flex', flex: '1 1 240px', minWidth: 200, alignItems: 'center', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 9, overflow: 'visible', position: 'relative' }}>
+                  {/* Field selector — custom dark dropdown */}
+                  <SearchFieldDropdown value={searchField} onChange={setSearchField} fields={SEARCH_FIELDS} />
+                  {/* Input */}
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
+                    <input
+                      placeholder={placeholders[searchField]}
+                      value={searchRaw}
+                      onChange={e => setSearchRaw(e.target.value)}
+                      style={{ background: 'transparent', border: 'none', outline: 'none', color: '#e2d9f3', fontSize: 13, padding: '7px 28px 7px 28px', width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {searchRaw && (
+                      <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Filters toggle */}
             {(() => {
               const mActiveCount = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length;
               const mTotalActive = mActiveCount + (sortBy !== 'created_desc' ? 1 : 0);
               return (
-                <button
-                  onClick={() => setFiltersOpen(v => !v)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
-                    borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
-                    background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`,
-                    color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
-                    fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
-                  }}
-                >
-                  <SlidersHorizontal size={13} />
-                  Filters
+                <>
+                  <button
+                    onClick={() => setFiltersOpen(v => !v)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
+                      borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
+                      background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`,
+                      color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
+                      fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
+                    }}
+                  >
+                    <SlidersHorizontal size={13} />
+                    Filters
+                    {mTotalActive > 0 && (
+                      <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                        {mTotalActive}
+                      </span>
+                    )}
+                    <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+                  </button>
                   {mTotalActive > 0 && (
-                    <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
-                      {mTotalActive}
-                    </span>
+                    <button
+                      onClick={() => { setStatusFilter(''); setTempFilter(''); setCampaignFilter(''); setSortBy('created_desc'); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 9, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      <X size={11} /> Clear all
+                    </button>
                   )}
-                  <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
-                </button>
+                </>
               );
             })()}
 
@@ -1121,13 +1198,12 @@ const SDRMeetingsTab = () => {
                     value={campaignFilter}
                     onChange={setCampaignFilter}
                     options={[
-                      { key: '', label: 'All Campaigns', color: '#6b7280' },
-                      ...campaigns.map(c => ({
-                        key: String(c.id),
-                        label: c.name.length > 26 ? c.name.slice(0, 24) + '…' : c.name,
-                        color: CAMPAIGN_STATUS_LABEL[c.status]?.color || '#6b7280',
-                        dot: true,
-                      })),
+                      { key: '',          label: 'All Campaigns', color: '#6b7280' },
+                      { key: 'active',    label: 'Active',        color: '#10b981', dot: true },
+                      { key: 'paused',    label: 'Paused',        color: '#f59e0b', dot: true },
+                      { key: 'completed', label: 'Completed',     color: '#6b7280', dot: true },
+                      { key: 'scheduled', label: 'Scheduled',     color: '#6366f1', dot: true },
+                      { key: 'draft',     label: 'Draft',         color: '#4b5563', dot: true },
                     ]}
                   />
                 </div>
@@ -1148,7 +1224,7 @@ const SDRMeetingsTab = () => {
               </div>
 
               {/* Panel footer */}
-              {(() => {
+              {/* {(() => {
                 const mTotalActive = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length + (sortBy !== 'created_desc' ? 1 : 0);
                 return mTotalActive > 0 ? (
                   <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1161,7 +1237,7 @@ const SDRMeetingsTab = () => {
                     <span style={{ color: '#6b7280', fontSize: 12 }}>{mTotalActive} active</span>
                   </div>
                 ) : null;
-              })()}
+              })()} */}
             </div>
           )}
 

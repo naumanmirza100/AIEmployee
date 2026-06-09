@@ -357,16 +357,18 @@ export const checkReplies = async (campaignId) => {
 
 // Meetings
 export const listMeetings = async ({
-  status = '', campaign_id = '', search = '', temperature = '',
-  sort = 'created_desc', active_only = true, page = 1, page_size = 20,
+  status = '', campaign_id = '', campaign_status = '', search = '', search_field = 'all', temperature = '',
+  sort = 'created_desc', active_only = false, page = 1, page_size = 20,
 } = {}) => {
   try {
     const params = new URLSearchParams();
-    if (status)      params.set('status', status);
-    if (campaign_id) params.set('campaign_id', campaign_id);
-    if (search)      params.set('search', search);
-    if (temperature) params.set('temperature', temperature);
-    if (sort)        params.set('sort', sort);
+    if (status)          params.set('status', status);
+    if (campaign_id)     params.set('campaign_id', campaign_id);
+    if (campaign_status) params.set('campaign_status', campaign_status);
+    if (search)          params.set('search', search);
+    if (search_field && search_field !== 'all') params.set('search_field', search_field);
+    if (temperature)     params.set('temperature', temperature);
+    if (sort)            params.set('sort', sort);
     params.set('active_only', active_only ? 'true' : 'false');
     params.set('page', page);
     params.set('page_size', page_size);
