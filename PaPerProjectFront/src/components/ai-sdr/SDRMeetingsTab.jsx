@@ -18,11 +18,12 @@ import {
 // ---------------------------------------------------------------------------
 
 const STATUS_CONFIG = {
-  pending:   { label: 'Pending',   color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'   },
-  scheduled: { label: 'Scheduled', color: '#10b981', bg: 'rgba(16,185,129,0.1)'  },
-  completed: { label: 'Completed', color: '#6b7280', bg: 'rgba(107,114,128,0.1)' },
-  cancelled: { label: 'Cancelled', color: '#ef4444', bg: 'rgba(239,68,68,0.1)'   },
-  no_show:   { label: "Didn't Show Up", color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'  },
+  pending:           { label: 'Pending',            color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'   },
+  awaiting_approval: { label: 'Awaiting Lead',      color: '#6366f1', bg: 'rgba(99,102,241,0.1)'   },
+  scheduled:         { label: 'Scheduled',          color: '#10b981', bg: 'rgba(16,185,129,0.1)'   },
+  completed:         { label: 'Completed',          color: '#6b7280', bg: 'rgba(107,114,128,0.1)'  },
+  cancelled:         { label: 'Cancelled',          color: '#ef4444', bg: 'rgba(239,68,68,0.1)'    },
+  no_show:           { label: "Didn't Show Up",     color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'   },
 };
 
 const TEMP_COLOR = { hot: '#ef4444', warm: '#f59e0b', cold: '#6b7280' };
@@ -292,7 +293,7 @@ function ClockTimePicker({ value, onChange }) {
   const [ampm, setAmpm]   = useState('AM');
   const [hour, setHour]   = useState(null);
   const [minute, setMinute] = useState(null);
-  const radius = 90, cx = 110, cy = 110;
+  const radius = 70, cx = 85, cy = 85;
 
   const commit = (h, m, ap) => {
     if (h === null || m === null) return;
@@ -321,18 +322,18 @@ function ClockTimePicker({ value, onChange }) {
   const displayM = minute === null ? '--' : String(minute).padStart(2,'0');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       {/* Digital display */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#0d0820', borderRadius: 10, padding: '8px 16px', border: '1px solid #2d1f4a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: '#0d0820', borderRadius: 8, padding: '6px 12px',  }}>
         <span onClick={() => setMode('hour')}
-          style={{ fontSize: 28, fontWeight: 700, cursor: 'pointer', color: mode === 'hour' ? '#a855f7' : '#e2d9f3' }}>{displayH}</span>
-        <span style={{ fontSize: 28, color: '#6b7280', fontWeight: 700 }}>:</span>
+          style={{ fontSize: 22, fontWeight: 700, cursor: 'pointer', color: mode === 'hour' ? '#a855f7' : '#e2d9f3' }}>{displayH}</span>
+        <span style={{ fontSize: 22, color: '#6b7280', fontWeight: 700 }}>:</span>
         <span onClick={() => setMode('minute')}
-          style={{ fontSize: 28, fontWeight: 700, cursor: 'pointer', color: mode === 'minute' ? '#a855f7' : '#e2d9f3' }}>{displayM}</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 8 }}>
+          style={{ fontSize: 22, fontWeight: 700, cursor: 'pointer', color: mode === 'minute' ? '#a855f7' : '#e2d9f3' }}>{displayM}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginLeft: 6 }}>
           {['AM','PM'].map(ap => (
             <span key={ap} onClick={() => toggleAmpm(ap)}
-              style={{ fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+              style={{ fontSize: 10, fontWeight: 700, cursor: 'pointer', padding: '1px 5px', borderRadius: 3,
                 background: ampm === ap ? '#a855f7' : 'transparent',
                 color: ampm === ap ? '#fff' : '#6b7280' }}>{ap}</span>
           ))}
@@ -340,7 +341,7 @@ function ClockTimePicker({ value, onChange }) {
       </div>
 
       {/* Clock face */}
-      <svg width={220} height={220}>
+      <svg width={170} height={170}>
         {/* Face */}
         <circle cx={cx} cy={cy} r={radius + 18} fill="#0d0820" stroke="#2d1f4a" strokeWidth={1} />
         <circle cx={cx} cy={cy} r={3} fill="#a855f7" />
@@ -405,7 +406,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
   };
   const isPast = (d) => new Date(y, mo, d) < new Date(new Date().setHours(0,0,0,0));
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (sendApproval = false) => {
     if (!selDate || !selTime) { toast({ title: 'Pick a date & time', variant: 'destructive' }); return; }
     setSaving(true);
     try {
@@ -413,8 +414,14 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
         scheduled_at: new Date(`${selDate}T${selTime}`).toISOString(),
         duration_minutes: parseInt(duration),
         notes,
+        send_approval: sendApproval,
+        browser_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
-      toast({ title: 'Meeting confirmed!', description: 'Confirmation email sent to the lead.' });
+      if (sendApproval) {
+        toast({ title: 'Approval email sent!', description: 'Lead will receive an email asking if the time works.' });
+      } else {
+        toast({ title: 'Meeting confirmed!', description: 'Confirmation email sent to the lead.' });
+      }
       onConfirmed(resp.data);
       onClose();
     } catch (e) {
@@ -430,7 +437,9 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
       <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 16, padding: 20, width: 520, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', scrollbarWidth: 'none' }} onClick={e => e.stopPropagation()}>
         <h3 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Confirm Meeting</h3>
         <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 16px' }}>
-          Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>. Confirmation email will be sent automatically.
+          Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>.{' '}
+          <span style={{ color: '#818cf8' }}>Ask Lead First</span> sends an approval email.{' '}
+          <span style={{ color: '#10b981' }}>Confirm Directly</span> schedules immediately.
         </p>
 
         {/* ── Calendar + Clock together ── */}
@@ -478,7 +487,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
         </div>
 
         {/* Duration + Notes */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <div>
             <label style={lbl}>Duration</label>
             <select value={duration} onChange={e => setDuration(e.target.value)} style={inp}>
@@ -491,12 +500,22 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           <Button variant="outline" onClick={onClose} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
-          <Button onClick={handleConfirm} disabled={saving || !selDate || !selTime}
-            style={{ background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <CalendarCheck size={14} />}
-            <span style={{ marginLeft: 6 }}>Confirm & Send Email</span>
+
+          {/* Option 1: Ask lead first */}
+          <Button onClick={() => handleConfirm(true)} disabled={saving || !selDate || !selTime}
+            style={{ background: 'linear-gradient(90deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+            <span style={{ marginLeft: 5 }}>Ask Lead First</span>
+          </Button>
+
+          {/* Option 2: Confirm directly */}
+          <Button onClick={() => handleConfirm(false)} disabled={saving || !selDate || !selTime}
+            style={{ background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck size={13} />}
+            <span style={{ marginLeft: 5 }}>Confirm Directly</span>
           </Button>
         </div>
       </div>
@@ -512,6 +531,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
   const [local, setLocal] = useState(meeting);
   const [actionLoading, setActionLoading] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [earlyWarning, setEarlyWarning] = useState(null); // { status, label, timeLeft }
   const { toast } = useToast();
 
   const act = async (label, fn) => {
@@ -527,7 +547,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
     } finally { setActionLoading(null); }
   };
 
-  const handleStatus = async (s) => {
+  const doStatus = async (s) => {
     setActionLoading('status');
     try {
       const resp = await updateMeeting(local.id, { status: s });
@@ -538,6 +558,21 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
     } catch (e) {
       toast({ title: 'Failed', description: e.message, variant: 'destructive' });
     } finally { setActionLoading(null); }
+  };
+
+  const handleStatus = (s) => {
+    if ((s === 'completed' || s === 'no_show') && local.scheduled_at) {
+      const meetingTime = new Date(local.scheduled_at);
+      if (meetingTime > new Date()) {
+        const diff = meetingTime - new Date();
+        const hrs  = Math.floor(diff / 3600000);
+        const mins = Math.floor((diff % 3600000) / 60000);
+        const timeLeft = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} min`;
+        setEarlyWarning({ status: s, label: s === 'completed' ? 'Mark Completed' : "Lead Didn't Show Up", timeLeft });
+        return;
+      }
+    }
+    doStatus(s);
   };
 
   const btnBase = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 };
@@ -553,13 +588,39 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
           />
         )}
 
+        {earlyWarning && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+            onClick={() => setEarlyWarning(null)}>
+            <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 14, padding: 24, width: 380, maxWidth: '95vw' }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <AlertCircle size={18} style={{ color: '#a855f7', flexShrink: 0 }} />
+                <h4 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 15, margin: 0 }}>Meeting hasn't started yet</h4>
+              </div>
+              <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, margin: '0 0 6px' }}>
+                Starts in <strong style={{ color: '#c084fc' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
+              </p>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+                <button onClick={() => setEarlyWarning(null)}
+                  style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid #2d1f4a', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>
+                  Cancel
+                </button>
+                <button onClick={() => { doStatus(earlyWarning.status); setEarlyWarning(null); }}
+                  style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg,#a855f7,#7c3aed)', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  Yes, proceed
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ padding: '16px 24px', borderLeft: '3px solid #a855f7' }}>
           {/* Actions */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-            {local.status === 'pending' && (
+            {(local.status === 'pending' || local.status === 'awaiting_approval') && (
               <button style={{ ...btnBase, background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff' }}
                 onClick={() => setShowConfirm(true)}>
-                <CalendarCheck size={12} /> Set Time & Confirm
+                <CalendarCheck size={12} /> {local.status === 'awaiting_approval' ? 'Change Proposed Time' : 'Set Time & Confirm'}
               </button>
             )}
             {local.status === 'pending' && (
@@ -617,7 +678,22 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             {local.scheduling_email_sent_at && <span style={{ color: '#10b981' }}>✓ Scheduling email sent {fmt(local.scheduling_email_sent_at)}</span>}
             {local.reminder_sent_at && <span style={{ color: '#6366f1' }}>✓ Reminder sent {fmt(local.reminder_sent_at)}</span>}
             {local.confirmed_at && <span style={{ color: '#10b981' }}>✓ Confirmed {fmt(local.confirmed_at)}</span>}
+            {local.approval_proposed_at && <span style={{ color: '#6366f1' }}>⏳ Approval email sent to lead {fmt(local.approval_proposed_at)}</span>}
           </div>
+
+          {/* Awaiting approval info banner */}
+          {local.status === 'awaiting_approval' && (
+            <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 18 }}>📨</span>
+              <div>
+                <p style={{ margin: 0, color: '#818cf8', fontSize: 12, fontWeight: 700 }}>WAITING FOR LEAD RESPONSE</p>
+                <p style={{ margin: '2px 0 0', color: '#9ca3af', fontSize: 12 }}>
+                  Approval email was sent. Lead will confirm or suggest another time.
+                  {local.scheduled_at && <> Proposed time: <strong style={{ color: '#e2d9f3' }}>{fmt(local.scheduled_at)}</strong></>}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Reply snippet */}
           {local.reply_snippet && (
@@ -913,12 +989,13 @@ const SDRMeetingsTab = () => {
                     value={statusFilter}
                     onChange={setStatusFilter}
                     options={[
-                      { key: '',          label: 'All Statuses', color: '#6b7280' },
-                      { key: 'pending',   label: 'Pending',      color: '#f59e0b', dot: true },
-                      { key: 'scheduled', label: 'Scheduled',    color: '#10b981', dot: true },
-                      { key: 'completed', label: 'Completed',    color: '#6b7280', dot: true },
-                      { key: 'cancelled', label: 'Cancelled',    color: '#ef4444', dot: true },
-                      { key: 'no_show',   label: "Didn't Show Up", color: '#8b5cf6', dot: true },
+                      { key: '',                   label: 'All Statuses',    color: '#6b7280' },
+                      { key: 'pending',            label: 'Pending',         color: '#f59e0b', dot: true },
+                      { key: 'awaiting_approval',  label: 'Awaiting Lead',   color: '#6366f1', dot: true },
+                      { key: 'scheduled',          label: 'Scheduled',       color: '#10b981', dot: true },
+                      { key: 'completed',          label: 'Completed',       color: '#6b7280', dot: true },
+                      { key: 'cancelled',          label: 'Cancelled',       color: '#ef4444', dot: true },
+                      { key: 'no_show',            label: "Didn't Show Up",  color: '#8b5cf6', dot: true },
                     ]}
                   />
                 </div>

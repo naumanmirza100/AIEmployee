@@ -482,6 +482,129 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
     return _base_html(body_html, preview_text=f"Reminder: your call is tomorrow at {scheduled_str}.")
 
 
+def _build_completion_html(first_name, sender, sender_title, sender_company,
+                            title, scheduled_str) -> str:
+    sender_block = f'<strong style="color:#111827;">{sender}</strong>'
+    if sender_title:
+        sender_block += f'<br/><span style="color:#6b7280;font-size:13px;">{sender_title}</span>'
+    if sender_company:
+        sender_block += f'<br/><span style="color:#6b7280;font-size:13px;">{sender_company}</span>'
+
+    body_html = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:18px;">
+            <div style="width:56px;height:56px;background:#f0fdf4;border-radius:50%;
+                        display:inline-flex;align-items:center;justify-content:center;
+                        font-size:26px;line-height:56px;text-align:center;">🤝</div>
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        Great connecting, {first_name}!
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Thank you for your time — it was wonderful speaking with you.
+      </p>
+
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Meeting Summary</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_detail_row('Topic', title)}
+              {_divider()}
+              {_detail_row('Date &amp; Time', scheduled_str)}
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:0 0 16px;color:#374151;font-size:14px;line-height:1.7;text-align:center;">
+        We'll be in touch with the next steps shortly.<br/>
+        Feel free to reply to this email if you have any questions in the meantime.
+      </p>
+
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin:20px 0;"/>
+
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
+        Looking forward to working together!<br/>
+        {sender_block}
+      </p>
+    """
+    return _base_html(body_html, preview_text=f"Thank you for our {title} — great connecting with you!")
+
+
+def _build_approval_request_html(first_name, sender, sender_title, sender_company,
+                                  title, proposed_time_str, yes_url, suggest_url) -> str:
+    sender_block = f'<strong style="color:#111827;">{sender}</strong>'
+    if sender_title:
+        sender_block += f'<br/><span style="color:#6b7280;font-size:13px;">{sender_title}</span>'
+    if sender_company:
+        sender_block += f'<br/><span style="color:#6b7280;font-size:13px;">{sender_company}</span>'
+
+    body_html = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:18px;">
+            <div style="width:56px;height:56px;background:#eff6ff;border-radius:50%;
+                        display:inline-flex;align-items:center;justify-content:center;
+                        font-size:26px;line-height:56px;text-align:center;">📅</div>
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        Does this time work for you?
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, I'd love to schedule our {title}.
+      </p>
+
+      <!-- Proposed time box -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:28px;">
+        <tr>
+          <td style="padding:20px 24px;text-align:center;">
+            <p style="margin:0 0 4px;color:#7c3aed;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Proposed Time</p>
+            <p style="margin:0;color:#111827;font-size:20px;font-weight:700;">{proposed_time_str}</p>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Action buttons -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+        <tr>
+          <td align="center" style="padding:0 8px 12px;">
+            {_btn('✅  Yes, this works for me', yes_url, '#059669')}
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 8px;">
+            {_btn('❌  Suggest another time', suggest_url, '#6b7280')}
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:0 0 0;color:#9ca3af;font-size:12px;text-align:center;line-height:1.6;">
+        Clicking "Yes" will confirm this meeting time.<br/>
+        Clicking "Suggest another time" will open a booking page where you can pick any time that suits you.
+      </p>
+
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0;"/>
+
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
+        Looking forward to connecting!<br/>
+        {sender_block}
+      </p>
+    """
+    return _base_html(body_html, preview_text=f"Does {proposed_time_str} work for your {title}?")
+
+
 # ---------------------------------------------------------------------------
 # Main Agent Class
 # ---------------------------------------------------------------------------
@@ -807,6 +930,105 @@ Return exactly this JSON:
 
         self._send_email(campaign, lead.email, subject, plain, html)
         logger.info("Reminder email sent to %s for meeting %s", lead.email, meeting.id)
+
+    # ------------------------------------------------------------------
+    # Completion Email  (sent when meeting is marked Completed)
+    # ------------------------------------------------------------------
+
+    def send_completion_email(self, campaign, lead, meeting) -> None:
+        """Send a thank-you email after the meeting is marked as Completed."""
+        first_name = lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there')
+        sender = campaign.sender_name or campaign.sender_company or 'the team'
+        sender_title = campaign.sender_title or ''
+        sender_company = campaign.sender_company or ''
+        title = meeting.title or 'Discovery Call'
+        scheduled_str = self._format_meeting_time(meeting) if meeting.scheduled_at else 'today'
+
+        subject = f"Great connecting with you, {first_name}!"
+
+        plain = (
+            f"Hi {first_name},\n\n"
+            f"Thank you for taking the time to speak with us today — it was a pleasure!\n\n"
+            f"We really enjoyed our {title} and learning more about your goals. "
+            f"We'll be in touch shortly with the next steps we discussed.\n\n"
+            f"In the meantime, feel free to reply to this email if you have any questions.\n\n"
+            f"Looking forward to working together!\n\n"
+            f"Best,\n{sender}"
+            + (f"\n{sender_title}" if sender_title else '')
+            + (f"\n{sender_company}" if sender_company else '')
+        )
+
+        html = _build_completion_html(
+            first_name=first_name,
+            sender=sender,
+            sender_title=sender_title,
+            sender_company=sender_company,
+            title=title,
+            scheduled_str=scheduled_str,
+        )
+
+        self._send_email(campaign, lead.email, subject, plain, html)
+        logger.info("Completion email sent to %s for meeting %s", lead.email, meeting.id)
+
+    # ------------------------------------------------------------------
+    # Approval Request Email  (sent when SDR proposes a time — lead must confirm)
+    # ------------------------------------------------------------------
+
+    def send_approval_request_email(self, campaign, lead, meeting, proposed_time_str: str) -> None:
+        """
+        Send email to lead asking: 'Does this time work for you?'
+        Includes two action buttons: Yes (confirm) and Suggest another time.
+        """
+        first_name = lead.first_name or (lead.display_name.split()[0] if lead.display_name else 'there')
+        sender = campaign.sender_name or campaign.sender_company or 'the team'
+        sender_title = campaign.sender_title or ''
+        sender_company = campaign.sender_company or ''
+        title = meeting.title or 'Discovery Call'
+
+        # Links must point to the BACKEND (Django) — yes/ confirms directly,
+        # suggest/ redirects to the React booking page.
+        backend_url = (
+            getattr(settings, 'SITE_URL', None)
+            or os.environ.get('SITE_URL', '')
+            or getattr(settings, 'BACKEND_URL', None)
+            or os.environ.get('BACKEND_URL', 'http://localhost:8000')
+        ).rstrip('/')
+
+        approval_token = str(meeting.approval_token)
+        yes_url = f"{backend_url}/api/sdr/meeting-approval/{approval_token}/yes/"
+        suggest_url = f"{backend_url}/api/sdr/meeting-approval/{approval_token}/suggest/"
+
+        subject = f"Does {proposed_time_str} work for you?"
+
+        plain = (
+            f"Hi {first_name},\n\n"
+            f"I'd like to schedule our {title}.\n\n"
+            f"Does the following time work for you?\n\n"
+            f"  {proposed_time_str}\n\n"
+            f"  ✅ Yes, confirm this time: {yes_url}\n\n"
+            f"  ❌ Suggest another time: {suggest_url}\n\n"
+            f"Looking forward to connecting!\n\n"
+            f"Best,\n{sender}"
+            + (f"\n{sender_title}" if sender_title else '')
+            + (f"\n{sender_company}" if sender_company else '')
+        )
+
+        html = _build_approval_request_html(
+            first_name=first_name,
+            sender=sender,
+            sender_title=sender_title,
+            sender_company=sender_company,
+            title=title,
+            proposed_time_str=proposed_time_str,
+            yes_url=yes_url,
+            suggest_url=suggest_url,
+        )
+
+        self._send_email(campaign, lead.email, subject, plain, html)
+        logger.info(
+            "Approval request email sent to %s for meeting %s (proposed: %s)",
+            lead.email, meeting.id, proposed_time_str,
+        )
 
     # ------------------------------------------------------------------
     # Internal SMTP sender

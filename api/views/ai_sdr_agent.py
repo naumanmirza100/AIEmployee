@@ -10,6 +10,7 @@ import csv
 import io
 import json
 import logging
+import os
 from datetime import timedelta
 
 from django.conf import settings
@@ -934,6 +935,7 @@ def _serialize_meeting(m: SDRMeeting) -> dict:
         'scheduling_email_sent_at': m.scheduling_email_sent_at.isoformat() if m.scheduling_email_sent_at else None,
         'reminder_sent_at': m.reminder_sent_at.isoformat() if m.reminder_sent_at else None,
         'confirmed_at': m.confirmed_at.isoformat() if m.confirmed_at else None,
+        'approval_proposed_at': m.approval_proposed_at.isoformat() if m.approval_proposed_at else None,
         'created_at': m.created_at.isoformat(),
     }
 
@@ -1870,8 +1872,19 @@ def sdr_meeting_detail(request, meeting_id):
                 meeting.scheduled_at = d['scheduled_at'] or None
             meeting.save()
 
-            # Send "you didn't show up" email when status changes to no_show
             new_status = meeting.status
+            # Send completion thank-you email when status changes to completed
+            if old_status != 'completed' and new_status == 'completed':
+                try:
+                    if meeting.enrollment and meeting.enrollment.campaign:
+                        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                        MeetingSchedulingAgent(company=company_user.company).send_completion_email(
+                            meeting.enrollment.campaign, meeting.lead, meeting
+                        )
+                except Exception as mail_exc:
+                    logger.warning("Completion email failed for meeting %s: %s", meeting.id, mail_exc)
+
+            # Send "you didn't show up" email when status changes to no_show
             if old_status != 'no_show' and new_status == 'no_show':
                 try:
                     if meeting.enrollment and meeting.enrollment.campaign:
@@ -1911,8 +1924,11 @@ def sdr_meeting_detail(request, meeting_id):
 @permission_classes([IsCompanyUserOnly])
 def sdr_confirm_meeting(request, meeting_id):
     """
-    Confirm a meeting at a specific time.
-    Sends confirmation email to lead and updates lead status to meeting_scheduled.
+    Two modes via `send_approval` flag:
+      - send_approval=false (default): confirm immediately, send confirmation email to lead.
+      - send_approval=true: set status to awaiting_approval, email lead asking "does this time work?"
+        Lead clicks Yes → /meetings/<id>/approve/ → status = scheduled
+        Lead clicks Suggest → /meetings/<id>/suggest-time/ → opens booking page
     """
     company_user = request.user
     try:
@@ -1928,37 +1944,182 @@ def sdr_confirm_meeting(request, meeting_id):
         if not scheduled_at:
             return Response({'status': 'error', 'message': 'scheduled_at is required.'}, status=400)
 
+        # Parse ISO string to datetime if needed
+        if isinstance(scheduled_at, str):
+            from django.utils.dateparse import parse_datetime
+            parsed = parse_datetime(scheduled_at)
+            if parsed is None:
+                from datetime import datetime
+                parsed = datetime.fromisoformat(scheduled_at.replace('Z', '+00:00'))
+            scheduled_at = parsed
+
         meeting.scheduled_at = scheduled_at
-        meeting.status = 'scheduled'
-        meeting.confirmed_at = timezone.now()
         if d.get('duration_minutes'):
             meeting.duration_minutes = int(d['duration_minutes'])
         if d.get('notes'):
             meeting.notes = d['notes']
-        meeting.save()
 
-        # Update lead status
-        lead = meeting.lead
-        lead.status = 'meeting_scheduled'
-        lead.save(update_fields=['status'])
+        send_approval = str(d.get('send_approval', 'false')).lower() in ('true', '1', 'yes')
+        # Use browser timezone for formatting the proposed time in the email
+        # so the lead sees the same time the SDR picked in the UI
+        browser_tz = d.get('browser_timezone', '') or meeting.lead_timezone or 'UTC'
+        if meeting.lead_timezone != browser_tz and browser_tz != 'UTC':
+            meeting.lead_timezone = browser_tz
 
-        # Send confirmation email if campaign SMTP configured
-        if meeting.enrollment and meeting.enrollment.campaign:
-            campaign = meeting.enrollment.campaign
-            try:
+        if send_approval:
+            # Lead approval flow — email lead, wait for their confirmation
+            import uuid as _uuid
+            meeting.approval_token = _uuid.uuid4()
+            meeting.status = 'awaiting_approval'
+            meeting.approval_proposed_at = timezone.now()
+            meeting.save()
+
+            if meeting.enrollment and meeting.enrollment.campaign:
+                campaign = meeting.enrollment.campaign
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                MeetingSchedulingAgent(company=company_user.company).send_confirmation_email(campaign, lead, meeting)
-            except KeyServiceError:
-                raise
-            except Exception as exc:
-                logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+                from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
+                tz_name = browser_tz
+                proposed_time_str = format_datetime_with_timezone(meeting.scheduled_at, tz_name)
+                try:
+                    MeetingSchedulingAgent(company=company_user.company).send_approval_request_email(
+                        campaign, meeting.lead, meeting, proposed_time_str
+                    )
+                except KeyServiceError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Approval request email failed for meeting %s: %s", meeting.id, exc)
 
-        return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
+            return Response({
+                'status': 'success',
+                'mode': 'awaiting_approval',
+                'message': 'Approval email sent to lead.',
+                'data': _serialize_meeting(meeting),
+            })
+
+        else:
+            # Direct confirm flow (original behaviour)
+            meeting.status = 'scheduled'
+            meeting.confirmed_at = timezone.now()
+            meeting.save()
+
+            lead = meeting.lead
+            lead.status = 'meeting_scheduled'
+            lead.save(update_fields=['status'])
+
+            if meeting.enrollment and meeting.enrollment.campaign:
+                campaign = meeting.enrollment.campaign
+                try:
+                    from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                    MeetingSchedulingAgent(company=company_user.company).send_confirmation_email(campaign, lead, meeting)
+                except KeyServiceError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+
+            return Response({'status': 'success', 'mode': 'confirmed', 'data': _serialize_meeting(meeting)})
+
     except KeyServiceError:
         raise
     except Exception as exc:
         logger.error("Confirm meeting error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Meeting — lead approval actions (public, token-based, no auth)
+# ==========================================================================
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
+
+@csrf_exempt
+@require_GET
+def sdr_meeting_lead_approve(request, approval_token):
+    """
+    Lead clicks 'Yes, this time works' link from approval email.
+    Marks meeting as scheduled, sends confirmation email, shows a friendly HTML page.
+    """
+    from django.http import HttpResponse
+
+    def _html_page(title, icon, heading, body_lines, color='#10b981'):
+        lines_html = ''.join(f'<p style="margin:8px 0;color:#6b7280;font-size:15px;">{l}</p>' for l in body_lines)
+        return HttpResponse(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>{title}</title></head>
+        <body style="margin:0;padding:0;background:#0d0820;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <div style="background:linear-gradient(145deg,#1a1030,#120d24);border:1px solid #2d1f4a;border-radius:20px;padding:48px 40px;max-width:480px;width:90%;text-align:center;box-shadow:0 25px 50px rgba(0,0,0,0.5);">
+          <div style="font-size:56px;margin-bottom:20px;">{icon}</div>
+          <h1 style="margin:0 0 16px;color:#e2d9f3;font-size:24px;font-weight:700;">{heading}</h1>
+          {lines_html}
+        </div></body></html>""")
+
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            approval_token=approval_token
+        )
+    except SDRMeeting.DoesNotExist:
+        return _html_page('Invalid Link', '❌', 'Invalid or Expired Link',
+                          ['This link is no longer valid.', 'Please contact the sender for a new meeting invitation.'])
+
+    if meeting.status not in ('awaiting_approval', 'pending'):
+        from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
+        scheduled_str = format_datetime_with_timezone(meeting.scheduled_at, meeting.lead_timezone or 'UTC') if meeting.scheduled_at else ''
+        return _html_page('Already Confirmed', '✅', 'Meeting Already Confirmed',
+                          [f'Your meeting is confirmed.', scheduled_str])
+
+    meeting.status = 'scheduled'
+    meeting.confirmed_at = timezone.now()
+    meeting.save(update_fields=['status', 'confirmed_at'])
+
+    lead = meeting.lead
+    lead.status = 'meeting_scheduled'
+    lead.save(update_fields=['status'])
+
+    if meeting.enrollment and meeting.enrollment.campaign:
+        campaign = meeting.enrollment.campaign
+        try:
+            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+            MeetingSchedulingAgent(company=meeting.company_user.company).send_confirmation_email(
+                campaign, lead, meeting
+            )
+        except Exception as exc:
+            logger.warning("Confirmation email after approval failed for meeting %s: %s", meeting.id, exc)
+
+    from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
+    tz_name = meeting.lead_timezone or 'UTC'
+    scheduled_str = format_datetime_with_timezone(meeting.scheduled_at, tz_name) if meeting.scheduled_at else ''
+
+    return _html_page(
+        'Meeting Confirmed', '🎉', "You're all set!",
+        [
+            f'<strong style="color:#e2d9f3;">{scheduled_str}</strong>',
+            'A confirmation email is on its way to you.',
+            'Looking forward to speaking with you!',
+        ]
+    )
+
+
+@csrf_exempt
+@require_GET
+def sdr_meeting_lead_suggest(request, approval_token):
+    """
+    Lead clicks 'Suggest another time' link — redirect them to the booking page.
+    """
+    from django.http import HttpResponse, HttpResponseRedirect
+
+    try:
+        meeting = SDRMeeting.objects.get(approval_token=approval_token)
+    except SDRMeeting.DoesNotExist:
+        return HttpResponse('Invalid or expired link.', status=404)
+
+    from django.conf import settings as _settings
+    frontend_url = (
+        getattr(_settings, 'FRONTEND_URL', None)
+        or os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+    ).rstrip('/')
+    booking_url = f"{frontend_url}/book/{meeting.booking_token}"
+
+    return HttpResponseRedirect(booking_url)
 
 
 # ==========================================================================
