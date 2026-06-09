@@ -288,9 +288,8 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
 // ClockTimePicker — circular analog clock style picker
 // ---------------------------------------------------------------------------
 
-function ClockTimePicker({ value, onChange }) {
+function ClockTimePicker({ value, onChange, ampm, onAmpmChange }) {
   const [mode, setMode]   = useState('hour'); // 'hour' | 'minute'
-  const [ampm, setAmpm]   = useState('AM');
   const [hour, setHour]   = useState(null);
   const [minute, setMinute] = useState(null);
   const radius = 70, cx = 85, cy = 85;
@@ -304,7 +303,7 @@ function ClockTimePicker({ value, onChange }) {
 
   const pickHour = (h) => { setHour(h); setMode('minute'); commit(h, minute ?? 0, ampm); };
   const pickMinute = (m) => { setMinute(m); commit(hour ?? 12, m, ampm); };
-  const toggleAmpm = (ap) => { setAmpm(ap); commit(hour ?? 12, minute ?? 0, ap); };
+  const toggleAmpm = (ap) => { onAmpmChange(ap); commit(hour ?? 12, minute ?? 0, ap); };
 
   const hourNums  = [12,1,2,3,4,5,6,7,8,9,10,11];
   const minuteNums = [0,5,10,15,20,25,30,35,40,45,50,55];
@@ -323,23 +322,6 @@ function ClockTimePicker({ value, onChange }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      {/* Digital display */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: '#0d0820', borderRadius: 8, padding: '6px 12px',  }}>
-        <span onClick={() => setMode('hour')}
-          style={{ fontSize: 22, fontWeight: 700, cursor: 'pointer', color: mode === 'hour' ? '#a855f7' : '#e2d9f3' }}>{displayH}</span>
-        <span style={{ fontSize: 22, color: '#6b7280', fontWeight: 700 }}>:</span>
-        <span onClick={() => setMode('minute')}
-          style={{ fontSize: 22, fontWeight: 700, cursor: 'pointer', color: mode === 'minute' ? '#a855f7' : '#e2d9f3' }}>{displayM}</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginLeft: 6 }}>
-          {['AM','PM'].map(ap => (
-            <span key={ap} onClick={() => toggleAmpm(ap)}
-              style={{ fontSize: 10, fontWeight: 700, cursor: 'pointer', padding: '1px 5px', borderRadius: 3,
-                background: ampm === ap ? '#a855f7' : 'transparent',
-                color: ampm === ap ? '#fff' : '#6b7280' }}>{ap}</span>
-          ))}
-        </div>
-      </div>
-
       {/* Clock face */}
       <svg width={170} height={170}>
         {/* Face */}
@@ -374,6 +356,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
   const today = new Date();
   const [selDate, setSelDate] = useState('');
   const [selTime, setSelTime] = useState('');
+  const [ampm, setAmpm] = useState('AM');
   const [duration, setDuration] = useState(String(meeting.duration_minutes || 30));
   const [notes, setNotes]  = useState(meeting.notes || '');
   const [saving, setSaving] = useState(false);
@@ -482,22 +465,59 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
 
           {/* Clock */}
           <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <ClockTimePicker value={selTime} onChange={setSelTime} />
+            <ClockTimePicker value={selTime} onChange={setSelTime} ampm={ampm} onAmpmChange={setAmpm} />
           </div>
         </div>
 
-        {/* Duration + Notes */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        {/* Duration + AM/PM */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
           <div>
             <label style={lbl}>Duration</label>
-            <select value={duration} onChange={e => setDuration(e.target.value)} style={inp}>
+            <select value={duration} onChange={e => setDuration(e.target.value)}
+              style={{ ...inp, height: 42, appearance: 'none', WebkitAppearance: 'none', paddingRight: 32,
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', cursor: 'pointer' }}>
               {['15','30','45','60','90'].map(d => <option key={d} value={d}>{d} min</option>)}
             </select>
           </div>
           <div>
-            <label style={lbl}>Notes (optional)</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...inp, resize: 'none' }} />
+            <label style={lbl}>Time</label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, padding: '0 20px', height: 42, boxSizing: 'border-box' }}>
+              {/* HH : MM display — clicking switches clock mode */}
+              <span style={{ fontSize: 22, fontWeight: 700, cursor: 'pointer', color: '#e2d9f3', letterSpacing: 1 }}>
+                {selTime ? (() => { const [hh,mm] = selTime.split(':').map(Number); const h12 = hh % 12 || 12; return `${String(h12).padStart(2,'0')}:${String(mm).padStart(2,'0')}`; })() : '--:--'}
+              </span>
+              {/* AM / PM toggle buttons */}
+              <div style={{ display: 'flex', flexDirection: 'row', gap: 3, marginLeft: 6 }}>
+                {['AM','PM'].map(ap => (
+                  <button key={ap} type="button" onClick={() => {
+                    setAmpm(ap);
+                    if (selTime) {
+                      const [hh, mm] = selTime.split(':').map(Number);
+                      const h12 = hh % 12 || 12;
+                      let h24 = h12 % 12;
+                      if (ap === 'PM') h24 += 12;
+                      setSelTime(`${String(h24).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
+                    }
+                  }}
+                    style={{
+                      padding: '2px 8px', borderRadius: 4, border: '1px solid',
+                      fontWeight: 700, fontSize: 11, cursor: 'pointer', transition: 'all 0.12s',
+                      background: ampm === ap ? '#a855f7' : 'transparent',
+                      borderColor: ampm === ap ? '#a855f7' : '#2d1f4a',
+                      color: ampm === ap ? '#fff' : '#6b7280',
+                    }}>{ap}</button>
+                ))}
+              </div>
+            </div>
           </div>
+        </div>
+
+        {/* Notes — full width */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>Notes (optional)</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+            style={{ ...inp, resize: 'none', width: '100%' }} />
         </div>
 
         {/* Action buttons */}
@@ -534,24 +554,24 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
   const [earlyWarning, setEarlyWarning] = useState(null); // { status, label, timeLeft }
   const { toast } = useToast();
 
-  const act = async (label, fn) => {
-    setActionLoading(label);
+  const act = async (key, toastLabel, fn) => {
+    setActionLoading(key);
     try {
       const resp = await fn();
-      toast({ title: `${label} — done!` });
-      const updated = resp?.data || local;
+      toast({ title: `${toastLabel} — done!` });
+      const updated = resp?.data?.data || resp?.data || local;
       setLocal(updated);
       onUpdated(updated);
     } catch (e) {
-      toast({ title: `${label} failed`, description: e.message, variant: 'destructive' });
+      toast({ title: `${toastLabel} failed`, description: e.message, variant: 'destructive' });
     } finally { setActionLoading(null); }
   };
 
   const doStatus = async (s) => {
-    setActionLoading('status');
+    setActionLoading(`status_${s}`);
     try {
       const resp = await updateMeeting(local.id, { status: s });
-      const updated = resp?.data || { ...local, status: s };
+      const updated = resp?.data?.data || resp?.data || { ...local, status: s };
       setLocal(updated);
       onUpdated(updated);
       toast({ title: `Marked as ${STATUS_CONFIG[s]?.label || s}` });
@@ -626,43 +646,43 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             {local.status === 'pending' && (
               <button disabled={actionLoading === 'resend'}
                 style={{ ...btnBase, background: 'rgba(168,85,247,0.12)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
-                onClick={() => act('Scheduling email resent', () => resendSchedulingEmail(local.id))}>
+                onClick={() => act('resend', 'Scheduling email resent', () => resendSchedulingEmail(local.id))}>
                 {actionLoading === 'resend' ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Resend Scheduling Email
               </button>
             )}
             {local.status === 'scheduled' && (
               <button disabled={actionLoading === 'reminder'}
                 style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
-                onClick={() => act('Reminder sent', () => sendMeetingReminder(local.id))}>
+                onClick={() => act('reminder', 'Reminder sent', () => sendMeetingReminder(local.id))}>
                 {actionLoading === 'reminder' ? <Loader2 size={12} className="animate-spin" /> : <Bell size={12} />} Send Reminder
               </button>
             )}
             {local.status === 'scheduled' && (
               <>
-                <button disabled={actionLoading === 'status'}
+                <button disabled={!!actionLoading}
                   style={{ ...btnBase, background: 'rgba(107,114,128,0.12)', color: '#9ca3af', border: '1px solid #2d1f4a' }}
                   onClick={() => handleStatus('completed')}>
-                  <CheckCircle2 size={12} /> Mark Completed
+                  {actionLoading === 'status_completed' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Mark Completed
                 </button>
-                <button disabled={actionLoading === 'status'}
+                <button disabled={!!actionLoading}
                   style={{ ...btnBase, background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
                   onClick={() => handleStatus('no_show')}>
-                  <XCircle size={12} /> Lead Didn't Show Up
+                  {actionLoading === 'status_no_show' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />} Lead Didn't Show Up
                 </button>
               </>
             )}
             {(local.status === 'no_show' || local.status === 'cancelled') && (
-              <button disabled={actionLoading === 'status'}
+              <button disabled={!!actionLoading}
                 style={{ ...btnBase, background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}
                 onClick={() => handleStatus('pending')}>
-                <CalendarCheck size={12} /> Reschedule
+                {actionLoading === 'status_pending' ? <Loader2 size={12} className="animate-spin" /> : <CalendarCheck size={12} />} Reschedule
               </button>
             )}
             {local.status === 'completed' && (
-              <button disabled={actionLoading === 'status'}
+              <button disabled={!!actionLoading}
                 style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
                 onClick={() => handleStatus('pending')}>
-                <RefreshCw size={12} /> Reopen
+                {actionLoading === 'status_pending' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Reopen
               </button>
             )}
             {local.calendar_link && (
@@ -673,12 +693,23 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             )}
           </div>
 
-          {/* Status timestamps */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14, fontSize: 11 }}>
-            {local.scheduling_email_sent_at && <span style={{ color: '#10b981' }}>✓ Scheduling email sent {fmt(local.scheduling_email_sent_at)}</span>}
-            {local.reminder_sent_at && <span style={{ color: '#6366f1' }}>✓ Reminder sent {fmt(local.reminder_sent_at)}</span>}
-            {local.confirmed_at && <span style={{ color: '#10b981' }}>✓ Confirmed {fmt(local.confirmed_at)}</span>}
-            {local.approval_proposed_at && <span style={{ color: '#6366f1' }}>⏳ Approval email sent to lead {fmt(local.approval_proposed_at)}</span>}
+          {/* Status timestamps — one relevant badge per state */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, fontSize: 11 }}>
+            {local.status === 'awaiting_approval' && local.approval_proposed_at && (
+              <span style={{ color: '#6366f1' }}>⏳ Approval email sent {fmt(local.approval_proposed_at)}</span>
+            )}
+            {local.status === 'scheduled' && local.confirmed_at && (
+              <span style={{ color: '#10b981' }}>✓ Confirmed {fmt(local.confirmed_at)}</span>
+            )}
+            {local.status === 'scheduled' && local.reminder_sent_at && (
+              <span style={{ color: '#6366f1' }}>✓ Reminder sent {fmt(local.reminder_sent_at)}</span>
+            )}
+            {(local.status === 'pending' || local.status === 'awaiting_approval') && local.scheduling_email_sent_at && (
+              <span style={{ color: '#10b981' }}>✓ Scheduling email sent {fmt(local.scheduling_email_sent_at)}</span>
+            )}
+            {(local.status === 'completed' || local.status === 'no_show') && local.confirmed_at && (
+              <span style={{ color: '#6b7280' }}>✓ Was scheduled {fmt(local.confirmed_at)}</span>
+            )}
           </div>
 
           {/* Awaiting approval info banner */}

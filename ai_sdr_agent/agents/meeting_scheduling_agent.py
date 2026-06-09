@@ -539,7 +539,8 @@ def _build_completion_html(first_name, sender, sender_title, sender_company,
 
 
 def _build_approval_request_html(first_name, sender, sender_title, sender_company,
-                                  title, proposed_time_str, yes_url, suggest_url) -> str:
+                                  title, proposed_time_str, yes_url, suggest_url,
+                                  notes: str = '') -> str:
     sender_block = f'<strong style="color:#111827;">{sender}</strong>'
     if sender_title:
         sender_block += f'<br/><span style="color:#6b7280;font-size:13px;">{sender_title}</span>'
@@ -594,6 +595,8 @@ def _build_approval_request_html(first_name, sender, sender_title, sender_compan
         Clicking "Yes" will confirm this meeting time.<br/>
         Clicking "Suggest another time" will open a booking page where you can pick any time that suits you.
       </p>
+
+      {'<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;margin-bottom:24px;"><tr><td style="padding:16px 20px;"><p style="margin:0 0 6px;color:#92400e;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Additional Notes</p><p style="margin:0;color:#374151;font-size:14px;line-height:1.7;">' + notes.replace('\n', '<br/>') + '</p></td></tr></table>' if notes and notes.strip() else ''}
 
       <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0;"/>
 
@@ -1000,6 +1003,7 @@ Return exactly this JSON:
 
         subject = f"Does {proposed_time_str} work for you?"
 
+        notes_block = (f"\n\nAdditional Notes:\n{meeting.notes}\n" if meeting.notes and meeting.notes.strip() else '')
         plain = (
             f"Hi {first_name},\n\n"
             f"I'd like to schedule our {title}.\n\n"
@@ -1007,7 +1011,8 @@ Return exactly this JSON:
             f"  {proposed_time_str}\n\n"
             f"  ✅ Yes, confirm this time: {yes_url}\n\n"
             f"  ❌ Suggest another time: {suggest_url}\n\n"
-            f"Looking forward to connecting!\n\n"
+            + notes_block
+            + f"Looking forward to connecting!\n\n"
             f"Best,\n{sender}"
             + (f"\n{sender_title}" if sender_title else '')
             + (f"\n{sender_company}" if sender_company else '')
@@ -1022,6 +1027,7 @@ Return exactly this JSON:
             proposed_time_str=proposed_time_str,
             yes_url=yes_url,
             suggest_url=suggest_url,
+            notes=meeting.notes or '',
         )
 
         self._send_email(campaign, lead.email, subject, plain, html)
