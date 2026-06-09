@@ -1300,16 +1300,24 @@ const SDROutreachTab = () => {
 
                       {/* Meeting column */}
                       <td style={{ padding: '11px 14px' }}>
-                        {enr.meeting_id ? (
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 3,
-                            padding: '3px 8px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                            background: 'rgba(245,158,11,0.12)', color: '#f59e0b',
-                            border: '1px solid rgba(245,158,11,0.3)',
-                          }}>
-                            <Calendar size={9} /> Pending
-                          </span>
-                        ) : <span style={{ color: '#2d1f4a', fontSize: 11 }}>—</span>}
+                        {enr.meeting_id ? (() => {
+                          const ms = enr.meeting_status;
+                          const cfg = ms === 'scheduled'         ? { label: 'Scheduled',      color: '#10b981', bg: 'rgba(16,185,129,0.12)',   border: 'rgba(16,185,129,0.3)'  }
+                                    : ms === 'awaiting_approval' ? { label: 'Awaiting Lead',  color: '#6366f1', bg: 'rgba(99,102,241,0.12)',   border: 'rgba(99,102,241,0.3)'  }
+                                    : ms === 'completed'         ? { label: 'Completed',      color: '#6b7280', bg: 'rgba(107,114,128,0.12)',  border: 'rgba(107,114,128,0.3)' }
+                                    : ms === 'no_show'           ? { label: "Didn't Show",    color: '#8b5cf6', bg: 'rgba(139,92,246,0.12)',   border: 'rgba(139,92,246,0.3)'  }
+                                    : ms === 'cancelled'         ? { label: 'Cancelled',      color: '#ef4444', bg: 'rgba(239,68,68,0.12)',    border: 'rgba(239,68,68,0.3)'   }
+                                    :                              { label: 'Pending',         color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',   border: 'rgba(245,158,11,0.3)'  };
+                          return (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 3,
+                              padding: '3px 8px', borderRadius: 8, fontSize: 10, fontWeight: 600,
+                              background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+                            }}>
+                              <Calendar size={9} /> {cfg.label}
+                            </span>
+                          );
+                        })() : <span style={{ color: '#2d1f4a', fontSize: 11 }}>—</span>}
                       </td>
                     </tr>
                   );

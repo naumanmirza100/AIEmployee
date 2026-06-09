@@ -197,3 +197,13 @@
     .masonry-grid_column > div { /* change div to reference your elements you put in <Masonry> */
       margin-bottom: 30px;
     }
+
+    /* Hide number input spinners globally */
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type=number] {
+      -moz-appearance: textfield;
+    }

@@ -288,24 +288,31 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
 // ClockTimePicker — circular analog clock style picker
 // ---------------------------------------------------------------------------
 
-function ClockTimePicker({ value, onChange, ampm, onAmpmChange }) {
-  const [mode, setMode]   = useState('hour'); // 'hour' | 'minute'
-  const [hour, setHour]   = useState(null);
-  const [minute, setMinute] = useState(null);
+function ClockTimePicker({ value, onChange, ampm, onAmpmChange, mode, onModeChange }) {
   const radius = 70, cx = 85, cy = 85;
 
+  // Derive hour12 and minute from the value prop (single source of truth)
+  const { hour12, minute: minVal } = React.useMemo(() => {
+    if (!value) return { hour12: null, minute: null };
+    const [hh, mm] = value.split(':').map(Number);
+    return { hour12: hh % 12 || 12, minute: mm };
+  }, [value]);
+
   const commit = (h, m, ap) => {
-    if (h === null || m === null) return;
     let h24 = h % 12;
     if (ap === 'PM') h24 += 12;
     onChange(`${String(h24).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
   };
 
-  const pickHour = (h) => { setHour(h); setMode('minute'); commit(h, minute ?? 0, ampm); };
-  const pickMinute = (m) => { setMinute(m); commit(hour ?? 12, m, ampm); };
-  const toggleAmpm = (ap) => { onAmpmChange(ap); commit(hour ?? 12, minute ?? 0, ap); };
+  const pickHour = (h) => {
+    commit(h, minVal ?? 0, ampm);
+    onModeChange('minute');
+  };
+  const pickMinute = (m) => {
+    commit(hour12 ?? 12, m, ampm);
+  };
 
-  const hourNums  = [12,1,2,3,4,5,6,7,8,9,10,11];
+  const hourNums   = [12,1,2,3,4,5,6,7,8,9,10,11];
   const minuteNums = [0,5,10,15,20,25,30,35,40,45,50,55];
 
   const getPos = (i, total, r) => {
@@ -314,25 +321,25 @@ function ClockTimePicker({ value, onChange, ampm, onAmpmChange }) {
   };
 
   const nums   = mode === 'hour' ? hourNums : minuteNums;
-  const selNum = mode === 'hour' ? hour : minute;
-  const selPos = selNum !== null ? getPos(nums.indexOf(selNum), nums.length, radius) : null;
-
-  const displayH = hour === null ? '--' : String(hour).padStart(2,'0');
-  const displayM = minute === null ? '--' : String(minute).padStart(2,'0');
+  const selNum = mode === 'hour' ? hour12 : minVal;
+  // For minutes, snap to nearest 5 for highlight
+  const selNumSnapped = mode === 'minute' && selNum !== null
+    ? minuteNums.reduce((a, b) => Math.abs(b - selNum) < Math.abs(a - selNum) ? b : a)
+    : selNum;
+  const selPos = selNumSnapped !== null
+    ? getPos(nums.indexOf(selNumSnapped), nums.length, radius)
+    : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       {/* Clock face */}
       <svg width={170} height={170}>
-        {/* Face */}
         <circle cx={cx} cy={cy} r={radius + 18} fill="#0d0820" stroke="#2d1f4a" strokeWidth={1} />
         <circle cx={cx} cy={cy} r={3} fill="#a855f7" />
-        {/* Hand */}
         {selPos && <line x1={cx} y1={cy} x2={selPos.x} y2={selPos.y} stroke="#a855f7" strokeWidth={2} strokeLinecap="round" />}
-        {/* Numbers */}
         {nums.map((n, i) => {
           const pos = getPos(i, nums.length, radius);
-          const selected = n === selNum;
+          const selected = n === selNumSnapped;
           return (
             <g key={n} onClick={() => mode === 'hour' ? pickHour(n) : pickMinute(n)} style={{ cursor: 'pointer' }}>
               <circle cx={pos.x} cy={pos.y} r={16} fill={selected ? '#a855f7' : 'transparent'} />
@@ -357,6 +364,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
   const [selDate, setSelDate] = useState('');
   const [selTime, setSelTime] = useState('');
   const [ampm, setAmpm] = useState('AM');
+  const [clockMode, setClockMode] = useState('hour'); // 'hour' | 'minute'
   const [duration, setDuration] = useState(String(meeting.duration_minutes || 30));
   const [notes, setNotes]  = useState(meeting.notes || '');
   const [saving, setSaving] = useState(false);
@@ -465,7 +473,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
 
           {/* Clock */}
           <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <ClockTimePicker value={selTime} onChange={setSelTime} ampm={ampm} onAmpmChange={setAmpm} />
+            <ClockTimePicker value={selTime} onChange={setSelTime} ampm={ampm} onAmpmChange={setAmpm} mode={clockMode} onModeChange={setClockMode} />
           </div>
         </div>
 
@@ -482,11 +490,64 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
           </div>
           <div>
             <label style={lbl}>Time</label>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, padding: '0 20px', height: 42, boxSizing: 'border-box' }}>
-              {/* HH : MM display — clicking switches clock mode */}
-              <span style={{ fontSize: 22, fontWeight: 700, cursor: 'pointer', color: '#e2d9f3', letterSpacing: 1 }}>
-                {selTime ? (() => { const [hh,mm] = selTime.split(':').map(Number); const h12 = hh % 12 || 12; return `${String(h12).padStart(2,'0')}:${String(mm).padStart(2,'0')}`; })() : '--:--'}
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center',  justifyContent:'space-between',gap: 8, background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, padding: '0 12px', height: 42, boxSizing: 'border-box', width: '100%' }}>
+              {/* HH : MM — editable inputs + clock sync */}
+              {(() => {
+                const [hh, mm] = selTime ? selTime.split(':').map(Number) : [null, null];
+                const h12 = hh !== null ? (hh % 12 || 12) : null;
+                const hStr = h12 !== null ? String(h12).padStart(2,'0') : '';
+                const mStr = mm !== null ? String(mm).padStart(2,'0') : '';
+                const inputStyle = {
+                  width: 28, background: 'transparent', border: 'none', outline: 'none',
+                  fontSize: 16, fontWeight: 700, color: '#e2d9f3', textAlign: 'center',
+                  padding: 0, caretColor: '#a855f7',
+                  MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield',
+                };
+                const commitFromInputs = (hVal, mVal, ap) => {
+                  const h = parseInt(hVal);
+                  const m = parseInt(mVal);
+                  if (isNaN(h) || isNaN(m)) return;
+                  const clampH = Math.min(Math.max(h, 1), 12);
+                  const clampM = Math.min(Math.max(m, 0), 59);
+                  let h24 = clampH % 12;
+                  if (ap === 'PM') h24 += 12;
+                  setSelTime(`${String(h24).padStart(2,'0')}:${String(clampM).padStart(2,'0')}`);
+                };
+                return (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <input
+                      type="number" min={1} max={12}
+                      value={hStr}
+                      placeholder="HH"
+                      onFocus={() => setClockMode('hour')}
+                      onChange={e => {
+                        const v = e.target.value.slice(-2);
+                        if (v === '' || /^\d{1,2}$/.test(v)) {
+                          const mCur = mm !== null ? String(mm).padStart(2,'0') : '00';
+                          commitFromInputs(v || '12', mCur, ampm);
+                          if (v.length === 2) setClockMode('minute');
+                        }
+                      }}
+                      style={{ ...inputStyle, color: clockMode === 'hour' ? '#a855f7' : '#e2d9f3' }}
+                    />
+                    <span style={{ color: '#6b7280', fontSize: 16, fontWeight: 700 }}>:</span>
+                    <input
+                      type="number" min={0} max={59}
+                      value={mStr}
+                      placeholder="MM"
+                      onFocus={() => setClockMode('minute')}
+                      onChange={e => {
+                        const v = e.target.value.slice(-2);
+                        if (v === '' || /^\d{1,2}$/.test(v)) {
+                          const hCur = h12 !== null ? String(h12) : '12';
+                          commitFromInputs(hCur, v || '0', ampm);
+                        }
+                      }}
+                      style={{ ...inputStyle, color: clockMode === 'minute' ? '#a855f7' : '#e2d9f3' }}
+                    />
+                  </span>
+                );
+              })()}
               {/* AM / PM toggle buttons */}
               <div style={{ display: 'flex', flexDirection: 'row', gap: 3, marginLeft: 6 }}>
                 {['AM','PM'].map(ap => (
