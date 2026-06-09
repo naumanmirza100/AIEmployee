@@ -2037,35 +2037,27 @@ from django.views.decorators.http import require_GET
 def sdr_meeting_lead_approve(request, approval_token):
     """
     Lead clicks 'Yes, this time works' link from approval email.
-    Marks meeting as scheduled, sends confirmation email, shows a friendly HTML page.
+    Marks meeting as scheduled, sends confirmation email, redirects to booking page confirmed state.
     """
-    from django.http import HttpResponse
+    from django.http import HttpResponseRedirect, HttpResponse
+    from django.conf import settings as _settings
 
-    def _html_page(title, icon, heading, body_lines, color='#10b981'):
-        lines_html = ''.join(f'<p style="margin:8px 0;color:#6b7280;font-size:15px;">{l}</p>' for l in body_lines)
-        return HttpResponse(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>{title}</title></head>
-        <body style="margin:0;padding:0;background:#0d0820;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-        <div style="background:linear-gradient(145deg,#1a1030,#120d24);border:1px solid #2d1f4a;border-radius:20px;padding:48px 40px;max-width:480px;width:90%;text-align:center;box-shadow:0 25px 50px rgba(0,0,0,0.5);">
-          <div style="font-size:56px;margin-bottom:20px;">{icon}</div>
-          <h1 style="margin:0 0 16px;color:#e2d9f3;font-size:24px;font-weight:700;">{heading}</h1>
-          {lines_html}
-        </div></body></html>""")
+    def _site_url():
+        return (
+            getattr(_settings, 'SITE_URL', None)
+            or os.environ.get('SITE_URL', 'http://localhost:8000')
+        ).rstrip('/')
 
     try:
         meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
             approval_token=approval_token
         )
     except SDRMeeting.DoesNotExist:
-        return _html_page('Invalid Link', '❌', 'Invalid or Expired Link',
-                          ['This link is no longer valid.', 'Please contact the sender for a new meeting invitation.'])
+        return HttpResponse('Invalid or expired link.', status=404, content_type='text/plain')
 
+    # Already confirmed — redirect to confirmed state on booking page
     if meeting.status not in ('awaiting_approval', 'pending'):
-        from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
-        scheduled_str = format_datetime_with_timezone(meeting.scheduled_at, meeting.lead_timezone or 'UTC') if meeting.scheduled_at else ''
-        return _html_page('Already Confirmed', '✅', 'Meeting Already Confirmed',
-                          [f'Your meeting is confirmed.', scheduled_str])
+        return HttpResponseRedirect(f"{_site_url()}/book/{meeting.booking_token}/?approved=1")
 
     meeting.status = 'scheduled'
     meeting.confirmed_at = timezone.now()
@@ -2085,25 +2077,20 @@ def sdr_meeting_lead_approve(request, approval_token):
         except Exception as exc:
             logger.warning("Confirmation email after approval failed for meeting %s: %s", meeting.id, exc)
 
-    from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
-    tz_name = meeting.lead_timezone or 'UTC'
-    scheduled_str = format_datetime_with_timezone(meeting.scheduled_at, tz_name) if meeting.scheduled_at else ''
-
-    return _html_page(
-        'Meeting Confirmed', '🎉', "You're all set!",
-        [
-            f'<strong style="color:#e2d9f3;">{scheduled_str}</strong>',
-            'A confirmation email is on its way to you.',
-            'Looking forward to speaking with you!',
-        ]
-    )
+    from django.http import HttpResponseRedirect
+    from django.conf import settings as _settings
+    site_url = (
+        getattr(_settings, 'SITE_URL', None)
+        or os.environ.get('SITE_URL', 'http://localhost:8000')
+    ).rstrip('/')
+    return HttpResponseRedirect(f"{site_url}/book/{meeting.booking_token}/?approved=1")
 
 
 @csrf_exempt
 @require_GET
 def sdr_meeting_lead_suggest(request, approval_token):
     """
-    Lead clicks 'Suggest another time' link — redirect them to the booking page.
+    Lead clicks 'Suggest another time' link — redirect them to the Django booking page.
     """
     from django.http import HttpResponse, HttpResponseRedirect
 
@@ -2113,11 +2100,11 @@ def sdr_meeting_lead_suggest(request, approval_token):
         return HttpResponse('Invalid or expired link.', status=404)
 
     from django.conf import settings as _settings
-    frontend_url = (
-        getattr(_settings, 'FRONTEND_URL', None)
-        or os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+    site_url = (
+        getattr(_settings, 'SITE_URL', None)
+        or os.environ.get('SITE_URL', 'http://localhost:8000')
     ).rstrip('/')
-    booking_url = f"{frontend_url}/book/{meeting.booking_token}"
+    booking_url = f"{site_url}/book/{meeting.booking_token}/"
 
     return HttpResponseRedirect(booking_url)
 
@@ -2498,7 +2485,7 @@ def sdr_booking_info(request, token):
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
 
-    if meeting.status not in ('pending',):
+    if meeting.status not in ('pending', 'awaiting_approval'):
         return Response({
             'error': 'already_booked',
             'message': 'This meeting has already been scheduled.',
@@ -2532,7 +2519,7 @@ def sdr_booking_confirm(request, token):
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
 
-    if meeting.status != 'pending':
+    if meeting.status not in ('pending', 'awaiting_approval'):
         return Response({
             'error': 'already_booked',
             'message': 'This time slot has already been booked.',
@@ -2568,7 +2555,7 @@ def sdr_booking_confirm(request, token):
         meet_link = f"https://meet.jit.si/SDR-{room_slug}"
 
     # Claim the slot atomically — prevent double-booking if the page is submitted twice
-    rows = SDRMeeting.objects.filter(id=meeting.id, status='pending').update(
+    rows = SDRMeeting.objects.filter(id=meeting.id, status__in=['pending', 'awaiting_approval']).update(
         status='scheduled',
         scheduled_at=scheduled_at,
         confirmed_at=timezone.now(),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { getBookingInfo, confirmBooking } from '@/services/aiSdrService';
 
 // ---------------------------------------------------------------------------
@@ -151,6 +151,8 @@ function Calendar({ selectedDay, onSelect }) {
 
 export default function MeetingBookingPage() {
   const { token } = useParams();
+  const [searchParams] = useSearchParams();
+  const isApproved = searchParams.get('approved') === '1';
 
   const [info, setInfo]         = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -163,10 +165,30 @@ export default function MeetingBookingPage() {
 
   useEffect(() => {
     getBookingInfo(token)
-      .then(setInfo)
-      .catch(err => setError(err?.message || err?.error || 'Booking link not found.'))
+      .then(data => {
+        setInfo(data);
+        // Lead clicked "Yes" in approval email — show confirmed state directly
+        if (isApproved) {
+          setConfirmed({
+            title: data.title,
+            scheduled_at: null,   // already confirmed server-side
+            duration_minutes: data.duration_minutes,
+            sender_name: data.sender_name,
+            meet_link: null,
+          });
+        }
+      })
+      .catch(err => {
+        // If meeting is already booked and approved=1, still show confirmed
+        if (isApproved) {
+          setConfirmed({ title: 'Your Meeting', scheduled_at: null, duration_minutes: null, sender_name: '', meet_link: null });
+          setLoading(false);
+          return;
+        }
+        setError(err?.message || err?.error || 'Booking link not found.');
+      })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [token, isApproved]);
 
   const handleConfirm = async () => {
     if (!selectedDay || !selectedTime || submitting) return;
@@ -221,19 +243,26 @@ export default function MeetingBookingPage() {
         <h1 style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 24, margin: '0 0 8px' }}>
           You're confirmed!
         </h1>
-        <p style={{ color: '#9ca3af', fontSize: 14, margin: '0 0 4px' }}>
-          <strong style={{ color: '#e2d9f3' }}>{confirmed.title}</strong>
+        <p style={{ color: '#9ca3af', fontSize: 14, margin: '0 0 20px' }}>
+          A confirmation email is on its way to you.
         </p>
-        <div style={{ margin: '20px 0', padding: '16px 20px', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 12 }}>
-          <p style={{ color: '#a855f7', fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>
-            {fmtDate(confirmed.scheduled_at)}
-          </p>
-          <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
-            {confirmed.duration_minutes} minutes · with {confirmed.sender_name || 'our team'}
+
+        <div style={{ margin: '0 0 20px', padding: '16px 20px', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 12 }}>
+          {confirmed.scheduled_at && (
+            <p style={{ color: '#a855f7', fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>
+              {fmtDate(confirmed.scheduled_at)}
+            </p>
+          )}
+          {confirmed.duration_minutes && (
+            <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
+              {confirmed.duration_minutes} minutes · with {confirmed.sender_name || 'our team'}
+            </p>
+          )}
+          <p style={{ color: '#6b7280', fontSize: 13, margin: confirmed.scheduled_at ? '4px 0 0' : 0 }}>
+            Your video call link will be included in that email.
           </p>
         </div>
 
-        {/* Meeting join link */}
         {confirmed.meet_link && (
           <div style={{ margin: '0 0 20px', padding: '14px 20px', background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 12 }}>
             <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 10px' }}>Your video call link</p>
@@ -244,25 +273,16 @@ export default function MeetingBookingPage() {
               style={{
                 display: 'inline-block',
                 background: 'linear-gradient(90deg,#10b981,#059669)',
-                color: '#fff',
-                fontWeight: 700,
-                fontSize: 14,
-                padding: '10px 24px',
-                borderRadius: 9,
-                textDecoration: 'none',
+                color: '#fff', fontWeight: 700, fontSize: 14,
+                padding: '10px 24px', borderRadius: 9, textDecoration: 'none',
               }}
             >
-              Join Meeting
+              🎥 Join Meeting
             </a>
-            <p style={{ color: '#374151', fontSize: 11, margin: '10px 0 0', wordBreak: 'break-all' }}>
-              {confirmed.meet_link}
-            </p>
           </div>
         )}
 
-        <p style={{ color: '#4b5563', fontSize: 12 }}>
-          A confirmation email has been sent with the meeting link. See you then!
-        </p>
+        <p style={{ color: '#4b5563', fontSize: 12 }}>See you then!</p>
       </div>
     </div>
   );
