@@ -911,6 +911,12 @@ def list_interviews(request):
                 'scheduled_datetime': interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else None,
                 'selected_slot': interview.selected_slot,
                 'confirmation_token': interview.confirmation_token,
+                'cv_record_id': interview.cv_record_id,
+                'feedback_rating': interview.feedback_rating,
+                'feedback_notes': interview.feedback_notes,
+                'feedback_strengths': interview.feedback_strengths,
+                'feedback_improvements': interview.feedback_improvements,
+                'feedback_submitted_at': interview.feedback_submitted_at.isoformat() if interview.feedback_submitted_at else None,
                 'created_at': interview.created_at.isoformat() if interview.created_at else None,
             })
         
@@ -1041,6 +1047,60 @@ def update_interview(request, interview_id):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def submit_interview_feedback(request, interview_id):
+    """Submit or update post-interview feedback"""
+    from django.utils import timezone as tz
+    try:
+        company_user = request.user
+        interview = Interview.objects.filter(
+            id=interview_id,
+            company_user=company_user
+        ).first()
+        if not interview:
+            return Response({'status': 'error', 'message': 'Interview not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        rating = request.data.get('feedback_rating')
+        notes = (request.data.get('feedback_notes') or '').strip() or None
+        strengths = (request.data.get('feedback_strengths') or '').strip() or None
+        improvements = (request.data.get('feedback_improvements') or '').strip() or None
+
+        if rating is not None:
+            try:
+                rating = int(rating)
+                if not (1 <= rating <= 5):
+                    return Response({'status': 'error', 'message': 'Rating must be between 1 and 5'}, status=status.HTTP_400_BAD_REQUEST)
+            except (TypeError, ValueError):
+                return Response({'status': 'error', 'message': 'Invalid rating'}, status=status.HTTP_400_BAD_REQUEST)
+
+        interview.feedback_rating = rating
+        interview.feedback_notes = notes
+        interview.feedback_strengths = strengths
+        interview.feedback_improvements = improvements
+        if not interview.feedback_submitted_at:
+            interview.feedback_submitted_at = tz.now()
+        interview.save()
+
+        return Response({
+            'status': 'success',
+            'message': 'Feedback saved',
+            'data': {
+                'feedback_rating': interview.feedback_rating,
+                'feedback_notes': interview.feedback_notes,
+                'feedback_strengths': interview.feedback_strengths,
+                'feedback_improvements': interview.feedback_improvements,
+                'feedback_submitted_at': interview.feedback_submitted_at.isoformat() if interview.feedback_submitted_at else None,
+            }
+        })
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.exception(f"Error saving interview feedback: {e}")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -1481,6 +1541,102 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
                 "error": str(e),
             })
         return ('error', False)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_cv_record_detail(request, record_id):
+    """Full candidate profile: CV data + linked job application + interview history"""
+    from recruitment_agent.models import JobApplication
+    try:
+        company_user = request.user
+        cv = CVRecord.objects.filter(
+            id=record_id,
+            job_description__company_user=company_user
+        ).select_related('job_description').first()
+
+        if not cv:
+            return Response({'status': 'error', 'message': 'Record not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        parsed_data = json.loads(cv.parsed_json) if cv.parsed_json else {}
+        insights_data = json.loads(cv.insights_json) if cv.insights_json else {}
+        enriched_data = json.loads(cv.enriched_json) if cv.enriched_json else {}
+        qualification_data = json.loads(cv.qualification_json) if cv.qualification_json else {}
+
+        # Find linked job application by email
+        application = None
+        candidate_email = (parsed_data.get('email') or '').strip().lower()
+        if candidate_email and cv.job_description_id:
+            app_obj = JobApplication.objects.filter(
+                job_id=cv.job_description_id,
+                email__iexact=candidate_email
+            ).first()
+            if app_obj:
+                application = {
+                    'id': app_obj.id,
+                    'first_name': app_obj.first_name,
+                    'last_name': app_obj.last_name,
+                    'email': app_obj.email,
+                    'phone': app_obj.phone,
+                    'current_location': app_obj.current_location,
+                    'salary_expectation': app_obj.salary_expectation,
+                    'education': app_obj.education,
+                    'previous_company': app_obj.previous_company,
+                    'previous_salary': app_obj.previous_salary,
+                    'linkedin_url': app_obj.linkedin_url,
+                    'github_url': app_obj.github_url,
+                    'other_links': app_obj.other_links,
+                    'cover_letter': app_obj.cover_letter,
+                    'cv_file_name': app_obj.cv_file_name,
+                    'status': app_obj.status,
+                    'applied_at': app_obj.applied_at.isoformat() if app_obj.applied_at else None,
+                }
+
+        # Find linked interviews
+        interviews_list = []
+        for iv in Interview.objects.filter(cv_record=cv).order_by('-created_at'):
+            interviews_list.append({
+                'id': iv.id,
+                'status': iv.status,
+                'outcome': iv.outcome or '',
+                'interview_type': iv.interview_type,
+                'scheduled_datetime': iv.scheduled_datetime.isoformat() if iv.scheduled_datetime else None,
+                'notes': iv.notes,
+                'feedback_rating': iv.feedback_rating,
+                'feedback_notes': iv.feedback_notes,
+                'feedback_strengths': iv.feedback_strengths,
+                'feedback_improvements': iv.feedback_improvements,
+                'feedback_submitted_at': iv.feedback_submitted_at.isoformat() if iv.feedback_submitted_at else None,
+                'created_at': iv.created_at.isoformat() if iv.created_at else None,
+            })
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': cv.id,
+                'file_name': cv.file_name,
+                'role_fit_score': cv.role_fit_score,
+                'rank': cv.rank,
+                'qualification_decision': cv.qualification_decision,
+                'qualification_confidence': cv.qualification_confidence,
+                'qualification_priority': cv.qualification_priority,
+                'job_description_id': cv.job_description_id,
+                'job_description_title': cv.job_description.title if cv.job_description else None,
+                'parsed': parsed_data,
+                'insights': insights_data,
+                'enriched': enriched_data,
+                'qualified': qualification_data,
+                'created_at': cv.created_at.isoformat() if cv.created_at else None,
+                'application': application,
+                'interviews': interviews_list,
+            }
+        })
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting CV record detail: {e}")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

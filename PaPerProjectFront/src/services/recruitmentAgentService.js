@@ -585,6 +585,32 @@ export const exportInterviewsCSV = async (jobId = null) => {
   URL.revokeObjectURL(a.href);
 };
 
+/**
+ * Get full candidate profile (CV data + linked application + interviews)
+ */
+export const getCVRecordDetail = async (recordId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/cv-records/${recordId}`);
+    return response;
+  } catch (error) {
+    console.error('Get CV record detail error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Submit or update post-interview feedback
+ */
+export const submitInterviewFeedback = async (interviewId, feedbackData) => {
+  try {
+    const response = await companyApi.patch(`/recruitment/interviews/${interviewId}/feedback`, feedbackData);
+    return response;
+  } catch (error) {
+    console.error('Submit interview feedback error:', error);
+    throw error;
+  }
+};
+
 // ========== AI Graph Generator APIs ==========
 
 /**

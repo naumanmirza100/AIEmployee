@@ -355,7 +355,14 @@ class Interview(models.Model):
     
     # Additional notes
     notes = models.TextField(null=True, blank=True)
-    
+
+    # Post-interview feedback
+    feedback_rating = models.IntegerField(null=True, blank=True, help_text="Interviewer rating 1-5")
+    feedback_notes = models.TextField(null=True, blank=True, help_text="General feedback notes")
+    feedback_strengths = models.TextField(null=True, blank=True, help_text="Candidate strengths observed")
+    feedback_improvements = models.TextField(null=True, blank=True, help_text="Areas for improvement")
+    feedback_submitted_at = models.DateTimeField(null=True, blank=True, help_text="When interviewer submitted feedback")
+
     class Meta:
         db_table = 'ppp_recruitment_agent_interview'
         ordering = ['-created_at']
