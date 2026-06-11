@@ -149,7 +149,25 @@ def assign_managed_key(request):
     If `request_id` is passed, the matching KeyRequest is marked approved.
     Tokens always reset weekly when renewal_period != 'none'.
     """
-    from datetime import timedelta as _td
+    try:
+        return _assign_managed_key_impl(request)
+    except Exception as exc:
+        logger.error(
+            "assign_managed_key failed (user=%s, payload=%s): %s",
+            getattr(request.user, 'id', None), request.data, exc,
+            exc_info=True,
+        )
+        return Response(
+            {
+                'status': 'error',
+                'message': 'Could not assign the managed key. Please try again.',
+                'detail': str(exc),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+def _assign_managed_key_impl(request):
     company_id = request.data.get('company_id')
     agent_name = (request.data.get('agent_name') or '').strip()
     provider = (request.data.get('provider') or 'openai').strip()
@@ -177,6 +195,27 @@ def assign_managed_key(request):
     except (UnicodeEncodeError, UnicodeDecodeError):
         return Response({'status': 'error', 'message': 'API key contains invalid characters. Paste only the plain key text.'},
                         status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate the pasted key against the provider BEFORE saving. Without this
+    # a typo'd or wrong-provider key would be saved silently, and the company
+    # user would only see the failure later — at first LLM call — as
+    # "managed key was rejected by the provider". Reuses the same provider
+    # probe used for BYOK validation. On timeout/network errors the helper
+    # returns valid=True so a transient outage does not block legitimate keys.
+    from api.views.company_api_keys import _validate_byok_key
+    is_valid, validation_error = _validate_byok_key(provider, api_key)
+    if not is_valid:
+        return Response(
+            {
+                'status': 'error',
+                'message': (
+                    f'{validation_error} '
+                    f'Make sure the key matches the selected provider ({provider}).'
+                ),
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     try:
         company = Company.objects.get(pk=company_id)
     except Company.DoesNotExist:

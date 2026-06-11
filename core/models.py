@@ -2083,6 +2083,8 @@ class KeyRequest(models.Model):
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    preferred_duration = models.CharField(max_length=10, default='monthly')
+    is_renewal = models.BooleanField(default=False)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     linked_key_id = models.BigIntegerField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)

@@ -23,14 +23,24 @@ SYSTEM_PROMPT = (
     "You are the Operations Knowledge Assistant for a company's internal document library. "
     "You answer questions strictly based on the provided document excerpts (contracts, invoices, "
     "reports, memos, policies, manuals, spreadsheets, presentations).\n\n"
-    "FORMATTING RULES — always follow:\n"
+    "SCOPE RULES — read these first:\n"
+    "- Your ONLY job is answering questions about the user's uploaded operations documents.\n"
+    "- If the question is personal, conversational, or unrelated to the documents (e.g. "
+    "\"do you have kids\", \"how are you\", \"what's the weather\", \"tell me a joke\", "
+    "questions about yourself, opinions, or general knowledge), do NOT summarise the document "
+    "excerpts. Instead, reply with a brief, friendly one-liner explaining that you only answer "
+    "questions about the uploaded documents, and suggest 1–2 example questions the user could ask.\n"
+    "- If the provided excerpts clearly do not address the user's question, say so plainly. Do "
+    "NOT pad the answer with unrelated content from the excerpts just because it was retrieved.\n\n"
+    "FORMATTING RULES — apply only when actually answering a document question:\n"
     "1. Respond in GitHub-flavored Markdown.\n"
     "2. Start with a one-line direct answer (no heading).\n"
     "3. Then use `## Section` headings and `### Sub-section` sub-headings to organise details.\n"
     "4. Use short bullet lists (`- item`) for key points, numbered lists for steps.\n"
     "5. Use **bold** for important terms, numbers, dates, and names.\n"
     "6. If the answer includes tabular data, format as a Markdown table.\n"
-    "7. At the end, add a `## Sources` section listing the document titles and page numbers you used.\n\n"
+    "7. At the end, add a `## Sources` section listing the document titles and page numbers you used.\n"
+    "   Do NOT include a Sources section when refusing an off-topic question.\n\n"
     "CONTENT RULES:\n"
     "- Only use facts present in the excerpts. If the answer is not in the excerpts, say so clearly "
     "and suggest what document the user should upload.\n"
@@ -59,6 +69,44 @@ def _tokenize(text: str) -> List[str]:
         return []
     words = re.findall(r"[A-Za-z0-9]{2,}", text.lower())
     return [w for w in words if w not in _STOPWORDS]
+
+
+# Patterns for clearly off-topic / conversational questions that should never trigger
+# a document summary. Kept narrow to avoid catching legitimate doc queries like
+# "do you have any contracts about X" — those mention doc-domain words.
+_OFF_TOPIC_PATTERNS = [
+    re.compile(r"\b(do|did|have|had)\s+you\s+(have|own|get|got)\s+(any\s+)?(kids?|children|"
+               r"family|wife|husband|spouse|partner|girlfriend|boyfriend|pets?|dogs?|cats?|"
+               r"siblings?|brothers?|sisters?|parents?|mom|dad|mother|father)\b", re.I),
+    re.compile(r"\b(are|were|r)\s+you\s+(married|single|divorced|alive|dead|human|real|"
+               r"sentient|conscious|happy|sad|tired|bored|ok|okay|fine|sure|there|here|"
+               r"a\s+(bot|robot|ai|machine|person|human|man|woman|girl|boy))\b", re.I),
+    re.compile(r"\bhow\s+(are|r|do|did)\s+you(?:\s+(doing|feel|feeling|today))?\b", re.I),
+    re.compile(r"\bhow'?s\s+(it\s+going|your\s+day|life)\b", re.I),
+    re.compile(r"\b(what'?s|what\s+is|what\s+are)\s+your\s+(name|age|favou?rite|"
+               r"opinion|view|gender|religion|hobby|job|salary)\b", re.I),
+    re.compile(r"\bwho\s+(are|made|built|created|trained)\s+you\b", re.I),
+    re.compile(r"\bwhat\s+are\s+you\b", re.I),
+    re.compile(r"\btell\s+me\s+(a\s+)?(joke|story|secret|riddle|poem|something\s+funny)\b", re.I),
+    re.compile(r"\b(what'?s|what\s+is|how'?s|how\s+is)\s+the\s+weather\b", re.I),
+    re.compile(r"\bdo\s+you\s+(like|love|hate|enjoy|prefer|believe|think|feel|dream|sleep|eat|"
+               r"drink|exist|live)\b", re.I),
+    re.compile(r"\bcan\s+you\s+(sing|dance|cook|drive|swim|fly|cry|laugh|feel|dream)\b", re.I),
+    # Pure greetings / small talk with nothing else of substance. Allow a short
+    # trailing address like "hi there" / "hello team" but not a full sentence.
+    re.compile(r"^\s*(hi|hello|hey|yo|sup|hiya|howdy|greetings|good\s+(morning|afternoon|"
+               r"evening|night))(\s+(there|everyone|all|team|guys|folks|friend|buddy))?"
+               r"[\s.!?,]*$", re.I),
+    re.compile(r"^\s*(thanks|thank\s+you|thx|ty|cheers|bye|goodbye|see\s+ya|cya)[\s.!?,]*$", re.I),
+]
+
+
+def _looks_off_topic(question: str) -> bool:
+    """True for personal, conversational, or general-knowledge questions that have
+    nothing to do with the user's uploaded operations documents."""
+    if not question:
+        return False
+    return any(pat.search(question) for pat in _OFF_TOPIC_PATTERNS)
 
 
 def _score_chunk(chunk_text: str, question_tokens: List[str]) -> int:
@@ -125,8 +173,15 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             if meta_answer is not None:
                 return meta_answer
 
+            # Fast path: obvious off-topic / conversational questions — never feed
+            # document context to the LLM, just politely redirect.
+            if _looks_off_topic(question):
+                return self._off_topic_response(question, company_id)
+
             # Retrieve relevant chunks
-            context_text, sources = self._build_context(question, company_id, document_ids)
+            context_text, sources, is_relevant = self._build_context(
+                question, company_id, document_ids,
+            )
 
             if not context_text:
                 return {
@@ -142,14 +197,37 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                     'suggested_title': question[:60],
                 }
 
-            # Build prompt
+            # Build prompt — when retrieval was weak (fallback-only), tell the LLM
+            # explicitly so it doesn't pretend the excerpts answer the question.
             history_block = self._format_history(chat_history or [])
+            if is_relevant:
+                context_header = "RELEVANT DOCUMENT EXCERPTS:"
+                instructions = (
+                    "Answer the question using the formatting and content rules. "
+                    "Cite sources in the final `## Sources` section."
+                )
+            else:
+                context_header = (
+                    "NOTE: No document excerpts matched the user's question. The text "
+                    "below is just generic context from the most recent documents — it "
+                    "very likely does NOT answer the question.\n\n"
+                    "RECENT DOCUMENT CONTEXT (for orientation only):"
+                )
+                instructions = (
+                    "Because no excerpts actually matched the question:\n"
+                    "- If the question is off-topic or conversational, reply with a brief "
+                    "one-liner explaining you only answer questions about uploaded "
+                    "documents, and suggest 1–2 example doc questions.\n"
+                    "- Otherwise, say plainly that none of the uploaded documents address "
+                    "the question and suggest what the user could upload or ask instead.\n"
+                    "- Do NOT summarise the recent-document context as if it were the answer. "
+                    "Do NOT include a `## Sources` section in this case."
+                )
             prompt = (
                 f"{history_block}"
                 f"USER QUESTION:\n{question}\n\n"
-                f"RELEVANT DOCUMENT EXCERPTS:\n{context_text}\n\n"
-                "Answer the question using the formatting and content rules. "
-                "Cite sources in the final `## Sources` section."
+                f"{context_header}\n{context_text}\n\n"
+                f"{instructions}"
             )
 
             llm_response = self._call_llm_for_reasoning(
@@ -173,8 +251,10 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                     'sources': sources,
                 }
 
-            # Ensure a sources section is present — append if the LLM forgot
-            if '## Sources' not in answer_text and sources:
+            # Ensure a sources section is present — but only when retrieval was
+            # actually relevant. For weak/fallback retrieval we deliberately omit
+            # sources so the user isn't misled into thinking those docs answered them.
+            if is_relevant and '## Sources' not in answer_text and sources:
                 answer_text += '\n\n## Sources\n' + '\n'.join(
                     f"- **{s.get('title')}** (page {s.get('page') or 'n/a'})" for s in sources
                 )
@@ -182,7 +262,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             return {
                 'success': True,
                 'answer': answer_text,
-                'sources': sources,
+                'sources': sources if is_relevant else [],
                 'suggested_title': self._suggest_title(question),
             }
 
@@ -269,6 +349,43 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         }
 
     # ──────────────────────────────────────────────
+    # Off-topic / conversational responses
+    # ──────────────────────────────────────────────
+    def _off_topic_response(self, question: str, company_id: int) -> Dict:
+        """Friendly redirect for personal / conversational questions. Suggests 1–2
+        example questions grounded in the user's actual documents when possible."""
+        recent_titles: List[str] = []
+        try:
+            recent_titles = list(
+                OperationsDocument.objects
+                .filter(company_id=company_id, is_processed=True)
+                .order_by('-created_at')
+                .values_list('title', flat=True)[:2]
+            )
+        except Exception:
+            recent_titles = []
+        recent_titles = [t for t in recent_titles if t]
+
+        if recent_titles:
+            examples = ' or '.join(f"*\"What does **{t}** cover?\"*" for t in recent_titles)
+            suggestion = f"For example, you could ask: {examples}"
+        else:
+            suggestion = (
+                "Try asking something like *\"What documents do I have?\"* or upload a "
+                "document from the **Documents** tab to get started."
+            )
+
+        return {
+            'success': True,
+            'answer': (
+                "I'm the Operations Knowledge Assistant — I can only answer questions "
+                f"about your uploaded documents, so I can't help with that one.\n\n{suggestion}"
+            ),
+            'sources': [],
+            'suggested_title': self._suggest_title(question),
+        }
+
+    # ──────────────────────────────────────────────
     # Context building / retrieval
     # ──────────────────────────────────────────────
     def _build_context(
@@ -276,11 +393,17 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         question: str,
         company_id: int,
         document_ids: Optional[List[int]],
-    ) -> Tuple[str, List[Dict]]:
-        """Keyword-based retrieval over OperationsDocumentChunk."""
+    ) -> Tuple[str, List[Dict], bool]:
+        """Keyword-based retrieval over OperationsDocumentChunk.
+
+        Returns (context_text, sources, is_relevant) where is_relevant is True only
+        when at least one chunk actually matched the question's keywords. When
+        is_relevant is False, the context (if any) is recent-doc fallback material
+        that should NOT be presented as if it answered the question.
+        """
         tokens = _tokenize(question)
         if not tokens:
-            return '', []
+            return '', [], False
 
         chunk_qs = OperationsDocumentChunk.objects.filter(
             document__company_id=company_id,
@@ -303,7 +426,8 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
 
         # Fallback: if no keyword matches, grab summary/parsed_text of most recent docs
         if not scored:
-            return self._fallback_context(company_id, document_ids, tokens)
+            fb_text, fb_sources = self._fallback_context(company_id, document_ids, tokens)
+            return fb_text, fb_sources, False
 
         scored.sort(key=lambda x: x[0], reverse=True)
         top = scored[: self.MAX_CHUNKS]
@@ -339,7 +463,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             seen.add(key)
             unique_sources.append(s)
 
-        return '\n---\n'.join(parts), unique_sources
+        return '\n---\n'.join(parts), unique_sources, True
 
     def _fallback_context(
         self,
