@@ -10,6 +10,7 @@ import csv
 import io
 import json
 import logging
+import os
 from datetime import timedelta
 
 from django.conf import settings
@@ -38,8 +39,17 @@ logger = logging.getLogger(__name__)
 # Per-request agent factories — pass company so keys resolve per-company
 # --------------------------------------------------------------------------
 
-def _get_research_agent(company) -> LeadResearchAgent:
+def _get_research_agent(company, company_user=None) -> LeadResearchAgent:
     """Create a LeadResearchAgent with the correct company key context."""
+    if company_user is not None:
+        sdr_settings = SDRAgentSettings.objects.filter(company_user=company_user).first()
+        if sdr_settings:
+            return LeadResearchAgent(
+                company=company,
+                apollo_api_key=sdr_settings.apollo_api_key or None,
+                apify_token=sdr_settings.apify_api_token or None,
+                apify_actor=sdr_settings.apify_actor_id or None,
+            )
     return LeadResearchAgent(company=company)
 
 
@@ -493,7 +503,7 @@ def research_leads(request):
         )
 
         try:
-            researcher = _get_research_agent(company_user.company)
+            researcher = _get_research_agent(company_user.company, company_user=company_user)
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
@@ -925,6 +935,7 @@ def _serialize_meeting(m: SDRMeeting) -> dict:
         'scheduling_email_sent_at': m.scheduling_email_sent_at.isoformat() if m.scheduling_email_sent_at else None,
         'reminder_sent_at': m.reminder_sent_at.isoformat() if m.reminder_sent_at else None,
         'confirmed_at': m.confirmed_at.isoformat() if m.confirmed_at else None,
+        'approval_proposed_at': m.approval_proposed_at.isoformat() if m.approval_proposed_at else None,
         'created_at': m.created_at.isoformat(),
     }
 
@@ -1074,12 +1085,19 @@ def sdr_clear_campaign_leads(request, campaign_id):
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
 
     try:
-        # Cascade: logs and meetings are FK'd to enrollment (on_delete=CASCADE)
-        deleted_count, _ = campaign.enrollments.all().delete()
-        campaign.emails_sent = 0
-        campaign.replies_received = 0
-        campaign.meetings_booked = 0
-        campaign.total_leads = 0
+        # Selective: if enrollment_ids provided, only delete those
+        enrollment_ids = request.data.get('enrollment_ids', [])
+        if enrollment_ids:
+            qs = campaign.enrollments.filter(id__in=enrollment_ids)
+        else:
+            qs = campaign.enrollments.all()
+        deleted_count, _ = qs.delete()
+        # Recount from DB after deletion
+        from django.db.models import Count
+        campaign.total_leads      = campaign.enrollments.count()
+        campaign.emails_sent      = campaign.outreach_logs.filter(status='sent').count()
+        campaign.replies_received = campaign.enrollments.filter(replied_at__isnull=False).count()
+        campaign.meetings_booked  = campaign.meetings.count()
         campaign.save(update_fields=['emails_sent', 'replies_received', 'meetings_booked', 'total_leads'])
         logger.info("SDR: cleared %d enrollments from campaign %s", deleted_count, campaign_id)
         return Response({
@@ -1729,13 +1747,14 @@ def sdr_meetings_list(request):
 
     if request.method == 'GET':
         try:
-            status_filter  = request.GET.get('status', '').strip()
-            campaign_id    = request.GET.get('campaign_id', '').strip()
-            search         = request.GET.get('search', '').strip()
-            temperature_f  = request.GET.get('temperature', '').strip()
-            # active_only=true (default) → strictly active campaigns only
-            # active_only=false          → all campaigns including ended ones
-            active_only    = request.GET.get('active_only', 'true').lower() != 'false'
+            status_filter    = request.GET.get('status', '').strip()
+            campaign_id      = request.GET.get('campaign_id', '').strip()
+            campaign_status  = request.GET.get('campaign_status', '').strip()
+            search           = request.GET.get('search', '').strip()
+            search_field     = request.GET.get('search_field', 'all').strip()
+            temperature_f    = request.GET.get('temperature', '').strip()
+            # active_only=true → strictly active campaigns only; default false = show all
+            active_only    = request.GET.get('active_only', 'false').lower() == 'true'
             try:
                 page      = max(1, int(request.GET.get('page', 1)))
                 page_size = min(100, max(5, int(request.GET.get('page_size', 20))))
@@ -1761,8 +1780,10 @@ def sdr_meetings_list(request):
             # Always exclude orphaned meetings (campaign or enrollment was deleted)
             qs = qs.filter(enrollment__isnull=False, enrollment__campaign__isnull=False)
 
-            # active_only → strictly active campaigns; False → all existing campaigns
-            if active_only:
+            # campaign_status filter overrides active_only when provided
+            if campaign_status:
+                qs = qs.filter(enrollment__campaign__status=campaign_status)
+            elif active_only:
                 qs = qs.filter(enrollment__campaign__status='active')
 
             if status_filter:
@@ -1775,14 +1796,25 @@ def sdr_meetings_list(request):
                 qs = qs.filter(lead__temperature=temperature_f)
 
             if search:
-                qs = qs.filter(
-                    Q(lead__full_name__icontains=search)
-                    | Q(lead__first_name__icontains=search)
-                    | Q(lead__last_name__icontains=search)
-                    | Q(lead__email__icontains=search)
-                    | Q(lead__company_name__icontains=search)
-                    | Q(lead__job_title__icontains=search)
-                )
+                field_map = {
+                    'name':     Q(lead__full_name__icontains=search) | Q(lead__first_name__icontains=search) | Q(lead__last_name__icontains=search),
+                    'email':    Q(lead__email__icontains=search),
+                    'company':  Q(lead__company_name__icontains=search),
+                    'title':    Q(lead__job_title__icontains=search),
+                    'campaign': Q(enrollment__campaign__name__icontains=search),
+                }
+                if search_field in field_map:
+                    qs = qs.filter(field_map[search_field])
+                else:
+                    qs = qs.filter(
+                        Q(lead__full_name__icontains=search)
+                        | Q(lead__first_name__icontains=search)
+                        | Q(lead__last_name__icontains=search)
+                        | Q(lead__email__icontains=search)
+                        | Q(lead__company_name__icontains=search)
+                        | Q(lead__job_title__icontains=search)
+                        | Q(enrollment__campaign__name__icontains=search)
+                    )
 
             total        = qs.count()
             paginator    = Paginator(qs, page_size)
@@ -1846,12 +1878,46 @@ def sdr_meeting_detail(request, meeting_id):
     if request.method == 'PUT':
         try:
             d = request.data
+            old_status = meeting.status
             for field in ('title', 'notes', 'status', 'calendar_link', 'duration_minutes'):
                 if field in d:
                     setattr(meeting, field, d[field])
             if 'scheduled_at' in d:
                 meeting.scheduled_at = d['scheduled_at'] or None
             meeting.save()
+
+            new_status = meeting.status
+            # Send completion thank-you email when status changes to completed
+            if old_status != 'completed' and new_status == 'completed':
+                try:
+                    if meeting.enrollment and meeting.enrollment.campaign:
+                        from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                        MeetingSchedulingAgent(company=company_user.company).send_completion_email(
+                            meeting.enrollment.campaign, meeting.lead, meeting
+                        )
+                except Exception as mail_exc:
+                    logger.warning("Completion email failed for meeting %s: %s", meeting.id, mail_exc)
+
+            # Send "you didn't show up" email when status changes to no_show
+            if old_status != 'no_show' and new_status == 'no_show':
+                try:
+                    if meeting.enrollment and meeting.enrollment.campaign:
+                        campaign = meeting.enrollment.campaign
+                        lead = meeting.lead
+                        outreach = _get_outreach_agent(company_user.company)
+                        subject = "We missed you today"
+                        body = (
+                            f"Hi {lead.first_name or lead.full_name},\n\n"
+                            f"We had a meeting scheduled today but it looks like you weren't able to make it — no worries at all!\n\n"
+                            f"I'd love to find another time that works better for you. "
+                            f"Feel free to pick a new slot here: {campaign.calendar_link or ''}\n\n"
+                            f"Looking forward to connecting,\n"
+                            f"{campaign.sender_name}\n{campaign.sender_title}\n{campaign.sender_company}"
+                        )
+                        outreach.send_email(campaign, lead.email, subject, body)
+                except Exception as mail_exc:
+                    logger.warning("No-show email failed for meeting %s: %s", meeting.id, mail_exc)
+
             return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
         except KeyServiceError:
             raise
@@ -1872,8 +1938,11 @@ def sdr_meeting_detail(request, meeting_id):
 @permission_classes([IsCompanyUserOnly])
 def sdr_confirm_meeting(request, meeting_id):
     """
-    Confirm a meeting at a specific time.
-    Sends confirmation email to lead and updates lead status to meeting_scheduled.
+    Two modes via `send_approval` flag:
+      - send_approval=false (default): confirm immediately, send confirmation email to lead.
+      - send_approval=true: set status to awaiting_approval, email lead asking "does this time work?"
+        Lead clicks Yes → /meetings/<id>/approve/ → status = scheduled
+        Lead clicks Suggest → /meetings/<id>/suggest-time/ → opens booking page
     """
     company_user = request.user
     try:
@@ -1889,37 +1958,169 @@ def sdr_confirm_meeting(request, meeting_id):
         if not scheduled_at:
             return Response({'status': 'error', 'message': 'scheduled_at is required.'}, status=400)
 
+        # Parse ISO string to datetime if needed
+        if isinstance(scheduled_at, str):
+            from django.utils.dateparse import parse_datetime
+            parsed = parse_datetime(scheduled_at)
+            if parsed is None:
+                from datetime import datetime
+                parsed = datetime.fromisoformat(scheduled_at.replace('Z', '+00:00'))
+            scheduled_at = parsed
+
         meeting.scheduled_at = scheduled_at
-        meeting.status = 'scheduled'
-        meeting.confirmed_at = timezone.now()
         if d.get('duration_minutes'):
             meeting.duration_minutes = int(d['duration_minutes'])
         if d.get('notes'):
             meeting.notes = d['notes']
-        meeting.save()
 
-        # Update lead status
-        lead = meeting.lead
-        lead.status = 'meeting_scheduled'
-        lead.save(update_fields=['status'])
+        send_approval = str(d.get('send_approval', 'false')).lower() in ('true', '1', 'yes')
+        # Use browser timezone for formatting the proposed time in the email
+        # so the lead sees the same time the SDR picked in the UI
+        browser_tz = d.get('browser_timezone', '') or meeting.lead_timezone or 'UTC'
+        if meeting.lead_timezone != browser_tz and browser_tz != 'UTC':
+            meeting.lead_timezone = browser_tz
 
-        # Send confirmation email if campaign SMTP configured
-        if meeting.enrollment and meeting.enrollment.campaign:
-            campaign = meeting.enrollment.campaign
-            try:
+        if send_approval:
+            # Lead approval flow — email lead, wait for their confirmation
+            import uuid as _uuid
+            meeting.approval_token = _uuid.uuid4()
+            meeting.status = 'awaiting_approval'
+            meeting.approval_proposed_at = timezone.now()
+            meeting.save()
+
+            if meeting.enrollment and meeting.enrollment.campaign:
+                campaign = meeting.enrollment.campaign
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-                MeetingSchedulingAgent(company=company_user.company).send_confirmation_email(campaign, lead, meeting)
-            except KeyServiceError:
-                raise
-            except Exception as exc:
-                logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+                from ai_sdr_agent.agents.meeting_scheduling_agent import format_datetime_with_timezone
+                tz_name = browser_tz
+                proposed_time_str = format_datetime_with_timezone(meeting.scheduled_at, tz_name)
+                try:
+                    MeetingSchedulingAgent(company=company_user.company).send_approval_request_email(
+                        campaign, meeting.lead, meeting, proposed_time_str
+                    )
+                except KeyServiceError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Approval request email failed for meeting %s: %s", meeting.id, exc)
 
-        return Response({'status': 'success', 'data': _serialize_meeting(meeting)})
+            return Response({
+                'status': 'success',
+                'mode': 'awaiting_approval',
+                'message': 'Approval email sent to lead.',
+                'data': _serialize_meeting(meeting),
+            })
+
+        else:
+            # Direct confirm flow (original behaviour)
+            meeting.status = 'scheduled'
+            meeting.confirmed_at = timezone.now()
+            meeting.save()
+
+            lead = meeting.lead
+            lead.status = 'meeting_scheduled'
+            lead.save(update_fields=['status'])
+
+            if meeting.enrollment and meeting.enrollment.campaign:
+                campaign = meeting.enrollment.campaign
+                try:
+                    from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                    MeetingSchedulingAgent(company=company_user.company).send_confirmation_email(campaign, lead, meeting)
+                except KeyServiceError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Confirmation email failed for meeting %s: %s", meeting.id, exc)
+
+            return Response({'status': 'success', 'mode': 'confirmed', 'data': _serialize_meeting(meeting)})
+
     except KeyServiceError:
         raise
     except Exception as exc:
         logger.error("Confirm meeting error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Meeting — lead approval actions (public, token-based, no auth)
+# ==========================================================================
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
+
+@csrf_exempt
+@require_GET
+def sdr_meeting_lead_approve(request, approval_token):
+    """
+    Lead clicks 'Yes, this time works' link from approval email.
+    Marks meeting as scheduled, sends confirmation email, redirects to booking page confirmed state.
+    """
+    from django.http import HttpResponseRedirect, HttpResponse
+    from django.conf import settings as _settings
+
+    def _site_url():
+        return (
+            getattr(_settings, 'SITE_URL', None)
+            or os.environ.get('SITE_URL', 'http://localhost:8000')
+        ).rstrip('/')
+
+    try:
+        meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
+            approval_token=approval_token
+        )
+    except SDRMeeting.DoesNotExist:
+        return HttpResponse('Invalid or expired link.', status=404, content_type='text/plain')
+
+    # Already confirmed — redirect to confirmed state on booking page
+    if meeting.status not in ('awaiting_approval', 'pending'):
+        return HttpResponseRedirect(f"{_site_url()}/book/{meeting.booking_token}/?approved=1")
+
+    meeting.status = 'scheduled'
+    meeting.confirmed_at = timezone.now()
+    meeting.save(update_fields=['status', 'confirmed_at'])
+
+    lead = meeting.lead
+    lead.status = 'meeting_scheduled'
+    lead.save(update_fields=['status'])
+
+    if meeting.enrollment and meeting.enrollment.campaign:
+        campaign = meeting.enrollment.campaign
+        try:
+            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+            MeetingSchedulingAgent(company=meeting.company_user.company).send_confirmation_email(
+                campaign, lead, meeting
+            )
+        except Exception as exc:
+            logger.warning("Confirmation email after approval failed for meeting %s: %s", meeting.id, exc)
+
+    from django.http import HttpResponseRedirect
+    from django.conf import settings as _settings
+    site_url = (
+        getattr(_settings, 'SITE_URL', None)
+        or os.environ.get('SITE_URL', 'http://localhost:8000')
+    ).rstrip('/')
+    return HttpResponseRedirect(f"{site_url}/book/{meeting.booking_token}/?approved=1")
+
+
+@csrf_exempt
+@require_GET
+def sdr_meeting_lead_suggest(request, approval_token):
+    """
+    Lead clicks 'Suggest another time' link — redirect them to the Django booking page.
+    """
+    from django.http import HttpResponse, HttpResponseRedirect
+
+    try:
+        meeting = SDRMeeting.objects.get(approval_token=approval_token)
+    except SDRMeeting.DoesNotExist:
+        return HttpResponse('Invalid or expired link.', status=404)
+
+    from django.conf import settings as _settings
+    site_url = (
+        getattr(_settings, 'SITE_URL', None)
+        or os.environ.get('SITE_URL', 'http://localhost:8000')
+    ).rstrip('/')
+    booking_url = f"{site_url}/book/{meeting.booking_token}/"
+
+    return HttpResponseRedirect(booking_url)
 
 
 # ==========================================================================
@@ -2298,7 +2499,7 @@ def sdr_booking_info(request, token):
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
 
-    if meeting.status not in ('pending',):
+    if meeting.status not in ('pending', 'awaiting_approval'):
         return Response({
             'error': 'already_booked',
             'message': 'This meeting has already been scheduled.',
@@ -2332,7 +2533,7 @@ def sdr_booking_confirm(request, token):
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
 
-    if meeting.status != 'pending':
+    if meeting.status not in ('pending', 'awaiting_approval'):
         return Response({
             'error': 'already_booked',
             'message': 'This time slot has already been booked.',
@@ -2368,7 +2569,7 @@ def sdr_booking_confirm(request, token):
         meet_link = f"https://meet.jit.si/SDR-{room_slug}"
 
     # Claim the slot atomically — prevent double-booking if the page is submitted twice
-    rows = SDRMeeting.objects.filter(id=meeting.id, status='pending').update(
+    rows = SDRMeeting.objects.filter(id=meeting.id, status__in=['pending', 'awaiting_approval']).update(
         status='scheduled',
         scheduled_at=scheduled_at,
         confirmed_at=timezone.now(),

@@ -685,6 +685,9 @@ urlpatterns = [
     # Google Calendar OAuth (one-time setup)
     re_path(r'^sdr/google-auth/?$', sdr_api.sdr_google_auth_start, name='sdr_google_auth_start'),
     re_path(r'^sdr/google-auth/callback/?$', sdr_api.sdr_google_auth_callback, name='sdr_google_auth_callback'),
+    # Lead approval flow (public, no auth — approval_token in URL)
+    re_path(r'^sdr/meeting-approval/(?P<approval_token>[0-9a-f-]+)/yes/?$', sdr_api.sdr_meeting_lead_approve, name='sdr_meeting_lead_approve'),   # GET
+    re_path(r'^sdr/meeting-approval/(?P<approval_token>[0-9a-f-]+)/suggest/?$', sdr_api.sdr_meeting_lead_suggest, name='sdr_meeting_lead_suggest'),  # GET → redirect to booking
     # Public booking endpoints (no auth — token in URL)
     re_path(r'^sdr/book/(?P<token>[0-9a-f-]+)/?$', sdr_api.sdr_booking_info, name='sdr_booking_info'),   # GET
     re_path(r'^sdr/book/(?P<token>[0-9a-f-]+)/confirm/?$', sdr_api.sdr_booking_confirm, name='sdr_booking_confirm'),  # POST

@@ -118,7 +118,23 @@
 
   <div class="body">
 
-    {% if already_booked %}
+    {% if just_approved %}
+      <!-- Lead clicked "Yes, this works" in approval email -->
+      <div id="success-state" style="display:block;">
+        <div class="icon">🎉</div>
+        <h2>You're confirmed!</h2>
+        {% if scheduled_at_display %}
+        <p style="margin:12px 0 16px;padding:14px 18px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;">
+          <strong style="color:#7c3aed;font-size:16px;">{{ scheduled_at_display }}</strong>
+        </p>
+        {% endif %}
+        <p>
+          A confirmation email is on its way to you.<br/>
+          Your video call link will be included in that email.
+        </p>
+      </div>
+
+    {% elif already_booked %}
       {% if status == 'scheduled' %}
         <div class="booked-banner">
           <div class="icon">✅</div>
@@ -189,6 +205,9 @@
       <div id="success-state">
         <div class="icon">🎉</div>
         <h2>You're confirmed!</h2>
+        <p id="confirmed-time-wrap" style="display:none;margin:12px 0 16px;padding:14px 18px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;">
+          <strong id="confirmed-time" style="color:#7c3aed;font-size:16px;"></strong>
+        </p>
         <p>
           A confirmation email is on its way to you.<br/>
           Your video call link will be included in that email.
@@ -249,6 +268,17 @@
         document.getElementById('booking-form').style.display = 'none';
         var ss = document.getElementById('success-state');
         ss.style.display = 'block';
+        // Show confirmed time
+        if (res.data.scheduled_at) {
+          var timeEl = document.getElementById('confirmed-time');
+          var timeWrap = document.getElementById('confirmed-time-wrap');
+          var d = new Date(res.data.scheduled_at);
+          timeEl.textContent = d.toLocaleString(undefined, {
+            weekday: 'long', month: 'long', day: 'numeric',
+            year: 'numeric', hour: '2-digit', minute: '2-digit'
+          });
+          timeWrap.style.display = 'block';
+        }
         if (res.data.meet_link) {
           var wrap = document.getElementById('meet-link-wrap');
           var anchor = document.getElementById('meet-link-anchor');

@@ -331,6 +331,7 @@ class SDRMeeting(models.Model):
 
     STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('awaiting_approval', 'Awaiting Approval'),
         ('scheduled', 'Scheduled'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
@@ -366,6 +367,10 @@ class SDRMeeting(models.Model):
 
     # Public booking link — shared with the lead so they can self-schedule
     booking_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
+    # Lead approval flow — token used in yes/suggest-time links emailed to the lead
+    approval_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    approval_proposed_at = models.DateTimeField(null=True, blank=True)  # when approval email was sent
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

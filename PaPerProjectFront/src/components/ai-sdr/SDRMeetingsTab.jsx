@@ -18,11 +18,12 @@ import {
 // ---------------------------------------------------------------------------
 
 const STATUS_CONFIG = {
-  pending:   { label: 'Pending',   color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'   },
-  scheduled: { label: 'Scheduled', color: '#10b981', bg: 'rgba(16,185,129,0.1)'  },
-  completed: { label: 'Completed', color: '#6b7280', bg: 'rgba(107,114,128,0.1)' },
-  cancelled: { label: 'Cancelled', color: '#ef4444', bg: 'rgba(239,68,68,0.1)'   },
-  no_show:   { label: 'No Show',   color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'  },
+  pending:           { label: 'Pending',            color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'   },
+  awaiting_approval: { label: 'Awaiting Lead',      color: '#6366f1', bg: 'rgba(99,102,241,0.1)'   },
+  scheduled:         { label: 'Scheduled',          color: '#10b981', bg: 'rgba(16,185,129,0.1)'   },
+  completed:         { label: 'Completed',          color: '#6b7280', bg: 'rgba(107,114,128,0.1)'  },
+  cancelled:         { label: 'Cancelled',          color: '#ef4444', bg: 'rgba(239,68,68,0.1)'    },
+  no_show:           { label: "Didn't Show Up",     color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)'   },
 };
 
 const TEMP_COLOR = { hot: '#ef4444', warm: '#f59e0b', cold: '#6b7280' };
@@ -284,26 +285,172 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
 }
 
 // ---------------------------------------------------------------------------
+// ClockTimePicker — circular analog clock style picker
+// ---------------------------------------------------------------------------
+
+function SearchFieldDropdown({ value, onChange, fields }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const selected = fields.find(f => f.key === value) || fields[0];
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', background: 'rgba(168,85,247,0.08)', border: 'none', borderRight: '1px solid #2d1f4a', borderRadius: '9px 0 0 9px', color: '#a855f7', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', height: '100%', outline: 'none' }}>
+        {selected.label}
+        <ChevronDown size={11} style={{ color: '#a855f7', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 100, background: 'linear-gradient(135deg,#0f0a1f,#140830)', border: '1px solid #2d1f4a', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', minWidth: 130, overflow: 'hidden', animation: 'fadeDown 0.12s ease' }}>
+          {fields.map((f, i) => {
+            const isSel = f.key === value;
+            return (
+              <button key={f.key} type="button" onClick={() => { onChange(f.key); setOpen(false); }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none', borderBottom: i < fields.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', cursor: 'pointer', background: isSel ? 'rgba(168,85,247,0.12)' : 'transparent', color: isSel ? '#a855f7' : '#c4b5d4', fontSize: 13, fontWeight: isSel ? 600 : 400, transition: 'background 0.1s', textAlign: 'left' }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}>
+                {isSel && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#a855f7', flexShrink: 0 }} />}
+                {!isSel && <span style={{ width: 6, height: 6, flexShrink: 0 }} />}
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClockTimePicker({ value, onChange, ampm, onAmpmChange, mode, onModeChange }) {
+  const radius = 70, cx = 85, cy = 85;
+
+  // Derive hour12 and minute from the value prop (single source of truth)
+  const { hour12, minute: minVal } = React.useMemo(() => {
+    if (!value) return { hour12: null, minute: null };
+    const [hh, mm] = value.split(':').map(Number);
+    return { hour12: hh % 12 || 12, minute: mm };
+  }, [value]);
+
+  const commit = (h, m, ap) => {
+    let h24 = h % 12;
+    if (ap === 'PM') h24 += 12;
+    onChange(`${String(h24).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+  };
+
+  const pickHour = (h) => {
+    commit(h, minVal ?? 0, ampm);
+    onModeChange('minute');
+  };
+  const pickMinute = (m) => {
+    commit(hour12 ?? 12, m, ampm);
+  };
+
+  const hourNums   = [12,1,2,3,4,5,6,7,8,9,10,11];
+  const minuteNums = [0,5,10,15,20,25,30,35,40,45,50,55];
+
+  const getPos = (i, total, r) => {
+    const angle = (i / total) * 2 * Math.PI - Math.PI / 2;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  };
+
+  const nums   = mode === 'hour' ? hourNums : minuteNums;
+  const selNum = mode === 'hour' ? hour12 : minVal;
+  // For minutes, snap to nearest 5 for highlight
+  const selNumSnapped = mode === 'minute' && selNum !== null
+    ? minuteNums.reduce((a, b) => Math.abs(b - selNum) < Math.abs(a - selNum) ? b : a)
+    : selNum;
+  const selPos = selNumSnapped !== null
+    ? getPos(nums.indexOf(selNumSnapped), nums.length, radius)
+    : null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      {/* Clock face */}
+      <svg width={170} height={170}>
+        <circle cx={cx} cy={cy} r={radius + 18} fill="#0d0820" stroke="#2d1f4a" strokeWidth={1} />
+        <circle cx={cx} cy={cy} r={3} fill="#a855f7" />
+        {selPos && <line x1={cx} y1={cy} x2={selPos.x} y2={selPos.y} stroke="#a855f7" strokeWidth={2} strokeLinecap="round" />}
+        {nums.map((n, i) => {
+          const pos = getPos(i, nums.length, radius);
+          const selected = n === selNumSnapped;
+          return (
+            <g key={n} onClick={() => mode === 'hour' ? pickHour(n) : pickMinute(n)} style={{ cursor: 'pointer' }}>
+              <circle cx={pos.x} cy={pos.y} r={16} fill={selected ? '#a855f7' : 'transparent'} />
+              <text x={pos.x} y={pos.y + 5} textAnchor="middle" fontSize={12} fontWeight={selected ? 700 : 400}
+                fill={selected ? '#fff' : '#c4b5d4'}>{mode === 'minute' ? String(n).padStart(2,'0') : n}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <p style={{ color: '#6b7280', fontSize: 11, margin: 0 }}>
+        {mode === 'hour' ? 'Select hour' : 'Select minute'}
+      </p>
+    </div>
+  );
+}
+
 // ConfirmModal
 // ---------------------------------------------------------------------------
 
 function ConfirmModal({ meeting, onClose, onConfirmed }) {
-  const [scheduledAt, setScheduledAt] = useState('');
+  const today = new Date();
+  const [selDate, setSelDate] = useState('');
+  const [selTime, setSelTime] = useState('');
+  const [ampm, setAmpm] = useState('AM');
+  const [clockMode, setClockMode] = useState('hour'); // 'hour' | 'minute'
   const [duration, setDuration] = useState(String(meeting.duration_minutes || 30));
-  const [notes, setNotes] = useState(meeting.notes || '');
+  const [notes, setNotes]  = useState(meeting.notes || '');
   const [saving, setSaving] = useState(false);
+  const [calMonth, setCalMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const { toast } = useToast();
 
-  const handleConfirm = async () => {
-    if (!scheduledAt) { toast({ title: 'Pick a date & time', variant: 'destructive' }); return; }
+  // Build calendar days grid
+  const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
+  const firstDay    = (y, m) => new Date(y, m, 1).getDay();
+  const y = calMonth.getFullYear(), mo = calMonth.getMonth();
+  const totalDays = daysInMonth(y, mo);
+  const startBlank = firstDay(y, mo);
+  const cells = [];
+  for (let i = 0; i < startBlank; i++) cells.push(null);
+  for (let d = 1; d <= totalDays; d++) cells.push(d);
+
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  const selectDay = (d) => {
+    if (!d) return;
+    const dd = String(d).padStart(2,'0');
+    const mm = String(mo + 1).padStart(2,'0');
+    setSelDate(`${y}-${mm}-${dd}`);
+  };
+
+  const isToday = (d) => {
+    const t = new Date();
+    return d === t.getDate() && mo === t.getMonth() && y === t.getFullYear();
+  };
+  const isPast = (d) => new Date(y, mo, d) < new Date(new Date().setHours(0,0,0,0));
+
+  const handleConfirm = async (sendApproval = false) => {
+    if (!selDate || !selTime) { toast({ title: 'Pick a date & time', variant: 'destructive' }); return; }
     setSaving(true);
     try {
       const resp = await confirmMeeting(meeting.id, {
-        scheduled_at: new Date(scheduledAt).toISOString(),
+        scheduled_at: new Date(`${selDate}T${selTime}`).toISOString(),
         duration_minutes: parseInt(duration),
         notes,
+        send_approval: sendApproval,
+        browser_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
-      toast({ title: 'Meeting confirmed!', description: 'Confirmation email sent to the lead.' });
+      if (sendApproval) {
+        toast({ title: 'Approval email sent!', description: 'Lead will receive an email asking if the time works.' });
+      } else {
+        toast({ title: 'Meeting confirmed!', description: 'Confirmation email sent to the lead.' });
+      }
       onConfirmed(resp.data);
       onClose();
     } catch (e) {
@@ -312,30 +459,182 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
   };
 
   const inp = { width: '100%', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, color: '#e2d9f3', padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
-  const lbl = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 5, display: 'block' };
+  const lbl = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 16, padding: 28, width: 460, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 16, padding: 20, width: 520, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', scrollbarWidth: 'none' }} onClick={e => e.stopPropagation()}>
         <h3 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Confirm Meeting</h3>
-        <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 20px' }}>
-          Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>. Confirmation email will be sent automatically.
+        <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 16px' }}>
+          Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>.{' '}
+          <span style={{ color: '#818cf8' }}>Ask Lead First</span> sends an approval email.{' '}
+          <span style={{ color: '#10b981' }}>Confirm Directly</span> schedules immediately.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div><label style={lbl}>Date & Time</label><input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} style={inp} /></div>
-          <div><label style={lbl}>Duration</label>
-            <select value={duration} onChange={e => setDuration(e.target.value)} style={inp}>
-              {['15', '30', '45', '60', '90'].map(d => <option key={d} value={d}>{d} min</option>)}
+
+        {/* ── Calendar + Clock together ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
+
+          {/* Calendar */}
+          <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <button onClick={() => setCalMonth(new Date(y, mo - 1, 1))}
+                style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>‹</button>
+              <span style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 12 }}>{monthNames[mo].slice(0,3)} {y}</span>
+              <button onClick={() => setCalMonth(new Date(y, mo + 1, 1))}
+                style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>›</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1, marginBottom: 3 }}>
+              {dayNames.map(d => <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: 9, fontWeight: 600 }}>{d.slice(0,1)}</div>)}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 1 }}>
+              {cells.map((d, i) => {
+                const dateStr = d ? `${y}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}` : '';
+                const selected = dateStr === selDate;
+                const past = d ? isPast(d) : false;
+                const todayD = d ? isToday(d) : false;
+                return (
+                  <div key={i} onClick={() => !past && d && selectDay(d)}
+                    style={{
+                      textAlign: 'center', padding: '5px 0', borderRadius: 4, fontSize: 11,
+                      cursor: d && !past ? 'pointer' : 'default',
+                      background: selected ? '#a855f7' : todayD ? 'rgba(168,85,247,0.15)' : 'transparent',
+                      color: !d ? 'transparent' : past ? '#2d1f4a' : selected ? '#fff' : todayD ? '#a855f7' : '#c4b5d4',
+                      border: todayD && !selected ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
+                    }}>
+                    {d || ''}
+                  </div>
+                );
+              })}
+            </div>
+            {selDate && <p style={{ color: '#10b981', fontSize: 10, marginTop: 6, textAlign: 'center' }}>✓ {new Date(selDate + 'T00:00').toDateString()}</p>}
+          </div>
+
+          {/* Clock */}
+          <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <ClockTimePicker value={selTime} onChange={setSelTime} ampm={ampm} onAmpmChange={setAmpm} mode={clockMode} onModeChange={setClockMode} />
+          </div>
+        </div>
+
+        {/* Duration + AM/PM */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div>
+            <label style={lbl}>Duration</label>
+            <select value={duration} onChange={e => setDuration(e.target.value)}
+              style={{ ...inp, height: 42, appearance: 'none', WebkitAppearance: 'none', paddingRight: 32,
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', cursor: 'pointer' }}>
+              {['15','30','45','60','90'].map(d => <option key={d} value={d}>{d} min</option>)}
             </select>
           </div>
-          <div><label style={lbl}>Notes (optional)</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...inp, resize: 'vertical' }} /></div>
+          <div>
+            <label style={lbl}>Time</label>
+            <div style={{ display: 'flex', alignItems: 'center',  justifyContent:'space-between',gap: 8, background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, padding: '0 12px', height: 42, boxSizing: 'border-box', width: '100%' }}>
+              {/* HH : MM — editable inputs + clock sync */}
+              {(() => {
+                const [hh, mm] = selTime ? selTime.split(':').map(Number) : [null, null];
+                const h12 = hh !== null ? (hh % 12 || 12) : null;
+                const hStr = h12 !== null ? String(h12).padStart(2,'0') : '';
+                const mStr = mm !== null ? String(mm).padStart(2,'0') : '';
+                const inputStyle = {
+                  width: 28, background: 'transparent', border: 'none', outline: 'none',
+                  fontSize: 16, fontWeight: 700, color: '#e2d9f3', textAlign: 'center',
+                  padding: 0, caretColor: '#a855f7',
+                  MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield',
+                };
+                const commitFromInputs = (hVal, mVal, ap) => {
+                  const h = parseInt(hVal);
+                  const m = parseInt(mVal);
+                  if (isNaN(h) || isNaN(m)) return;
+                  const clampH = Math.min(Math.max(h, 1), 12);
+                  const clampM = Math.min(Math.max(m, 0), 59);
+                  let h24 = clampH % 12;
+                  if (ap === 'PM') h24 += 12;
+                  setSelTime(`${String(h24).padStart(2,'0')}:${String(clampM).padStart(2,'0')}`);
+                };
+                return (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <input
+                      type="number" min={1} max={12}
+                      value={hStr}
+                      placeholder="HH"
+                      onFocus={() => setClockMode('hour')}
+                      onChange={e => {
+                        const v = e.target.value.slice(-2);
+                        if (v === '' || /^\d{1,2}$/.test(v)) {
+                          const mCur = mm !== null ? String(mm).padStart(2,'0') : '00';
+                          commitFromInputs(v || '12', mCur, ampm);
+                          if (v.length === 2) setClockMode('minute');
+                        }
+                      }}
+                      style={{ ...inputStyle, color: clockMode === 'hour' ? '#a855f7' : '#e2d9f3' }}
+                    />
+                    <span style={{ color: '#6b7280', fontSize: 16, fontWeight: 700 }}>:</span>
+                    <input
+                      type="number" min={0} max={59}
+                      value={mStr}
+                      placeholder="MM"
+                      onFocus={() => setClockMode('minute')}
+                      onChange={e => {
+                        const v = e.target.value.slice(-2);
+                        if (v === '' || /^\d{1,2}$/.test(v)) {
+                          const hCur = h12 !== null ? String(h12) : '12';
+                          commitFromInputs(hCur, v || '0', ampm);
+                        }
+                      }}
+                      style={{ ...inputStyle, color: clockMode === 'minute' ? '#a855f7' : '#e2d9f3' }}
+                    />
+                  </span>
+                );
+              })()}
+              {/* AM / PM toggle buttons */}
+              <div style={{ display: 'flex', flexDirection: 'row', gap: 3, marginLeft: 6 }}>
+                {['AM','PM'].map(ap => (
+                  <button key={ap} type="button" onClick={() => {
+                    setAmpm(ap);
+                    if (selTime) {
+                      const [hh, mm] = selTime.split(':').map(Number);
+                      const h12 = hh % 12 || 12;
+                      let h24 = h12 % 12;
+                      if (ap === 'PM') h24 += 12;
+                      setSelTime(`${String(h24).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
+                    }
+                  }}
+                    style={{
+                      padding: '2px 8px', borderRadius: 4, border: '1px solid',
+                      fontWeight: 700, fontSize: 11, cursor: 'pointer', transition: 'all 0.12s',
+                      background: ampm === ap ? '#a855f7' : 'transparent',
+                      borderColor: ampm === ap ? '#a855f7' : '#2d1f4a',
+                      color: ampm === ap ? '#fff' : '#6b7280',
+                    }}>{ap}</button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+
+        {/* Notes — full width */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>Notes (optional)</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+            style={{ ...inp, resize: 'none', width: '100%' }} />
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           <Button variant="outline" onClick={onClose} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
-          <Button onClick={handleConfirm} disabled={saving || !scheduledAt}
-            style={{ background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <CalendarCheck size={14} />}
-            <span style={{ marginLeft: 6 }}>Confirm & Send Email</span>
+
+          {/* Option 1: Ask lead first */}
+          <Button onClick={() => handleConfirm(true)} disabled={saving || !selDate || !selTime}
+            style={{ background: 'linear-gradient(90deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+            <span style={{ marginLeft: 5 }}>Ask Lead First</span>
+          </Button>
+
+          {/* Option 2: Confirm directly */}
+          <Button onClick={() => handleConfirm(false)} disabled={saving || !selDate || !selTime}
+            style={{ background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck size={13} />}
+            <span style={{ marginLeft: 5 }}>Confirm Directly</span>
           </Button>
         </div>
       </div>
@@ -351,32 +650,48 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
   const [local, setLocal] = useState(meeting);
   const [actionLoading, setActionLoading] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [earlyWarning, setEarlyWarning] = useState(null); // { status, label, timeLeft }
   const { toast } = useToast();
 
-  const act = async (label, fn) => {
-    setActionLoading(label);
+  const act = async (key, toastLabel, fn) => {
+    setActionLoading(key);
     try {
       const resp = await fn();
-      toast({ title: `${label} — done!` });
-      const updated = resp?.data || local;
+      toast({ title: `${toastLabel} — done!` });
+      const updated = resp?.data?.data || resp?.data || local;
       setLocal(updated);
       onUpdated(updated);
     } catch (e) {
-      toast({ title: `${label} failed`, description: e.message, variant: 'destructive' });
+      toast({ title: `${toastLabel} failed`, description: e.message, variant: 'destructive' });
     } finally { setActionLoading(null); }
   };
 
-  const handleStatus = async (s) => {
-    setActionLoading('status');
+  const doStatus = async (s) => {
+    setActionLoading(`status_${s}`);
     try {
       const resp = await updateMeeting(local.id, { status: s });
-      const updated = resp?.data || { ...local, status: s };
+      const updated = resp?.data?.data || resp?.data || { ...local, status: s };
       setLocal(updated);
       onUpdated(updated);
       toast({ title: `Marked as ${STATUS_CONFIG[s]?.label || s}` });
     } catch (e) {
       toast({ title: 'Failed', description: e.message, variant: 'destructive' });
     } finally { setActionLoading(null); }
+  };
+
+  const handleStatus = (s) => {
+    if ((s === 'completed' || s === 'no_show') && local.scheduled_at) {
+      const meetingTime = new Date(local.scheduled_at);
+      if (meetingTime > new Date()) {
+        const diff = meetingTime - new Date();
+        const hrs  = Math.floor(diff / 3600000);
+        const mins = Math.floor((diff % 3600000) / 60000);
+        const timeLeft = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} min`;
+        setEarlyWarning({ status: s, label: s === 'completed' ? 'Mark Completed' : "Lead Didn't Show Up", timeLeft });
+        return;
+      }
+    }
+    doStatus(s);
   };
 
   const btnBase = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 };
@@ -392,42 +707,82 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
           />
         )}
 
+        {earlyWarning && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+            onClick={() => setEarlyWarning(null)}>
+            <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 14, padding: 24, width: 380, maxWidth: '95vw' }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <AlertCircle size={18} style={{ color: '#a855f7', flexShrink: 0 }} />
+                <h4 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 15, margin: 0 }}>Meeting hasn't started yet</h4>
+              </div>
+              <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, margin: '0 0 6px' }}>
+                Starts in <strong style={{ color: '#c084fc' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
+              </p>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+                <button onClick={() => setEarlyWarning(null)}
+                  style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid #2d1f4a', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>
+                  Cancel
+                </button>
+                <button onClick={() => { doStatus(earlyWarning.status); setEarlyWarning(null); }}
+                  style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg,#a855f7,#7c3aed)', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  Yes, proceed
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ padding: '16px 24px', borderLeft: '3px solid #a855f7' }}>
           {/* Actions */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-            {local.status === 'pending' && (
+            {(local.status === 'pending' || local.status === 'awaiting_approval') && (
               <button style={{ ...btnBase, background: 'linear-gradient(90deg,#10b981,#059669)', color: '#fff' }}
                 onClick={() => setShowConfirm(true)}>
-                <CalendarCheck size={12} /> Set Time & Confirm
+                <CalendarCheck size={12} /> {local.status === 'awaiting_approval' ? 'Change Proposed Time' : 'Set Time & Confirm'}
               </button>
             )}
             {local.status === 'pending' && (
               <button disabled={actionLoading === 'resend'}
                 style={{ ...btnBase, background: 'rgba(168,85,247,0.12)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
-                onClick={() => act('Scheduling email resent', () => resendSchedulingEmail(local.id))}>
+                onClick={() => act('resend', 'Scheduling email resent', () => resendSchedulingEmail(local.id))}>
                 {actionLoading === 'resend' ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Resend Scheduling Email
               </button>
             )}
             {local.status === 'scheduled' && (
               <button disabled={actionLoading === 'reminder'}
                 style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
-                onClick={() => act('Reminder sent', () => sendMeetingReminder(local.id))}>
+                onClick={() => act('reminder', 'Reminder sent', () => sendMeetingReminder(local.id))}>
                 {actionLoading === 'reminder' ? <Loader2 size={12} className="animate-spin" /> : <Bell size={12} />} Send Reminder
               </button>
             )}
             {local.status === 'scheduled' && (
               <>
-                <button disabled={actionLoading === 'status'}
+                <button disabled={!!actionLoading}
                   style={{ ...btnBase, background: 'rgba(107,114,128,0.12)', color: '#9ca3af', border: '1px solid #2d1f4a' }}
                   onClick={() => handleStatus('completed')}>
-                  <CheckCircle2 size={12} /> Mark Completed
+                  {actionLoading === 'status_completed' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Mark Completed
                 </button>
-                <button disabled={actionLoading === 'status'}
+                <button disabled={!!actionLoading}
                   style={{ ...btnBase, background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
                   onClick={() => handleStatus('no_show')}>
-                  <XCircle size={12} /> No Show
+                  {actionLoading === 'status_no_show' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />} Lead Didn't Show Up
                 </button>
               </>
+            )}
+            {(local.status === 'no_show' || local.status === 'cancelled') && (
+              <button disabled={!!actionLoading}
+                style={{ ...btnBase, background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}
+                onClick={() => handleStatus('pending')}>
+                {actionLoading === 'status_pending' ? <Loader2 size={12} className="animate-spin" /> : <CalendarCheck size={12} />} Reschedule
+              </button>
+            )}
+            {local.status === 'completed' && (
+              <button disabled={!!actionLoading}
+                style={{ ...btnBase, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
+                onClick={() => handleStatus('pending')}>
+                {actionLoading === 'status_pending' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Reopen
+              </button>
             )}
             {local.calendar_link && (
               <a href={local.calendar_link} target="_blank" rel="noopener noreferrer"
@@ -437,12 +792,38 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             )}
           </div>
 
-          {/* Status timestamps */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14, fontSize: 11 }}>
-            {local.scheduling_email_sent_at && <span style={{ color: '#10b981' }}>✓ Scheduling email sent {fmt(local.scheduling_email_sent_at)}</span>}
-            {local.reminder_sent_at && <span style={{ color: '#6366f1' }}>✓ Reminder sent {fmt(local.reminder_sent_at)}</span>}
-            {local.confirmed_at && <span style={{ color: '#10b981' }}>✓ Confirmed {fmt(local.confirmed_at)}</span>}
+          {/* Status timestamps — one relevant badge per state */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, fontSize: 11 }}>
+            {local.status === 'awaiting_approval' && local.approval_proposed_at && (
+              <span style={{ color: '#6366f1' }}>⏳ Approval email sent {fmt(local.approval_proposed_at)}</span>
+            )}
+            {local.status === 'scheduled' && local.confirmed_at && (
+              <span style={{ color: '#10b981' }}>✓ Confirmed {fmt(local.confirmed_at)}</span>
+            )}
+            {local.status === 'scheduled' && local.reminder_sent_at && (
+              <span style={{ color: '#6366f1' }}>✓ Reminder sent {fmt(local.reminder_sent_at)}</span>
+            )}
+            {(local.status === 'pending' || local.status === 'awaiting_approval') && local.scheduling_email_sent_at && (
+              <span style={{ color: '#10b981' }}>✓ Scheduling email sent {fmt(local.scheduling_email_sent_at)}</span>
+            )}
+            {(local.status === 'completed' || local.status === 'no_show') && local.confirmed_at && (
+              <span style={{ color: '#6b7280' }}>✓ Was scheduled {fmt(local.confirmed_at)}</span>
+            )}
           </div>
+
+          {/* Awaiting approval info banner */}
+          {local.status === 'awaiting_approval' && (
+            <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 18 }}>📨</span>
+              <div>
+                <p style={{ margin: 0, color: '#818cf8', fontSize: 12, fontWeight: 700 }}>WAITING FOR LEAD RESPONSE</p>
+                <p style={{ margin: '2px 0 0', color: '#9ca3af', fontSize: 12 }}>
+                  Approval email was sent. Lead will confirm or suggest another time.
+                  {local.scheduled_at && <> Proposed time: <strong style={{ color: '#e2d9f3' }}>{fmt(local.scheduled_at)}</strong></>}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Reply snippet */}
           {local.reply_snippet && (
@@ -475,40 +856,44 @@ const SDRMeetingsTab = () => {
   // Filters
   const [filtersOpen, setFiltersOpen]       = useState(false);
   const [searchRaw, setSearchRaw]           = useState('');
+  const [searchField, setSearchField]       = useState('all');
   const [statusFilter, setStatusFilter]     = useState('');
   const [campaignFilter, setCampaignFilter] = useState('');
   const [tempFilter, setTempFilter]         = useState('');
   const [sortBy, setSortBy]                 = useState('created_desc');
-  const [activeOnly, setActiveOnly]         = useState(true);
+  const [activeOnly, setActiveOnly]         = useState(false);
   const [page, setPage]                     = useState(1);
   const [pageSize, setPageSize]             = useState(20);
 
-  const search = useDebounce(searchRaw, 400);
+  const search = useDebounce(searchRaw, 250);
   const { toast } = useToast();
+
+  // Load campaigns once on mount only
+  useEffect(() => {
+    listCampaigns()
+      .then(r => setCampaigns(r?.data || r || []))
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async (overrides = {}) => {
     setLoading(true);
     try {
-      const [meetingsResp, campaignsResp] = await Promise.all([
-        listMeetings({
-          status:      overrides.status      ?? statusFilter,
-          campaign_id: overrides.campaign_id ?? campaignFilter,
-          search:      overrides.search      ?? search,
-          temperature: overrides.temperature ?? tempFilter,
-          sort:        overrides.sort        ?? sortBy,
-          active_only: overrides.active_only ?? activeOnly,
-          page:        overrides.page        ?? page,
-          page_size:   overrides.page_size   ?? pageSize,
-        }),
-        listCampaigns(),
-      ]);
-      // companyApi returns response.json() directly
+      const meetingsResp = await listMeetings({
+        status:          overrides.status          ?? statusFilter,
+        campaign_status: overrides.campaign_status ?? campaignFilter,
+        search:          overrides.search          ?? search,
+        search_field:    overrides.search_field    ?? searchField,
+        temperature:     overrides.temperature     ?? tempFilter,
+        sort:            overrides.sort            ?? sortBy,
+        active_only:     overrides.active_only     ?? (campaignFilter ? false : activeOnly),
+        page:            overrides.page            ?? page,
+        page_size:       overrides.page_size       ?? pageSize,
+      });
       setData(meetingsResp || { results: [], total: 0, total_pages: 1, page: 1 });
-      setCampaigns(campaignsResp?.data || campaignsResp || []);
     } catch (e) {
       toast({ title: 'Failed to load meetings', description: e.message, variant: 'destructive' });
     } finally { setLoading(false); }
-  }, [search, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, page, pageSize, toast]);
+  }, [search, searchField, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, page, pageSize, toast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -539,7 +924,7 @@ const SDRMeetingsTab = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset to page 1 when any filter changes
-  useEffect(() => { setPage(1); }, [search, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, pageSize]);
+  useEffect(() => { setPage(1); }, [search, searchField, statusFilter, campaignFilter, tempFilter, sortBy, activeOnly, pageSize]);
 
   const handleRowUpdate = useCallback((updated) => {
     setData(d => ({
@@ -657,47 +1042,82 @@ const SDRMeetingsTab = () => {
           {/* Top row: search + filter toggle + sort + page size + refresh */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
 
-            {/* Search */}
-            <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
-              <Search size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
-              <input
-                placeholder="Search name, email, company, title…"
-                value={searchRaw}
-                onChange={e => setSearchRaw(e.target.value)}
-                style={{ ...inp, width: '100%', paddingLeft: 32, paddingRight: searchRaw ? 30 : 12, boxSizing: 'border-box' }}
-              />
-              {searchRaw && (
-                <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
-                  <X size={13} />
-                </button>
-              )}
-            </div>
+            {/* Search — field selector + input */}
+            {(() => {
+              const SEARCH_FIELDS = [
+                { key: 'all',      label: 'All Fields' },
+                { key: 'name',     label: 'Name'       },
+                { key: 'email',    label: 'Email'      },
+                { key: 'company',  label: 'Company'    },
+                { key: 'title',    label: 'Job Title'  },
+                { key: 'campaign', label: 'Campaign'   },
+              ];
+              const placeholders = {
+                all:      'Search all fields…',
+                name:     'Search by name…',
+                email:    'Search by email…',
+                company:  'Search by company…',
+                title:    'Search by job title…',
+                campaign: 'Search by campaign name…',
+              };
+              return (
+                <div style={{ display: 'flex', flex: '1 1 240px', minWidth: 200, alignItems: 'center', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 9, overflow: 'visible', position: 'relative' }}>
+                  {/* Field selector — custom dark dropdown */}
+                  <SearchFieldDropdown value={searchField} onChange={setSearchField} fields={SEARCH_FIELDS} />
+                  {/* Input */}
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#4b5563', pointerEvents: 'none' }} />
+                    <input
+                      placeholder={placeholders[searchField]}
+                      value={searchRaw}
+                      onChange={e => setSearchRaw(e.target.value)}
+                      style={{ background: 'transparent', border: 'none', outline: 'none', color: '#e2d9f3', fontSize: 13, padding: '7px 28px 7px 28px', width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {searchRaw && (
+                      <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Filters toggle */}
             {(() => {
               const mActiveCount = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length;
               const mTotalActive = mActiveCount + (sortBy !== 'created_desc' ? 1 : 0);
               return (
-                <button
-                  onClick={() => setFiltersOpen(v => !v)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
-                    borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
-                    background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`,
-                    color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
-                    fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
-                  }}
-                >
-                  <SlidersHorizontal size={13} />
-                  Filters
+                <>
+                  <button
+                    onClick={() => setFiltersOpen(v => !v)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
+                      borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
+                      background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`,
+                      color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
+                      fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
+                    }}
+                  >
+                    <SlidersHorizontal size={13} />
+                    Filters
+                    {mTotalActive > 0 && (
+                      <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                        {mTotalActive}
+                      </span>
+                    )}
+                    <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
+                  </button>
                   {mTotalActive > 0 && (
-                    <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
-                      {mTotalActive}
-                    </span>
+                    <button
+                      onClick={() => { setStatusFilter(''); setTempFilter(''); setCampaignFilter(''); setSortBy('created_desc'); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 9, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      <X size={11} /> Clear all
+                    </button>
                   )}
-                  <ChevronDown size={11} style={{ color: '#6b7280', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: '0.15s', flexShrink: 0 }} />
-                </button>
+                </>
               );
             })()}
 
@@ -738,12 +1158,13 @@ const SDRMeetingsTab = () => {
                     value={statusFilter}
                     onChange={setStatusFilter}
                     options={[
-                      { key: '',          label: 'All Statuses', color: '#6b7280' },
-                      { key: 'pending',   label: 'Pending',      color: '#f59e0b', dot: true },
-                      { key: 'scheduled', label: 'Scheduled',    color: '#10b981', dot: true },
-                      { key: 'completed', label: 'Completed',    color: '#6b7280', dot: true },
-                      { key: 'cancelled', label: 'Cancelled',    color: '#ef4444', dot: true },
-                      { key: 'no_show',   label: 'No Show',      color: '#8b5cf6', dot: true },
+                      { key: '',                   label: 'All Statuses',    color: '#6b7280' },
+                      { key: 'pending',            label: 'Pending',         color: '#f59e0b', dot: true },
+                      { key: 'awaiting_approval',  label: 'Awaiting Lead',   color: '#6366f1', dot: true },
+                      { key: 'scheduled',          label: 'Scheduled',       color: '#10b981', dot: true },
+                      { key: 'completed',          label: 'Completed',       color: '#6b7280', dot: true },
+                      { key: 'cancelled',          label: 'Cancelled',       color: '#ef4444', dot: true },
+                      { key: 'no_show',            label: "Didn't Show Up",  color: '#8b5cf6', dot: true },
                     ]}
                   />
                 </div>
@@ -777,13 +1198,12 @@ const SDRMeetingsTab = () => {
                     value={campaignFilter}
                     onChange={setCampaignFilter}
                     options={[
-                      { key: '', label: 'All Campaigns', color: '#6b7280' },
-                      ...campaigns.map(c => ({
-                        key: String(c.id),
-                        label: c.name.length > 26 ? c.name.slice(0, 24) + '…' : c.name,
-                        color: CAMPAIGN_STATUS_LABEL[c.status]?.color || '#6b7280',
-                        dot: true,
-                      })),
+                      { key: '',          label: 'All Campaigns', color: '#6b7280' },
+                      { key: 'active',    label: 'Active',        color: '#10b981', dot: true },
+                      { key: 'paused',    label: 'Paused',        color: '#f59e0b', dot: true },
+                      { key: 'completed', label: 'Completed',     color: '#6b7280', dot: true },
+                      { key: 'scheduled', label: 'Scheduled',     color: '#6366f1', dot: true },
+                      { key: 'draft',     label: 'Draft',         color: '#4b5563', dot: true },
                     ]}
                   />
                 </div>
@@ -804,7 +1224,7 @@ const SDRMeetingsTab = () => {
               </div>
 
               {/* Panel footer */}
-              {(() => {
+              {/* {(() => {
                 const mTotalActive = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length + (sortBy !== 'created_desc' ? 1 : 0);
                 return mTotalActive > 0 ? (
                   <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -817,7 +1237,7 @@ const SDRMeetingsTab = () => {
                     <span style={{ color: '#6b7280', fontSize: 12 }}>{mTotalActive} active</span>
                   </div>
                 ) : null;
-              })()}
+              })()} */}
             </div>
           )}
 

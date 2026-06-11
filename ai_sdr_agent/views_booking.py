@@ -25,6 +25,9 @@ def book_meeting(request, token):
         if meeting.enrollment_id and meeting.enrollment else None
     )
 
+    # Lead approved via email link — show confirmed page directly
+    just_approved = request.GET.get('approved') == '1'
+
     return render(request, 'ai_sdr_agent/book_meeting.html', {
         'token': str(token),
         'meeting_title': meeting.title or 'Discovery Call',
@@ -36,10 +39,12 @@ def book_meeting(request, token):
         'sender_name': campaign.sender_name if campaign else '',
         'sender_title': campaign.sender_title if campaign else '',
         'sender_company': campaign.sender_company if campaign else '',
-        'already_booked': meeting.status != 'pending',
+        # awaiting_approval = lead can still pick a time (suggest flow)
+        'already_booked': meeting.status not in ('pending', 'awaiting_approval'),
+        'just_approved': just_approved,
         'status': meeting.status,
         'scheduled_at_display': (
-            meeting.scheduled_at.strftime('%A, %B %d %Y at %I:%M %p UTC')
+            meeting.scheduled_at.strftime('%A, %B %d %Y at %I:%M %p')
             if meeting.scheduled_at else None
         ),
     })
