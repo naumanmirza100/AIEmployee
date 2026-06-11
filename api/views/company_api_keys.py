@@ -405,18 +405,21 @@ def create_key_request(request):
     Only one pending request per (company, agent) — if one exists, we return it.
     is_renewal=true: request is for renewing an expired key (same flow, tagged differently).
     """
-    company = request.user.company
-    agent_name = (request.data.get('agent_name') or '').strip()
-    provider = (request.data.get('provider') or 'openai').strip()
-    note = (request.data.get('note') or '').strip()
-    preferred_duration = (request.data.get('preferred_duration') or 'monthly').strip()
-    if preferred_duration not in ('monthly', 'yearly'):
-        preferred_duration = 'monthly'
-    is_renewal = bool(request.data.get('is_renewal', False))
+    try:
+        company = getattr(request.user, 'company', None)
+        if company is None:
+            return Response(
+                {'status': 'error', 'message': 'No company linked to this user.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         agent_name = (request.data.get('agent_name') or '').strip()
         provider = (request.data.get('provider') or 'openai').strip()
         note = (request.data.get('note') or '').strip()
+        preferred_duration = (request.data.get('preferred_duration') or 'monthly').strip()
+        if preferred_duration not in ('monthly', 'yearly'):
+            preferred_duration = 'monthly'
+        is_renewal = bool(request.data.get('is_renewal', False))
 
         if agent_name not in VALID_AGENTS:
             return Response({'status': 'error', 'message': 'Invalid agent_name'},
@@ -450,6 +453,8 @@ def create_key_request(request):
             agent_name=agent_name,
             provider=provider,
             note=note,
+            preferred_duration=preferred_duration,
+            is_renewal=is_renewal,
         )
 
         # Broadcast to admins so they see it without polling the dashboard.
@@ -458,11 +463,13 @@ def create_key_request(request):
         # still see it in the dashboard list.
         try:
             from core.notification_utils import notify_admins
+            action = "renewal" if is_renewal else "request"
             notify_admins(
-                title=f"New managed-key request — {company.name}",
+                title=f"New managed-key {action} — {company.name}",
                 message=(
-                    f"{company.name} is requesting a managed {provider.upper()} key "
-                    f"for {req.get_agent_name_display()}."
+                    f"{company.name} is requesting a "
+                    f"{'renewal of' if is_renewal else 'managed'} "
+                    f"{provider.upper()} key for {req.get_agent_name_display()}."
                 ),
                 action_url='/admin/api-keys',
                 notification_type='key_request_new',
@@ -473,26 +480,26 @@ def create_key_request(request):
                 req.id, notify_exc, exc_info=True,
             )
 
-    req = KeyRequest.objects.create(
-        company=company,
-        requested_by=request.user,
-        agent_name=agent_name,
-        provider=provider,
-        note=note,
-        preferred_duration=preferred_duration,
-        is_renewal=is_renewal,
-    )
+        return Response({
+            'status': 'success',
+            'request_id': req.id,
+            'is_renewal': is_renewal,
+        })
 
-    from core.notification_utils import notify_admins
-    action = "renewal" if is_renewal else "request"
-    notify_admins(
-        title=f"New managed-key {action} — {company.name}",
-        message=f"{company.name} is requesting a {'renewal of' if is_renewal else 'managed'} {provider.upper()} key for {req.get_agent_name_display()}.",
-        action_url='/admin/api-keys',
-        notification_type='key_request_new',
-    )
-
-    return Response({'status': 'success', 'request_id': req.id, 'is_renewal': is_renewal})
+    except Exception as exc:
+        logger.error(
+            "create_key_request failed (user=%s, payload=%s): %s",
+            getattr(request.user, 'id', None), request.data, exc,
+            exc_info=True,
+        )
+        return Response(
+            {
+                'status': 'error',
+                'message': 'Could not create the key request. Please try again.',
+                'detail': str(exc),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(['POST'])
