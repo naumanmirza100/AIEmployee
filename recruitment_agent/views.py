@@ -45,26 +45,28 @@ def get_agents():
         _log_service = LogService()
     
     if _groq_client is None:
-        _groq_client = GroqClient()
+        try:
+            _groq_client = GroqClient()
+        except Exception:
+            _groq_client = None  # No key available — agents that need Groq will fail at call time
     
-    if _cv_agent is None:
-        _cv_agent = CVParserAgent(groq_client=_groq_client, log_service=_log_service)
-    
-    if _sum_agent is None:
-        _sum_agent = SummarizationAgent(groq_client=_groq_client, log_service=_log_service)
-    
+    if _groq_client is not None:
+        if _cv_agent is None:
+            _cv_agent = CVParserAgent(groq_client=_groq_client, log_service=_log_service)
+        if _sum_agent is None:
+            _sum_agent = SummarizationAgent(groq_client=_groq_client, log_service=_log_service)
+        if _job_desc_agent is None:
+            _job_desc_agent = JobDescriptionParserAgent(groq_client=_groq_client, log_service=_log_service)
+
     if _django_repo is None:
         _django_repo = DjangoRepository()
-    
+
     if _enrich_agent is None:
         _enrich_agent = LeadResearchEnrichmentAgent(log_service=_log_service, sql_repository=_django_repo)
-    
+
     if _qualify_agent is None:
         _qualify_agent = LeadQualificationAgent(log_service=_log_service, sql_repository=_django_repo)
-    
-    if _job_desc_agent is None:
-        _job_desc_agent = JobDescriptionParserAgent(groq_client=_groq_client, log_service=_log_service)
-    
+
     if _interview_agent is None:
         _interview_agent = InterviewSchedulingAgent(log_service=_log_service)
     

@@ -9,16 +9,28 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2 } from 'lucide-react';
-import { 
-  getJobDescriptions, 
-  createJobDescription, 
-  updateJobDescription, 
+import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2, Settings, X, ArrowRight, Copy, Check, Eye, MapPin, Building2, Clock, ExternalLink } from 'lucide-react';
+import { DatePicker } from '@/components/ui/date-picker';
+import {
+  getJobDescriptions,
+  createJobDescription,
+  updateJobDescription,
   deleteJobDescription,
   generateJobDescription,
+  getInterviewSettings,
 } from '@/services/recruitmentAgentService';
 
-const JobDescriptions = ({ onUpdate }) => {
+/** Convert a Date object to 'YYYY-MM-DD' using LOCAL date components — avoids
+ *  timezone-shift bugs that occur with toLocaleDateString(). */
+const toLocaleDateStr = (date) => {
+  const d = date instanceof Date ? date : new Date(date);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const { toast } = useToast();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,10 +50,16 @@ const JobDescriptions = ({ onUpdate }) => {
     requirements: '',
     parse_keywords: true,
     is_active: true,
+    application_open_date: '',
+    application_close_date: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [showSettingsBanner, setShowSettingsBanner] = useState(false);
+  const [configuredJobIds, setConfiguredJobIds] = useState(new Set());
+  const [copiedJobId, setCopiedJobId] = useState(null);
+  const [viewingJob, setViewingJob] = useState(null);
 
   useEffect(() => {
     fetchJobs();
@@ -52,7 +70,20 @@ const JobDescriptions = ({ onUpdate }) => {
       setLoading(true);
       const response = await getJobDescriptions();
       if (response.status === 'success') {
-        setJobs(response.data || []);
+        const jobList = response.data || [];
+        setJobs(jobList);
+        // Check which jobs have interview settings configured (non-blocking)
+        if (jobList.length > 0) {
+          Promise.allSettled(jobList.map((j) => getInterviewSettings(j.id))).then((results) => {
+            const ids = new Set();
+            results.forEach((r, idx) => {
+              if (r.status === 'fulfilled' && r.value?.data?.schedule_from_date) {
+                ids.add(jobList[idx].id);
+              }
+            });
+            setConfiguredJobIds(ids);
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching job descriptions:', error);
@@ -68,11 +99,11 @@ const JobDescriptions = ({ onUpdate }) => {
 
   const handleCreate = async () => {
     if (!formData.title || !formData.description) {
-      toast({
-        title: 'Validation Error',
-        description: 'Title and description are required',
-        variant: 'destructive',
-      });
+      toast({ title: 'Validation Error', description: 'Title and description are required', variant: 'destructive' });
+      return;
+    }
+    if (!formData.application_open_date || !formData.application_close_date) {
+      toast({ title: 'Validation Error', description: 'Applications open date and close date are required', variant: 'destructive' });
       return;
     }
 
@@ -89,6 +120,7 @@ const JobDescriptions = ({ onUpdate }) => {
         setCreateWithAiStep('prompt');
         resetForm();
         fetchJobs();
+        setShowSettingsBanner(true);
         if (onUpdate) onUpdate();
       }
     } catch (error) {
@@ -112,19 +144,21 @@ const JobDescriptions = ({ onUpdate }) => {
       department: job.department || '',
       type: job.type || 'Full-time',
       requirements: job.requirements || '',
-      parse_keywords: true, // keywords regenerated when description is updated
+      parse_keywords: true,
       is_active: job.is_active !== false,
+      application_open_date: job.application_open_date || '',
+      application_close_date: job.application_close_date || '',
     });
     setShowEditModal(true);
   };
 
   const handleUpdate = async () => {
     if (!formData.title || !formData.description) {
-      toast({
-        title: 'Validation Error',
-        description: 'Title and description are required',
-        variant: 'destructive',
-      });
+      toast({ title: 'Validation Error', description: 'Title and description are required', variant: 'destructive' });
+      return;
+    }
+    if (!formData.application_open_date || !formData.application_close_date) {
+      toast({ title: 'Validation Error', description: 'Applications open date and close date are required', variant: 'destructive' });
       return;
     }
 
@@ -269,6 +303,40 @@ const JobDescriptions = ({ onUpdate }) => {
 
   return (
     <div className="space-y-4 w-full max-w-full overflow-x-hidden">
+      {showSettingsBanner && (
+        <div
+          className="flex items-start gap-3 rounded-xl px-4 py-3.5"
+          style={{
+            background: 'linear-gradient(90deg, rgba(167,139,250,0.10) 0%, rgba(96,165,250,0.07) 100%)',
+            border: '1px solid rgba(167,139,250,0.30)',
+          }}
+        >
+          <div className="shrink-0 mt-0.5 rounded-lg p-1.5" style={{ background: 'rgba(167,139,250,0.15)' }}>
+            <Settings className="h-4 w-4 text-violet-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white">Job created! Complete your Settings</p>
+            <p className="text-xs text-white/60 mt-0.5">
+              Configure email follow-ups, interview scheduling, and qualification thresholds in Settings to get the most out of the recruitment agent.
+            </p>
+            {onGoToSettings && (
+              <button
+                onClick={() => { setShowSettingsBanner(false); onGoToSettings(null); }}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-violet-300 hover:text-violet-200 transition-colors"
+              >
+                Go to Settings <ArrowRight className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setShowSettingsBanner(false)}
+            className="shrink-0 text-white/30 hover:text-white/60 transition-colors mt-0.5"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h2 className="text-2xl font-bold text-white">Job Descriptions</h2>
@@ -321,7 +389,34 @@ const JobDescriptions = ({ onUpdate }) => {
                       {job.type}
                     </CardDescription>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {onGoToSettings && (
+                      configuredJobIds.has(job.id) ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onGoToSettings(job.id); }}
+                          title="Interview settings configured — click to view"
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
+                          style={{ background: 'rgba(52,211,153,0.12)', borderColor: 'rgba(52,211,153,0.35)', color: '#34d399' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(52,211,153,0.24)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(52,211,153,0.12)'; }}
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                          Configured
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onGoToSettings(job.id); }}
+                          title="Complete email, interview & qualification settings"
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
+                          style={{ background: 'rgba(251,191,36,0.12)', borderColor: 'rgba(251,191,36,0.35)', color: '#fbbf24' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.24)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.12)'; }}
+                        >
+                          <Settings className="h-3 w-3" />
+                          Setup
+                        </button>
+                      )
+                    )}
                     {job.is_active ? (
                       <Badge className="bg-green-500">
                         <CheckCircle className="h-3 w-3 mr-1" />
@@ -344,11 +439,34 @@ const JobDescriptions = ({ onUpdate }) => {
                   <Button
                     variant="outline"
                     size="sm"
+                    title="View job details"
+                    onClick={() => setViewingJob(job)}
+                  >
+                    <Eye className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => handleEdit(job)}
                     className="flex-1"
                   >
                     <Edit className="h-3 w-3 mr-1" />
                     Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title="Copy application link"
+                    onClick={() => {
+                      const url = `${window.location.origin}/jobs/apply/${job.id}`;
+                      navigator.clipboard.writeText(url).then(() => {
+                        setCopiedJobId(job.id);
+                        setTimeout(() => setCopiedJobId(null), 2000);
+                      });
+                    }}
+                    className={copiedJobId === job.id ? 'text-green-500 border-green-500/40' : ''}
+                  >
+                    {copiedJobId === job.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   </Button>
                   <Button
                     variant="outline"
@@ -362,6 +480,111 @@ const JobDescriptions = ({ onUpdate }) => {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* View Job Modal */}
+      {viewingJob && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setViewingJob(null)}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl"
+            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.2)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-6 pt-6 pb-4" style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                <div className="shrink-0 rounded-xl p-2.5 mt-0.5" style={{ background: 'rgba(167,139,250,0.15)' }}>
+                  <Briefcase className="h-5 w-5 text-violet-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-bold text-white leading-tight">{viewingJob.title}</h2>
+                  <div className="flex flex-wrap gap-3 mt-1.5">
+                    {viewingJob.location && (
+                      <span className="flex items-center gap-1 text-xs text-white/50"><MapPin className="h-3 w-3" />{viewingJob.location}</span>
+                    )}
+                    {viewingJob.type && (
+                      <span className="flex items-center gap-1 text-xs text-white/50"><Clock className="h-3 w-3" />{viewingJob.type}</span>
+                    )}
+                    {viewingJob.department && (
+                      <span className="flex items-center gap-1 text-xs text-white/50"><Building2 className="h-3 w-3" />{viewingJob.department}</span>
+                    )}
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${viewingJob.is_active ? 'text-emerald-400' : 'text-white/40'}`} style={{ background: viewingJob.is_active ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.06)', border: `1px solid ${viewingJob.is_active ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.1)'}` }}>
+                      {viewingJob.is_active ? '● Active' : '○ Inactive'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setViewingJob(null)} className="shrink-0 text-white/30 hover:text-white/70 transition-colors mt-1">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-5">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Applications Open', value: viewingJob.application_open_date },
+                  { label: 'Applications Close', value: viewingJob.application_close_date },
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-lg px-4 py-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <p className="text-xs text-white/40 mb-1">{label}</p>
+                    <p className="text-sm font-semibold text-white">
+                      {value ? new Date(value + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {viewingJob.description && (
+                <div>
+                  <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Description</p>
+                  <p className="text-sm text-white/70 leading-relaxed whitespace-pre-line">{viewingJob.description}</p>
+                </div>
+              )}
+              {viewingJob.requirements && (
+                <div>
+                  <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Requirements</p>
+                  <p className="text-sm text-white/70 leading-relaxed whitespace-pre-line">{viewingJob.requirements}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer actions */}
+            <div className="flex items-center justify-between gap-3 px-6 pb-6 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}/jobs/apply/${viewingJob.id}`;
+                  navigator.clipboard.writeText(url).then(() => {
+                    setCopiedJobId(viewingJob.id);
+                    setTimeout(() => setCopiedJobId(null), 2000);
+                  });
+                }}
+                className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg border transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+              >
+                {copiedJobId === viewingJob.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedJobId === viewingJob.id ? 'Link Copied!' : 'Copy Application Link'}
+              </button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setViewingJob(null); handleEdit(viewingJob); }}>
+                  <Edit className="h-3.5 w-3.5 mr-1.5" />Edit
+                </Button>
+                <a
+                  href={`${window.location.origin}/jobs/apply/${viewingJob.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg font-medium text-white transition-all"
+                  style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />View Form
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -562,6 +785,31 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
           checked={formData.is_active !== false}
           onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
         />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Applications Open Date <span className="text-red-500">*</span></Label>
+          <DatePicker
+            date={formData.application_open_date ? new Date(formData.application_open_date + 'T00:00:00') : null}
+            setDate={(date) => setFormData({
+              ...formData,
+              application_open_date: date ? toLocaleDateStr(date) : '',
+            })}
+            placeholder="Select open date"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Applications Close Date <span className="text-red-500">*</span></Label>
+          <DatePicker
+            date={formData.application_close_date ? new Date(formData.application_close_date + 'T00:00:00') : null}
+            setDate={(date) => setFormData({
+              ...formData,
+              application_close_date: date ? toLocaleDateStr(date) : '',
+            })}
+            placeholder="Select close date"
+          />
+        </div>
       </div>
 
       <div className="space-y-2">

@@ -4,14 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User } from 'lucide-react';
-import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions } from '@/services/recruitmentAgentService';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2 } from 'lucide-react';
+import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
 
 const Interviews = ({ onUpdate }) => {
@@ -23,12 +24,15 @@ const Interviews = ({ onUpdate }) => {
   const [jobFilter, setJobFilter] = useState('');
   const [jobs, setJobs] = useState([]);
   const [updatingId, setUpdatingId] = useState(null);
+  const [pendingChange, setPendingChange] = useState(null); // { interview, type: 'status'|'outcome', value, label }
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleInterviewObj, setRescheduleInterviewObj] = useState(null);
   const [reschedulePickedDate, setReschedulePickedDate] = useState(null);
   const [reschedulePickedTime, setReschedulePickedTime] = useState('');
   const [rescheduleError, setRescheduleError] = useState('');
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+  const [feedbackModal, setFeedbackModal] = useState(null); // { interview, rating, notes, strengths, improvements }
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   useEffect(() => {
     fetchInterviews();
@@ -96,43 +100,34 @@ const Interviews = ({ onUpdate }) => {
     return <Badge className={variants[outcome] || 'bg-gray-500'}>{labels[outcome] || outcome}</Badge>;
   };
 
-  const handleStatusChange = async (interviewId, newStatus) => {
-    try {
-      setUpdatingId(interviewId);
-      const response = await updateInterview(interviewId, { status: newStatus });
-      if (response.status === 'success') {
-        toast({ title: 'Updated', description: 'Interview status updated' });
-        fetchInterviews();
-        if (onUpdate) onUpdate();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update status',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingId(null);
-    }
+  const STATUS_LABELS = { PENDING: 'Pending', SCHEDULED: 'Scheduled', COMPLETED: 'Completed', CANCELLED: 'Cancelled', RESCHEDULED: 'Rescheduled' };
+  const OUTCOME_LABELS = { ONSITE_INTERVIEW: 'Onsite Interview', HIRED: 'Hired', PASSED: 'Passed', REJECTED: 'Rejected', '': 'None' };
+
+  const handleStatusChange = (interview, newStatus) => {
+    setPendingChange({ interview, type: 'status', value: newStatus, label: STATUS_LABELS[newStatus] || newStatus });
   };
 
-  const handleOutcomeChange = async (interviewId, newOutcome) => {
+  const handleOutcomeChange = (interview, newOutcome) => {
+    setPendingChange({ interview, type: 'outcome', value: newOutcome, label: OUTCOME_LABELS[newOutcome] || newOutcome || 'None' });
+  };
+
+  const handleConfirmChange = async () => {
+    if (!pendingChange) return;
+    const { interview, type, value } = pendingChange;
     try {
-      setUpdatingId(interviewId);
-      const response = await updateInterview(interviewId, { outcome: newOutcome || '' });
+      setUpdatingId(interview.id);
+      const payload = type === 'status' ? { status: value } : { outcome: value || '' };
+      const response = await updateInterview(interview.id, payload);
       if (response.status === 'success') {
-        toast({ title: 'Updated', description: 'Interview outcome updated' });
+        toast({ title: 'Updated', description: `Interview ${type} updated successfully` });
         fetchInterviews();
         if (onUpdate) onUpdate();
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update outcome',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message || `Failed to update ${type}`, variant: 'destructive' });
     } finally {
       setUpdatingId(null);
+      setPendingChange(null);
     }
   };
 
@@ -186,6 +181,42 @@ const Interviews = ({ onUpdate }) => {
       });
     } finally {
       setRescheduleSubmitting(false);
+    }
+  };
+
+  const openFeedbackModal = (interview) => {
+    setFeedbackModal({
+      interview,
+      rating: interview.feedback_rating || 0,
+      notes: interview.feedback_notes || '',
+      strengths: interview.feedback_strengths || '',
+      improvements: interview.feedback_improvements || '',
+    });
+  };
+
+  const handleFeedbackSubmit = async () => {
+    if (!feedbackModal) return;
+    if (!feedbackModal.rating) {
+      toast({ title: 'Rating required', description: 'Please select a star rating.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setFeedbackSubmitting(true);
+      const response = await submitInterviewFeedback(feedbackModal.interview.id, {
+        feedback_rating: feedbackModal.rating,
+        feedback_notes: feedbackModal.notes,
+        feedback_strengths: feedbackModal.strengths,
+        feedback_improvements: feedbackModal.improvements,
+      });
+      if (response.status === 'success') {
+        toast({ title: 'Feedback saved', description: 'Interview feedback recorded successfully.' });
+        setFeedbackModal(null);
+        fetchInterviews();
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: error?.message || 'Failed to save feedback', variant: 'destructive' });
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -334,6 +365,34 @@ const Interviews = ({ onUpdate }) => {
                       Reschedule
                     </button>
                   )}
+
+                  {/* Feedback Button (COMPLETED interviews) */}
+                  {interview.status === 'COMPLETED' && (
+                    interview.feedback_submitted_at ? (
+                      <button
+                        type="button"
+                        onClick={() => openFeedbackModal(interview)}
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-green-800 bg-green-950/40 px-3 py-1.5 text-xs sm:text-sm font-medium text-green-300 hover:bg-green-900/50 transition-colors w-full sm:w-auto"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+                        View Feedback
+                        {interview.feedback_rating && (
+                          <span className="flex gap-0.5 ml-1">
+                            {[1,2,3,4,5].map(s => <Star key={s} className={`h-2.5 w-2.5 ${s <= interview.feedback_rating ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`} />)}
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openFeedbackModal(interview)}
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1.5 text-xs sm:text-sm font-medium text-blue-300 hover:bg-blue-900/50 transition-colors w-full sm:w-auto"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
+                        Add Feedback
+                      </button>
+                    )
+                  )}
                   
                   {/* Status & Decision Controls */}
                   <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
@@ -342,7 +401,7 @@ const Interviews = ({ onUpdate }) => {
                       <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Status</Label>
                       <Select
                         value={interview.status}
-                        onValueChange={(value) => handleStatusChange(interview.id, value)}
+                        onValueChange={(value) => handleStatusChange(interview, value)}
                         disabled={updatingId === interview.id}
                       >
                         <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
@@ -367,7 +426,7 @@ const Interviews = ({ onUpdate }) => {
                         <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Decision</Label>
                         <Select
                           value={interview.outcome || 'none'}
-                          onValueChange={(value) => handleOutcomeChange(interview.id, value === 'none' ? '' : value)}
+                          onValueChange={(value) => handleOutcomeChange(interview, value === 'none' ? '' : value)}
                           disabled={updatingId === interview.id}
                         >
                           <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
@@ -500,6 +559,139 @@ const Interviews = ({ onUpdate }) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Interview Feedback Modal */}
+      {feedbackModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setFeedbackModal(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl p-5 space-y-4"
+            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-base font-bold text-white">Interview Feedback</h3>
+              <p className="text-sm text-white/50 mt-0.5">{feedbackModal.interview.candidate_name} – {feedbackModal.interview.job_title || feedbackModal.interview.job_role}</p>
+            </div>
+
+            {/* Star Rating */}
+            <div>
+              <Label className="text-xs text-white/60 mb-2 block">Overall Rating *</Label>
+              <div className="flex gap-1">
+                {[1,2,3,4,5].map(star => (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => setFeedbackModal(f => ({ ...f, rating: star }))}
+                    className="transition-transform hover:scale-110 focus:outline-none"
+                  >
+                    <Star className={`h-7 w-7 transition-colors ${star <= feedbackModal.rating ? 'text-amber-400 fill-amber-400' : 'text-white/20 hover:text-amber-300'}`} />
+                  </button>
+                ))}
+                {feedbackModal.rating > 0 && (
+                  <span className="text-xs text-white/40 self-center ml-2">{['','Poor','Below Average','Average','Good','Excellent'][feedbackModal.rating]}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Strengths */}
+            <div>
+              <Label className="text-xs text-white/60 mb-1.5 block">Strengths Observed</Label>
+              <Textarea
+                value={feedbackModal.strengths}
+                onChange={(e) => setFeedbackModal(f => ({ ...f, strengths: e.target.value }))}
+                placeholder="e.g. Strong communication skills, solid technical foundation..."
+                className="min-h-[70px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none"
+              />
+            </div>
+
+            {/* Improvements */}
+            <div>
+              <Label className="text-xs text-white/60 mb-1.5 block">Areas for Improvement</Label>
+              <Textarea
+                value={feedbackModal.improvements}
+                onChange={(e) => setFeedbackModal(f => ({ ...f, improvements: e.target.value }))}
+                placeholder="e.g. Needs more experience with system design..."
+                className="min-h-[70px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none"
+              />
+            </div>
+
+            {/* Notes */}
+            <div>
+              <Label className="text-xs text-white/60 mb-1.5 block">Additional Notes</Label>
+              <Textarea
+                value={feedbackModal.notes}
+                onChange={(e) => setFeedbackModal(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Any other observations or comments..."
+                className="min-h-[60px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none"
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end pt-1">
+              <button
+                onClick={() => setFeedbackModal(null)}
+                disabled={feedbackSubmitting}
+                className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleFeedbackSubmit}
+                disabled={feedbackSubmitting || !feedbackModal.rating}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50 flex items-center gap-2"
+                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+              >
+                {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Save Feedback
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Status / Decision Change Modal */}
+      {pendingChange && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setPendingChange(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-white mb-1">Confirm Change</h3>
+            <p className="text-sm text-white/60 mb-1">
+              {pendingChange.type === 'status' ? 'Change interview status' : 'Change interview decision'} for{' '}
+              <span className="text-white font-medium">{pendingChange.interview.candidate_name}</span>?
+            </p>
+            <p className="text-sm text-white/50 mb-5">
+              New {pendingChange.type}:{' '}
+              <span className="font-semibold text-violet-300">{pendingChange.label}</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setPendingChange(null)}
+                className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmChange}
+                disabled={!!updatingId}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
+                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+              >
+                {updatingId ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yes, Update'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -549,6 +549,68 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
   }
 };
 
+/**
+ * Download candidates CSV export
+ */
+export const exportCandidatesCSV = async (jobId = null) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const { getCompanyToken } = await import('@/services/companyAuthService');
+  const token = getCompanyToken();
+  const url = `${API_BASE_URL}/recruitment/export/candidates/${jobId ? `?job_id=${jobId}` : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `candidates_${jobId || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/**
+ * Download interviews CSV export
+ */
+export const exportInterviewsCSV = async (jobId = null) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const { getCompanyToken } = await import('@/services/companyAuthService');
+  const token = getCompanyToken();
+  const url = `${API_BASE_URL}/recruitment/export/interviews/${jobId ? `?job_id=${jobId}` : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `interviews_${jobId || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/**
+ * Get full candidate profile (CV data + linked application + interviews)
+ */
+export const getCVRecordDetail = async (recordId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/cv-records/${recordId}`);
+    return response;
+  } catch (error) {
+    console.error('Get CV record detail error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Submit or update post-interview feedback
+ */
+export const submitInterviewFeedback = async (interviewId, feedbackData) => {
+  try {
+    const response = await companyApi.patch(`/recruitment/interviews/${interviewId}/feedback`, feedbackData);
+    return response;
+  } catch (error) {
+    console.error('Submit interview feedback error:', error);
+    throw error;
+  }
+};
+
 // ========== AI Graph Generator APIs ==========
 
 /**

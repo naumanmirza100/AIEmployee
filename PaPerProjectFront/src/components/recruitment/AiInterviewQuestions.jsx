@@ -21,11 +21,49 @@ import { renderChart } from './ChartRenderer';
 
 // ...existing code...
 
+// Badge style helpers
+const BADGE = {
+  green:  'display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:9999px;font-size:0.72rem;font-weight:600;background:rgba(52,211,153,0.15);color:#34d399;border:1px solid rgba(52,211,153,0.3)',
+  red:    'display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:9999px;font-size:0.72rem;font-weight:600;background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3)',
+  amber:  'display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:9999px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3)',
+  blue:   'display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:9999px;font-size:0.72rem;font-weight:600;background:rgba(96,165,250,0.15);color:#60a5fa;border:1px solid rgba(96,165,250,0.3)',
+  violet: 'display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:9999px;font-size:0.72rem;font-weight:600;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3)',
+  gray:   'display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:9999px;font-size:0.72rem;font-weight:600;background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.45);border:1px solid rgba(255,255,255,0.12)',
+};
+function badge(style, text) { return `<span style="${BADGE[style]}">${text}</span>`; }
+
+/** Converts known field values to styled badges. Applied to list-item HTML content. */
+function styleBadges(html) {
+  // Status
+  html = html.replace(/\b(Active)\b/g, badge('green', '● $1'));
+  html = html.replace(/\b(Inactive)\b/g, badge('gray', '○ $1'));
+  // Job type
+  html = html.replace(/\b(Full-time)\b/g, badge('blue', '$1'));
+  html = html.replace(/\b(Part-time)\b/g, badge('violet', '$1'));
+  html = html.replace(/\b(Contract)\b/g, badge('amber', '$1'));
+  html = html.replace(/\b(Internship)\b/g, badge('violet', '$1'));
+  html = html.replace(/\b(Online|ONLINE)\b/g, badge('blue', '$1'));
+  html = html.replace(/\b(Onsite|ONSITE)\b/g, badge('amber', '$1'));
+  // Qualification decisions
+  html = html.replace(/\b(INTERVIEW)\b/g, badge('green', '$1'));
+  html = html.replace(/\b(HOLD)\b/g, badge('amber', '$1'));
+  html = html.replace(/\b(REJECT|REJECTED)\b/g, badge('red', '$1'));
+  // Interview status
+  html = html.replace(/\b(SCHEDULED)\b/g, badge('green', '$1'));
+  html = html.replace(/\b(PENDING)\b/g, badge('amber', '$1'));
+  html = html.replace(/\b(COMPLETED)\b/g, badge('blue', '$1'));
+  html = html.replace(/\b(CANCELLED)\b/g, badge('red', '$1'));
+  // Outcomes
+  html = html.replace(/\b(Hired|HIRED)\b/g, badge('green', '$1'));
+  html = html.replace(/\b(Passed|PASSED)\b/g, badge('blue', '$1'));
+  return html;
+}
+
 /** Markdown to HTML for Q&A answers - proper heading, subheading, lists, tables */
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
   const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
+  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:600;color:#e2e8f0">$1</strong>');
   const lines = markdown.split('\n');
   const out = [];
   let inList = false;
@@ -80,48 +118,48 @@ function markdownToHtml(markdown) {
     // ## heading (h2)
     if (/^## /.test(t)) {
       closeList();
-      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t.slice(3)))}</h2>`);
+      out.push(`<h2 style="font-size:1.1rem;font-weight:700;margin:1.25rem 0 0.6rem;color:#c084fc;border-bottom:1px solid rgba(167,139,250,0.25);padding-bottom:0.4rem">${bold(escape(t.slice(3)))}</h2>`);
       i++; continue;
     }
     // ### subheading (h3)
     if (/^### /.test(t)) {
       closeList();
-      out.push(`<h3 class="text-lg font-semibold mt-4 mb-2 text-foreground">${bold(escape(t.slice(4)))}</h3>`);
+      out.push(`<h3 style="font-size:1rem;font-weight:600;margin:1rem 0 0.4rem;color:#a78bfa">${bold(escape(t.slice(4)))}</h3>`);
       i++; continue;
     }
     // #### sub-subheading (h4)
     if (/^#### /.test(t)) {
       closeList();
-      out.push(`<h4 class="text-base font-semibold mt-3 mb-1.5 text-muted-foreground">${bold(escape(t.slice(5)))}</h4>`);
+      out.push(`<h4 style="font-size:0.9rem;font-weight:600;margin:0.75rem 0 0.3rem;color:#818cf8">${bold(escape(t.slice(5)))}</h4>`);
       i++; continue;
     }
     if (t.endsWith(':') && t.length > 10 && !t.startsWith('-') && !t.startsWith('*') && !/^\d+\./.test(t)) {
       closeList();
-      out.push(`<h2 class="text-xl font-bold mt-6 mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">${bold(escape(t))}</h2>`);
+      out.push(`<h2 style="font-size:1.1rem;font-weight:700;margin:1.25rem 0 0.6rem;color:#c084fc;border-bottom:1px solid rgba(167,139,250,0.25);padding-bottom:0.4rem">${bold(escape(t))}</h2>`);
       i++; continue;
     }
     // Numbered list (1. 2. 3.)
     if (/^[\s]*\d+\.\s+/.test(t)) {
       if (!inList || listType !== 'ol') {
         closeList();
-        out.push('<ol class="list-decimal pl-6 my-4 space-y-2">');
+        out.push('<ol style="list-style:decimal;padding-left:1.5rem;margin:0.75rem 0;display:flex;flex-direction:column;gap:0.4rem">');
         inList = true;
         listType = 'ol';
       }
       const content = t.replace(/^[\s]*\d+\.\s+/, '');
-      out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
+      out.push(`<li style="color:rgba(226,232,240,0.9);line-height:1.65;font-size:0.9rem">${styleBadges(bold(escape(content)))}</li>`);
       i++; continue;
     }
     // Bullet list (•, -, *)
     if (/^[\s]*(?:•|-|\*)\s+/.test(t)) {
       if (!inList || listType !== 'ul') {
         closeList();
-        out.push('<ul class="list-disc pl-6 my-4 space-y-2">');
+        out.push('<ul style="list-style:disc;padding-left:1.5rem;margin:0.75rem 0;display:flex;flex-direction:column;gap:0.4rem">');
         inList = true;
         listType = 'ul';
       }
       const content = t.replace(/^[\s]*(?:•|-|\*)\s+/, '');
-      out.push(`<li class="text-base leading-relaxed">${bold(escape(content))}</li>`);
+      out.push(`<li style="color:rgba(226,232,240,0.9);line-height:1.65;font-size:0.9rem">${styleBadges(bold(escape(content)))}</li>`);
       i++; continue;
     }
     if (t === '' && inList) {
@@ -130,7 +168,7 @@ function markdownToHtml(markdown) {
     }
     if (t && !t.startsWith('<')) {
       closeList();
-      out.push(`<p class="my-4 text-base leading-relaxed">${bold(escape(t)).replace(/\n/g, '<br/>')}</p>`);
+      out.push(`<p style="margin:0.6rem 0;line-height:1.7;color:rgba(226,232,240,0.85);font-size:0.9rem">${styleBadges(bold(escape(t)).replace(/\n/g, '<br/>'))}</p>`);
     }
     i++;
   }
@@ -265,11 +303,12 @@ const AiInterviewQuestions = () => {
         const result = await generateGraph(q);
         if (result.status === 'success' && result.data) {
           const { chart, insights } = result.data;
-          const userMsg = { role: 'user', content: q };
+          const userMsg = { role: 'user', content: q, ts: new Date().toISOString() };
           const assistantMsg = {
             role: 'assistant',
             content: chart?.title ? `**${chart.title}**` : 'Chart generated',
             responseData: { isGraph: true, chart, insights, chartTitle: chart?.title, chartType: chart?.type },
+            ts: new Date().toISOString(),
           };
           const title = q.slice(0, 40);
           if (selectedChatId) {
@@ -317,8 +356,9 @@ const AiInterviewQuestions = () => {
             responseText += `• **${i.title || 'N/A'}**: ${i.value || 'N/A'}\n`;
           });
         }
-        const userMsg = { role: 'user', content: q };
-        const assistantMsg = { role: 'assistant', content: responseText, responseData: response };
+        const now = new Date().toISOString();
+        const userMsg = { role: 'user', content: q, ts: now };
+        const assistantMsg = { role: 'assistant', content: responseText, responseData: response, ts: new Date().toISOString() };
         const title = q.slice(0, 40);
 
         if (selectedChatId) {
@@ -733,19 +773,21 @@ const AiInterviewQuestions = () => {
             {currentMessages.map((msg, i) => (
               <div
                 key={i}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`rounded-2xl ${
-                    msg.role === 'user'
-                      ? 'bg-primary text-primary-foreground max-w-[85%] px-4 py-3'
-                      : msg.responseData?.isGraph
-                        ? 'bg-muted border max-w-[70%] px-2 py-2'
-                        : 'bg-muted border max-w-[85%] px-4 py-3'
-                  }`}
+                  className={`rounded-2xl ${msg.role === 'user' ? 'max-w-[80%]' : msg.responseData?.isGraph ? 'max-w-[72%]' : 'max-w-[88%]'}`}
+                  style={msg.role === 'user' ? {
+                    background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)',
+                    padding: '10px 16px',
+                  } : {
+                    background: 'linear-gradient(135deg, rgba(18,12,40,0.97) 0%, rgba(14,10,32,0.97) 100%)',
+                    border: '1px solid rgba(167,139,250,0.2)',
+                    padding: msg.responseData?.isGraph ? '10px' : '14px 18px',
+                  }}
                 >
                   {msg.role === 'user' ? (
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    <p style={{ fontSize: '0.9rem', color: '#fff', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
                   ) : msg.responseData?.isGraph ? (
                     <>
                       <div className="space-y-3">
@@ -826,7 +868,7 @@ const AiInterviewQuestions = () => {
                   ) : (
                     <>
                       <div
-                        className="prose prose-base max-w-none [&_h2]:text-violet-600 [&_h2]:dark:text-violet-400 [&_strong]:font-semibold [&_p]:text-base [&_li]:text-base"
+                        style={{ lineHeight: 1.7 }}
                         dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.responseData?.answer ?? msg.content) }}
                       />
                       {Array.isArray(msg.responseData?.insights) && msg.responseData.insights.length > 0 && (
@@ -849,13 +891,18 @@ const AiInterviewQuestions = () => {
                     </>
                   )}
                 </div>
+                {msg.ts && (
+                  <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '3px', paddingLeft: msg.role === 'user' ? 0 : '4px', paddingRight: msg.role === 'user' ? '4px' : 0 }}>
+                    {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Analyzing...</span>
+                <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background: 'rgba(18,12,40,0.97)', border: '1px solid rgba(167,139,250,0.2)' }}>
+                  <Loader2 className="h-4 w-4 animate-spin" style={{ color: '#a78bfa' }} />
+                  <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>Analyzing...</span>
                 </div>
               </div>
             )}
