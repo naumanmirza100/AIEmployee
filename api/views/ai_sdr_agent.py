@@ -39,6 +39,16 @@ logger = logging.getLogger(__name__)
 # Per-request agent factories — pass company so keys resolve per-company
 # --------------------------------------------------------------------------
 
+def _ensure_https(url: str) -> str:
+    """Add https:// prefix if a URL has no protocol."""
+    if not url:
+        return url
+    url = url.strip()
+    if url and not url.startswith(('http://', 'https://')):
+        return f'https://{url}'
+    return url
+
+
 def _get_research_agent(company, company_user=None) -> LeadResearchAgent:
     """Create a LeadResearchAgent with the correct company key context."""
     if company_user is not None:
@@ -116,6 +126,12 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'temperature': lead.temperature,
         'score_breakdown': lead.score_breakdown,
         'qualification_reasoning': lead.qualification_reasoning,
+        'key_strengths': lead.key_strengths if hasattr(lead, 'key_strengths') else [],
+        'concerns': lead.concerns if hasattr(lead, 'concerns') else [],
+        'outreach_strategy': lead.outreach_strategy if hasattr(lead, 'outreach_strategy') else '',
+        'confidence_score': lead.confidence_score if hasattr(lead, 'confidence_score') else None,
+        'data_quality_flags': lead.data_quality_flags if hasattr(lead, 'data_quality_flags') else [],
+        'email_bounced': lead.email_bounced,
         'status': lead.status,
         'source': lead.source,
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
@@ -393,6 +409,9 @@ def qualify_lead(request, lead_id):
         lead.temperature = result['temperature']
         lead.score_breakdown = result.get('score_breakdown', {})
         lead.qualification_reasoning = result.get('qualification_reasoning', '')
+        lead.key_strengths = result.get('key_strengths', [])
+        lead.concerns = result.get('concerns', [])
+        lead.outreach_strategy = result.get('outreach_strategy', '')
         lead.qualified_at = timezone.now()
         lead.status = 'qualified'
         lead.save()
@@ -432,6 +451,9 @@ def qualify_all_leads(request):
                 lead.temperature = result['temperature']
                 lead.score_breakdown = result.get('score_breakdown', {})
                 lead.qualification_reasoning = result.get('qualification_reasoning', '')
+                lead.key_strengths = result.get('key_strengths', [])
+                lead.concerns = result.get('concerns', [])
+                lead.outreach_strategy = result.get('outreach_strategy', '')
                 lead.qualified_at = timezone.now()
                 lead.status = 'qualified'
                 lead.save()
@@ -508,25 +530,47 @@ def research_leads(request):
 
             created = 0
             skipped_dupes = 0
-            # Pre-load existing emails for this company user to avoid N queries
-            existing_emails = set(
-                SDRLead.objects.filter(company_user=company_user)
-                .values_list('email', flat=True)
-            )
-            existing_emails_lower = {e.lower() for e in existing_emails if e}
 
+            # Pre-load existing emails AND name+company pairs to catch no-email dupes (e.g. Apify)
+            existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list('email', 'full_name', 'company_name')
+            existing_emails_lower = set()
+            existing_name_company = set()
+            for em, fn, cn in existing_leads_qs:
+                if em:
+                    existing_emails_lower.add(em.lower())
+                if fn and cn:
+                    existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
+
+            from ai_sdr_agent.agents.lead_validator import validate_lead
             for ld in raw_leads:
                 full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
                 lead_email = (ld.get('email') or '').strip().lower()
+                company_name = (ld.get('company_name') or '').strip()
 
-                # ── Duplicate guard ──────────────────────────────────────────
+                # ── Reject leads with no name and no company (totally empty) ──
+                if not full_name.strip() and not company_name:
+                    logger.info("SDR [research] SKIPPING empty lead (no name, no company)")
+                    skipped_dupes += 1
+                    continue
+
+                # ── Duplicate guard — email OR name+company ──────────────────
                 if lead_email and lead_email in existing_emails_lower:
                     logger.info("SDR [research] SKIPPING duplicate email=%s", lead_email)
                     skipped_dupes += 1
                     continue
+                name_company_key = (full_name.lower().strip(), company_name.lower().strip())
+                if full_name and company_name and name_company_key in existing_name_company:
+                    logger.info("SDR [research] SKIPPING duplicate name+company: %s @ %s", full_name, company_name)
+                    skipped_dupes += 1
+                    continue
+                # Track both for intra-batch dedup
                 if lead_email:
-                    existing_emails_lower.add(lead_email)   # prevent intra-batch dupes
+                    existing_emails_lower.add(lead_email)
+                if full_name and company_name:
+                    existing_name_company.add(name_company_key)
                 # ─────────────────────────────────────────────────────────────
+
+                validation = validate_lead({**ld, 'full_name': full_name})
 
                 SDRLead.objects.create(
                     company_user=company_user,
@@ -546,15 +590,17 @@ def research_leads(request):
                     company_size_range=ld.get('company_size_range', ''),
                     company_location=ld.get('company_location', ''),
                     company_technologies=ld.get('company_technologies', []),
-                    linkedin_url=ld.get('linkedin_url', ''),
-                    company_linkedin_url=ld.get('company_linkedin_url', ''),
-                    company_website=ld.get('company_website', ''),
+                    linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
+                    company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
+                    company_website=_ensure_https(ld.get('company_website', '')),
                     recent_news=ld.get('recent_news', []),
                     buying_signals=ld.get('buying_signals', []),
                     apollo_id=ld.get('apollo_id', ''),
                     raw_data=ld.get('raw_data', {}),
                     source=ld.get('source', 'ai_generated'),
                     status='new',
+                    confidence_score=validation['confidence_score'],
+                    data_quality_flags=validation['data_quality_flags'],
                 )
                 created += 1
 
@@ -572,6 +618,9 @@ def research_leads(request):
                     lead.temperature = result['temperature']
                     lead.score_breakdown = result.get('score_breakdown', {})
                     lead.qualification_reasoning = result.get('qualification_reasoning', '')
+                    lead.key_strengths = result.get('key_strengths', [])
+                    lead.concerns = result.get('concerns', [])
+                    lead.outreach_strategy = result.get('outreach_strategy', '')
                     lead.qualified_at = timezone.now()
                     lead.status = 'qualified'
                     lead.save()

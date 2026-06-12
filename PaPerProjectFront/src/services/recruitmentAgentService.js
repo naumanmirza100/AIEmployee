@@ -601,6 +601,7 @@ export const getCVRecordDetail = async (recordId) => {
 /**
  * Submit or update post-interview feedback
  */
+
 export const submitInterviewFeedback = async (interviewId, feedbackData) => {
   try {
     const response = await companyApi.patch(`/recruitment/interviews/${interviewId}/feedback`, feedbackData);
