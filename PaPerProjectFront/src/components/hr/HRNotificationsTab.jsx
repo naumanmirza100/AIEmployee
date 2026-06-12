@@ -43,7 +43,7 @@ const NOTIFICATION_TYPES = [
 ];
 
 const SCHED_STATUS_BADGE = {
-  pending: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+  pending: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
   sent: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
   failed: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
   cancelled: 'bg-white/[0.04] text-white/70 border-white/[0.06]',

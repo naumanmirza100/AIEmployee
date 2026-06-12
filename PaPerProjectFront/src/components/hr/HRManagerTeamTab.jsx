@@ -20,9 +20,9 @@ import hrAgentService from '@/services/hrAgentService';
 const STATUS_DOT = {
   active: 'bg-emerald-400',
   on_leave: 'bg-amber-400',
-  probation: 'bg-sky-400',
+  probation: 'bg-violet-400',
   notice: 'bg-rose-400',
-  offboarded: 'bg-slate-400',
+  offboarded: 'bg-white/40',
 };
 
 
@@ -101,7 +101,7 @@ export default function HRManagerTeamTab({ onOpenEmployee }) {
                       <div className="text-xs text-white/55">{m.job_title || '—'}</div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[m.employment_status] || 'bg-slate-400'}`} />
+                      <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[m.employment_status] || 'bg-white/40'}`} />
                       <span className="text-[10px] text-white/55 uppercase tracking-wider">{m.employment_status}</span>
                     </div>
                   </div>

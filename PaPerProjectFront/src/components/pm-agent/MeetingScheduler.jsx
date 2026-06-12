@@ -14,7 +14,7 @@ function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
   const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-violet-300">$1</strong>');
-  const italic = (s) => s.replace(/\*(.+?)\*/g, '<em class="text-gray-400">$1</em>');
+  const italic = (s) => s.replace(/\*(.+?)\*/g, '<em class="text-white/55">$1</em>');
   const lines = markdown.split('\n');
   const out = [];
   for (const line of lines) {
@@ -22,18 +22,18 @@ function markdownToHtml(markdown) {
     if (!t) { out.push('<br/>'); continue; }
     if (t.startsWith('# ')) { out.push(`<h2 class="text-lg font-bold text-violet-300 mt-3 mb-1">${bold(escape(t.slice(2)))}</h2>`); continue; }
     if (t.startsWith('## ')) { out.push(`<h3 class="text-base font-semibold text-violet-300 mt-2 mb-1">${bold(escape(t.slice(3)))}</h3>`); continue; }
-    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-gray-200">${italic(bold(escape(t.replace(/^[-*]\s+/, ''))))}</span></div>`); continue; }
-    out.push(`<p class="text-gray-300 my-0.5">${italic(bold(escape(t)))}</p>`);
+    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-white/80">${italic(bold(escape(t.replace(/^[-*]\s+/, ''))))}</span></div>`); continue; }
+    out.push(`<p class="text-white/65 my-0.5">${italic(bold(escape(t)))}</p>`);
   }
   return out.join('\n');
 }
 
 const STATUS_CONFIG = {
-  pending: { color: 'text-yellow-400', bg: 'bg-yellow-500/20', icon: Clock, label: 'Pending' },
-  accepted: { color: 'text-green-400', bg: 'bg-green-500/20', icon: CheckCircle, label: 'Accepted' },
+  pending: { color: 'text-amber-400', bg: 'bg-amber-500/20', icon: Clock, label: 'Pending' },
+  accepted: { color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: CheckCircle, label: 'Accepted' },
   rejected: { color: 'text-red-400', bg: 'bg-red-500/20', icon: XCircle, label: 'Rejected' },
-  counter_proposed: { color: 'text-blue-400', bg: 'bg-blue-500/20', icon: ArrowRightLeft, label: 'Counter Proposed' },
-  withdrawn: { color: 'text-gray-400', bg: 'bg-gray-500/20', icon: Trash2, label: 'Withdrawn' },
+  counter_proposed: { color: 'text-violet-400', bg: 'bg-violet-500/20', icon: ArrowRightLeft, label: 'Counter Proposed' },
+  withdrawn: { color: 'text-white/55', bg: 'bg-white/[0.05]', icon: Trash2, label: 'Withdrawn' },
 };
 
 export default function MeetingScheduler() {
@@ -500,11 +500,11 @@ export default function MeetingScheduler() {
                           <div>
                             <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }} />
                             {msg.responseData?.meeting && (
-                              <div className="mt-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                                <div className="flex items-center gap-2 text-green-400 text-xs font-medium mb-1">
+                              <div className="mt-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                                <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
                                   <CheckCircle className="h-3.5 w-3.5" /> Meeting Created
                                 </div>
-                                <div className="text-xs text-gray-300 space-y-0.5">
+                                <div className="text-xs text-white/65 space-y-0.5">
                                   <div><strong>With:</strong> {msg.responseData.meeting.invitee_name}</div>
                                   <div><strong>When:</strong> {new Date(msg.responseData.meeting.proposed_time).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
                                   <div><strong>Duration:</strong> {msg.responseData.meeting.duration_minutes} min</div>
@@ -550,8 +550,8 @@ export default function MeetingScheduler() {
             {activeTab === 'meetings' && (
               <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <h3 className="text-sm font-medium text-gray-300">Your Meetings</h3>
-                  <Button onClick={fetchMeetings} disabled={meetingsLoading} variant="outline" size="sm" className="border-gray-600 text-gray-300">
+                  <h3 className="text-sm font-medium text-white/65">Your Meetings</h3>
+                  <Button onClick={fetchMeetings} disabled={meetingsLoading} variant="outline" size="sm" className="border-white/[0.08] text-white/65">
                     <RefreshCw className={`w-3.5 h-3.5 mr-1 ${meetingsLoading ? 'animate-spin' : ''}`} /> Refresh
                   </Button>
                 </div>
@@ -559,9 +559,9 @@ export default function MeetingScheduler() {
                 {/* Stats summary */}
                 {meetingStats.total > 0 && (
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400">{meetingStats.pending} pending</span>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">{meetingStats.accepted} accepted</span>
-                    {meetingStats.counter > 0 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400">{meetingStats.counter} counter-proposed</span>}
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">{meetingStats.pending} pending</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">{meetingStats.accepted} accepted</span>
+                    {meetingStats.counter > 0 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400">{meetingStats.counter} counter-proposed</span>}
                     {nextMeeting && (
                       <span className="text-[11px] text-violet-400 flex items-center gap-1">
                         <Clock className="h-3 w-3" /> Next: {nextMeeting.title} — {new Date(nextMeeting.proposed_time).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
@@ -587,13 +587,13 @@ export default function MeetingScheduler() {
                       <div className="flex items-start justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-white">{m.title}</h4>
-                          <p className="text-xs text-gray-400 mt-0.5">With: {m.invitee_name}</p>
+                          <p className="text-xs text-white/55 mt-0.5">With: {m.invitee_name}</p>
                         </div>
                         <span className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${sc.bg} ${sc.color}`}>
                           <StatusIcon className="h-3 w-3" /> {sc.label}
                         </span>
                       </div>
-                      <div className="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
+                      <div className="flex items-center gap-4 text-xs text-white/55 flex-wrap">
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {new Date(m.proposed_time).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                         <span>{m.duration_minutes} min</span>
                         {m.is_recurring && (
@@ -625,11 +625,11 @@ export default function MeetingScheduler() {
                       {/* Agenda */}
                       {m.agenda?.length > 0 && (
                         <div className="pt-1 space-y-1">
-                          <span className="text-[10px] text-gray-500 uppercase tracking-wide">Agenda</span>
+                          <span className="text-[10px] text-white/40 uppercase tracking-wide">Agenda</span>
                           {m.agenda.map((a, ai) => (
-                            <div key={ai} className="flex items-start gap-2 text-xs text-gray-300">
+                            <div key={ai} className="flex items-start gap-2 text-xs text-white/65">
                               <span className="text-violet-400 mt-0.5">{a.done ? '✓' : '•'}</span>
-                              <span className={a.done ? 'line-through text-gray-500' : ''}>{a.item}</span>
+                              <span className={a.done ? 'line-through text-white/40' : ''}>{a.item}</span>
                             </div>
                           ))}
                         </div>
@@ -639,9 +639,9 @@ export default function MeetingScheduler() {
                       {m.responses?.length > 0 && (
                         <div className="space-y-1 pt-1 border-t border-white/5">
                           {m.responses.map((r, ri) => (
-                            <div key={ri} className="text-xs text-gray-400 flex items-center gap-2">
-                              <span className="font-medium text-gray-300">{r.responder_name}</span>
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_CONFIG[r.action]?.bg || 'bg-gray-500/20'} ${STATUS_CONFIG[r.action]?.color || 'text-gray-400'}`}>
+                            <div key={ri} className="text-xs text-white/55 flex items-center gap-2">
+                              <span className="font-medium text-white/65">{r.responder_name}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_CONFIG[r.action]?.bg || 'bg-white/[0.05]'} ${STATUS_CONFIG[r.action]?.color || 'text-white/55'}`}>
                                 {r.action}
                               </span>
                               {r.proposed_time && <span>→ {new Date(r.proposed_time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
@@ -666,7 +666,7 @@ export default function MeetingScheduler() {
                               </div>
                               <div className="flex gap-2">
                                 <Button size="sm" onClick={() => handleRespond(m.id, 'counter_proposed')} disabled={respondLoading || !counterDate || !counterTime}
-                                  className="bg-blue-600 hover:bg-blue-700 text-xs h-7">
+                                  className="bg-violet-600 hover:bg-violet-700 text-xs h-7">
                                   {respondLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <><ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest Time</>}
                                 </Button>
                                 <Button size="sm" variant="ghost" onClick={() => setRespondingTo(null)} className="text-xs h-7">Cancel</Button>
@@ -677,14 +677,14 @@ export default function MeetingScheduler() {
                               {/* Accept button — shown when invitee counter-proposed a new time */}
                               {m.status === 'counter_proposed' && (
                                 <Button size="sm" onClick={() => handleRespond(m.id, 'accepted')} disabled={respondLoading}
-                                  className="bg-green-600 hover:bg-green-700 text-xs h-7">
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-xs h-7">
                                   <CheckCircle className="h-3 w-3 mr-1" /> Accept Proposed Time
                                 </Button>
                               )}
                               <Button size="sm" onClick={() => handleRespond(m.id, 'withdrawn')} variant="outline" className="text-xs h-7 border-red-500/30 text-red-400 hover:bg-red-500/10">
                                 <Trash2 className="h-3 w-3 mr-1" /> Withdraw
                               </Button>
-                              <Button size="sm" onClick={() => setRespondingTo(m.id)} variant="outline" className="text-xs h-7 border-blue-500/30 text-blue-400 hover:bg-blue-500/10">
+                              <Button size="sm" onClick={() => setRespondingTo(m.id)} variant="outline" className="text-xs h-7 border-violet-500/30 text-violet-400 hover:bg-violet-500/10">
                                 <ArrowRightLeft className="h-3 w-3 mr-1" /> Change Time
                               </Button>
                             </>
@@ -695,7 +695,7 @@ export default function MeetingScheduler() {
                       {/* Meeting Notes link — show for past accepted meetings */}
                       {m.status === 'accepted' && new Date(m.proposed_time) < new Date() && (
                         <div className="pt-1 border-t border-white/5">
-                          <span className="text-[10px] text-green-400 flex items-center gap-1">
+                          <span className="text-[10px] text-emerald-400 flex items-center gap-1">
                             <CheckCircle className="h-3 w-3" /> Meeting completed — add notes in the AI Tools → Meeting Notes tab
                           </span>
                         </div>

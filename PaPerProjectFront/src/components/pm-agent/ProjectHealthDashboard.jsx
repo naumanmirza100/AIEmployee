@@ -20,24 +20,24 @@ function markdownToHtml(markdown) {
     if (t.startsWith('# ')) { out.push(`<h2 class="text-lg font-bold text-violet-300 mt-3 mb-1">${bold(escape(t.slice(2)))}</h2>`); continue; }
     if (t.startsWith('## ')) { out.push(`<h3 class="text-base font-semibold text-violet-300 mt-2 mb-1">${bold(escape(t.slice(3)))}</h3>`); continue; }
     if (t.startsWith('### ')) { out.push(`<h4 class="text-sm font-semibold text-violet-400 mt-2 mb-1">${bold(escape(t.slice(4)))}</h4>`); continue; }
-    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-gray-200">${bold(escape(t.replace(/^[-*]\s+/, '')))}</span></div>`); continue; }
-    if (/^\d+\.\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 font-medium">${t.match(/^\d+/)[0]}.</span><span class="text-gray-200">${bold(escape(t.replace(/^\d+\.\s+/, '')))}</span></div>`); continue; }
-    out.push(`<p class="text-gray-300 my-1">${bold(escape(t))}</p>`);
+    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-white/80">${bold(escape(t.replace(/^[-*]\s+/, '')))}</span></div>`); continue; }
+    if (/^\d+\.\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 font-medium">${t.match(/^\d+/)[0]}.</span><span class="text-white/80">${bold(escape(t.replace(/^\d+\.\s+/, '')))}</span></div>`); continue; }
+    out.push(`<p class="text-white/65 my-1">${bold(escape(t))}</p>`);
   }
   return out.join('\n');
 }
 
 function getScoreColor(score) {
-  if (score >= 80) return 'text-green-400';
-  if (score >= 60) return 'text-yellow-400';
-  if (score >= 40) return 'text-orange-400';
+  if (score >= 80) return 'text-emerald-400';
+  if (score >= 60) return 'text-amber-400';
+  if (score >= 40) return 'text-amber-400';
   return 'text-red-400';
 }
 
 function getScoreBg(score) {
-  if (score >= 80) return 'bg-green-900/30 border-green-700';
-  if (score >= 60) return 'bg-yellow-900/30 border-yellow-700';
-  if (score >= 40) return 'bg-orange-900/30 border-orange-700';
+  if (score >= 80) return 'bg-emerald-900/30 border-emerald-700';
+  if (score >= 60) return 'bg-amber-900/30 border-amber-700';
+  if (score >= 40) return 'bg-amber-900/30 border-amber-700';
   return 'bg-red-900/30 border-red-700';
 }
 
@@ -103,7 +103,7 @@ export default function ProjectHealthDashboard() {
   return (
     <div className="space-y-6">
       {/* Controls */}
-      <Card className="bg-gray-900/50 border-gray-700">
+      <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg text-violet-300 flex items-center gap-2">
             <Activity className="w-5 h-5" /> Project Health & Status
@@ -112,10 +112,10 @@ export default function ProjectHealthDashboard() {
         <CardContent>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Select value={selectedProject || ''} onValueChange={(v) => setSelectedProject(v || null)}>
-              <SelectTrigger className="flex-1 h-10 bg-gray-800 border-gray-600 text-white">
+              <SelectTrigger className="flex-1 h-10 bg-white/[0.02] border-white/[0.08] text-white">
                 <SelectValue placeholder="Select a Project" />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-600 z-50">
+              <SelectContent className="bg-white/[0.02] border-white/[0.08] z-50">
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                 ))}
@@ -135,7 +135,7 @@ export default function ProjectHealthDashboard() {
       {(loading || reportLoading) && (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
-          <span className="ml-3 text-gray-400">{loading ? 'Calculating health score...' : 'Generating status report...'}</span>
+          <span className="ml-3 text-white/55">{loading ? 'Calculating health score...' : 'Generating status report...'}</span>
         </div>
       )}
 
@@ -149,16 +149,16 @@ export default function ProjectHealthDashboard() {
                 <div className="flex items-center justify-center gap-6">
                   <div className="text-center">
                     <div className={`text-5xl font-bold ${getScoreColor(score)}`}>{score}</div>
-                    <div className="text-sm text-gray-400 mt-1">/ 100</div>
+                    <div className="text-sm text-white/55 mt-1">/ 100</div>
                     <div className={`text-sm font-medium mt-2 ${getScoreColor(score)}`}>
                       {score >= 80 ? 'Healthy' : score >= 60 ? 'Needs Attention' : score >= 40 ? 'At Risk' : 'Critical'}
                     </div>
                   </div>
-                  <div className="h-20 w-px bg-gray-700" />
+                  <div className="h-20 w-px bg-white/[0.05]" />
                   <div className="space-y-2 text-sm">
                     {health.metrics && Object.entries(health.metrics).map(([key, val]) => (
                       <div key={key} className="flex items-center gap-2">
-                        <span className="text-gray-400 capitalize">{key.replace(/_/g, ' ')}:</span>
+                        <span className="text-white/55 capitalize">{key.replace(/_/g, ' ')}:</span>
                         <span className="text-white font-medium">{typeof val === 'number' ? `${val}%` : String(val)}</span>
                       </div>
                     ))}
@@ -170,7 +170,7 @@ export default function ProjectHealthDashboard() {
 
           {/* Issues */}
           {health.issues?.length > 0 && (
-            <Card className="bg-gray-800 border-gray-700">
+            <Card className="bg-white/[0.02] border-white/[0.06]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm text-red-400 flex items-center gap-1">
                   <AlertTriangle className="w-4 h-4" /> Issues ({health.issues.length})
@@ -178,7 +178,7 @@ export default function ProjectHealthDashboard() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {health.issues.map((issue, i) => (
-                  <div key={i} className="bg-gray-900 rounded p-2 text-sm text-gray-300">
+                  <div key={i} className="bg-black/30 rounded p-2 text-sm text-white/65">
                     {typeof issue === 'string' ? issue : issue.description || issue.message || JSON.stringify(issue)}
                   </div>
                 ))}
@@ -188,16 +188,16 @@ export default function ProjectHealthDashboard() {
 
           {/* Recommendations */}
           {health.recommendations?.length > 0 && (
-            <Card className="bg-gray-800 border-gray-700">
+            <Card className="bg-white/[0.02] border-white/[0.06]">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-green-400 flex items-center gap-1">
+                <CardTitle className="text-sm text-emerald-400 flex items-center gap-1">
                   <CheckCircle className="w-4 h-4" /> Recommendations
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
                 {health.recommendations.map((rec, i) => (
-                  <div key={i} className="text-sm text-gray-300 flex items-start gap-2">
-                    <span className="text-green-400">•</span>
+                  <div key={i} className="text-sm text-white/65 flex items-start gap-2">
+                    <span className="text-emerald-400">•</span>
                     <span>{typeof rec === 'string' ? rec : rec.recommendation || rec.text || JSON.stringify(rec)}</span>
                   </div>
                 ))}
@@ -207,7 +207,7 @@ export default function ProjectHealthDashboard() {
 
           {/* Fallback: render answer or report as markdown */}
           {(health.answer || health.report) && !score && (
-            <Card className="bg-gray-800 border-gray-700">
+            <Card className="bg-white/[0.02] border-white/[0.06]">
               <CardContent className="pt-4">
                 <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(health.answer || health.report) }} />
               </CardContent>
@@ -218,7 +218,7 @@ export default function ProjectHealthDashboard() {
 
       {/* Status Report Display */}
       {!reportLoading && statusReport && (
-        <Card className="bg-gray-800 border-gray-700">
+        <Card className="bg-white/[0.02] border-white/[0.06]">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm text-violet-300 flex items-center gap-1">
               <FileText className="w-4 h-4" /> Status Report
@@ -235,8 +235,8 @@ export default function ProjectHealthDashboard() {
 
       {/* Empty State */}
       {!loading && !reportLoading && !health && !statusReport && (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-          <Activity className="w-12 h-12 mb-3 text-gray-600" />
+        <div className="flex flex-col items-center justify-center py-20 text-white/40">
+          <Activity className="w-12 h-12 mb-3 text-white/35" />
           <p className="text-sm text-center">Select a project and click Health Score or Status Report to get started.</p>
         </div>
       )}
