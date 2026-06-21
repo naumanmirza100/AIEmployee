@@ -97,7 +97,7 @@ class LeadResearchAgent:
                     'Go to SDR Agent → Settings and enter your Apollo.io API key.'
                 )
             return self._search_apollo(icp_profile, count)
-        if source == 'ai':
+        if source in ('ai', 'ai_generated'):
             return self._generate_ai_leads(icp_profile, count)
         # auto priority — apify only if both token AND actor are set
         if self.apollo_api_key:
@@ -450,7 +450,13 @@ company_technologies (array of 2-3 strings),
 recent_news (array with 1 object: title, date, summary),
 buying_signals (array of 2 short strings), source ("ai_generated")
 
-Use realistic varied data matching the ICP."""
+IMPORTANT URL rules:
+- linkedin_url must be a full URL: "https://linkedin.com/in/firstname-lastname-xxxxx"
+- company_linkedin_url must start with "https://linkedin.com/company/"
+- company_website must start with "https://" (e.g. "https://acmecorp.com")
+- email must be a real business email using company_domain (not gmail/yahoo)
+
+Use realistic varied data. Each lead must be a different person at a different company."""
 
             try:
                 resp = self.groq_client.chat.completions.create(

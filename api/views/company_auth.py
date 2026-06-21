@@ -188,7 +188,12 @@ def login_company_user(request):
                 company = Company.objects.get(id=company_id)
                 company_user = CompanyUser.objects.get(company=company, email=email)
             else:
-                company_user = CompanyUser.objects.get(email=email)
+                # Use filter+order_by to handle duplicate emails across companies gracefully
+                # (picks the most recently active account)
+                qs = CompanyUser.objects.filter(email=email).order_by('-last_login')
+                if not qs.exists():
+                    raise CompanyUser.DoesNotExist
+                company_user = qs.first()
                 company = company_user.company
         except (CompanyUser.DoesNotExist, Company.DoesNotExist):
             return Response({

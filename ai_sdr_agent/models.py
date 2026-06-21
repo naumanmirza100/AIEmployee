@@ -21,8 +21,8 @@ class SDRIcpProfile(models.Model):
     company_size_max = models.IntegerField(null=True, blank=True)
 
     # Scoring thresholds
-    hot_threshold = models.IntegerField(default=70)   # score >= hot_threshold → Hot
-    warm_threshold = models.IntegerField(default=40)  # score >= warm_threshold → Warm
+    hot_threshold = models.IntegerField(default=75)   # score >= hot_threshold → Hot
+    warm_threshold = models.IntegerField(default=60)  # score >= warm_threshold → Warm
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
@@ -103,8 +103,13 @@ class SDRLead(models.Model):
     # AI Qualification
     score = models.IntegerField(null=True, blank=True)           # 0–100
     temperature = models.CharField(max_length=10, choices=TEMPERATURE_CHOICES, blank=True)
-    score_breakdown = models.JSONField(default=dict)             # {industry:28, job_title:30, ...}
+    score_breakdown = models.JSONField(default=dict)             # {company_quality:22, contact_quality:18, ...}
     qualification_reasoning = models.TextField(blank=True)
+    key_strengths = models.JSONField(default=list, blank=True)
+    concerns = models.JSONField(default=list, blank=True)
+    outreach_strategy = models.TextField(blank=True)
+    confidence_score = models.IntegerField(null=True, blank=True, help_text="Data accuracy confidence 0-100")
+    data_quality_flags = models.JSONField(default=list, blank=True)
 
     # Workflow
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='new')
