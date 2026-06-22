@@ -75,11 +75,25 @@ export const updateApplicationStatus = async (applicationId, status) => {
   }
 };
 
+/**
+ * Run AI pipeline on all unprocessed applications for a job
+ */
+export const processJobApplicants = async (jobId) => {
+  try {
+    const response = await companyApi.post(`/company/jobs/${jobId}/process-applicants`);
+    return response;
+  } catch (error) {
+    console.error('Process job applicants error:', error);
+    throw error;
+  }
+};
+
 export default {
   createJobPosition,
   getCompanyJobs,
   updateJobPosition,
   getJobApplications,
   updateApplicationStatus,
+  processJobApplicants,
 };
 

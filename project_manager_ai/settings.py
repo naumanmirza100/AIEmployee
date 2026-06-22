@@ -412,10 +412,31 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # or '/app/staticfiles' –
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # --------------------
-# Media files (for file uploads)
+# Media / File Storage (S3 or local)
 # --------------------
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+USE_S3 = os.environ.get('USE_S3', 'False').lower() == 'true'
+
+if USE_S3:
+    INSTALLED_APPS += ['storages']
+
+    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'us-east-1')
+
+    # Private bucket — use pre-signed URLs (expire in 1 hour)
+    AWS_QUERYSTRING_AUTH = True
+    AWS_QUERYSTRING_EXPIRE = 3600
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_DEFAULT_ACL = 'private'
+    AWS_S3_VERIFY = True
+
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/'
+    MEDIA_ROOT = ''
+else:
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
 
 
 # --------------------
@@ -990,20 +1011,20 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.ScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'pm_llm': '30/hour',        # LLM-powered endpoints (project_pilot, knowledge_qa, task_prioritization, meeting_schedule)
-        'pm_crud': '200/hour',       # CRUD endpoints (chat create/update/delete, meeting respond)
+        'pm_llm': '200/hour',
+        'pm_crud': '1000/hour',
         # Frontline Agent throttles
-        'frontline_public': '20/hour',   # Unauthenticated widget/form endpoints — keyed by IP
-        'frontline_widget_key': '200/hour',   # Per-tenant widget budget — keyed by widget_key (covers all visitors of one tenant)
-        'frontline_llm': '60/hour',      # Authenticated LLM-powered endpoints (Q&A, triage, auto-resolve, summarize, extract)
-        'frontline_upload': '30/hour',   # Document uploads (expensive: parse + embed)
-        'frontline_crud': '300/hour',    # Authenticated CRUD endpoints
+        'frontline_public': '200/hour',
+        'frontline_widget_key': '1000/hour',
+        'frontline_llm': '500/hour',
+        'frontline_upload': '200/hour',
+        'frontline_crud': '1000/hour',
         # HR Support Agent throttles
-        'hr_public': '20/hour',
-        'hr_llm': '60/hour',
-        'hr_upload': '30/hour',
-        'hr_crud': '300/hour',
-        # Company auth endpoints (login / register) — by IP, to stop credential stuffing
-        'company_auth': '10/hour',
+        'hr_public': '200/hour',
+        'hr_llm': '500/hour',
+        'hr_upload': '200/hour',
+        'hr_crud': '1000/hour',
+        # Company auth endpoints
+        'company_auth': '200/hour',
     },
 }

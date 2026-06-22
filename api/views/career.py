@@ -23,16 +23,16 @@ def generate_application_token():
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def list_job_positions(request):
-    """List job positions"""
+    """List active job positions with search, company filter, type filter, and pagination."""
     try:
-        jobs = JobDescription.objects.filter(is_active=True).order_by('-created_at')
-        
-        # Filter by company if provided
+        jobs = JobDescription.objects.select_related('company').filter(is_active=True).order_by('-created_at')
+
+        # Filter by company
         company_id = request.GET.get('company_id')
         if company_id:
             jobs = jobs.filter(company_id=company_id)
-        
-        # Filter by search (title, description, department) if provided
+
+        # Full-text search across title / description / department / location
         search = request.GET.get('search', '').strip()
         if search:
             jobs = jobs.filter(
@@ -41,24 +41,65 @@ def list_job_positions(request):
                 Q(department__icontains=search) |
                 Q(location__icontains=search)
             )
-        
-        # Filter by location if provided
-        location = request.GET.get('location')
+
+        # Filter by location
+        location = request.GET.get('location', '').strip()
         if location:
             jobs = jobs.filter(location__icontains=location)
-        
-        # Filter by type if provided
-        job_type = request.GET.get('type')
+
+        # Filter by job type
+        job_type = request.GET.get('type', '').strip()
         if job_type:
             jobs = jobs.filter(type=job_type)
-        
-        serializer = JobDescriptionSerializer(jobs, many=True)
-        
+
+        total_count = jobs.count()
+
+        # Pagination
+        try:
+            page = max(1, int(request.GET.get('page', 1)))
+            page_size = int(request.GET.get('page_size', 10))
+            if page_size not in (5, 10, 25, 50):
+                page_size = 10
+        except (ValueError, TypeError):
+            page = 1
+            page_size = 10
+
+        offset = (page - 1) * page_size
+        jobs_page = jobs[offset: offset + page_size]
+
+        serializer = JobDescriptionSerializer(jobs_page, many=True)
+
+        # Build unique company list from ALL active jobs (for filter dropdown)
+        companies = (
+            JobDescription.objects
+            .filter(is_active=True)
+            .select_related('company')
+            .values('company__id', 'company__name')
+            .distinct()
+            .order_by('company__name')
+        )
+        company_list = [
+            {'id': c['company__id'], 'name': c['company__name']}
+            for c in companies
+            if c['company__id'] and c['company__name']
+        ]
+
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+
         return Response({
             'status': 'success',
-            'data': serializer.data
+            'data': serializer.data,
+            'pagination': {
+                'total_count': total_count,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1,
+            },
+            'companies': company_list,
         }, status=status.HTTP_200_OK)
-    
+
     except Exception as e:
         return Response({
             'status': 'error',
@@ -78,8 +119,19 @@ def submit_career_application(request):
         resume_path = None
         if 'file' in request.FILES or 'resume' in request.FILES:
             uploaded_file = request.FILES.get('file') or request.FILES.get('resume')
-            # Save file to media/uploads/careers/
-            file_path = f'careers/{uploaded_file.name}'
+            import re as _re
+            safe_name = _re.sub(r'[^A-Za-z0-9._-]+', '_', uploaded_file.name)
+            # Resolve position before building path (position fetched below, so pre-fetch here)
+            _pre_position_id = data.get('positionId') or data.get('position_id')
+            if _pre_position_id:
+                try:
+                    from recruitment_agent.models import JobDescription as _JD
+                    _pre_pos = _JD.objects.values('id', 'company_id').get(id=_pre_position_id)
+                    file_path = f"cvs/{_pre_pos['company_id'] or 'unknown'}/{_pre_pos['id']}/{safe_name}"
+                except Exception:
+                    file_path = f'cvs/general/{safe_name}'
+            else:
+                file_path = f'cvs/general/{safe_name}'
             saved_path = default_storage.save(file_path, ContentFile(uploaded_file.read()))
             resume_path = saved_path
         

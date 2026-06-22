@@ -3,9 +3,15 @@ Recruitment Agent API Views for Company Users
 """
 import json
 import logging
+import math
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from django.db import models
+from django.core.files.base import File
+from django.core.files.storage import default_storage
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -29,6 +35,7 @@ from recruitment_agent.django_repository import DjangoRepository
 from recruitment_agent.models import (
     Interview,
     CVRecord,
+    CVRecordDecisionLog,
     JobDescription,
     RecruiterEmailSettings,
     RecruiterInterviewSettings,
@@ -247,13 +254,53 @@ def process_cvs(request):
                 
                 record_id = django_repo.store_parsed(uploaded_file.name, parsed) if django_repo else None
                 
-                # Link to company_user and job description if provided
+                # Link to company_user and job description; upload original file to S3
                 if record_id:
                     try:
+                        from recruitment_agent.models import JobApplication as _JobApp
                         cv_record = CVRecord.objects.get(id=record_id)
                         cv_record.company_user = company_user
                         if job_desc:
                             cv_record.job_description = job_desc
+
+                        # Auto-link to JobApplication using parsed email or filename
+                        if job_desc and not cv_record.job_application_id:
+                            _parsed_email = ''
+                            if isinstance(parsed, dict):
+                                _parsed_email = (
+                                    parsed.get('email') or parsed.get('contact_email') or ''
+                                ).strip().lower()
+                                if not _parsed_email and isinstance(parsed.get('contact'), dict):
+                                    _parsed_email = (parsed['contact'].get('email') or '').strip().lower()
+                            # Try email match first
+                            _app = None
+                            if _parsed_email:
+                                _app = (
+                                    _JobApp.objects
+                                    .filter(job=job_desc, email__iexact=_parsed_email, cv_record__isnull=True)
+                                    .first()
+                                )
+                            # Fallback: filename match
+                            if not _app:
+                                _app = (
+                                    _JobApp.objects
+                                    .filter(job=job_desc, cv_file_name=uploaded_file.name, cv_record__isnull=True)
+                                    .first()
+                                )
+                            if _app:
+                                cv_record.job_application = _app
+
+                        # Upload original CV file to S3 under cvs/{company_id}/{job_id}/{filename}
+                        if job_desc and company:
+                            try:
+                                safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', uploaded_file.name)
+                                s3_key = f'cvs/{company.id}/{job_desc.id}/{safe_name}'
+                                with open(temp_path, 'rb') as _fh:
+                                    actual_key = default_storage.save(s3_key, File(_fh))
+                                cv_record.s3_key = actual_key
+                            except Exception as s3_err:
+                                logger.warning(f"CV S3 upload failed for {uploaded_file.name}: {s3_err}")
+
                         cv_record.save()
                     except CVRecord.DoesNotExist:
                         pass
@@ -381,12 +428,25 @@ def process_cvs(request):
                         cv_record.qualification_json = json.dumps(result['qualified'])
                         # role_fit_score comes from summary, not qualified
                         cv_record.role_fit_score = result['summary'].get('role_fit_score') if isinstance(result.get('summary'), dict) else None
-                        cv_record.qualification_decision = result['qualified'].get('decision') if isinstance(result.get('qualified'), dict) else None
+                        new_decision = result['qualified'].get('decision') if isinstance(result.get('qualified'), dict) else None
+                        old_decision = cv_record.qualification_decision
+                        cv_record.qualification_decision = new_decision
                         # qualified has confidence_score, not confidence
                         cv_record.qualification_confidence = result['qualified'].get('confidence_score') if isinstance(result.get('qualified'), dict) else None
                         cv_record.qualification_priority = result['qualified'].get('priority') if isinstance(result.get('qualified'), dict) else None
                         cv_record.rank = idx + 1
                         cv_record.save()
+                        if new_decision and new_decision != old_decision:
+                            try:
+                                CVRecordDecisionLog.objects.create(
+                                    cv_record=cv_record,
+                                    from_decision=old_decision,
+                                    to_decision=new_decision,
+                                    changed_by='AI Processing',
+                                    source='AI',
+                                )
+                            except Exception:
+                                pass
                     except CVRecord.DoesNotExist:
                         pass
                 
@@ -394,19 +454,24 @@ def process_cvs(request):
                 qual_decision = result.get('qualified', {}).get('decision', '') if isinstance(result.get('qualified'), dict) else ''
                 if qual_decision == "INTERVIEW" and interview_agent:
                     parsed_cv = result.get('parsed', {})
-                    candidate_name = parsed_cv.get('name', 'Candidate') if isinstance(parsed_cv, dict) else 'Candidate'
-                    candidate_email = parsed_cv.get('email') if isinstance(parsed_cv, dict) else None
-                    candidate_phone = parsed_cv.get('phone') if isinstance(parsed_cv, dict) else None
+
+                    # Prefer real JobApplication data (candidate filled the form) over AI-parsed CV text
+                    _record_id = result.get('record_id')
+                    _cv_rec = CVRecord.objects.select_related('job_application').filter(id=_record_id).first() if _record_id else None
+                    _job_app = _cv_rec.job_application if _cv_rec else None
+
+                    if _job_app:
+                        candidate_name  = f"{_job_app.first_name} {_job_app.last_name}".strip() or 'Candidate'
+                        candidate_email = _job_app.email
+                        candidate_phone = _job_app.phone or (parsed_cv.get('phone') if isinstance(parsed_cv, dict) else None)
+                    else:
+                        # Fallback for manually uploaded CVs that have no linked JobApplication
+                        candidate_name  = (parsed_cv.get('name', 'Candidate') if isinstance(parsed_cv, dict) else 'Candidate') or 'Candidate'
+                        candidate_email = parsed_cv.get('email') if isinstance(parsed_cv, dict) else None
+                        candidate_phone = parsed_cv.get('phone') if isinstance(parsed_cv, dict) else None
                     
-                    # Get job role from job description or use default
-                    job_role = "Position"
-                    if job_description_text:
-                        import re
-                        job_role = job_description_text.split('\n')[0][:100] if job_description_text else "Position"
-                        job_role = re.sub(r'[\r\n\t]+', ' ', job_role)
-                        job_role = re.sub(r'\s+', ' ', job_role).strip()
-                    elif job_kw_list and len(job_kw_list) > 0:
-                        job_role = job_kw_list[0]
+                    # Use the actual job title as job_role (not first line of description text)
+                    job_role = (job_desc.title if job_desc and job_desc.title else None) or "Position"
                     
                     if candidate_email:
                         logger.info(f"Auto-scheduling interview for approved candidate: {candidate_name} ({candidate_email})")
@@ -597,16 +662,51 @@ def generate_job_description(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_job_descriptions(request):
-    """List all job descriptions for the company user"""
+    """List job descriptions with search, filters and pagination"""
     try:
         company_user = request.user
-        
-        job_descriptions = JobDescription.objects.filter(
-            company_user=company_user
-        ).order_by('-created_at')
-        
+
+        qs = JobDescription.objects.filter(company_user=company_user)
+
+        # search
+        search = request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(
+                models.Q(title__icontains=search) |
+                models.Q(location__icontains=search) |
+                models.Q(department__icontains=search)
+            )
+
+        # filters
+        status_filter = request.query_params.get('status', '')   # 'active' | 'inactive'
+        type_filter   = request.query_params.get('type', '')     # 'Full-time' etc.
+        dept_filter   = request.query_params.get('department', '')
+
+        if status_filter == 'active':
+            qs = qs.filter(is_active=True)
+        elif status_filter == 'inactive':
+            qs = qs.filter(is_active=False)
+
+        if type_filter:
+            qs = qs.filter(type=type_filter)
+
+        if dept_filter:
+            qs = qs.filter(department__icontains=dept_filter)
+
+        total = qs.count()
+
+        # pagination
+        try:
+            page      = max(1, int(request.query_params.get('page', 1)))
+            page_size = min(50, max(1, int(request.query_params.get('page_size', 9))))
+        except ValueError:
+            page, page_size = 1, 9
+
+        offset = (page - 1) * page_size
+        qs = qs.order_by('-created_at')[offset: offset + page_size]
+
         job_list = []
-        for jd in job_descriptions:
+        for jd in qs:
             job_list.append({
                 'id': jd.id,
                 'title': jd.title,
@@ -622,12 +722,16 @@ def list_job_descriptions(request):
                 'created_at': jd.created_at.isoformat() if jd.created_at else None,
                 'updated_at': jd.updated_at.isoformat() if jd.updated_at else None,
             })
-        
+
         return Response({
             'status': 'success',
-            'data': job_list
+            'data': job_list,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': math.ceil(total / page_size) if page_size else 1,
         })
-    
+
     except KeyServiceError:
         raise
     except Exception as e:
@@ -636,6 +740,66 @@ def list_job_descriptions(request):
             'status': 'error',
             'message': f'Failed to list job descriptions: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_job_applications(request, job_description_id):
+    """List all public job applications for a specific job description"""
+    from recruitment_agent.models import JobApplication
+    try:
+        company_user = request.user
+        job = JobDescription.objects.filter(id=job_description_id, company_user=company_user).first()
+        if not job:
+            return Response({'status': 'error', 'message': 'Job description not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        applications = JobApplication.objects.filter(job=job).order_by('-applied_at')
+        data = []
+        for app in applications:
+            cv_url = None
+            if app.cv_file:
+                try:
+                    raw = app.cv_file.url
+                    cv_url = raw if raw.startswith('http') else request.build_absolute_uri(raw)
+                except Exception:
+                    pass
+
+            ai_analysed = False
+            cv_record_id = None
+            try:
+                if app.cv_record:
+                    ai_analysed = True
+                    cv_record_id = app.cv_record.id
+            except Exception:
+                pass
+
+            data.append({
+                'id': app.id,
+                'first_name': app.first_name,
+                'last_name': app.last_name,
+                'email': app.email,
+                'phone': app.phone,
+                'current_location': app.current_location,
+                'salary_expectation': app.salary_expectation,
+                'education': app.education,
+                'previous_company': app.previous_company,
+                'linkedin_url': app.linkedin_url,
+                'github_url': app.github_url,
+                'cover_letter': app.cover_letter,
+                'cv_file_name': app.cv_file_name,
+                'cv_url': cv_url,
+                'status': app.status,
+                'applied_at': app.applied_at.isoformat() if app.applied_at else None,
+                'ai_analysed': ai_analysed,
+                'cv_record_id': cv_record_id,
+            })
+
+        return Response({'status': 'success', 'data': data, 'total': len(data)})
+
+    except Exception as e:
+        logger.error(f"Error listing job applications: {e}")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -910,6 +1074,7 @@ def list_interviews(request):
                 'outcome': interview.outcome or '',
                 'scheduled_datetime': interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else None,
                 'selected_slot': interview.selected_slot,
+                'meeting_link': interview.meeting_link or '',
                 'confirmation_token': interview.confirmation_token,
                 'cv_record_id': interview.cv_record_id,
                 'feedback_rating': interview.feedback_rating,
@@ -1240,7 +1405,7 @@ def schedule_interview(request):
             cv_record = CVRecord.objects.filter(
                 id=cv_record_id,
                 job_description__company_user=company_user
-            ).select_related('job_description').first()
+            ).select_related('job_description', 'job_application').first()
             if not cv_record:
                 return Response({
                     'status': 'error',
@@ -1253,6 +1418,13 @@ def schedule_interview(request):
                 ).first()
                 if job_settings and getattr(job_settings, 'default_interview_type', None):
                     interview_type_to_use = job_settings.default_interview_type
+
+            # Override with real application data if available (real form submission beats AI-parsed)
+            _app = cv_record.job_application
+            if _app:
+                candidate_name  = f"{_app.first_name} {_app.last_name}".strip() or candidate_name
+                candidate_email = _app.email or candidate_email
+                candidate_phone = _app.phone or candidate_phone
         
         # Get company user email settings for interview defaults
         try:
@@ -1392,28 +1564,29 @@ def list_cv_records(request):
         
         cv_records = CVRecord.objects.filter(
             job_description__company_user=company_user
-        )
-        
+        ).select_related('job_description', 'job_application')
+
         if job_id:
             cv_records = cv_records.filter(job_description_id=job_id)
-        
+
         if decision:
             cv_records = cv_records.filter(qualification_decision=decision)
-        
+
         cv_records = cv_records.order_by('-rank', '-created_at')
         total = cv_records.count()
-        
+
         if paginate and page_size is not None:
             start = (page - 1) * page_size
             cv_records = cv_records[start:start + page_size]
-        
+
         records_list = []
         for cv in cv_records:
             parsed_data = json.loads(cv.parsed_json) if cv.parsed_json else {}
             insights_data = json.loads(cv.insights_json) if cv.insights_json else {}
             enriched_data = json.loads(cv.enriched_json) if cv.enriched_json else {}
             qualification_data = json.loads(cv.qualification_json) if cv.qualification_json else {}
-            
+
+            app = cv.job_application
             records_list.append({
                 'id': cv.id,
                 'file_name': cv.file_name,
@@ -1424,6 +1597,10 @@ def list_cv_records(request):
                 'qualification_priority': cv.qualification_priority,
                 'job_description_id': cv.job_description_id,
                 'job_description_title': cv.job_description.title if cv.job_description else None,
+                # Real contact info from the linked JobApplication (null for manually uploaded CVs)
+                'application_email': app.email if app else None,
+                'application_phone': app.phone if app else None,
+                'application_name': f'{app.first_name} {app.last_name}'.strip() if app else None,
                 'parsed': parsed_data,
                 'insights': insights_data,
                 'enriched': enriched_data,
@@ -1471,24 +1648,42 @@ def _get_parsed_email_and_name(parsed):
 
 def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, email_settings, log_service):
     """
-    If this CV record has no existing interview and has candidate email in parsed_json,
+    If this CV record has no existing interview and has candidate email,
     schedule an interview and send invitation email. Returns ('sent', True), ('skipped', reason), or ('error', False).
+    Prefers real JobApplication data over AI-parsed CV text.
     """
-    if not cv_record.parsed_json:
-        return ('skipped', 'no_parsed_json')
-    try:
-        parsed = json.loads(cv_record.parsed_json) if isinstance(cv_record.parsed_json, str) else cv_record.parsed_json
-    except (TypeError, ValueError):
-        return ('skipped', 'invalid_parsed_json')
-    candidate_email, candidate_name = _get_parsed_email_and_name(parsed)
-    if not candidate_email:
-        logger.info(f"Bulk INTERVIEW: CV record id={cv_record.id} skipped - no email in parsed_json (keys: {list(parsed.keys()) if isinstance(parsed, dict) else 'n/a'})")
-        return ('skipped', 'no_email')
     # Skip if interview already exists for this CV record
     if Interview.objects.filter(cv_record=cv_record).exists():
         return ('skipped', 'already_has_interview')
 
-    candidate_phone = (parsed.get('phone') or '').strip() or None if isinstance(parsed, dict) else None
+    # Prefer real JobApplication data (candidate filled the public form)
+    _app = getattr(cv_record, 'job_application', None)
+    if _app is None:
+        # Try fetching the linked application in case select_related wasn't used
+        try:
+            _cv = CVRecord.objects.select_related('job_application').get(pk=cv_record.pk)
+            _app = _cv.job_application
+        except CVRecord.DoesNotExist:
+            _app = None
+
+    if _app:
+        candidate_email = _app.email
+        candidate_name  = f"{_app.first_name} {_app.last_name}".strip() or 'Candidate'
+        candidate_phone = _app.phone or None
+    else:
+        # Fallback to AI-parsed data for manually uploaded CVs
+        if not cv_record.parsed_json:
+            return ('skipped', 'no_parsed_json')
+        try:
+            parsed = json.loads(cv_record.parsed_json) if isinstance(cv_record.parsed_json, str) else cv_record.parsed_json
+        except (TypeError, ValueError):
+            return ('skipped', 'invalid_parsed_json')
+        candidate_email, candidate_name = _get_parsed_email_and_name(parsed)
+        candidate_phone = (parsed.get('phone') or '').strip() or None if isinstance(parsed, dict) else None
+
+    if not candidate_email:
+        logger.info(f"Bulk INTERVIEW: CV record id={cv_record.id} skipped - no email available")
+        return ('skipped', 'no_email')
     job_role = 'Position'
     if cv_record.job_description:
         job_role = (cv_record.job_description.title or 'Position')[:255]
@@ -1564,36 +1759,33 @@ def get_cv_record_detail(request, record_id):
         enriched_data = json.loads(cv.enriched_json) if cv.enriched_json else {}
         qualification_data = json.loads(cv.qualification_json) if cv.qualification_json else {}
 
-        # Find linked job application by email
+        # Find linked job application via direct FK only (set during process_cvs)
         application = None
-        candidate_email = (parsed_data.get('email') or '').strip().lower()
-        if candidate_email and cv.job_description_id:
-            app_obj = JobApplication.objects.filter(
-                job_id=cv.job_description_id,
-                email__iexact=candidate_email
-            ).first()
-            if app_obj:
-                application = {
-                    'id': app_obj.id,
-                    'first_name': app_obj.first_name,
-                    'last_name': app_obj.last_name,
-                    'email': app_obj.email,
-                    'phone': app_obj.phone,
-                    'current_location': app_obj.current_location,
-                    'salary_expectation': app_obj.salary_expectation,
-                    'education': app_obj.education,
-                    'previous_company': app_obj.previous_company,
-                    'previous_salary': app_obj.previous_salary,
-                    'linkedin_url': app_obj.linkedin_url,
-                    'github_url': app_obj.github_url,
-                    'other_links': app_obj.other_links,
-                    'cover_letter': app_obj.cover_letter,
-                    'cv_file_name': app_obj.cv_file_name,
-                    'status': app_obj.status,
-                    'applied_at': app_obj.applied_at.isoformat() if app_obj.applied_at else None,
-                }
+        cv_with_app = CVRecord.objects.filter(pk=cv.pk).select_related('job_application').first()
+        app_obj = cv_with_app.job_application if cv_with_app else None
 
-        # Find linked interviews
+        if app_obj:
+            application = {
+                'id': app_obj.id,
+                'first_name': app_obj.first_name,
+                'last_name': app_obj.last_name,
+                'email': app_obj.email,
+                'phone': app_obj.phone,
+                'current_location': app_obj.current_location,
+                'salary_expectation': app_obj.salary_expectation,
+                'education': app_obj.education,
+                'previous_company': app_obj.previous_company,
+                'previous_salary': app_obj.previous_salary,
+                'linkedin_url': app_obj.linkedin_url,
+                'github_url': app_obj.github_url,
+                'other_links': app_obj.other_links,
+                'cover_letter': app_obj.cover_letter,
+                'cv_file_name': app_obj.cv_file_name,
+                'status': app_obj.status,
+                'applied_at': app_obj.applied_at.isoformat() if app_obj.applied_at else None,
+            }
+
+        # Find linked interviews — all fields from DB including meeting_link
         interviews_list = []
         for iv in Interview.objects.filter(cv_record=cv).order_by('-created_at'):
             interviews_list.append({
@@ -1601,7 +1793,13 @@ def get_cv_record_detail(request, record_id):
                 'status': iv.status,
                 'outcome': iv.outcome or '',
                 'interview_type': iv.interview_type,
+                'candidate_name': iv.candidate_name,
+                'candidate_email': iv.candidate_email,
+                'candidate_phone': iv.candidate_phone,
+                'job_role': iv.job_role,
                 'scheduled_datetime': iv.scheduled_datetime.isoformat() if iv.scheduled_datetime else None,
+                'selected_slot': iv.selected_slot,
+                'meeting_link': iv.meeting_link or '',
                 'notes': iv.notes,
                 'feedback_rating': iv.feedback_rating,
                 'feedback_notes': iv.feedback_notes,
@@ -1636,6 +1834,38 @@ def get_cv_record_detail(request, record_id):
         raise
     except Exception as e:
         logger.exception(f"Error getting CV record detail: {e}")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_cv_record_decision_history(request, record_id):
+    """Return the full decision change audit trail for a CV record."""
+    try:
+        company_user = request.user
+        cv = CVRecord.objects.filter(
+            id=record_id,
+            job_description__company_user=company_user,
+        ).first()
+        if not cv:
+            return Response({'status': 'error', 'message': 'CV record not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        logs = CVRecordDecisionLog.objects.filter(cv_record=cv).order_by('changed_at')
+        data = [
+            {
+                'id': log.id,
+                'from_decision': log.from_decision,
+                'to_decision': log.to_decision,
+                'changed_by': log.changed_by,
+                'source': log.source,
+                'changed_at': log.changed_at.isoformat() if log.changed_at else None,
+            }
+            for log in logs
+        ]
+        return Response({'status': 'success', 'data': data})
+    except Exception as e:
+        logger.exception(f"Error getting decision history: {e}")
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1675,7 +1905,27 @@ def bulk_update_cv_records(request):
             id__in=ids,
             job_description__company_user=company_user
         )
+        # Capture old decisions before bulk update for audit trail
+        old_decisions = {cv.id: cv.qualification_decision for cv in qs.only('id', 'qualification_decision')}
         updated_count = qs.update(qualification_decision=decision)
+
+        # Log decision changes
+        full_name = getattr(company_user, 'full_name', '') or ''
+        email = getattr(company_user, 'email', '') or ''
+        changed_by = f"{full_name} ({email})" if full_name else email or 'Unknown'
+        log_entries = [
+            CVRecordDecisionLog(
+                cv_record_id=cv_id,
+                from_decision=old_dec,
+                to_decision=decision,
+                changed_by=changed_by,
+                source='Manual',
+            )
+            for cv_id, old_dec in old_decisions.items()
+            if old_dec != decision
+        ]
+        if log_entries:
+            CVRecordDecisionLog.objects.bulk_create(log_entries)
 
         # When changing to INTERVIEW: schedule interview and send invitation email for each
         # CV that doesn't already have an interview (so admin-override gets same email as processing).
@@ -1701,11 +1951,11 @@ def bulk_update_cv_records(request):
                     job_description__company_user=company_user
                 ).select_related('job_description')
                 for cv in cv_records:
-                    status, detail = _schedule_interview_for_cv_record(cv, company_user, interview_agent, email_settings, log_service)
-                    if status == 'sent':
+                    sched_status, sched_detail = _schedule_interview_for_cv_record(cv, company_user, interview_agent, email_settings, log_service)
+                    if sched_status == 'sent':
                         emails_sent += 1
-                    elif status == 'skipped':
-                        skip_reasons[detail] = skip_reasons.get(detail, 0) + 1
+                    elif sched_status == 'skipped':
+                        skip_reasons[sched_detail] = skip_reasons.get(sched_detail, 0) + 1
                 if skip_reasons:
                     logger.info(f"Bulk INTERVIEW skip reasons: {skip_reasons}")
             except Exception as e:

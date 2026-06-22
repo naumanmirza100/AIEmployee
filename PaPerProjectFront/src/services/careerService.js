@@ -2,39 +2,26 @@
 
 import api from './api';
 
-// Same pattern as modulePurchaseService.getModulePrices - base can be with or without /api
-const getCareersUrl = () => {
-  const base = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
-  return base.includes('/api') ? `${base}/careers/positions` : `${base}/api/careers/positions`;
-};
-
 /**
- * Get all job positions (public endpoint - uses direct fetch to avoid auth/header issues)
+ * Get active job positions — public endpoint, supports search/filter/pagination.
+ * params: { search, company_id, type, location, page, page_size }
  */
 export const getPositions = async (params = {}) => {
   try {
     const queryParams = {};
-    if (params.search) queryParams.search = params.search;
-    if (params.department) queryParams.department = params.department;
-    if (params.type) queryParams.type = params.type;
+    if (params.search)      queryParams.search    = params.search;
+    if (params.company_id)  queryParams.company_id = params.company_id;
+    if (params.type)        queryParams.type       = params.type;
+    if (params.location)    queryParams.location   = params.location;
+    if (params.page)        queryParams.page       = params.page;
+    if (params.page_size)   queryParams.page_size  = params.page_size;
 
     const queryString = new URLSearchParams(queryParams).toString();
-    const url = `${getCareersUrl()}${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/careers/positions${queryString ? `?${queryString}` : ''}`;
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      const err = new Error(errData?.message || `HTTP ${response.status}`);
-      err.status = response.status;
-      err.data = errData;
-      throw err;
-    }
-
-    return await response.json();
+    const response = await api.get(endpoint);
+    // api.get returns response.data (axios interceptor)
+    return response;
   } catch (error) {
     console.error('Get positions error:', error);
     throw error;

@@ -1,6 +1,20 @@
+import re as _re
+
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import User
+
+
+def _cv_upload_to(instance, filename):
+    """S3 path: cvs/{company_id}/{job_id}/{safe_filename}"""
+    safe = _re.sub(r'[^A-Za-z0-9._-]+', '_', filename)
+    try:
+        company_id = instance.job.company_id or 'unknown'
+        job_id = instance.job_id or 'unknown'
+    except Exception:
+        company_id = 'unknown'
+        job_id = 'unknown'
+    return f'cvs/{company_id}/{job_id}/{safe}'
 
 
 class RecruiterEmailSettings(models.Model):
@@ -215,6 +229,7 @@ class CVRecord(models.Model):
     Table: dbo.ppp_recruitment_agent_cvrecord (aligned with ppp_ prefix).
     """
     file_name = models.CharField(max_length=512)
+    s3_key = models.CharField(max_length=1024, null=True, blank=True, help_text="S3 object key for the original CV file (cvs/{company_id}/{job_id}/{filename})")
     parsed_json = models.TextField(help_text="Structured CV data from CVParserAgent")
     insights_json = models.TextField(null=True, blank=True, help_text="Summarization results from SummarizationAgent")
     role_fit_score = models.IntegerField(null=True, blank=True, help_text="Role fit score 0-100")
@@ -227,7 +242,16 @@ class CVRecord(models.Model):
     
     # Link to job description (optional)
     job_description = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='cv_records')
-    
+
+    # Link to the public JobApplication this CV came from (null for manually uploaded CVs)
+    job_application = models.OneToOneField(
+        'JobApplication',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cv_record',
+    )
+
     created_at = models.DateTimeField(default=timezone.now)
     
     class Meta:
@@ -262,7 +286,7 @@ class JobApplication(models.Model):
     github_url = models.URLField(max_length=500, blank=True, null=True)
     other_links = models.TextField(blank=True, null=True)
     cover_letter = models.TextField(blank=True, null=True)
-    cv_file = models.FileField(upload_to='job_applications/cvs/', null=True, blank=True)
+    cv_file = models.FileField(upload_to=_cv_upload_to, null=True, blank=True)
     cv_file_name = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     applied_at = models.DateTimeField(auto_now_add=True)
@@ -329,6 +353,9 @@ class Interview(models.Model):
     
     # Unique token for candidate to access slot selection page
     confirmation_token = models.CharField(max_length=64, unique=True, null=True, blank=True, help_text="Unique token for candidate slot selection")
+
+    # Google Meet link auto-generated at slot confirmation
+    meeting_link = models.URLField(max_length=500, null=True, blank=True, help_text="Google Meet link generated when candidate confirms their slot")
     
     # Related CV record (optional)
     cv_record = models.ForeignKey(CVRecord, on_delete=models.SET_NULL, null=True, blank=True, related_name='interviews')
@@ -432,8 +459,11 @@ class Interview(models.Model):
         """
         from datetime import date
         job = None
-        if self.cv_record and self.cv_record.job_description_id:
-            job = self.cv_record.job_description
+        try:
+            if self.cv_record_id and self.cv_record and self.cv_record.job_description_id:
+                job = self.cv_record.job_description
+        except CVRecord.DoesNotExist:
+            pass
 
         if not job:
             return False
@@ -578,6 +608,29 @@ class SavedGraphPrompt(models.Model):
     
     def __str__(self):
         return f"{self.title} ({self.chart_type})"
+
+
+class CVRecordDecisionLog(models.Model):
+    """Audit trail of every decision change on a CV record."""
+    SOURCE_CHOICES = [
+        ('AI', 'AI Processing'),
+        ('Manual', 'Manual Override'),
+    ]
+    cv_record = models.ForeignKey(CVRecord, on_delete=models.CASCADE, related_name='decision_logs')
+    from_decision = models.CharField(max_length=32, null=True, blank=True)
+    to_decision = models.CharField(max_length=32)
+    changed_by = models.CharField(max_length=255, null=True, blank=True, help_text='Email/name of the user who made the change')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='Manual')
+    changed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'ppp_recruitment_agent_cvrecorddecisionlog'
+        ordering = ['changed_at']
+        verbose_name = 'CV Record Decision Log'
+        verbose_name_plural = 'CV Record Decision Logs'
+
+    def __str__(self):
+        return f"CVRecord#{self.cv_record_id}: {self.from_decision} → {self.to_decision}"
 
 
 class CareerApplication(models.Model):

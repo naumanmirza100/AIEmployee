@@ -7,7 +7,6 @@
 </head>
 <body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
 
-    <!-- Wrapper -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
         <tr>
             <td align="center">
@@ -24,7 +23,7 @@
                         </td>
                     </tr>
 
-                    <!-- Body -->
+                    <!-- Greeting -->
                     <tr>
                         <td style="padding:36px 40px 20px;">
                             <p style="margin:0 0 20px;font-size:16px;color:#1a1a2e;line-height:1.6;">Dear <strong>{{ candidate_name }}</strong>,</p>
@@ -58,7 +57,7 @@
                                             </tr>
                                             <tr>
                                                 <td style="padding:8px 0;">
-                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Date & Time</span>
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Date &amp; Time</span>
                                                     <span style="font-size:16px;color:#059669;font-weight:700;display:block;margin-top:2px;">{{ selected_slot }}</span>
                                                 </td>
                                             </tr>
@@ -68,6 +67,68 @@
                             </table>
                         </td>
                     </tr>
+
+                    {% if meeting_link %}
+                    <!-- Google Meet Section -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4ff;border-radius:12px;border:1px solid #c7d2fe;">
+                                <tr>
+                                    <td style="padding:24px;">
+
+                                        <!-- Google Meet logo row -->
+                                        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td style="vertical-align:middle;">
+                                                    <img src="https://fonts.gstatic.com/s/i/productlogos/meet_2020q4/v1/web-96dp/logo_meet_2020q4_color_2x_web_96dp.png"
+                                                         alt="Google Meet" width="32" height="32"
+                                                         style="display:inline-block;vertical-align:middle;border-radius:6px;" />
+                                                    <span style="font-size:16px;font-weight:700;color:#1a1a2e;vertical-align:middle;margin-left:10px;">Google Meet</span>
+                                                </td>
+                                                <td style="text-align:right;vertical-align:middle;">
+                                                    <span style="font-size:11px;font-weight:600;color:#4f46e5;background:#e0e7ff;padding:4px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px;">Online Interview</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <p style="margin:14px 0 18px;font-size:14px;color:#555;line-height:1.6;">
+                                            Your interview will be conducted online. Click the button below to join at your scheduled time.
+                                        </p>
+
+                                        <!-- Big Join button -->
+                                        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td align="center">
+                                                    <a href="{{ meeting_link }}"
+                                                       style="display:inline-block;background:linear-gradient(135deg,#1a73e8,#1557b0);color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 36px;border-radius:50px;letter-spacing:0.2px;box-shadow:0 4px 14px rgba(26,115,232,0.35);">
+                                                        📹&nbsp; Join Interview on Google Meet
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <!-- Link copy row -->
+                                        <p style="margin:16px 0 0;font-size:12px;color:#888;text-align:center;line-height:1.5;">
+                                            Or copy this link:&nbsp;
+                                            <a href="{{ meeting_link }}" style="color:#4f46e5;word-break:break-all;">{{ meeting_link }}</a>
+                                        </p>
+
+                                        <!-- Tips -->
+                                        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top:18px;border-top:1px solid #c7d2fe;padding-top:14px;">
+                                            <tr>
+                                                <td style="font-size:13px;color:#666;line-height:1.6;">
+                                                    <strong style="color:#4f46e5;">💡 Tips:</strong>
+                                                    Join 5 minutes early &nbsp;·&nbsp; Test your camera &amp; mic &nbsp;·&nbsp; Use a quiet space
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    {% endif %}
 
                     <!-- Preparation Checklist -->
                     <tr>
@@ -84,19 +145,25 @@
                                             <tr>
                                                 <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
                                                     <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Arrive on time (or join online meeting 5 minutes early)
+                                                    Join the meeting 5 minutes early to check your setup
                                                 </td>
                                             </tr>
                                             <tr>
                                                 <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
                                                     <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Bring a copy of your resume
+                                                    Keep a copy of your resume handy
                                                 </td>
                                             </tr>
                                             <tr>
                                                 <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
                                                     <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Prepare any questions you may have
+                                                    Prepare questions you'd like to ask
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
+                                                    <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
+                                                    Ensure a stable internet connection and quiet environment
                                                 </td>
                                             </tr>
                                         </table>
@@ -105,17 +172,6 @@
                             </table>
                         </td>
                     </tr>
-
-                    {% if interview_type == 'ONLINE' %}
-                    <!-- Online Note -->
-                    <tr>
-                        <td style="padding:0 40px 24px;">
-                            <p style="margin:0;font-size:13px;color:#888;line-height:1.6;background:#fafafa;padding:14px 18px;border-radius:10px;border-left:3px solid #6366f1;">
-                                <strong style="color:#555;">Online Interview:</strong> You will receive the meeting link via a separate email before the interview.
-                            </p>
-                        </td>
-                    </tr>
-                    {% endif %}
 
                     <!-- Sign-off -->
                     <tr>
@@ -128,7 +184,7 @@
                     <!-- Footer -->
                     <tr>
                         <td style="background:#fafafa;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
-                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated confirmation email.</p>
+                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated confirmation email. Please do not reply to this email.</p>
                         </td>
                     </tr>
 

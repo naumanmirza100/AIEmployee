@@ -147,15 +147,39 @@ def public_job_apply(request, job_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if JobApplication.objects.filter(job=job, email=email).exists():
+    email_taken = JobApplication.objects.filter(job=job, email=email).exists()
+    phone_taken = JobApplication.objects.filter(job=job, phone=phone).exists()
+
+    if email_taken and phone_taken:
         return Response(
-            {'status': 'error', 'message': 'You have already applied to this position with this email address.'},
+            {
+                'status': 'error',
+                'code': 'ALREADY_APPLIED',
+                'duplicate_fields': ['email', 'phone'],
+                'message': 'An application with this email and phone already exists for this position.',
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if JobApplication.objects.filter(job=job, phone=phone).exists():
+    if email_taken:
         return Response(
-            {'status': 'error', 'message': 'This phone number has already been used to apply for this position.'},
+            {
+                'status': 'error',
+                'code': 'ALREADY_APPLIED',
+                'duplicate_fields': ['email'],
+                'message': 'This email address is already registered for this position.',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if phone_taken:
+        return Response(
+            {
+                'status': 'error',
+                'code': 'ALREADY_APPLIED',
+                'duplicate_fields': ['phone'],
+                'message': 'This phone number is already registered for this position.',
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
