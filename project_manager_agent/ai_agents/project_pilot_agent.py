@@ -642,9 +642,8 @@ Available update fields for projects:
 - description: new project description (string)
 - status: "planning", "active", "on_hold", "completed", "cancelled", "in_progress", "review"
 - priority: "low", "medium", "high", "urgent"
-- deadline: "YYYY-MM-DD" format or null
+- deadline: "YYYY-MM-DD" format or null (the project's end / due date — there is no separate end_date)
 - start_date: "YYYY-MM-DD" format or null
-- end_date: "YYYY-MM-DD" format or null
 - project_type: "website", "mobile_app", "web_app", "ai_bot", "integration", "marketing", "database", "consulting", "ai_system"
 - budget_min: number or null
 - budget_max: number or null
@@ -1039,8 +1038,9 @@ Return ONLY this JSON format (no other text):
         "project_description": "Comprehensive description based on all features, modules, and services mentioned in the request. Include purpose, core infrastructure, modules, and external integrations.",
         "project_status": "planning",
         "project_priority": "medium",
-        "deadline_days": null,
-        "reasoning": "Brief explanation of why this project is being created based on the user's requirements"
+        "start_date": "YYYY-MM-DD or null",
+        "deadline": "YYYY-MM-DD or null",
+        "reasoning": "Brief explanation of why this project is being created based on the user's requirements, INCLUDING how you derived the timeline (project complexity, scope, anticipated phases) and why those dates make sense."
     }},
     {{
         "action": "create_task",
@@ -1051,7 +1051,7 @@ Return ONLY this JSON format (no other text):
         "due_date": "YYYY-MM-DD",
         "priority": "high|medium|low",
         "status": "todo",
-        "reasoning": "DETAILED AI reasoning (5-7 sentences) including: (1) WHY this task matters and how it contributes to the project, (2) ESTIMATED EFFORT and why this due_date was chosen (how many days/weeks and why), (3) PRIORITY justification (why high/medium/low based on importance and urgency), (4) TASK BREAKDOWN and efficiency, (5) TECHNICAL DECISIONS, (6) RISK and best practices, (7) COMPLETION STRATEGY."
+        "reasoning": "DETAILED AI reasoning (5-7 sentences) including: (1) WHY this task matters and how it contributes to the project, (2) ESTIMATED EFFORT and why this due_date was chosen RELATIVE TO THE PROJECT START AND END (not just 'today'), (3) PRIORITY justification (why high/medium/low based on importance and urgency), (4) TASK BREAKDOWN and efficiency, (5) TECHNICAL DECISIONS, (6) RISK and best practices, (7) COMPLETION STRATEGY."
     }}
 ]
 
@@ -1059,12 +1059,19 @@ CRITICAL RULES:
 - Return ONLY the JSON array, no explanations or text outside JSON
 - NEVER include update_task actions when creating a new project
 - Break down ALL features/modules/services mentioned into separate tasks
-- DUE DATES (MANDATORY – use reasoning and effort estimation):
-  Set due_date for EVERY task in YYYY-MM-DD. TODAY'S DATE is {_today}. For each task:
-  (1) Estimate how long the task will take to complete based on scope, complexity, and dependencies (e.g. small/quick = 3–7 days, medium = 1–2 weeks, large/complex = 2–4 weeks).
-  (2) Consider task order: tasks that must be done first (e.g. database design, auth) get earlier due dates; dependent tasks get later dates.
-  (3) Set due_date = today + estimated working days (use calendar dates). Example: if today is {_today}, a 5-day task might be due in 7 calendar days; a 2-week task in 14 days.
-  Do not leave due_date empty. Each due_date should reflect realistic effort for that specific task.
+- PROJECT TIMELINE (think before writing dates — do NOT just default to "today"):
+  Today's date is {_today}. The user's request may or may not mention concrete dates.
+  (1) If the user explicitly stated a start date (e.g. "starting Jan 15", "begin next Monday", "starts 2026-02-01"), use that as start_date. Otherwise use {_today} as start_date.
+  (2) Estimate the project's total duration by reasoning about scope, complexity, number of features/modules, integration count, and team size. Small project = 2–6 weeks, medium = 2–4 months, large/complex = 4–9 months, enterprise = 9+ months.
+  (3) Set deadline = start_date + estimated duration (this is the project's end / due date — there is no separate end_date field).
+  (4) If you genuinely cannot reason about duration (e.g. user gave only a project name), leave start_date / deadline as null instead of guessing.
+- TASK DUE DATES (anchor to the PROJECT, not to today):
+  For each task:
+  (1) Estimate effort: small = 3–7 days, medium = 1–2 weeks, large/complex = 2–4 weeks.
+  (2) Order tasks by dependency. Foundation tasks (auth, DB, core APIs) come first; dependent features come later.
+  (3) Compute due_date = start_date + cumulative offset from where this task sits in the dependency order. Do NOT just use today+N — anchor every date to the project's start_date.
+  (4) The last task's due_date should land on or before the project's deadline.
+  Do not leave due_date empty. Each due_date should reflect realistic effort AND the task's position in the project plan.
 - Create 10-20 tasks that comprehensively cover:
   * Core Infrastructure Layer (Auth, Data Warehouse, Event Bus, Audit, Notifications)
   * All modules/services mentioned (e.g., creator-profile-service, avatar-classification-service, etc.)
@@ -1176,7 +1183,10 @@ Extract ONLY create_task actions. Use project_id: {target_project_id} for all ta
 
 CRITICAL: If the user asked to add "one task", "1 task", "a task", or "a new task" (with or without a topic), return exactly ONE create_task. Use their topic as task_title (e.g. fix "sementic" to "semantic") and write a concise task_description (2-4 sentences is fine).
 
-DUE DATES: Set due_date in YYYY-MM-DD. Estimate how long each task will take (small=3-7 days, medium=1-2 weeks, large=2-4 weeks). Set due_date = today + estimated days. In reasoning, justify why that due_date was chosen.
+DUE DATES (anchor to the project, not blindly to today):
+  (1) Estimate effort per task: small=3-7 days, medium=1-2 weeks, large=2-4 weeks.
+  (2) Look at the existing project's start_date / deadline in context (if shown above) and consider where this task fits relative to other tasks already in the project.
+  (3) Set due_date so the task lands within the project's window (start_date → deadline). If the project has no dates set, anchor from {_today} and use realistic effort. Justify the choice in reasoning.
 PRIORITY: Set based on importance AND urgency. High = critical for project to work + urgent; Medium = important but not blocking; Low = optional. Justify in reasoning.
 
 Return ONLY this JSON format (no other text):
@@ -1198,7 +1208,7 @@ Rules:
 - Return ONLY the JSON array, no explanations. Never respond with questions or clarification—only valid JSON.
 - DO NOT include create_project action
 - Use project_id: {target_project_id} for all tasks
-- Set due_date for every task: estimate effort (days/weeks) and set due_date = today + that. Justify in reasoning. Do not leave due_date empty.
+- Set due_date for every task: estimate effort and pick a date that fits the project's existing schedule (or today + that effort if the project has no dates). Justify in reasoning. Do not leave due_date empty.
 - Set priority by importance and urgency; justify in reasoning.
 - When user asked for ONE task only (e.g. "add only 1 task", "add a task for X"), return exactly one create_task with a short title and concise description.
 - When multiple tasks requested: break down into logical tasks (8-15 tasks covering features)
@@ -1272,8 +1282,9 @@ Return ONLY this JSON format (no other text):
         "project_description": "Comprehensive description covering ALL features, modules, services, infrastructure, and external integrations mentioned in the request",
         "project_status": "planning",
         "project_priority": "medium",
-        "deadline_days": null,
-        "reasoning": "User wants to build a new system with the specified features and modules"
+        "start_date": "YYYY-MM-DD or null",
+        "deadline": "YYYY-MM-DD or null",
+        "reasoning": "User wants to build a new system with the specified features. Include in the reasoning how you derived the timeline from project complexity (scope, modules, integrations) and why the chosen dates are realistic."
     }},
     {{
         "action": "create_task",
@@ -1293,7 +1304,8 @@ CRITICAL RULES:
 - NEVER include update_task actions - this is a NEW project creation
 - Create 10-20 tasks covering ALL features/modules/services mentioned
 - Break down each major component into separate tasks
-- DUE DATES: Estimate effort per task (small=3-7 days, medium=1-2 weeks, large=2-4 weeks). Set due_date = today + estimated days. Consider dependencies (earlier tasks get earlier due dates). Justify in reasoning. Do not leave due_date empty.
+- PROJECT TIMELINE: If user mentions a start date use it, otherwise use {_today}. Set deadline = start_date + estimated total duration based on project complexity (small=2-6 weeks, medium=2-4 months, large=4-9 months, enterprise=9+ months). The deadline is the project's single end / due date — there is no separate end_date field.
+- TASK DUE DATES: Anchor every task to the project's start_date, not to today. (1) Estimate effort: small=3-7 days, medium=1-2 weeks, large=2-4 weeks. (2) Order tasks by dependency — foundational tasks first. (3) Compute due_date = start_date + cumulative offset. The final task's due_date must be ≤ the project's deadline. Justify in reasoning. Do not leave due_date empty.
 - PRIORITY: Set by importance AND urgency. High = critical for project to work + urgent; Medium = important but not blocking; Low = optional. Justify in reasoning.
 - For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences).
 - For each task's "reasoning" field, include effort/due_date justification and priority justification.

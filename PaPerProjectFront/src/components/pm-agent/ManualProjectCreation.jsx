@@ -24,7 +24,6 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
     budget_max: '',
     deadline: '',
     start_date: '',
-    end_date: '',
   });
 
   const [industries, setIndustries] = useState([]);
@@ -86,7 +85,6 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
       if (formData.budget_max) payload.budget_max = parseFloat(formData.budget_max);
       if (formData.deadline) payload.deadline = formData.deadline;
       if (formData.start_date) payload.start_date = formData.start_date;
-      if (formData.end_date) payload.end_date = formData.end_date;
 
       const response = await companyApi.post('/project-manager/projects/create/', payload);
       
@@ -108,7 +106,6 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
           budget_max: '',
           deadline: '',
           start_date: '',
-          end_date: '',
         });
 
         // Notify parent component
@@ -280,19 +277,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
               />
             </div>
 
-            {/* End Date */}
+            {/* Deadline (the project's end / due date — single field) */}
             <div>
-              <Label htmlFor="end_date">End Date</Label>
-              <Input
-                id="end_date"
-                type="date"
-                value={formData.end_date}
-                onChange={(e) => handleChange('end_date', e.target.value)}
-              />
-            </div>
-
-            {/* Deadline */}
-            <div className="md:col-span-2">
               <Label htmlFor="deadline">Deadline</Label>
               <Input
                 id="deadline"

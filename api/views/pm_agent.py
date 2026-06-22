@@ -798,34 +798,60 @@ def project_pilot(request):
             action_type = action_data.get("action")
             if action_type == "create_project":
                 try:
-                    end_date = None
-                    deadline_days = action_data.get("deadline_days")
-                    if deadline_days:
+                    # Parse explicit start_date / deadline. We collapsed the old
+                    # end_date + deadline pair into a single `deadline` field so
+                    # users don't have to maintain two near-identical dates. The
+                    # DB column `end_date` still exists for legacy readers and is
+                    # mirrored from deadline below; new code should only touch
+                    # `deadline`.
+                    def _parse_iso_date(raw):
+                        if not raw:
+                            return None
+                        if hasattr(raw, 'year') and not isinstance(raw, str):
+                            return raw  # already a date
                         try:
-                            days = int(
-                                str(deadline_days)
-                                .replace("working days", "")
-                                .replace("days", "")
-                                .strip()
-                            )
-                            current_date = datetime.now().date()
-                            working_days = 0
-                            check_date = current_date
-                            while working_days < days:
-                                if check_date.weekday() < 5:
-                                    working_days += 1
-                                if working_days < days:
-                                    check_date += timedelta(days=1)
-                            end_date = check_date
+                            return datetime.strptime(str(raw).split('T')[0], '%Y-%m-%d').date()
                         except (ValueError, TypeError):
-                            end_date = None
+                            return None
+
+                    start_date = _parse_iso_date(action_data.get("start_date"))
+                    # Accept legacy `end_date` in the LLM output, but treat it as
+                    # a deadline alias rather than a separate field.
+                    deadline = (
+                        _parse_iso_date(action_data.get("deadline"))
+                        or _parse_iso_date(action_data.get("end_date"))
+                    )
+
+                    # Legacy fallback: derive deadline from deadline_days only when
+                    # the agent didn't produce a concrete date. Anchor from
+                    # start_date (not today) when one is available.
+                    if deadline is None:
+                        deadline_days = action_data.get("deadline_days")
+                        if deadline_days:
+                            try:
+                                days = int(
+                                    str(deadline_days)
+                                    .replace("working days", "")
+                                    .replace("days", "")
+                                    .strip()
+                                )
+                                anchor = start_date or datetime.now().date()
+                                working_days = 0
+                                check_date = anchor
+                                while working_days < days:
+                                    if check_date.weekday() < 5:
+                                        working_days += 1
+                                    if working_days < days:
+                                        check_date += timedelta(days=1)
+                                deadline = check_date
+                            except (ValueError, TypeError):
+                                deadline = None
 
                     project_manager_id = action_data.get("project_manager_id")
                     industry_id = action_data.get("industry_id")
                     project_type = action_data.get("project_type")
                     budget_min = action_data.get("budget_min")
                     budget_max = action_data.get("budget_max")
-                    deadline = action_data.get("deadline") or end_date
 
                     # Create project with company association
                     # Note: owner field is required but CompanyUser is not a User model
@@ -834,7 +860,7 @@ def project_pilot(request):
                     from django.contrib.auth.models import User
                     # Try to get the first user as owner (you might want to change this logic)
                     default_owner = _get_project_owner(company_user)
-                    
+
                     project_data = {
                         "name": action_data.get("project_name", "New Project"),
                         "description": action_data.get("project_description", ""),
@@ -844,14 +870,14 @@ def project_pilot(request):
                         "priority": action_data.get("project_priority", "medium"),
                         "project_type": project_type if project_type else "web_app",
                     }
-                    
+
                     # Set owner if we have a default owner
                     if default_owner:
                         project_data["owner"] = default_owner
-                    
+
                     # Add optional fields
-                    if end_date:
-                        project_data["end_date"] = end_date
+                    if start_date:
+                        project_data["start_date"] = start_date
                     if project_manager_id:
                         project_data["project_manager_id"] = project_manager_id
                     if industry_id:
@@ -861,8 +887,12 @@ def project_pilot(request):
                     if budget_max:
                         project_data["budget_max"] = budget_max
                     if deadline:
+                        # Mirror deadline into the legacy end_date column so any
+                        # consumer that still reads end_date (Gantt, exports, etc.)
+                        # keeps working without a DB migration.
                         project_data["deadline"] = deadline
-                    
+                        project_data["end_date"] = deadline
+
                     project = Project.objects.create(**project_data)
                     _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
 
@@ -879,6 +909,8 @@ def project_pilot(request):
                             "project_id": project.id,
                             "project_name": project.name,
                             "message": f'Project "{project.name}" created successfully!',
+                            "start_date": project.start_date.isoformat() if project.start_date else None,
+                            "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                         }
                     )
                 except Exception as e:
@@ -943,7 +975,11 @@ def project_pilot(request):
                         except Exception:
                             due_date = None
 
-                    # Default due_date when missing (e.g. project deadline, end_date, or 14 days from now)
+                    # Fallback to project's own dates when LLM didn't supply one.
+                    # Dropped the previous `timezone.now() + 14 days` fallback —
+                    # the agent is now expected to reason about due_date itself,
+                    # and forcing a today+14 anchor was the root cause of every
+                    # task appearing to start "today" regardless of context.
                     if due_date is None and task_project:
                         from django.utils import timezone
                         from datetime import datetime as dt_time
@@ -959,8 +995,6 @@ def project_pilot(request):
                                 due_date = datetime.combine(d, dt_time(23, 59, 59))
                                 if timezone.is_naive(due_date):
                                     due_date = timezone.make_aware(due_date)
-                        if due_date is None:
-                            due_date = timezone.now() + timedelta(days=14)
 
                     estimated_hours = action_data.get("estimated_hours")
                     if estimated_hours:
@@ -1080,18 +1114,34 @@ def project_pilot(request):
                         if field in updates and updates[field] is not None:
                             setattr(project_to_update, field, updates[field])
 
-                    # Handle date fields
-                    for date_field in ["deadline", "start_date", "end_date"]:
-                        if date_field in updates:
-                            date_val = updates.get(date_field)
-                            if date_val:
-                                from datetime import datetime as _dt_proj
-                                try:
-                                    setattr(project_to_update, date_field, _dt_proj.strptime(date_val, "%Y-%m-%d").date())
-                                except (ValueError, TypeError):
-                                    pass
-                            else:
-                                setattr(project_to_update, date_field, None)
+                    # Handle date fields. `end_date` is no longer a user-facing
+                    # field — if the LLM emits it (legacy), treat it as a
+                    # deadline alias and mirror to both columns.
+                    deadline_in_updates = "deadline" in updates or "end_date" in updates
+                    if deadline_in_updates:
+                        date_val = updates.get("deadline") or updates.get("end_date")
+                        if date_val:
+                            from datetime import datetime as _dt_proj
+                            try:
+                                parsed = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
+                                project_to_update.deadline = parsed
+                                project_to_update.end_date = parsed
+                            except (ValueError, TypeError):
+                                pass
+                        else:
+                            project_to_update.deadline = None
+                            project_to_update.end_date = None
+
+                    if "start_date" in updates:
+                        date_val = updates.get("start_date")
+                        if date_val:
+                            from datetime import datetime as _dt_proj
+                            try:
+                                project_to_update.start_date = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
+                            except (ValueError, TypeError):
+                                pass
+                        else:
+                            project_to_update.start_date = None
 
                     # Handle budget fields
                     for budget_field in ["budget_min", "budget_max"]:
@@ -1339,7 +1389,7 @@ def task_prioritization(request):
                 "name": project.name,
                 "status": project.status,
                 "start_date": project.start_date.isoformat() if project.start_date else None,
-                "end_date": project.end_date.isoformat() if project.end_date else None,
+                "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
             }
         context["workload_analysis"] = {
             "workload_by_user": workload_analysis,
@@ -1674,8 +1724,7 @@ def timeline_gantt(request):
                 "name": project.name,
                 "status": project.status,
                 "start_date": project.start_date.isoformat() if project.start_date else None,
-                "end_date": project.end_date.isoformat() if project.end_date else None,
-                "deadline": project.deadline.isoformat() if project.deadline else None,
+                "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
             },
             "tasks": tasks,
         }
@@ -2763,9 +2812,9 @@ def create_project_manual(request):
       - industry_id: int (optional)
       - budget_min: decimal (optional)
       - budget_max: decimal (optional)
-      - deadline: date (optional, format: YYYY-MM-DD)
+      - deadline: date (optional, format: YYYY-MM-DD). Legacy `end_date` is
+        accepted as an alias and mirrored to the same column.
       - start_date: date (optional, format: YYYY-MM-DD)
-      - end_date: date (optional, format: YYYY-MM-DD)
     """
     company_user = request.user
     company = company_user.company
@@ -2786,9 +2835,10 @@ def create_project_manual(request):
         industry_id = request.data.get('industry_id')
         budget_min = request.data.get('budget_min')
         budget_max = request.data.get('budget_max')
-        deadline = request.data.get('deadline')
+        # `end_date` is the legacy alias for `deadline`. We accept either on the
+        # wire but normalise to a single value below.
+        deadline = request.data.get('deadline') or request.data.get('end_date')
         start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')
         
         # Validate status and priority
         valid_statuses = ['planning', 'active', 'on_hold', 'completed', 'cancelled', 'draft', 'posted', 'in_progress', 'review']
@@ -2861,13 +2911,17 @@ def create_project_manual(request):
         from datetime import datetime
         if deadline:
             try:
-                project_data['deadline'] = datetime.strptime(deadline, '%Y-%m-%d').date()
+                parsed_deadline = datetime.strptime(deadline, '%Y-%m-%d').date()
+                # Mirror to the legacy end_date column so existing readers still
+                # see the same value.
+                project_data['deadline'] = parsed_deadline
+                project_data['end_date'] = parsed_deadline
             except ValueError:
                 return Response({
                     'status': 'error',
                     'message': 'Invalid deadline format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if start_date:
             try:
                 project_data['start_date'] = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -2876,16 +2930,7 @@ def create_project_manual(request):
                     'status': 'error',
                     'message': 'Invalid start_date format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if end_date:
-            try:
-                project_data['end_date'] = datetime.strptime(end_date, '%Y-%m-%d').date()
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid end_date format. Use YYYY-MM-DD'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Create project
         project = Project.objects.create(**project_data)
         _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
@@ -3530,11 +3575,11 @@ def project_pilot_from_file(request):
                             logger.warning(f"Could not find industry '{industry_value}': {e}")
                             industry_instance = None
                     
-                    # Parse dates
+                    # Parse dates. end_date is the legacy alias for deadline —
+                    # accept either, mirror to both columns below.
                     start_date = action.get("start_date")
-                    end_date = action.get("end_date")
-                    deadline = action.get("deadline")
-                    
+                    deadline = action.get("deadline") or action.get("end_date")
+
                     if start_date and isinstance(start_date, str):
                         try:
                             from datetime import datetime
@@ -3542,14 +3587,6 @@ def project_pilot_from_file(request):
                         except (ValueError, TypeError):
                             logger.debug(f"Failed to parse start_date: {start_date}")
                             start_date = None
-
-                    if end_date and isinstance(end_date, str):
-                        try:
-                            from datetime import datetime
-                            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-                        except (ValueError, TypeError):
-                            logger.debug(f"Failed to parse end_date: {end_date}")
-                            end_date = None
 
                     if deadline and isinstance(deadline, str):
                         try:
@@ -3581,7 +3618,7 @@ def project_pilot_from_file(request):
                         budget_min=budget_min,
                         budget_max=budget_max,
                         start_date=start_date,
-                        end_date=end_date,
+                        end_date=deadline,  # mirror — legacy column
                         deadline=deadline,
                         created_by_company_user=company_user,
                         owner=default_owner,
@@ -4175,8 +4212,7 @@ def scan_notifications(request):
                 "id": project.id,
                 "name": project.name,
                 "status": project.status,
-                "deadline": project.deadline.isoformat() if project.deadline else None,
-                "end_date": project.end_date.isoformat() if project.end_date else None,
+                "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
             }
 
             result = agent.scan_project(project_info, tasks_data, available_users)

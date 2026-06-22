@@ -597,11 +597,24 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-muted-foreground">
                                         <span><strong className="text-foreground">Priority:</strong> {priorityDisplay}</span>
                                         <span><strong className="text-foreground">Assigned to:</strong> {assigneeDisplay}</span>
-                                        <span><strong className="text-foreground">Deadline:</strong> {formatDate(action.due_date)}</span>
-                                        <span><strong className="text-foreground">Start:</strong> {formatDate(action.created_at)}</span>
+                                        <span><strong className="text-foreground">Due:</strong> {formatDate(action.due_date)}</span>
+                                        <span><strong className="text-foreground">Created:</strong> {formatDate(action.created_at)}</span>
                                       </div>
                                     )}
-                                    {action.project_name && !isTaskAction && (
+                                    {!isTaskAction && action.action === 'create_project' && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-muted-foreground mt-1">
+                                        {action.project_name && (
+                                          <span className="sm:col-span-2"><strong className="text-foreground">Project:</strong> {action.project_name}</span>
+                                        )}
+                                        {action.start_date && (
+                                          <span><strong className="text-foreground">Start:</strong> {formatDate(action.start_date)}</span>
+                                        )}
+                                        {(action.deadline || action.end_date) && (
+                                          <span><strong className="text-foreground">Deadline:</strong> {formatDate(action.deadline || action.end_date)}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {action.project_name && !isTaskAction && action.action !== 'create_project' && (
                                       <p className="text-xs text-muted-foreground mt-1">Project: {action.project_name}</p>
                                     )}
                                   </div>
