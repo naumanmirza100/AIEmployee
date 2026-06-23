@@ -465,6 +465,39 @@ PM_AGENT_LLM_CONFIG = {
         'max_tokens': 800,
     },
 }
+
+# AI Executive Meeting Assistant — per-sub-agent LLM overrides
+EXEC_AGENT_LLM_CONFIG = {
+    'defaults': {
+        'model': GROQ_MODEL,
+        'temperature': 0.5,
+        'max_tokens': 1024,
+    },
+    'meetingschedulingagent': {
+        'temperature': 0.1,
+        'max_tokens': 600,
+    },
+    'meetingnotetakeragent': {
+        'temperature': 0.3,
+        'max_tokens': 800,
+    },
+    'taskprioritizationagent': {
+        'temperature': 0.2,
+        'max_tokens': 1200,
+    },
+    'calendarplanneragent': {
+        'temperature': 0.3,
+        'max_tokens': 1500,
+    },
+    'documentauthoringagent': {
+        'temperature': 0.4,
+        'max_tokens': 900,
+    },
+    'proactivenotificationagent': {
+        'temperature': 0.3,
+        'max_tokens': 400,
+    },
+}
 GROQ_REC_API_KEY = os.getenv('GROQ_REC_API_KEY', '')
 
 # OpenRouter API Settings (Highest Priority)
@@ -937,6 +970,32 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 86400.0 * 7,
         'options': {'expires': 86400.0 * 14},
     },
+
+    # ----- AI Executive Meeting Assistant -----
+    # Remind participants of meetings starting within 15 minutes — every 5 min.
+    'exec-meeting-send-reminders': {
+        'task': 'meeting_agent.send_meeting_reminders',
+        'schedule': 300.0,
+        'options': {'expires': 600},
+    },
+    # Proactive notifications: overdue tasks, approaching deadlines — every 15 min.
+    'exec-meeting-proactive-notifications': {
+        'task': 'meeting_agent.run_proactive_notifications',
+        'schedule': 900.0,
+        'options': {'expires': 1800},
+    },
+    # Auto-mark past meetings as completed — every 30 minutes.
+    'exec-meeting-mark-completed': {
+        'task': 'meeting_agent.mark_completed_meetings',
+        'schedule': 1800.0,
+        'options': {'expires': 3600},
+    },
+    # Clean up old read notifications — daily.
+    'exec-meeting-cleanup-notifications': {
+        'task': 'meeting_agent.cleanup_old_notifications',
+        'schedule': 86400.0,
+        'options': {'expires': 172800},
+    },
 }
 
 # Use django-celery-beat for database-backed periodic tasks (optional, more flexible)
@@ -1006,5 +1065,8 @@ REST_FRAMEWORK = {
         'hr_crud': '300/hour',
         # Company auth endpoints (login / register) — by IP, to stop credential stuffing
         'company_auth': '10/hour',
+        # AI Executive Meeting Assistant throttles
+        'exec_llm': '30/hour',    # LLM-powered endpoints (scheduling, notetaker, AI draft, etc.)
+        'exec_crud': '200/hour',  # CRUD endpoints (list/create/update meetings, tasks, notifications)
     },
 }

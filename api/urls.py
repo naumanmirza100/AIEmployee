@@ -28,6 +28,7 @@ from api.views import white_label
 from api.views import company_jobs
 from api.views import pm_agent
 from api.views import company_dashboard
+from api.views import meeting_agent as exec_meeting_api
 from api.views import company_projects_tasks
 from api.views import user_project_manager
 from api.views import recruitment_agent
@@ -817,6 +818,51 @@ urlpatterns = [
     re_path(r'^hr/documents/(?P<document_id>\d+)/unmark-outdated/?$', hr_agent.unmark_hr_document_outdated, name='hr_unmark_document_outdated'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/reingest/?$', hr_agent.reingest_hr_document, name='hr_reingest_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/access-log/?$', hr_agent.list_hr_document_access_log, name='hr_list_document_access_log'),  # GET
+
+    # ===========================================================================
+    # AI Executive Meeting Assistant endpoints
+    # ===========================================================================
+
+    # Meetings
+    re_path(r'^exec-meeting/ai/schedule/?$', exec_meeting_api.schedule_meeting_ai, name='exec_schedule_meeting_ai'),  # POST
+    re_path(r'^exec-meeting/meetings/?$', exec_meeting_api.meeting_list, name='exec_meeting_list'),  # GET, POST
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/?$', exec_meeting_api.meeting_notes, name='exec_meeting_notes'),  # GET, POST
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
+    re_path(r'^exec-meeting/meetings/suggest-slots/?$', exec_meeting_api.meeting_suggest_slots, name='exec_meeting_suggest_slots'),  # GET
+
+    # Action Items
+    re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/?$', exec_meeting_api.action_item_detail, name='exec_action_item_detail'),  # GET, PATCH
+
+    # Tasks
+    re_path(r'^exec-meeting/tasks/?$', exec_meeting_api.task_list, name='exec_task_list'),  # GET, POST
+    re_path(r'^exec-meeting/tasks/ai/prioritize/?$', exec_meeting_api.task_prioritize_ai, name='exec_task_prioritize_ai'),  # POST
+    re_path(r'^exec-meeting/tasks/ai/workload/?$', exec_meeting_api.task_workload_analysis, name='exec_task_workload'),  # POST
+    re_path(r'^exec-meeting/tasks/(?P<task_id>\d+)/?$', exec_meeting_api.task_detail, name='exec_task_detail'),  # GET, PATCH, DELETE
+
+    # Calendar
+    re_path(r'^exec-meeting/calendar/plan-week/?$', exec_meeting_api.calendar_plan_week, name='exec_calendar_plan_week'),  # POST
+    re_path(r'^exec-meeting/calendar/free-slots/?$', exec_meeting_api.calendar_free_slots, name='exec_calendar_free_slots'),  # GET
+
+    # Documents
+    re_path(r'^exec-meeting/documents/draft/?$', exec_meeting_api.document_draft, name='exec_document_draft'),  # POST
+
+    # Notifications
+    re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET
+    re_path(r'^exec-meeting/notifications/mark-all-read/?$', exec_meeting_api.notification_mark_all_read, name='exec_notification_mark_all_read'),  # PATCH
+    re_path(r'^exec-meeting/notifications/(?P<notification_id>\d+)/read/?$', exec_meeting_api.notification_mark_read, name='exec_notification_mark_read'),  # PATCH
+    re_path(r'^exec-meeting/notifications/daily-digest/?$', exec_meeting_api.notification_daily_digest, name='exec_notification_daily_digest'),  # POST
+
+    # Chat — per sub-agent
+    re_path(r'^exec-meeting/chat/(?P<agent_name>[a-z_]+)/?$', exec_meeting_api.chat_list, name='exec_chat_list'),  # GET, POST
+    re_path(r'^exec-meeting/chat/(?P<agent_name>[a-z_]+)/(?P<chat_id>\d+)/messages/?$', exec_meeting_api.chat_messages, name='exec_chat_messages'),  # GET, POST
+
+    # Admin endpoints
+    re_path(r'^admin/exec-meeting/meetings/?$', exec_meeting_api.admin_meeting_list, name='exec_admin_meeting_list'),  # GET
+    re_path(r'^admin/exec-meeting/tasks/?$', exec_meeting_api.admin_task_list, name='exec_admin_task_list'),  # GET
+    re_path(r'^admin/exec-meeting/notifications/?$', exec_meeting_api.admin_notification_list, name='exec_admin_notification_list'),  # GET
+    re_path(r'^admin/exec-meeting/stats/?$', exec_meeting_api.admin_stats, name='exec_admin_stats'),  # GET
 ]
 
 
