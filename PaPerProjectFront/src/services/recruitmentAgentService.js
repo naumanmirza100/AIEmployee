@@ -229,9 +229,17 @@ export const deleteQAChat = async (chatId) => {
 /**
  * Get all job descriptions for the company user
  */
-export const getJobDescriptions = async () => {
+export const getJobDescriptions = async (params = {}) => {
   try {
-    const response = await companyApi.get('/recruitment/job-descriptions');
+    const query = new URLSearchParams();
+    if (params.search)     query.set('search',     params.search);
+    if (params.status)     query.set('status',     params.status);
+    if (params.type)       query.set('type',       params.type);
+    if (params.department) query.set('department', params.department);
+    if (params.page)       query.set('page',       params.page);
+    if (params.page_size)  query.set('page_size',  params.page_size);
+    const qs = query.toString();
+    const response = await companyApi.get(`/recruitment/job-descriptions${qs ? `?${qs}` : ''}`);
     return response;
   } catch (error) {
     console.error('Get job descriptions error:', error);
@@ -549,6 +557,79 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
   }
 };
 
+/**
+ * Download candidates CSV export
+ */
+export const exportCandidatesCSV = async (jobId = null) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const { getCompanyToken } = await import('@/services/companyAuthService');
+  const token = getCompanyToken();
+  const url = `${API_BASE_URL}/recruitment/export/candidates/${jobId ? `?job_id=${jobId}` : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `candidates_${jobId || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/**
+ * Download interviews CSV export
+ */
+export const exportInterviewsCSV = async (jobId = null) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const { getCompanyToken } = await import('@/services/companyAuthService');
+  const token = getCompanyToken();
+  const url = `${API_BASE_URL}/recruitment/export/interviews/${jobId ? `?job_id=${jobId}` : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `interviews_${jobId || 'all'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/**
+ * Get full candidate profile (CV data + linked application + interviews)
+ */
+export const getCVRecordDetail = async (recordId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/cv-records/${recordId}`);
+    return response;
+  } catch (error) {
+    console.error('Get CV record detail error:', error);
+    throw error;
+  }
+};
+
+export const getCVRecordDecisionHistory = async (recordId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/cv-records/${recordId}/decision-history`);
+    return response;
+  } catch (error) {
+    console.error('Get decision history error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Submit or update post-interview feedback
+ */
+
+export const submitInterviewFeedback = async (interviewId, feedbackData) => {
+  try {
+    const response = await companyApi.patch(`/recruitment/interviews/${interviewId}/feedback`, feedbackData);
+    return response;
+  } catch (error) {
+    console.error('Submit interview feedback error:', error);
+    throw error;
+  }
+};
+
 // ========== AI Graph Generator APIs ==========
 
 /**
@@ -644,6 +725,16 @@ export const isPromptOnDashboard = (prompt) => {
   if (!prompt || !prompt.tags) return false;
   const tags = Array.isArray(prompt.tags) ? prompt.tags : [];
   return tags.includes('dashboard');
+};
+
+export const getJobApplicationsByJob = async (jobDescriptionId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/job-descriptions/${jobDescriptionId}/applications`);
+    return response;
+  } catch (error) {
+    console.error('Get job applications error:', error);
+    throw error;
+  }
 };
 
 export default {

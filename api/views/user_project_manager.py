@@ -186,6 +186,9 @@ def get_project_manager_projects_tasks(request):
                 'description': project.description,
                 'status': project.status,
                 'priority': project.priority,
+                'project_type': project.project_type,
+                'start_date': project.start_date.isoformat() if project.start_date else None,
+                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                 'tasks': tasks_data,
                 'tasks_count': len(tasks_data),
             })
@@ -243,9 +246,10 @@ def create_project_manager_project(request):
         status_val = request.data.get('status', 'planning')
         priority_val = request.data.get('priority', 'medium')
         project_type = request.data.get('project_type', 'web_app')
-        deadline = request.data.get('deadline')
+        # `end_date` is the legacy alias for `deadline`; accept either on the
+        # wire and mirror to both DB columns so existing readers keep working.
+        deadline = request.data.get('deadline') or request.data.get('end_date')
         start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')
         
         # Validate status and priority
         valid_statuses = ['planning', 'active', 'on_hold', 'completed', 'cancelled', 'draft', 'posted', 'in_progress', 'review']
@@ -290,18 +294,8 @@ def create_project_manager_project(request):
                     'status': 'error',
                     'message': 'Invalid start_date format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
-        
-        end_date_obj = None
-        if end_date:
-            try:
-                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid end_date format. Use YYYY-MM-DD'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Create project
+
+        # Create project. Mirror deadline_date into the legacy end_date column.
         project = Project.objects.create(
             name=name,
             description=description,
@@ -313,7 +307,7 @@ def create_project_manager_project(request):
             project_type=project_type,
             deadline=deadline_date,
             start_date=start_date_obj,
-            end_date=end_date_obj,
+            end_date=deadline_date,
         )
         
         return Response({
@@ -326,9 +320,8 @@ def create_project_manager_project(request):
                 'status': project.status,
                 'priority': project.priority,
                 'project_type': project.project_type,
-                'deadline': project.deadline.isoformat() if project.deadline else None,
+                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                 'start_date': project.start_date.isoformat() if project.start_date else None,
-                'end_date': project.end_date.isoformat() if project.end_date else None,
             }
         }, status=status.HTTP_201_CREATED)
     
@@ -601,6 +594,8 @@ def get_project_manager_projects(request):
                 'status': project.status,
                 'priority': project.priority,
                 'project_type': project.project_type,
+                'start_date': project.start_date.isoformat() if project.start_date else None,
+                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                 'tasks_count': project.tasks.count(),
             })
         
@@ -684,11 +679,18 @@ def update_project_manager_project(request, project_id):
             valid_types = [choice[0] for choice in Project.PROJECT_TYPE_CHOICES]
             if data['project_type'] in valid_types:
                 project.project_type = data['project_type']
-        if 'deadline' in data:
+        # `end_date` (legacy alias for deadline) is accepted on the wire but
+        # treated as the same field. Whichever key the caller sends is mirrored
+        # to both DB columns so existing readers keep working.
+        if 'deadline' in data or 'end_date' in data:
             deadline_str = data.get('deadline')
+            if deadline_str is None:
+                deadline_str = data.get('end_date')
             if deadline_str:
                 try:
-                    project.deadline = datetime.strptime(deadline_str, '%Y-%m-%d').date()
+                    parsed = datetime.strptime(deadline_str, '%Y-%m-%d').date()
+                    project.deadline = parsed
+                    project.end_date = parsed
                 except ValueError:
                     return Response({
                         'status': 'error',
@@ -696,6 +698,7 @@ def update_project_manager_project(request, project_id):
                     }, status=status.HTTP_400_BAD_REQUEST)
             else:
                 project.deadline = None
+                project.end_date = None
         if 'start_date' in data:
             start_date_str = data.get('start_date')
             if start_date_str:
@@ -708,19 +711,7 @@ def update_project_manager_project(request, project_id):
                     }, status=status.HTTP_400_BAD_REQUEST)
             else:
                 project.start_date = None
-        if 'end_date' in data:
-            end_date_str = data.get('end_date')
-            if end_date_str:
-                try:
-                    project.end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-                except ValueError:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid end_date format. Use YYYY-MM-DD'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                project.end_date = None
-        
+
         project.save()
         
         return Response({
@@ -733,12 +724,11 @@ def update_project_manager_project(request, project_id):
                 'status': project.status,
                 'priority': project.priority,
                 'project_type': project.project_type,
-                'deadline': project.deadline.isoformat() if project.deadline else None,
+                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                 'start_date': project.start_date.isoformat() if project.start_date else None,
-                'end_date': project.end_date.isoformat() if project.end_date else None,
             }
         }, status=status.HTTP_200_OK)
-    
+
     except Project.DoesNotExist:
         return Response({
             'status': 'error',

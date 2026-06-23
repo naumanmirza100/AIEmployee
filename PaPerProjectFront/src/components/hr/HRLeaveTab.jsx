@@ -35,7 +35,7 @@ const STATUS_BADGE = {
   pending: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
   approved: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
   rejected: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
-  cancelled: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+  cancelled: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
 };
 
 
@@ -271,7 +271,7 @@ export default function HRLeaveTab() {
                           <div className="flex gap-1 justify-end flex-wrap">
                             {view === 'mine' && (
                               <>
-                                <Button variant="outline" size="sm" className="h-7 text-xs text-sky-300 hover:text-sky-200"
+                                <Button variant="outline" size="sm" className="h-7 text-xs text-violet-300 hover:text-violet-200"
                                   onClick={() => openEdit(lr)}>
                                   <Pencil className="h-3 w-3 mr-1" /> Edit
                                 </Button>

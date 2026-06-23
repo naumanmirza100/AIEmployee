@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import pmAgentService from '@/services/pmAgentService';
 import { Loader2, Trash2, Send, Plus } from 'lucide-react';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const CHANNEL_TYPES = [
   { value: 'slack', label: 'Slack (webhook)' },
@@ -42,6 +43,13 @@ export default function NotificationSettings() {
     notification_type: 'overdue_task', name: '', title_template: '', message_template: '', default_severity: 'info', is_active: true,
   });
   const [savingTemplate, setSavingTemplate] = useState(false);
+
+  // Generic confirmation state — replaces window.confirm() throughout this file.
+  // Caller sets the meta + onConfirm; dialog closes on cancel/confirm.
+  const [confirm, setConfirm] = useState({
+    open: false, title: '', description: '', confirmLabel: 'Delete', onConfirm: null, loading: false,
+  });
+  const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
 
   useEffect(() => {
     refreshChannels();
@@ -99,14 +107,25 @@ export default function NotificationSettings() {
     }
   };
 
-  const removeChannel = async (id) => {
-    if (!window.confirm('Delete this channel?')) return;
-    try {
-      await pmAgentService.deleteNotificationChannel(id);
-      refreshChannels();
-    } catch (e) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
-    }
+  const removeChannel = (id) => {
+    setConfirm({
+      open: true,
+      title: 'Delete this channel?',
+      description: 'Notifications will stop going out through this channel. This cannot be undone.',
+      confirmLabel: 'Delete channel',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          await pmAgentService.deleteNotificationChannel(id);
+          refreshChannels();
+          closeConfirm();
+        } catch (e) {
+          toast({ title: 'Error', description: e.message, variant: 'destructive' });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const testChannel = async (id) => {
@@ -150,30 +169,41 @@ export default function NotificationSettings() {
     }
   };
 
-  const removeTemplate = async (id) => {
-    if (!window.confirm('Delete this template?')) return;
-    try {
-      await pmAgentService.deleteNotificationTemplate(id);
-      refreshTemplates();
-    } catch (e) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
-    }
+  const removeTemplate = (id) => {
+    setConfirm({
+      open: true,
+      title: 'Delete this template?',
+      description: 'Notifications of this type will fall back to the default template.',
+      confirmLabel: 'Delete template',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          await pmAgentService.deleteNotificationTemplate(id);
+          refreshTemplates();
+          closeConfirm();
+        } catch (e) {
+          toast({ title: 'Error', description: e.message, variant: 'destructive' });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   return (
     <div className="space-y-6">
       {/* Channels */}
-      <Card className="bg-gray-900/50 border-gray-700">
+      <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader>
           <CardTitle className="text-lg text-violet-300">Notification Channels</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-white/55">
             Fan out PM notifications to Slack, Microsoft Teams, or extra emails. Add a webhook URL from the corresponding app.
           </p>
 
           {/* New channel form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-gray-700 bg-gray-900/50">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-white/[0.06] bg-black/30">
             <div>
               <Label>Name</Label>
               <Input value={newChannel.name} onChange={(e) => setNewChannel({ ...newChannel, name: e.target.value })} placeholder="#pm-alerts" />
@@ -210,18 +240,18 @@ export default function NotificationSettings() {
           {channelsLoading ? (
             <Loader2 className="w-5 h-5 animate-spin mx-auto" />
           ) : channels.length === 0 ? (
-            <p className="text-sm text-gray-500">No channels configured yet.</p>
+            <p className="text-sm text-white/40">No channels configured yet.</p>
           ) : (
             <div className="space-y-2">
               {channels.map((ch) => (
-                <div key={ch.id} className="flex flex-wrap items-center gap-3 p-3 rounded border border-gray-700 bg-gray-900/40">
+                <div key={ch.id} className="flex flex-wrap items-center gap-3 p-3 rounded border border-white/[0.06] bg-black/30/40">
                   <Checkbox checked={ch.is_active} onCheckedChange={() => toggleChannelActive(ch)} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{ch.name}</p>
-                    <p className="text-xs text-gray-400 truncate">
+                    <p className="text-xs text-white/55 truncate">
                       {ch.channel_type} · {ch.target}
                     </p>
-                    <p className="text-xs text-gray-500">severities: {ch.severities || 'all'}{ch.types ? ` · types: ${ch.types}` : ''}</p>
+                    <p className="text-xs text-white/40">severities: {ch.severities || 'all'}{ch.types ? ` · types: ${ch.types}` : ''}</p>
                     {ch.last_error && (
                       <p className="text-xs text-red-400 mt-1">Last error: {ch.last_error}</p>
                     )}
@@ -240,17 +270,17 @@ export default function NotificationSettings() {
       </Card>
 
       {/* Templates */}
-      <Card className="bg-gray-900/50 border-gray-700">
+      <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader>
           <CardTitle className="text-lg text-violet-300">Notification Templates</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-white/55">
             Override the wording for a given notification type. Use <code>{'{placeholders}'}</code> like <code>{'{meeting_title}'}</code>, <code>{'{pending_names}'}</code>, <code>{'{reminder_text}'}</code>, <code>{'{time_display}'}</code>.
           </p>
 
           {/* New template form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-gray-700 bg-gray-900/50">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-white/[0.06] bg-black/30">
             <div>
               <Label>Notification type</Label>
               <Select value={newTemplate.notification_type} onValueChange={(v) => setNewTemplate({ ...newTemplate, notification_type: v })}>
@@ -292,18 +322,18 @@ export default function NotificationSettings() {
           {templatesLoading ? (
             <Loader2 className="w-5 h-5 animate-spin mx-auto" />
           ) : templates.length === 0 ? (
-            <p className="text-sm text-gray-500">No custom templates yet — defaults will be used.</p>
+            <p className="text-sm text-white/40">No custom templates yet — defaults will be used.</p>
           ) : (
             <div className="space-y-2">
               {templates.map((t) => (
-                <div key={t.id} className="flex items-start gap-3 p-3 rounded border border-gray-700 bg-gray-900/40">
+                <div key={t.id} className="flex items-start gap-3 p-3 rounded border border-white/[0.06] bg-black/30/40">
                   <Checkbox checked={t.is_active} onCheckedChange={() => toggleTemplateActive(t)} className="mt-1" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">
-                      {t.name} <span className="text-xs text-gray-500">· {t.notification_type} · {t.default_severity}</span>
+                      {t.name} <span className="text-xs text-white/40">· {t.notification_type} · {t.default_severity}</span>
                     </p>
-                    <p className="text-xs text-gray-400 truncate mt-1">{t.title_template}</p>
-                    <p className="text-xs text-gray-500 line-clamp-2">{t.message_template}</p>
+                    <p className="text-xs text-white/55 truncate mt-1">{t.title_template}</p>
+                    <p className="text-xs text-white/40 line-clamp-2">{t.message_template}</p>
                   </div>
                   <Button size="sm" variant="ghost" onClick={() => removeTemplate(t.id)}>
                     <Trash2 className="w-3 h-3 text-red-400" />
@@ -314,6 +344,17 @@ export default function NotificationSettings() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirm.open}
+        onOpenChange={(o) => !o && closeConfirm()}
+        title={confirm.title}
+        description={confirm.description}
+        confirmLabel={confirm.confirmLabel}
+        variant="danger"
+        loading={confirm.loading}
+        onConfirm={confirm.onConfirm}
+      />
     </div>
   );
 }

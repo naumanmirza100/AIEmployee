@@ -11,7 +11,209 @@ import {
   CheckCircle2, Layers, BookOpen,
   Lightbulb, Brain, Sparkles, Zap, Info,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import * as operationsService from '@/services/operationsAgentService';
+
+// ─── Markdown components for the Content tab ─────────────────────────
+// Plain extracted text from PDFs / DOCX is converted into markdown by
+// `plainTextToMarkdown` below, then rendered with these styled blocks
+// so resumes / contracts / manuals show clear headings and lists instead
+// of a wall of monospace text.
+const contentMarkdownComponents = {
+  h1: ({ children }) => (
+    <h1 className="text-xl font-bold text-white mt-6 mb-3 pb-2 border-b border-white/[0.08]">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <div className="flex items-center gap-2.5 mt-6 mb-3 pb-2 border-b border-white/[0.06]">
+      <div className="h-5 w-1 rounded-full bg-amber-500" />
+      <h2 className="text-base font-bold text-amber-400 m-0">{children}</h2>
+    </div>
+  ),
+  h3: ({ children }) => (
+    <div className="flex items-center gap-2 mt-5 mb-2">
+      <div className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+      <h3 className="text-sm font-semibold text-violet-300 m-0">{children}</h3>
+    </div>
+  ),
+  h4: ({ children }) => (
+    <h4 className="text-sm font-semibold text-white/80 mt-4 mb-2">{children}</h4>
+  ),
+  p: ({ children }) => (
+    <p className="text-sm text-white/65 leading-relaxed my-2">{children}</p>
+  ),
+  ul: ({ children }) => (
+    <ul className="space-y-1.5 my-3 ml-1 list-none p-0">{children}</ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="space-y-1.5 my-3 ml-1 list-none p-0">{children}</ol>
+  ),
+  li: ({ children }) => (
+    <li className="flex items-start gap-2.5 text-sm text-white/65 leading-relaxed p-0 m-0">
+      <span className="flex items-center justify-center h-4 w-4 rounded-full shrink-0 mt-1 text-[9px] font-bold"
+        style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b' }}
+      >•</span>
+      <span className="flex-1">{children}</span>
+    </li>
+  ),
+  strong: ({ children }) => (
+    <strong className="font-semibold text-white/90">{children}</strong>
+  ),
+  em: ({ children }) => (
+    <em className="text-white/70">{children}</em>
+  ),
+  a: ({ children, href }) => (
+    <a href={href} className="text-amber-400 underline underline-offset-2 break-all" target="_blank" rel="noopener noreferrer">{children}</a>
+  ),
+  hr: () => <hr className="my-6 border-white/[0.08]" />,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-white/20 pl-3 my-3 text-sm text-white/55 italic">{children}</blockquote>
+  ),
+  table: ({ children }) => (
+    <div className="my-3 overflow-x-auto rounded-lg border border-white/[0.06]">
+      <table className="w-full text-xs text-white/65">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="px-3 py-2 text-left font-semibold text-white/80 border-b border-white/[0.06] bg-white/[0.02]">{children}</th>
+  ),
+  td: ({ children }) => (
+    <td className="px-3 py-2 border-b border-white/[0.04]">{children}</td>
+  ),
+};
+
+// Small connector words that don't need to be capitalised for a line to count
+// as "title-case" (so "Education and Experience" still counts as a heading).
+const TITLE_CASE_SMALL_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into', 'of',
+  'on', 'or', 'the', 'to', 'with', 'vs', 'via', 'per',
+]);
+
+const isTitleCaseLine = (line) => {
+  const words = line.split(/\s+/).filter(Boolean);
+  if (words.length < 1) return false;
+  let capCount = 0;
+  for (const w of words) {
+    const clean = w.replace(/[^A-Za-z0-9]/g, '');
+    if (!clean) continue;
+    const first = clean[0];
+    if (first >= 'A' && first <= 'Z') capCount += 1;
+    else if (!TITLE_CASE_SMALL_WORDS.has(clean.toLowerCase()) && /[a-z]/.test(first)) return false;
+  }
+  return capCount >= 1;
+};
+
+// Convert raw extracted document text into structured markdown.
+//   ALL-CAPS short lines       → ## heading
+//   Title-Case standalone lines → ## heading (when followed by content)
+//   "1. Foo" / "1.1 Foo"        → ### numbered heading (when short + title-case)
+//   Short lines ending in ":"   → ### heading
+//   •, ●, ○, *, -, ▪ prefixes   → unordered list
+//   "1." / "1)" prefixes in body → ordered list
+//   Form-feed / explicit page break → horizontal rule
+// Falls through to plain paragraphs for everything else, and escapes any
+// stray markdown special chars so resume bullet points like "C++" aren't
+// rendered as code.
+const escapeMarkdown = (s) => s.replace(/([\\`*_{}\[\]()<>#+!|])/g, '\\$1');
+
+const plainTextToMarkdown = (raw) => {
+  if (!raw) return '';
+  // Normalise newlines, page breaks → ---
+  const text = raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\f/g, '\n\n---\n\n');
+
+  const lines = text.split('\n').map(l => l.replace(/\s+$/, ''));
+  const out = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const nextNonEmpty = lines.slice(i + 1).find(l => l.trim()) || '';
+
+    if (!line) {
+      out.push('');
+      continue;
+    }
+
+    // Already a horizontal rule we injected
+    if (line === '---') { out.push('---'); continue; }
+
+    // 1) Bullet list items
+    const bulletMatch = line.match(/^[•●○▪■▶►·⁃\-\*]\s+(.+)/);
+    if (bulletMatch) {
+      out.push(`- ${escapeMarkdown(bulletMatch[1])}`);
+      continue;
+    }
+
+    // 2) Numbered "1.", "1)" — could be heading or list item
+    const numberedMatch = line.match(/^(\d{1,3})[.)]\s+(.+)$/);
+    if (numberedMatch) {
+      const content = numberedMatch[2];
+      const wordCount = content.split(/\s+/).length;
+      const looksLikeHeading =
+        content.length <= 70 &&
+        wordCount <= 10 &&
+        !/[.!?]$/.test(content) &&
+        isTitleCaseLine(content);
+      if (looksLikeHeading) {
+        out.push(`### ${numberedMatch[1]}. ${escapeMarkdown(content)}`);
+      } else {
+        out.push(`${numberedMatch[1]}. ${escapeMarkdown(content)}`);
+      }
+      continue;
+    }
+
+    // 3) Dotted numeric headings: "1.1 Foo", "1.1.1 Foo"
+    const dottedNumMatch = line.match(/^(\d+(?:\.\d+){1,3})\s+(.+)$/);
+    if (dottedNumMatch && dottedNumMatch[2].length <= 80) {
+      out.push(`### ${dottedNumMatch[1]} ${escapeMarkdown(dottedNumMatch[2])}`);
+      continue;
+    }
+
+    // 4) ALL-CAPS heading: ≥3 letters, no terminal sentence punctuation, ≤ 80 chars
+    const letters = line.replace(/[^A-Za-z]/g, '');
+    if (
+      letters.length >= 3 &&
+      letters === letters.toUpperCase() &&
+      line.length <= 80 &&
+      !/[.!?]$/.test(line)
+    ) {
+      // Title-case it for nicer display while keeping acronyms intact:
+      // here we just keep ALL CAPS — markdown rendering already styles it.
+      out.push(`## ${escapeMarkdown(line)}`);
+      continue;
+    }
+
+    // 5) Short line ending with `:` → subheading
+    if (/:$/.test(line) && line.length <= 60 && line.split(/\s+/).length <= 8) {
+      out.push(`### ${escapeMarkdown(line.replace(/:\s*$/, ''))}`);
+      continue;
+    }
+
+    // 6) Title-Case standalone short line that is followed by a blank line
+    //    (i.e. ends a section break) → heading. Requiring the immediate next
+    //    line to be empty avoids classifying body-text Title-Case lines like
+    //    "Bachelor of Computer Science\nUniversity of …" as headings.
+    const immediateNext = (lines[i + 1] || '').trim();
+    if (
+      line.length <= 70 &&
+      line.split(/\s+/).length <= 10 &&
+      !/[.!?,;:]$/.test(line) &&
+      isTitleCaseLine(line) &&
+      immediateNext === '' &&
+      nextNonEmpty
+    ) {
+      out.push(`## ${escapeMarkdown(line)}`);
+      continue;
+    }
+
+    // 7) Default — plain paragraph (escape markdown specials)
+    out.push(escapeMarkdown(line));
+  }
+
+  // Collapse 3+ blank lines to a single paragraph break
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+};
 
 // ─── Helpers ────────────────────────────────
 const FILE_TYPE_CONFIG = {
@@ -308,7 +510,11 @@ const DocumentDetailPage = () => {
                 <span className="text-[10px] text-white/25">{document.full_text_length?.toLocaleString() || 0} characters total</span>
               </div>
               <div className="p-5 max-h-[600px] overflow-y-auto">
-                <pre className="text-sm text-white/40 whitespace-pre-wrap font-mono leading-relaxed">{document.parsed_text}</pre>
+                <div className="prose-content">
+                  <ReactMarkdown components={contentMarkdownComponents}>
+                    {plainTextToMarkdown(document.parsed_text)}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
           ) : (

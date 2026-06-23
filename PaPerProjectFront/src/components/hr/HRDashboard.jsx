@@ -796,10 +796,10 @@ const HRDashboard = () => {
                       className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                       style={activeTab === item.value
                         ? {
-                            background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                            background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
                             color: '#fff',
-                            border: '1.5px solid #a259ff',
-                            boxShadow: '0 0 8px 0 #a259ff55',
+                            border: '1.5px solid #f59e0b',
+                            boxShadow: '0 0 8px 0 #f59e0b55',
                           }
                         : {
                             background: 'rgba(60, 30, 90, 0.22)',
@@ -920,9 +920,9 @@ const HRDashboard = () => {
                                 const statusBadgeClass = {
                                   active: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
                                   on_leave: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
-                                  probation: 'bg-sky-500/10 text-sky-300 border-sky-400/30',
+                                  probation: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                   notice: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
-                                  offboarded: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+                                  offboarded: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
                                   candidate: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                   onboarding: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                 }[e.employment_status] || 'bg-white/[0.04] text-white/70';
@@ -1047,7 +1047,7 @@ const HRDashboard = () => {
                                     {
                                       active: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
                                       draft: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
-                                      closed: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+                                      closed: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
                                       cancelled: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
                                     }[c.status] || 'bg-white/[0.04] text-white/70'
                                   }`}>{c.status}</Badge>
@@ -1149,9 +1149,9 @@ const HRDashboard = () => {
                           const fmt = (d.file_format || 'other').toLowerCase();
                           const fmtColor = {
                             pdf: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
-                            docx: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
-                            doc: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
-                            txt: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                            docx: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
+                            doc: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
+                            txt: 'bg-white/[0.05] text-white/65 border-white/[0.08]',
                             md: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
                             html: 'bg-amber-500/15 text-amber-400 border-amber-400/30',
                           }[fmt] || 'bg-violet-500/15 text-violet-400 border-violet-400/30';
@@ -1166,10 +1166,10 @@ const HRDashboard = () => {
                           }[procStatus] || procStatus;
                           const procColor = {
                             ready: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
-                            processing: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
-                            pending: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                            processing: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
+                            pending: 'bg-white/[0.05] text-white/65 border-white/[0.08]',
                             failed: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
-                          }[procStatus] || 'bg-slate-500/15 text-slate-300 border-slate-400/30';
+                          }[procStatus] || 'bg-white/[0.05] text-white/65 border-white/[0.08]';
                           const hasVersionChain = d.version > 1 || d.parent_document_id || d.superseded_by_id;
 
                           return (
@@ -1197,7 +1197,7 @@ const HRDashboard = () => {
                                   </Badge>
                                   <Badge variant="outline" className="text-[10px] px-1.5 py-0">{d.confidentiality}</Badge>
                                   {d.version > 1 && (
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-sky-500/10 text-sky-300 border-sky-400/30">
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-500/10 text-violet-300 border-violet-400/30">
                                       v{d.version}
                                     </Badge>
                                   )}
@@ -1251,7 +1251,7 @@ const HRDashboard = () => {
                                     <DropdownMenuContent align="end" className="border-[#3a295a] bg-[#161630]">
                                       {hasVersionChain && (
                                         <DropdownMenuItem onClick={() => openDocVersions(d)} className="text-white/80">
-                                          <History className="h-4 w-4 mr-2 text-sky-400" /> Version history
+                                          <History className="h-4 w-4 mr-2 text-violet-400" /> Version history
                                         </DropdownMenuItem>
                                       )}
                                       <DropdownMenuItem onClick={() => openDocAccessLog(d)} className="text-white/80">
@@ -1267,7 +1267,7 @@ const HRDashboard = () => {
                                         </DropdownMenuItem>
                                       )}
                                       <DropdownMenuItem onClick={() => handleReingest(d)} className="text-white/80">
-                                        <RefreshCw className="h-4 w-4 mr-2 text-sky-400" /> Re-ingest
+                                        <RefreshCw className="h-4 w-4 mr-2 text-violet-400" /> Re-ingest
                                       </DropdownMenuItem>
                                     </DropdownMenuContent>
                                   </DropdownMenu>
@@ -1410,7 +1410,7 @@ const HRDashboard = () => {
                           }`}>
                             <div className="flex items-baseline justify-between gap-2 flex-wrap">
                               <div className="flex items-baseline gap-2 min-w-0">
-                                <Badge variant="outline" className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-400/30">
+                                <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">
                                   v{r.version}
                                 </Badge>
                                 <span className="text-white/90 text-sm truncate">{r.title}</span>
@@ -1555,7 +1555,7 @@ const HRDashboard = () => {
                                     <div className="font-medium text-white/95 truncate">{w.name}</div>
                                     <Badge variant="outline" className={w.is_active
                                       ? 'text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
-                                      : 'text-[10px] bg-slate-500/10 text-slate-300 border-slate-400/30'}>
+                                      : 'text-[10px] bg-white/[0.03] text-white/65 border-white/[0.08]'}>
                                       {w.is_active ? 'Active' : 'Inactive'}
                                     </Badge>
                                     {w.requires_approval && (
@@ -1845,7 +1845,7 @@ const HRDashboard = () => {
                                       completed: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
                                       failed: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
                                       paused: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
-                                      in_progress: 'bg-sky-500/10 text-sky-300 border-sky-400/30',
+                                      in_progress: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                       awaiting_approval: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                     }[row.status] || 'bg-white/[0.04] text-white/70'
                                   }`}>{row.status}</Badge>

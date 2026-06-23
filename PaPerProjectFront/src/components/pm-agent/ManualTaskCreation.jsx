@@ -85,9 +85,19 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
     }));
   };
 
+  // `datetime-local` strings look like "2026-06-23T14:30" — comparing them as
+  // ISO strings is a valid chronological compare. We use "now" rounded down to
+  // the current minute as the lower bound so a value set "right now" is still
+  // accepted instead of being rejected as a microsecond-old past time.
+  const nowDatetimeLocal = () => {
+    const d = new Date();
+    const off = d.getTimezoneOffset() * 60_000;
+    return new Date(d.getTime() - off).toISOString().slice(0, 16);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!formData.project_id) {
       toast({
         title: 'Validation Error',
@@ -101,6 +111,15 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
       toast({
         title: 'Validation Error',
         description: 'Task title is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (formData.due_date && formData.due_date < nowDatetimeLocal()) {
+      toast({
+        title: 'Invalid deadline',
+        description: 'Task deadline cannot be in the past.',
         variant: 'destructive',
       });
       return;
@@ -256,6 +275,7 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
               <Input
                 id="due_date"
                 type="datetime-local"
+                min={nowDatetimeLocal()}
                 value={formData.due_date}
                 onChange={(e) => handleChange('due_date', e.target.value)}
               />

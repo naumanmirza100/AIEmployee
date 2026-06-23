@@ -216,23 +216,24 @@ class TimelineGanttAgent(BaseAgent):
             earliest_start = project_start.isoformat()
             latest_end = project_start.isoformat()
         
+        _project_deadline = project.effective_deadline
         timeline_data = {
             'project_id': project_id,
             'project_name': project.name,
             'project_start_date': project.start_date.isoformat() if project.start_date else None,
-            'project_end_date': project.end_date.isoformat() if project.end_date else None,
+            'project_end_date': _project_deadline.isoformat() if _project_deadline else None,
             'timeline_created_at': timezone.now().isoformat(),
             'timeline_start': earliest_start,
             'timeline_end': latest_end,
             'tasks': timeline_tasks
         }
-        
+
         # Generate Gantt chart data for visualization
         gantt_data = {
             'project_id': project_id,
             'project_name': project.name,
             'project_start': project.start_date.isoformat() if project.start_date else earliest_start,
-            'project_end': project.end_date.isoformat() if project.end_date else latest_end,
+            'project_end': _project_deadline.isoformat() if _project_deadline else latest_end,
             'tasks': []
         }
         
@@ -308,11 +309,12 @@ class TimelineGanttAgent(BaseAgent):
         # Use AI to optimize timeline if we have tasks
         if tasks_data:
             import json
+            _project_deadline_iso = project.effective_deadline.isoformat() if project.effective_deadline else 'Not set'
             prompt = f"""You are a project timeline expert. Analyze these tasks and optimize their start/end dates for a Gantt chart.
 
 Project: {project.name}
 Project Start Date: {project.start_date.isoformat() if project.start_date else 'Not set'}
-Project End Date: {project.end_date.isoformat() if project.end_date else 'Not set'}
+Project Deadline: {_project_deadline_iso}
 
 Tasks:
 {json.dumps(tasks_data, indent=2)}
@@ -370,14 +372,15 @@ Return JSON array with optimized dates:
         else:
             optimization_map = {}
         
+        _project_deadline2 = project.effective_deadline
         gantt_data = {
             'project_id': project_id,
             'project_name': project.name,
             'project_start': project.start_date.isoformat() if project.start_date else None,
-            'project_end': project.end_date.isoformat() if project.end_date else None,
+            'project_end': _project_deadline2.isoformat() if _project_deadline2 else None,
             'tasks': []
         }
-        
+
         # Calculate start and end dates for each task (use AI optimization if available)
         project_start = project.start_date or timezone.now().date()
         
@@ -1166,20 +1169,21 @@ Return JSON:
         completed_tasks = tasks.filter(status='done').count()
         completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
         
+        _project_deadline3 = project.effective_deadline
         expected_completion_rate = None
-        if project.end_date and project.start_date:
-            project_duration = (project.end_date - project.start_date).days
+        if _project_deadline3 and project.start_date:
+            project_duration = (_project_deadline3 - project.start_date).days
             elapsed_days = (now.date() - project.start_date).days
             if project_duration > 0:
                 expected_completion_rate = (elapsed_days / project_duration) * 100
-        
+
         # Use AI to generate comprehensive suggestions
         prompt = f"""You are a project management expert. Analyze this project's progress and suggest timeline adjustments.
 
 Project: {project.name}
 Project Status: {project.status}
 Project Start: {project.start_date.isoformat() if project.start_date else 'Not set'}
-Project End: {project.end_date.isoformat() if project.end_date else 'Not set'}
+Project Deadline: {_project_deadline3.isoformat() if _project_deadline3 else 'Not set'}
 Current Date: {now.isoformat()}
 
 Progress Metrics:
@@ -1287,7 +1291,7 @@ Return JSON array:
                             })
         
         # Add project-level suggestions
-        if project.end_date and expected_completion_rate:
+        if _project_deadline3 and expected_completion_rate:
             if completion_rate < expected_completion_rate - 10:
                 suggestions.append({
                         'type': 'extend_project_deadline',
@@ -1296,7 +1300,7 @@ Return JSON array:
                     'project_level': True,
                         'current_completion_rate': round(completion_rate, 1),
                         'expected_completion_rate': round(expected_completion_rate, 1),
-                        'current_end_date': project.end_date.isoformat(),
+                        'current_end_date': _project_deadline3.isoformat(),
                         'suggested_extension_days': max(7, int((expected_completion_rate - completion_rate) / 10)),
                     'priority': 'high',
                     'reasoning': f'Project is {round(expected_completion_rate - completion_rate, 1)}% behind expected progress',
@@ -1832,15 +1836,16 @@ CALCULATE AND RETURN JSON:
                     alerts.append(alert_entry)
         
         # Check project deadline
-        if project.end_date:
-            project_days_until = (project.end_date - now.date()).days
+        _proj_dl = project.effective_deadline
+        if _proj_dl:
+            project_days_until = (_proj_dl - now.date()).days
             if 0 <= project_days_until <= days_ahead:
                 alerts.append({
                     'type': 'project_deadline',
                     'project_id': project.id,
                     'project_name': project.name,
-                    'due_date': project.end_date.isoformat(),
-                    'deadline': project.end_date.isoformat(),
+                    'due_date': _proj_dl.isoformat(),
+                    'deadline': _proj_dl.isoformat(),
                     'days_until': project_days_until,
                     'urgency': 'high' if project_days_until <= 3 else 'medium'
                 })
@@ -2261,7 +2266,7 @@ Return JSON:
             'status': project.status,
             'priority': project.priority,
             'start_date': project.start_date.isoformat() if project.start_date else None,
-            'end_date': project.end_date.isoformat() if project.end_date else None,
+            'deadline': project.effective_deadline.isoformat() if project.effective_deadline else None,
             'owner': project.owner.username,
             'created_at': project.created_at.isoformat(),
             'updated_at': project.updated_at.isoformat()
@@ -2462,7 +2467,7 @@ Return JSON:
                 'earliest_due_date': earliest_due.isoformat() if earliest_due else None,
                 'latest_due_date': latest_due.isoformat() if latest_due else None,
                 'project_start': project.start_date.isoformat() if project.start_date else None,
-                'project_end': project.end_date.isoformat() if project.end_date else None
+                'project_end': project.effective_deadline.isoformat() if project.effective_deadline else None
             },
             'metrics': {
                 'priority_distribution': priority_distribution,

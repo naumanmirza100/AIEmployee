@@ -6,11 +6,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search } from 'lucide-react';
+import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search, Settings, ArrowRight } from 'lucide-react';
 import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
-const CVProcessing = ({ onProcessComplete }) => {
+const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const { toast } = useToast();
   const [files, setFiles] = useState([]);
   const [jobDescriptions, setJobDescriptions] = useState([]);
@@ -23,6 +23,9 @@ const CVProcessing = ({ onProcessComplete }) => {
   const [displayedKeywords, setDisplayedKeywords] = useState([]);
   const [jobSearchOpen, setJobSearchOpen] = useState(false);
   const [jobSearchQuery, setJobSearchQuery] = useState('');
+  const [settingsIncomplete, setSettingsIncomplete] = useState(false);
+  const [settingsChecking, setSettingsChecking] = useState(false);
+  const [settingsChecked, setSettingsChecked] = useState(false);
   const jobDropdownRef = useRef(null);
 
   React.useEffect(() => {
@@ -61,40 +64,34 @@ const CVProcessing = ({ onProcessComplete }) => {
   };
 
   const handleJobSelection = async (jobId) => {
-    // Check interview settings if a job is selected
+    setSelectedJobId(jobId || '');
+    setSettingsIncomplete(false);
+    setSettingsChecked(false);
+
     if (jobId) {
       try {
+        setSettingsChecking(true);
         const settingsResponse = await getInterviewSettings(jobId);
         if (settingsResponse.status === 'success' && settingsResponse.data) {
           const settings = settingsResponse.data;
-          // Check if interview settings are complete
-          const isComplete = 
-            settings.schedule_from_date && 
-            settings.schedule_to_date && 
-            settings.start_time && 
+          const isComplete =
+            settings.schedule_from_date &&
+            settings.schedule_to_date &&
+            settings.start_time &&
             settings.end_time &&
             settings.time_slots_json &&
             Array.isArray(settings.time_slots_json) &&
             settings.time_slots_json.length > 0;
-          
-          if (!isComplete) {
-            toast({
-              title: 'Interview Settings Incomplete',
-              description: `Please complete interview settings for "${jobDescriptions.find(j => j.id.toString() === jobId.toString())?.title || 'this job'}" before processing CVs. Go to Settings > Interview Settings to configure.`,
-              variant: 'destructive',
-            });
-            // Don't set the job if settings are incomplete
-            return;
-          }
+          setSettingsIncomplete(!isComplete);
         }
       } catch (error) {
         console.error('Error checking interview settings:', error);
-        // Continue with job selection even if check fails
+      } finally {
+        setSettingsChecking(false);
+        setSettingsChecked(true);
       }
     }
-    
-    setSelectedJobId(jobId || "");
-    
+
     // Extract and display keywords when a job is selected
     if (jobId) {
       const selectedJob = jobDescriptions.find(job => job.id.toString() === jobId.toString());
@@ -320,6 +317,42 @@ const CVProcessing = ({ onProcessComplete }) => {
               <p className="text-[10px] sm:text-xs text-white/60">
                 Job selection is required to process CVs. Ensure interview settings are complete for the selected job.
               </p>
+
+              {/* Settings incomplete warning banner */}
+              {settingsChecking && (
+                <div className="flex items-center gap-2 text-xs text-white/40 mt-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Checking interview settings…
+                </div>
+              )}
+              {!settingsChecking && settingsIncomplete && selectedJobId && (
+                <div
+                  className="flex items-start gap-3 rounded-xl px-4 py-3 mt-1"
+                  style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.30)' }}
+                >
+                  <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-amber-300">Interview Settings Incomplete</p>
+                    <p className="text-xs text-white/55 mt-0.5">
+                      Configure schedule dates, time slots, and interview type for <span className="text-white/80">{selectedJobTitle}</span> before processing CVs.
+                    </p>
+                  </div>
+                  {onGoToSettings && (
+                    <button
+                      onClick={() => onGoToSettings(selectedJobId)}
+                      className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-amber-300 hover:text-amber-200 transition-colors"
+                    >
+                      Fix Settings <ArrowRight className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {!settingsChecking && settingsChecked && !settingsIncomplete && selectedJobId && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-400 mt-1">
+                  <CheckCircle className="h-3.5 w-3.5" />
+                  Interview settings configured
+                </div>
+              )}
               
               {/* Display Keywords when job is selected */}
               {selectedJobId && selectedJobId !== 'none' && displayedKeywords.length > 0 && (
@@ -367,7 +400,7 @@ const CVProcessing = ({ onProcessComplete }) => {
 
             <Button
               onClick={handleProcess}
-              disabled={processing || files.length === 0 || !selectedJobId}
+              disabled={processing || files.length === 0 || !selectedJobId || settingsIncomplete || settingsChecking}
               className="w-full sm:w-auto sm:min-w-[200px] h-10 text-sm"
             >
               {processing ? (

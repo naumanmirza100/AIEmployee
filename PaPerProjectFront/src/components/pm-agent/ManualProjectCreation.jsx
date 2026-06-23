@@ -24,7 +24,6 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
     budget_max: '',
     deadline: '',
     start_date: '',
-    end_date: '',
   });
 
   const [industries, setIndustries] = useState([]);
@@ -56,13 +55,52 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
     }));
   };
 
+  // Today as a YYYY-MM-DD string, in the user's local timezone. Used both as
+  // the `min` attr on the date inputs and as the lower bound in the submit
+  // validation. Computed each submit so the form stays correct across midnight.
+  const todayIso = () => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!formData.name.trim()) {
       toast({
         title: 'Validation Error',
         description: 'Project name is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Date validation — past dates and inverted ranges are nonsensical for a
+    // project being created right now.
+    const today = todayIso();
+    if (formData.start_date && formData.start_date < today) {
+      toast({
+        title: 'Invalid start date',
+        description: 'Start date cannot be in the past.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (formData.deadline && formData.deadline < today) {
+      toast({
+        title: 'Invalid deadline',
+        description: 'Deadline cannot be in the past.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (formData.start_date && formData.deadline && formData.deadline < formData.start_date) {
+      toast({
+        title: 'Invalid date range',
+        description: 'Deadline must be on or after the start date.',
         variant: 'destructive',
       });
       return;
@@ -86,7 +124,6 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
       if (formData.budget_max) payload.budget_max = parseFloat(formData.budget_max);
       if (formData.deadline) payload.deadline = formData.deadline;
       if (formData.start_date) payload.start_date = formData.start_date;
-      if (formData.end_date) payload.end_date = formData.end_date;
 
       const response = await companyApi.post('/project-manager/projects/create/', payload);
       
@@ -108,7 +145,6 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
           budget_max: '',
           deadline: '',
           start_date: '',
-          end_date: '',
         });
 
         // Notify parent component
@@ -275,28 +311,19 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
               <Input
                 id="start_date"
                 type="date"
+                min={todayIso()}
                 value={formData.start_date}
                 onChange={(e) => handleChange('start_date', e.target.value)}
               />
             </div>
 
-            {/* End Date */}
+            {/* Deadline (the project's end / due date — single field) */}
             <div>
-              <Label htmlFor="end_date">End Date</Label>
-              <Input
-                id="end_date"
-                type="date"
-                value={formData.end_date}
-                onChange={(e) => handleChange('end_date', e.target.value)}
-              />
-            </div>
-
-            {/* Deadline */}
-            <div className="md:col-span-2">
               <Label htmlFor="deadline">Deadline</Label>
               <Input
                 id="deadline"
                 type="date"
+                min={formData.start_date || todayIso()}
                 value={formData.deadline}
                 onChange={(e) => handleChange('deadline', e.target.value)}
               />

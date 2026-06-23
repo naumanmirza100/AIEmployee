@@ -49,6 +49,7 @@ import SequenceManagementPage from '@/components/marketing/SequenceManagementPag
 import EmailSendingStatusPage from '@/components/marketing/EmailSendingStatusPage';
 import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
+import CandidateDetailPage from '@/pages/CandidateDetailPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
 import HRAgentPage from '@/pages/HRAgentPage';
@@ -57,6 +58,7 @@ import HRMyProfilePage from '@/components/hr/HRMyProfilePage';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
+import JobApplicationPage from '@/pages/JobApplicationPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
@@ -136,6 +138,9 @@ import { useTranslation } from 'react-i18next';
               <Route path="email-accounts" element={<EmailAccountsPage />} />
             </Route>
             
+            {/* Public job application (no auth) */}
+            <Route path="/jobs/apply/:jobId" element={<JobApplicationPage />} />
+
             {/* Recruitment Agent routes without header/footer */}
             <Route path="/recruitment" element={<Navigate to="/recruitment/dashboard" replace />} />
             <Route path="/recruitment/dashboard" element={<RecruitmentAgentPage />} />
@@ -146,6 +151,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/recruitment/ai-interview-questions" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/saved-prompts" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/job-descriptions" element={<RecruitmentAgentPage />} />
+            <Route path="/recruitment/candidates/:id" element={<CandidateDetailPage />} />
             <Route path="/recruitment/candidates" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/interviews" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/settings" element={<Navigate to="/recruitment/settings/email" replace />} />

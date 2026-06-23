@@ -45,26 +45,28 @@ def get_agents():
         _log_service = LogService()
     
     if _groq_client is None:
-        _groq_client = GroqClient()
+        try:
+            _groq_client = GroqClient()
+        except Exception:
+            _groq_client = None  # No key available — agents that need Groq will fail at call time
     
-    if _cv_agent is None:
-        _cv_agent = CVParserAgent(groq_client=_groq_client, log_service=_log_service)
-    
-    if _sum_agent is None:
-        _sum_agent = SummarizationAgent(groq_client=_groq_client, log_service=_log_service)
-    
+    if _groq_client is not None:
+        if _cv_agent is None:
+            _cv_agent = CVParserAgent(groq_client=_groq_client, log_service=_log_service)
+        if _sum_agent is None:
+            _sum_agent = SummarizationAgent(groq_client=_groq_client, log_service=_log_service)
+        if _job_desc_agent is None:
+            _job_desc_agent = JobDescriptionParserAgent(groq_client=_groq_client, log_service=_log_service)
+
     if _django_repo is None:
         _django_repo = DjangoRepository()
-    
+
     if _enrich_agent is None:
         _enrich_agent = LeadResearchEnrichmentAgent(log_service=_log_service, sql_repository=_django_repo)
-    
+
     if _qualify_agent is None:
         _qualify_agent = LeadQualificationAgent(log_service=_log_service, sql_repository=_django_repo)
-    
-    if _job_desc_agent is None:
-        _job_desc_agent = JobDescriptionParserAgent(groq_client=_groq_client, log_service=_log_service)
-    
+
     if _interview_agent is None:
         _interview_agent = InterviewSchedulingAgent(log_service=_log_service)
     
@@ -1269,9 +1271,15 @@ def get_available_slots_for_interview(request, token):
     try:
         interview = Interview.objects.select_related(
             'cv_record__job_description', 'company_user', 'recruiter'
-        ).get(confirmation_token=token, status='PENDING')
+        ).get(confirmation_token=token)
     except Interview.DoesNotExist:
         return JsonResponse({"error": "Invalid or expired interview link"}, status=404)
+
+    if interview.status == 'SCHEDULED':
+        return JsonResponse({"error": "already_confirmed", "selected_slot": interview.selected_slot}, status=409)
+
+    if interview.status in ('COMPLETED', 'CANCELLED'):
+        return JsonResponse({"error": f"Interview is {interview.status.lower()}"}, status=410)
 
     # Check if job's scheduling date range has expired
     if interview.is_job_schedule_expired():
@@ -1422,10 +1430,25 @@ def candidate_select_slot(request, token):
     from recruitment_agent.models import Interview
     
     try:
-        interview = Interview.objects.get(confirmation_token=token, status='PENDING')
+        interview = Interview.objects.get(confirmation_token=token)
     except Interview.DoesNotExist:
         return render(request, 'recruitment_agent/candidate_slot_selection.html', {
             'error': 'Invalid or expired interview link. Please contact the recruiter.',
+            'invalid_token': True,
+        })
+
+    # If already confirmed/scheduled, show the confirmed details instead of slot picker
+    if interview.status == 'SCHEDULED':
+        return render(request, 'recruitment_agent/candidate_slot_confirmed.html', {
+            'interview': interview,
+            'scheduled_datetime': interview.scheduled_datetime,
+            'selected_slot': interview.selected_slot,
+            'already_confirmed': True,
+        })
+
+    if interview.status in ('COMPLETED', 'CANCELLED'):
+        return render(request, 'recruitment_agent/candidate_slot_selection.html', {
+            'error': f'This interview has been {interview.status.lower()}. Please contact the recruiter.',
             'invalid_token': True,
         })
 

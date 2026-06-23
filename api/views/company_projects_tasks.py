@@ -57,15 +57,19 @@ def update_company_project(request, project_id):
             valid_types = [choice[0] for choice in Project.PROJECT_TYPE_CHOICES]
             if data['project_type'] in valid_types:
                 project.project_type = data['project_type']
-        if 'deadline' in data:
-            project.deadline = data['deadline'] if data['deadline'] else None
+        # `end_date` is the legacy alias for `deadline`. Accept either, mirror
+        # writes to both DB columns, drop end_date from the response.
+        if 'deadline' in data or 'end_date' in data:
+            new_deadline = data.get('deadline')
+            if new_deadline is None:
+                new_deadline = data.get('end_date')
+            project.deadline = new_deadline if new_deadline else None
+            project.end_date = new_deadline if new_deadline else None
         if 'start_date' in data:
             project.start_date = data['start_date'] if data['start_date'] else None
-        if 'end_date' in data:
-            project.end_date = data['end_date'] if data['end_date'] else None
-        
+
         project.save()
-        
+
         return Response({
             'status': 'success',
             'message': 'Project updated successfully',
@@ -76,9 +80,8 @@ def update_company_project(request, project_id):
                 'status': project.status,
                 'priority': project.priority,
                 'project_type': project.project_type,
-                'deadline': project.deadline.isoformat() if project.deadline else None,
+                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                 'start_date': project.start_date.isoformat() if project.start_date else None,
-                'end_date': project.end_date.isoformat() if project.end_date else None,
             }
         }, status=status.HTTP_200_OK)
     

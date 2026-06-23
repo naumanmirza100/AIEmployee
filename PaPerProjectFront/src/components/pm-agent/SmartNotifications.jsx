@@ -10,8 +10,8 @@ import { Loader2, Bell, AlertTriangle, AlertCircle, Info, CheckCircle, RefreshCw
 
 const severityConfig = {
   critical: { icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-900/30 border-red-700', label: 'Critical' },
-  warning: { icon: AlertTriangle, color: 'text-yellow-400', bg: 'bg-yellow-900/30 border-yellow-700', label: 'Warning' },
-  info: { icon: Info, color: 'text-blue-400', bg: 'bg-blue-900/30 border-blue-700', label: 'Info' },
+  warning: { icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-900/30 border-amber-700', label: 'Warning' },
+  info: { icon: Info, color: 'text-violet-400', bg: 'bg-violet-900/30 border-violet-700', label: 'Info' },
 };
 
 export default function SmartNotifications() {
@@ -78,7 +78,7 @@ export default function SmartNotifications() {
   return (
     <div className="space-y-6">
       {/* Controls */}
-      <Card className="bg-gray-900/50 border-gray-700">
+      <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg text-violet-300 flex items-center gap-2">
@@ -88,7 +88,7 @@ export default function SmartNotifications() {
               )}
             </CardTitle>
             {unreadCount > 0 && (
-              <Button onClick={markAllRead} variant="ghost" size="sm" className="text-xs text-gray-400 hover:text-white">
+              <Button onClick={markAllRead} variant="ghost" size="sm" className="text-xs text-white/55 hover:text-white">
                 <Eye className="w-3 h-3 mr-1" /> Mark all read
               </Button>
             )}
@@ -97,10 +97,10 @@ export default function SmartNotifications() {
         <CardContent>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Select value={selectedProject || 'all'} onValueChange={(v) => setSelectedProject(v === 'all' ? null : v)}>
-              <SelectTrigger className="flex-1 h-10 bg-gray-800 border-gray-600 text-white">
+              <SelectTrigger className="flex-1 h-10 bg-white/[0.02] border-white/[0.08] text-white">
                 <SelectValue placeholder="All Projects" />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-600 z-50">
+              <SelectContent className="bg-white/[0.02] border-white/[0.08] z-50">
                 <SelectItem value="all">All Projects</SelectItem>
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
@@ -123,8 +123,8 @@ export default function SmartNotifications() {
 
       {/* Empty State */}
       {!loading && notifications.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-          <CheckCircle className="w-12 h-12 mb-3 text-green-600" />
+        <div className="flex flex-col items-center justify-center py-20 text-white/40">
+          <CheckCircle className="w-12 h-12 mb-3 text-emerald-600" />
           <p className="text-sm">No notifications. Click Scan to check for issues.</p>
         </div>
       )}
@@ -146,14 +146,14 @@ export default function SmartNotifications() {
                     <div className="flex items-center gap-2">
                       <span className={`text-xs font-medium ${config.color}`}>{config.label}</span>
                       {notif.project_name && (
-                        <span className="text-xs text-gray-500">• {notif.project_name}</span>
+                        <span className="text-xs text-white/40">• {notif.project_name}</span>
                       )}
-                      <span className="text-xs text-gray-600 ml-auto">
+                      <span className="text-xs text-white/35 ml-auto">
                         {new Date(notif.created_at).toLocaleDateString()}
                       </span>
                     </div>
                     <h4 className="text-sm font-medium text-white mt-1">{notif.title}</h4>
-                    <p className="text-xs text-gray-400 mt-1">{notif.message}</p>
+                    <p className="text-xs text-white/55 mt-1">{notif.message}</p>
                   </div>
                 </div>
               </div>

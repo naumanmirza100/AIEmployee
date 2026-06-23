@@ -117,6 +117,12 @@ export const deleteProjectPilotChat = async (chatId) => {
   return response;
 };
 
+/** Delete a PM project owned by the calling company user. */
+export const deleteProjectManual = async (projectId) => {
+  const response = await companyApi.delete(`/project-manager/projects/${projectId}/delete`);
+  return response;
+};
+
 /**
  * Generate a graph/chart from a natural language prompt (Project Manager)
  * @param {string} prompt
@@ -546,6 +552,7 @@ export default {
   createProjectPilotChat,
   updateProjectPilotChat,
   deleteProjectPilotChat,
+  deleteProjectManual,
   timelineGantt,
   generateSubtasks,
   dailyStandup,

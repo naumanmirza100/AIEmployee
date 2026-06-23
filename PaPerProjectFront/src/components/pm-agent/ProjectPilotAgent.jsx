@@ -577,12 +577,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                               <div
                                 key={idx}
                                 className={`p-3 rounded border text-sm ${
-                                  action.success ? 'bg-green-50 border-green-200 dark:bg-green-950/50 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800'
+                                  action.success ? 'bg-emerald-50 border-emerald-200/40 dark:bg-emerald-950/50 dark:border-emerald-800' : 'bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800'
                                 }`}
                               >
                                 <div className="flex items-start gap-2">
                                   {action.success ? (
-                                    <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
                                   ) : (
                                     <XCircle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
                                   )}
@@ -597,11 +597,24 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-muted-foreground">
                                         <span><strong className="text-foreground">Priority:</strong> {priorityDisplay}</span>
                                         <span><strong className="text-foreground">Assigned to:</strong> {assigneeDisplay}</span>
-                                        <span><strong className="text-foreground">Deadline:</strong> {formatDate(action.due_date)}</span>
-                                        <span><strong className="text-foreground">Start:</strong> {formatDate(action.created_at)}</span>
+                                        <span><strong className="text-foreground">Due:</strong> {formatDate(action.due_date)}</span>
+                                        <span><strong className="text-foreground">Created:</strong> {formatDate(action.created_at)}</span>
                                       </div>
                                     )}
-                                    {action.project_name && !isTaskAction && (
+                                    {!isTaskAction && action.action === 'create_project' && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-muted-foreground mt-1">
+                                        {action.project_name && (
+                                          <span className="sm:col-span-2"><strong className="text-foreground">Project:</strong> {action.project_name}</span>
+                                        )}
+                                        {action.start_date && (
+                                          <span><strong className="text-foreground">Start:</strong> {formatDate(action.start_date)}</span>
+                                        )}
+                                        {(action.deadline || action.end_date) && (
+                                          <span><strong className="text-foreground">Deadline:</strong> {formatDate(action.deadline || action.end_date)}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {action.project_name && !isTaskAction && action.action !== 'create_project' && (
                                       <p className="text-xs text-muted-foreground mt-1">Project: {action.project_name}</p>
                                     )}
                                   </div>
@@ -612,7 +625,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                         </div>
                       )}
                       {msg.responseData?.cannot_do && (
-                        <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">{msg.responseData.cannot_do}</p>
+                        <p className="text-sm text-amber-700 dark:text-amber-300 mt-2">{msg.responseData.cannot_do}</p>
                       )}
                       {(msg.responseData?.project_title || msg.responseData?.file_name) && (
                         <p className="text-xs text-muted-foreground mt-2">

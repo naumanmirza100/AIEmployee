@@ -2656,10 +2656,10 @@ const FrontlineDashboard = () => {
                   className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                   style={activeTab === item.value
                     ? {
-                        background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                        background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
                         color: '#fff',
-                        border: '1.5px solid #a259ff',
-                        boxShadow: '0 0 8px 0 #a259ff55',
+                        border: '1.5px solid #f59e0b',
+                        boxShadow: '0 0 8px 0 #f59e0b55',
                       }
                     : {
                         background: 'rgba(60, 30, 90, 0.22)',
@@ -2820,9 +2820,9 @@ const FrontlineDashboard = () => {
                     const fmt = (doc.file_format || 'other').toLowerCase();
                     const fmtColor = {
                       pdf: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
-                      docx: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
-                      doc: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
-                      txt: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                      docx: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
+                      doc: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
+                      txt: 'bg-white/[0.04] text-white/55 border-white/[0.08]',
                       md: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
                       html: 'bg-amber-500/15 text-amber-400 border-amber-400/30',
                     }[fmt] || 'bg-violet-500/15 text-violet-400 border-violet-400/30';
@@ -2840,10 +2840,10 @@ const FrontlineDashboard = () => {
                     }[procStatus] || procStatus;
                     const procColor = {
                       ready: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
-                      processing: 'bg-sky-500/15 text-sky-400 border-sky-400/30',
-                      pending: 'bg-slate-500/15 text-slate-300 border-slate-400/30',
+                      processing: 'bg-violet-500/15 text-violet-400 border-violet-400/30',
+                      pending: 'bg-white/[0.04] text-white/55 border-white/[0.08]',
                       failed: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
-                    }[procStatus] || 'bg-slate-500/15 text-slate-300 border-slate-400/30';
+                    }[procStatus] || 'bg-white/[0.04] text-white/55 border-white/[0.08]';
 
                     return (
                       <div
@@ -3230,7 +3230,7 @@ const FrontlineDashboard = () => {
                       <p className="font-medium">Ask your first question</p>
                       <p className="text-sm">Type a question to get an answer from your knowledge base.</p>
                       {documents.length === 0 && (
-                        <p className="text-xs mt-2 text-yellow-600 dark:text-yellow-400">💡 Tip: Upload documents in the Documents tab first</p>
+                        <p className="text-xs mt-2 text-amber-600 dark:text-amber-400">💡 Tip: Upload documents in the Documents tab first</p>
                       )}
                     </div>
                   )}
@@ -3287,16 +3287,16 @@ const FrontlineDashboard = () => {
                           <>
                             <div className="flex items-start gap-2">
                               {(msg.responseData?.has_verified_info) ? (
-                                <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
                               ) : (
-                                <XCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                                <XCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                               )}
                               <div className="flex-1 min-w-0">
                                 <div className="text-sm text-foreground whitespace-pre-wrap break-words">
                                   {msg.responseData?.answer ?? msg.content}
                                 </div>
                                 {msg.responseData?.confidence === 'low' && (
-                                  <div className="mt-2 text-xs rounded-md px-2 py-1 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border border-yellow-500/30">
+                                  <div className="mt-2 text-xs rounded-md px-2 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                                     Low-confidence match{typeof msg.responseData?.best_score === 'number' ? ` (score ${msg.responseData.best_score})` : ''}. Consider escalating to a human agent.
                                   </div>
                                 )}
@@ -3940,7 +3940,7 @@ const FrontlineDashboard = () => {
                               </span>
                             ) : '—'}
                           </TableCell>
-                          <TableCell>{t.auto_resolved ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : '—'}</TableCell>
+                          <TableCell>{t.auto_resolved ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : '—'}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}</TableCell>
                           <TableCell className="text-right">
                             <DropdownMenu>

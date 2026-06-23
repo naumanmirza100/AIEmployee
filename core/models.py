@@ -77,9 +77,22 @@ class Project(models.Model):
     
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return self.name
+
+    @property
+    def effective_deadline(self):
+        """
+        Canonical end / due date for the project.
+
+        The model historically carried both `end_date` and `deadline`. They have
+        been collapsed into a single user-facing field (`deadline`). New writes
+        mirror the value into both columns, but legacy rows may still have only
+        one of them populated. Always read through this property to tolerate
+        both shapes.
+        """
+        return self.deadline or self.end_date
 
 
 class Task(models.Model):
@@ -2083,6 +2096,8 @@ class KeyRequest(models.Model):
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    preferred_duration = models.CharField(max_length=10, default='monthly')
+    is_renewal = models.BooleanField(default=False)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     linked_key_id = models.BigIntegerField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)

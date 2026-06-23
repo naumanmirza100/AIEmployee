@@ -22,7 +22,7 @@ import {
 
 const SETTINGS_SUB_PATHS = ['email', 'interview', 'qualification'];
 
-const RecruiterSettings = () => {
+const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
@@ -99,6 +99,17 @@ const RecruiterSettings = () => {
       fetchInterviewSettings(selectedJobId);
     }
   }, [selectedJobId]);
+
+  // When arriving from job card Setup/Configured button, pre-select job and switch to interview tab
+  useEffect(() => {
+    if (!settingsJobId || jobs.length === 0) return;
+    const match = jobs.find((j) => j.id === settingsJobId);
+    if (match) {
+      setSelectedJobId(settingsJobId);
+      navigate('/recruitment/settings/interview');
+      if (onSettingsJobConsumed) onSettingsJobConsumed();
+    }
+  }, [settingsJobId, jobs]);
 
   // Update calendar month when date range changes
   useEffect(() => {
@@ -268,6 +279,25 @@ const RecruiterSettings = () => {
             variant: 'destructive',
           });
           return;
+        }
+      }
+
+      // Validate interview start date is not before job's application open date
+      if (scheduleFromDate) {
+        const selectedJob = jobs.find((j) => j.id === selectedJobId);
+        if (selectedJob?.application_open_date) {
+          const appOpenDate = new Date(selectedJob.application_open_date + 'T00:00:00');
+          const interviewStart = new Date(scheduleFromDate);
+          interviewStart.setHours(0, 0, 0, 0);
+          appOpenDate.setHours(0, 0, 0, 0);
+          if (interviewStart < appOpenDate) {
+            toast({
+              title: 'Invalid Date',
+              description: `Interview schedule cannot start before the job's application open date (${appOpenDate.toLocaleDateString()}).`,
+              variant: 'destructive',
+            });
+            return;
+          }
         }
       }
 

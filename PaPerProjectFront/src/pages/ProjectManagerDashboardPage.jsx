@@ -420,10 +420,10 @@ const ProjectManagerDashboardPage = () => {
                           className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                           style={activeTab === item.value
                             ? {
-                                background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                                background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
                                 color: '#fff',
-                                border: '1.5px solid #a259ff',
-                                boxShadow: '0 0 8px 0 #a259ff55',
+                                border: '1.5px solid #f59e0b',
+                                boxShadow: '0 0 8px 0 #f59e0b55',
                               }
                             : {
                                 background: 'rgba(60, 30, 90, 0.22)',

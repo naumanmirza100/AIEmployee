@@ -211,9 +211,10 @@ class ProjectPilotEnhancements:
                 if project.start_date and due_date.date() < project.start_date:
                     errors.append("Task due date cannot be before project start date")
                 
-                # Check if due date is after project end
-                if project.end_date and due_date.date() > project.end_date:
-                    errors.append("Task due date cannot be after project end date")
+                # Check if due date is after project deadline
+                _proj_deadline = project.effective_deadline
+                if _proj_deadline and due_date.date() > _proj_deadline:
+                    errors.append("Task due date cannot be after project deadline")
                     
             except (ValueError, TypeError) as e:
                 errors.append(f"Invalid due date format: {str(e)}")

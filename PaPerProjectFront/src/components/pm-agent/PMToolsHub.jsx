@@ -121,7 +121,7 @@ export default function PMToolsHub() {
           variant="ghost"
           size="sm"
           onClick={() => setActiveTool(null)}
-          className="text-gray-400 hover:text-white -ml-2"
+          className="text-white/55 hover:text-white -ml-2"
         >
           <ChevronLeft className="w-4 h-4 mr-1" /> Back to AI Tools
         </Button>

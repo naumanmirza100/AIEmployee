@@ -34,7 +34,7 @@ const STATUS_BADGE = {
   pending: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
   approved: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
   rejected: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
-  cancelled: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+  cancelled: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
 };
 
 
@@ -256,7 +256,7 @@ export default function HRMyProfilePage() {
                     <Badge variant="outline" className="text-[10px]">{d.document_type}</Badge>
                     <Badge variant="outline" className="text-[10px]">{d.confidentiality}</Badge>
                     {d.version > 1 && (
-                      <Badge variant="outline" className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-400/30">v{d.version}</Badge>
+                      <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">v{d.version}</Badge>
                     )}
                   </div>
                 </div>
@@ -288,7 +288,7 @@ export default function HRMyProfilePage() {
                     <Badge variant="outline" className={`text-[10px] ${
                       g.status === 'met' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
                       : g.status === 'missed' || g.status === 'dropped' ? 'bg-rose-500/10 text-rose-300 border-rose-400/30'
-                      : g.status === 'in_progress' ? 'bg-sky-500/10 text-sky-300 border-sky-400/30'
+                      : g.status === 'in_progress' ? 'bg-violet-500/10 text-violet-300 border-violet-400/30'
                       : 'bg-amber-500/10 text-amber-300 border-amber-400/30'
                     }`}>
                       {g.status.replace(/_/g, ' ')}
@@ -359,7 +359,7 @@ export default function HRMyProfilePage() {
                       )}
                       {r.growth_areas && (
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-sky-300/80 mb-0.5">Growth areas</div>
+                          <div className="text-[10px] uppercase tracking-wider text-violet-300/80 mb-0.5">Growth areas</div>
                           <div className="text-xs text-white/70 whitespace-pre-line">{r.growth_areas}</div>
                         </div>
                       )}

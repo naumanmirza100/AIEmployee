@@ -364,21 +364,23 @@ class RecruitmentQAAgent:
     interview settings, qualification settings, and other recruitment data.
     """
 
-    SYSTEM_PROMPT = """You are a Recruitment Knowledge Q&A Agent. You answer ONLY what the user asked.
+    SYSTEM_PROMPT = """You are a Recruitment Knowledge Q&A Agent. You answer questions about recruitment data accurately and completely.
 
-STRICT RULES:
-1. Answer ONLY the specific question. Do NOT add sections the user did not ask for.
-2. Do NOT add "Overview", "Qualification Settings", or "No jobs/candidates" unless the user explicitly asked for that (e.g. "what are my qualification settings?" or "give me an overview").
-3. For simple questions (e.g. "how many jobs?"): give a short direct answer with the exact number. Add nothing else unless the user asked for more.
-4. Use ONLY numbers and names from the data. No invented data.
-5. If the user asked only about jobs – answer only jobs. If only about candidates – answer only candidates. If only about settings – answer only settings.
-6. NEVER include inactive jobs unless the user explicitly asks about inactive/all jobs. Focus on active jobs by default unless asked otherwise.
+RULES:
+1. When asked for "details", "description", "full info", "everything", or "all" — provide COMPLETE information. Never truncate or summarise when the user wants full details.
+2. For simple count questions (e.g. "how many jobs?") — give a short direct answer.
+3. Use ONLY data provided in the context. Never invent names, numbers, or descriptions.
+4. If a field is available in the context (description, requirements, location, department, etc.) — include it in your answer when relevant.
+5. For job details — always show: title, status, location, department, type, description, requirements, candidate count, interview count.
+6. For candidate details — always show: name, score, decision, email if available, summary if available.
+7. Default to active jobs unless the user asks about all/inactive jobs.
 
-FORMATTING (when your answer has multiple parts or a list):
-- Use markdown: ## for main heading, ### for subheading, #### for sub-subheading.
-- Use bullet lists with - or * for multiple items.
-- Use numbered lists (1. 2. 3.) when order or steps matter.
-- Keep headings short; put details in lists or short paragraphs under them."""
+FORMATTING:
+- ## for main heading, ### for subheading per job/candidate
+- Bold (**text**) for titles, names, field labels
+- Bullet lists (- or *) for multiple fields per item
+- Numbered lists for ranked items
+- Never give a one-word or one-line answer when full details are in the context and the user wants them."""
 
     def __init__(self, groq_client: Optional[GroqClient] = None):
         if groq_client is None:
@@ -785,29 +787,54 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             lines.append(f"INTERVIEW_OUTCOME_{outcome}: {count}")
         lines.append("")
 
-        # Per-job summary lines (keep very compact: one line per job)
+        # Per-job detailed blocks
         for j in jobs:
             aid = j["id"]
             title = (j.get("title") or "").replace("\n", " ")
-            active = "yes" if j.get("is_active") else "no"
+            active_str = "Active" if j.get("is_active") else "Inactive"
             cand = j.get("candidate_count", 0)
             interv = j.get("interview_count", 0)
-            loc = j.get("location", "")
-            dept = j.get("department", "")
-            jtype = j.get("type", "")
+            loc = j.get("location", "") or "N/A"
+            dept = j.get("department", "") or "N/A"
+            jtype = j.get("type", "") or "N/A"
             jqc = j.get("qualification_counts", {})
-            lines.append(
-                f"JOB_ID_{aid}: title=\"{title}\" active={active} type={jtype} "
-                f"location=\"{loc}\" department=\"{dept}\" "
-                f"candidates={cand} interviews={interv} "
-                f"interview_decision={jqc.get('INTERVIEW', 0)} hold={jqc.get('HOLD', 0)} rejected={jqc.get('REJECT', 0)}"
-            )
+            desc = (j.get("description") or "")[:400]
+            req = (j.get("requirements") or "")[:300]
+            ss = j.get("score_stats", {})
+
+            lines.append(f"\n=== JOB: {title} (ID:{aid}) ===")
+            lines.append(f"Status: {active_str} | Type: {jtype} | Location: {loc} | Department: {dept}")
+            lines.append(f"Candidates: {cand} | Interviews: {interv} | Scores: avg={ss.get('avg',0)} max={ss.get('max',0)} min={ss.get('min',0)}")
+            lines.append(f"Decisions: INTERVIEW={jqc.get('INTERVIEW',0)} HOLD={jqc.get('HOLD',0)} REJECT={jqc.get('REJECT',0)}")
+            if desc:
+                lines.append(f"Description: {desc}")
+            if req:
+                lines.append(f"Requirements: {req}")
+
+            # Top candidates with names and scores
+            candidates = j.get("candidates", [])[:8]
+            if candidates:
+                lines.append("Candidates:")
+                for c in candidates:
+                    lines.append(
+                        f"  - {c.get('name','?')} | Score:{c.get('role_fit_score','N/A')} | "
+                        f"Decision:{c.get('qualification_decision','N/A')} | Email:{c.get('email','N/A')}"
+                    )
+
+            # Interview details
+            iv_details = j.get("interview_details", [])[:8]
+            if iv_details:
+                lines.append("Interviews:")
+                for iv in iv_details:
+                    lines.append(
+                        f"  - {iv.get('candidate_name','?')} | Status:{iv.get('status','N/A')} | "
+                        f"Outcome:{iv.get('outcome','N/A')} | Scheduled:{iv.get('scheduled_datetime','N/A')}"
+                    )
+
         lines.append("")
 
-        # Truncate context to avoid API payload errors and large token usage
         context_str = "\n".join(lines)
-        # ~4000 chars gives enough room for 15+ jobs without hitting token limits
-        MAX_CONTEXT_CHARS = 4000
+        MAX_CONTEXT_CHARS = 12000
         if len(context_str) > MAX_CONTEXT_CHARS:
             context_str = context_str[:MAX_CONTEXT_CHARS] + "\n... [truncated]"
         return context_str
@@ -1109,11 +1136,33 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         if ("list" in q or "show" in q or "all" in q or "which" in q) and "job" in q and "interview" not in q:
             if not jobs:
                 return "No jobs found."
-            answer = f"**All Jobs** ({total_jobs} total, {active} active, {inactive} inactive):\n\n"
-            for j in jobs:
-                status = "Active" if j["is_active"] else "Inactive"
-                answer += f"- **{j['title']}** — {status}, {j['candidate_count']} candidates, {j.get('interview_count', 0)} interviews\n"
-            return answer.strip()
+            wants_detail = any(x in q for x in ("detail", "details", "description", "requirement", "full", "complete", "everything", "all info", "poori", "puri", "sari", "sara"))
+            if wants_detail:
+                answer = f"## All Jobs ({total_jobs} total — {active} active, {inactive} inactive)\n\n"
+                for j in jobs:
+                    status = "Active" if j["is_active"] else "Inactive"
+                    answer += f"### {j['title']}\n"
+                    answer += f"- **Status:** {status}\n"
+                    if j.get("location"): answer += f"- **Location:** {j['location']}\n"
+                    if j.get("department"): answer += f"- **Department:** {j['department']}\n"
+                    if j.get("type"): answer += f"- **Type:** {j['type']}\n"
+                    answer += f"- **Candidates:** {j['candidate_count']} | **Interviews:** {j.get('interview_count', 0)}\n"
+                    jqc = j.get("qualification_counts", {})
+                    answer += f"- **Decisions:** INTERVIEW={jqc.get('INTERVIEW',0)}, HOLD={jqc.get('HOLD',0)}, REJECT={jqc.get('REJECT',0)}\n"
+                    if j.get("description"):
+                        answer += f"- **Description:** {j['description'][:600]}\n"
+                    if j.get("requirements"):
+                        answer += f"- **Requirements:** {j['requirements'][:400]}\n"
+                    answer += "\n"
+                return answer.strip()
+            else:
+                answer = f"**All Jobs** ({total_jobs} total, {active} active, {inactive} inactive):\n\n"
+                for j in jobs:
+                    status = "Active" if j["is_active"] else "Inactive"
+                    loc = f" | {j['location']}" if j.get("location") else ""
+                    dept = f" | {j['department']}" if j.get("department") else ""
+                    answer += f"- **{j['title']}** — {status}{loc}{dept} | {j['candidate_count']} candidates, {j.get('interview_count', 0)} interviews\n"
+                return answer.strip()
 
         # ── Qualification decision questions (BEFORE generic candidate count) ──
         if ("reject" in q or "rejected" in q) and ("candidate" in q or "cv" in q or "how many" in q):
@@ -1270,16 +1319,30 @@ INSTRUCTIONS:
 - Do NOT add extra sections unless explicitly asked.
 """
         else:
-            # Default prompt for other queries
-            prompt = f"""
+            wants_detail = any(x in q for x in ("detail", "details", "full", "complete", "everything", "description", "requirement", "explain", "tell me", "show me", "all info", "poori", "puri"))
+            if wants_detail:
+                prompt = f"""
 Question: "{question}"
 
 {context}
 
 INSTRUCTIONS:
-- Answer ONLY what was asked. Use exact numbers from DIRECT FACTS in your first sentence.
-- Format your answer with markdown: ## for main heading, ### for subheading, and use bullet lists (- or *) or numbered lists (1. 2. 3.) for multiple items.
-- Do NOT add Overview, Qualification Settings, Job Details, or "No jobs/candidates" unless explicitly asked.
+- Provide COMPLETE and DETAILED answer using all available data from the context.
+- For each job/candidate/interview: include name, status, location, department, type, description, requirements, candidate count, scores, decisions — every field available.
+- Format with ## for job/section headings, ### for sub-sections, bullet lists for fields.
+- Use exact values from context. Never omit available details.
+"""
+            else:
+                prompt = f"""
+Question: "{question}"
+
+{context}
+
+INSTRUCTIONS:
+- Answer the question clearly and completely. Use exact numbers and names from the context.
+- For each item mentioned (job, candidate, interview) — include all relevant fields: title, status, location, description, requirements, scores, decisions.
+- Format with markdown: ## headings, bullet lists for multiple fields per item.
+- Do not give a one-line answer if the context has more relevant detail.
 """
         try:
             llm_answer = self.groq_client.send_prompt_text(

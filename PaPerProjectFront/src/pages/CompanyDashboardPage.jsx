@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { DatePicker } from '@/components/ui/date-picker';
 import SearchableSelect from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,17 +22,27 @@ import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
+import pmAgentService from '@/services/pmAgentService';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { API_BASE_URL } from '@/config/apiConfig';
 import {
   Building2, Plus, Briefcase, Users, Eye,
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw, KeyRound, RefreshCw
+  Ticket, RotateCcw, KeyRound, RefreshCw, Copy
 } from 'lucide-react';
 import { createCheckoutSession } from '@/services/modulePurchaseService';
+
+const toLocaleDateStr = (date) => {
+  const d = date instanceof Date ? date : new Date(date);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 const CompanyDashboardPage = () => {
   const navigate = useNavigate();
@@ -43,9 +55,16 @@ const CompanyDashboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('dashboard'); // 'dashboard', 'project-manager'
   const [activeTab, setActiveTab] = useState('jobs');
+  // Generic confirmation state — replaces window.confirm() for user (de)activation
+  // and any other destructive action on this page.
+  const [confirm, setConfirm] = useState({
+    open: false, title: '', description: '', confirmLabel: 'Confirm', variant: 'default', onConfirm: null, loading: false,
+  });
+  const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedJobApplications, setSelectedJobApplications] = useState([]);
+  const [processingApplicants, setProcessingApplicants] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
@@ -118,6 +137,9 @@ const CompanyDashboardPage = () => {
     type: 'Full-time',
     description: '',
     requirements: '',
+    is_active: true,
+    application_open_date: '',
+    application_close_date: '',
   });
   const [jobSubmitting, setJobSubmitting] = useState(false);
 
@@ -244,64 +266,41 @@ const CompanyDashboardPage = () => {
     }
   };
 
-  const handleCreateJob = async (e) => {
-    e.preventDefault();
-    if (jobSubmitting) return; // Prevent duplicate submissions
+  const handleCreateJob = async () => {
+    if (jobSubmitting) return;
 
-    // Validate required fields have meaningful content (at least 2 alphanumeric chars)
-    const validateField = (value, fieldName) => {
-      const alnumCount = (value.match(/[a-zA-Z0-9]/g) || []).length;
-      if (alnumCount < 2) {
-        toast({
-          title: 'Validation Error',
-          description: `${fieldName} must contain at least 2 alphanumeric characters.`,
-          variant: 'destructive',
-        });
-        return false;
-      }
-      return true;
-    };
+    const alnum = (v) => (v.match(/[a-zA-Z0-9]/g) || []).length;
+    const err = (msg) => { toast({ title: 'Validation Error', description: msg, variant: 'destructive' }); return false; };
 
-    if (!validateField(jobForm.title, 'Job Title')) return;
-    if (!validateField(jobForm.location, 'Location')) return;
-    if (!validateField(jobForm.department, 'Department')) return;
-
-    // Description must have at least 20 alphanumeric characters
-    const descAlnum = (jobForm.description.match(/[a-zA-Z0-9]/g) || []).length;
-    if (descAlnum < 20) {
-      toast({ title: 'Validation Error', description: 'Job description must contain at least 20 alphanumeric characters. Please provide a meaningful description.', variant: 'destructive' });
-      return;
-    }
-
-    // Requirements validation (if provided) - at least 10 alphanumeric characters
-    if (jobForm.requirements?.trim()) {
-      const reqAlnum = (jobForm.requirements.match(/[a-zA-Z0-9]/g) || []).length;
-      if (reqAlnum < 10) {
-        toast({ title: 'Validation Error', description: 'Requirements must contain at least 10 alphanumeric characters if provided.', variant: 'destructive' });
-        return;
-      }
-    }
+    if (alnum(jobForm.title) < 2)       return err('Job Title must contain at least 2 alphanumeric characters.');
+    if (alnum(jobForm.location) < 2)    return err('Location must contain at least 2 alphanumeric characters.');
+    if (alnum(jobForm.department) < 2)  return err('Department must contain at least 2 alphanumeric characters.');
+    if (alnum(jobForm.description) < 20) return err('Job Description must contain at least 20 alphanumeric characters.');
+    if (jobForm.requirements?.trim() && alnum(jobForm.requirements) < 10)
+      return err('Requirements must contain at least 10 alphanumeric characters if provided.');
+    if (!jobForm.application_open_date)  return err('Please select an Applications Open Date.');
+    if (!jobForm.application_close_date) return err('Please select an Applications Close Date.');
+    if (jobForm.application_open_date > jobForm.application_close_date)
+      return err('Open date must be before the close date.');
 
     setJobSubmitting(true);
     try {
-      const response = await companyJobsService.createJobPosition(jobForm);
+      const response = await companyJobsService.createJobPosition({
+        ...jobForm,
+        parse_keywords: true,
+      });
       if (response.status === 'success') {
-        toast({
-          title: 'Success!',
-          description: 'Job posted successfully',
-        });
+        toast({ title: 'Job posted!', description: `"${jobForm.title}" is now ${jobForm.is_active ? 'live' : 'saved as inactive'}.` });
         setShowCreateJobModal(false);
         setJobForm({
-          title: '', location: '', department: '', type: 'Full-time', description: '', requirements: '',
+          title: '', location: '', department: '', type: 'Full-time',
+          description: '', requirements: '', is_active: true,
+          application_open_date: '', application_close_date: '',
         });
         fetchJobs();
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to create job',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message || 'Failed to create job', variant: 'destructive' });
     } finally {
       setJobSubmitting(false);
     }
@@ -340,6 +339,33 @@ const CompanyDashboardPage = () => {
         description: error.message || 'Failed to update status',
         variant: 'destructive',
       });
+    }
+  };
+
+  const handleProcessApplicants = async () => {
+    if (!selectedJob) return;
+    setProcessingApplicants(true);
+    try {
+      const response = await companyJobsService.processJobApplicants(selectedJob.id);
+      if (response.status === 'success') {
+        const processed = response.processed || 0;
+        const total = response.total || 0;
+        if (total === 0) {
+          toast({ title: 'No new applications', description: 'All applicants for this job have already been analysed.' });
+        } else {
+          toast({
+            title: `AI Analysis Complete`,
+            description: `Processed ${processed} of ${total} application(s). ${processed} candidate(s) analysed.`,
+          });
+          handleViewApplications(selectedJob.id);
+        }
+      } else {
+        toast({ title: 'Error', description: response.message || 'Failed to process applicants', variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: error.message || 'Failed to process applicants', variant: 'destructive' });
+    } finally {
+      setProcessingApplicants(false);
     }
   };
 
@@ -391,7 +417,7 @@ const CompanyDashboardPage = () => {
   const handleUpdateProject = async (e) => {
     e.preventDefault();
     if (!editingProject) return;
-    
+
     try {
       const response = await companyProjectsTasksService.updateProject(editingProject.id, projectForm);
       if (response.status === 'success') {
@@ -410,6 +436,38 @@ const CompanyDashboardPage = () => {
         variant: 'destructive',
       });
     }
+  };
+
+  const handleDeleteProject = (project) => {
+    setConfirm({
+      open: true,
+      title: `Delete project "${project.name}"?`,
+      description:
+        'This permanently deletes the project, all its tasks, subtasks, and team assignments. This cannot be undone.',
+      confirmLabel: 'Delete project',
+      variant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await pmAgentService.deleteProjectManual(project.id);
+          if (response.status === 'success') {
+            toast({ title: 'Project deleted', description: `"${project.name}" was removed.` });
+            fetchProjects();
+            closeConfirm();
+          } else {
+            throw new Error(response.message || 'Failed to delete project');
+          }
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to delete project',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const handleEditTask = (task) => {
@@ -775,50 +833,63 @@ const CompanyDashboardPage = () => {
     }
   };
   
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to deactivate this user?')) {
-      return;
-    }
-    
-    try {
-      const response = await companyUserManagementService.deleteUser(userId);
-      if (response.status === 'success') {
-        toast({
-          title: 'Success!',
-          description: 'User deactivated successfully',
-        });
-        fetchUsers();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to deactivate user',
-        variant: 'destructive',
-      });
-    }
+  const handleDeleteUser = (userId) => {
+    setConfirm({
+      open: true,
+      title: 'Deactivate this user?',
+      description:
+        'They will no longer be able to log in or appear in task assignment dropdowns. You can reactivate them later.',
+      confirmLabel: 'Deactivate user',
+      variant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await companyUserManagementService.deleteUser(userId);
+          if (response.status === 'success') {
+            toast({ title: 'Success!', description: 'User deactivated successfully' });
+            fetchUsers();
+          }
+          closeConfirm();
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to deactivate user',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
-  const handleReactivateUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to reactivate this user?')) {
-      return;
-    }
-
-    try {
-      const response = await companyUserManagementService.reactivateUser(userId);
-      if (response.status === 'success') {
-        toast({
-          title: 'Success!',
-          description: 'User reactivated successfully',
-        });
-        fetchUsers();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to reactivate user',
-        variant: 'destructive',
-      });
-    }
+  const handleReactivateUser = (userId) => {
+    setConfirm({
+      open: true,
+      title: 'Reactivate this user?',
+      description: 'They will be able to log in again and show up in task assignment dropdowns.',
+      confirmLabel: 'Reactivate user',
+      variant: 'default',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await companyUserManagementService.reactivateUser(userId);
+          if (response.status === 'success') {
+            toast({ title: 'Success!', description: 'User reactivated successfully' });
+            fetchUsers();
+          }
+          closeConfirm();
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to reactivate user',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const toggleProject = (projectId) => {
@@ -1039,15 +1110,33 @@ const CompanyDashboardPage = () => {
                               <Badge className="bg-violet-600/20 text-violet-300 border border-violet-500/30">{job.type}</Badge>
                             </div>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleViewApplications(job.id)}
-                            className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View Applications
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const url = `${window.location.origin}/jobs/apply/${job.id}`;
+                                navigator.clipboard.writeText(url).then(() => {
+                                  toast({ title: 'Link copied!', description: 'Application link copied to clipboard.' });
+                                }).catch(() => {
+                                  toast({ title: 'Error', description: 'Failed to copy link.', variant: 'destructive' });
+                                });
+                              }}
+                              className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
+                            >
+                              <Copy className="h-4 w-4 mr-2" />
+                              Copy Link
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleViewApplications(job.id)}
+                              className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
+                            >
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Applications
+                            </Button>
+                          </div>
                         </div>
                       </CardHeader>
                       <CardContent>
@@ -1100,17 +1189,32 @@ const CompanyDashboardPage = () => {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between gap-2">
                                   <CardTitle className="text-lg text-white">{project.name}</CardTitle>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleEditProject(project);
-                                    }}
-                                    className="h-8 w-8 p-0"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditProject(project);
+                                      }}
+                                      className="h-8 w-8 p-0"
+                                      title="Edit project"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteProject(project);
+                                      }}
+                                      className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                      title="Delete project"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </div>
                                 <div className="mt-2 flex items-center gap-3 flex-wrap">
                                   <Badge className={project.status === 'active' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-white/10 text-white/50 border border-white/10'}>
@@ -1261,61 +1365,147 @@ const CompanyDashboardPage = () => {
             <TabsContent value="applications" className="space-y-4">
               {selectedJob ? (
                 <div>
-                  <div className="flex justify-between items-center mb-4">
+                  <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
                     <h2 className="text-2xl font-bold text-white">Applications for {selectedJob.title}</h2>
-                    <Button variant="outline" onClick={() => setSelectedJob(null)} className="border-white/20 text-white/70 hover:text-white hover:bg-white/10">
-                      Back to Jobs
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleProcessApplicants}
+                        disabled={processingApplicants}
+                        className="bg-violet-600 hover:bg-violet-700 text-white"
+                      >
+                        {processingApplicants ? (
+                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Analysing...</>
+                        ) : (
+                          <><BrainCircuit className="h-4 w-4 mr-2" />Process with AI</>
+                        )}
+                      </Button>
+                      <Button variant="outline" onClick={() => setSelectedJob(null)} className="border-white/20 text-white/70 hover:text-white hover:bg-white/10">
+                        Back to Jobs
+                      </Button>
+                    </div>
                   </div>
                   {selectedJobApplications.length === 0 ? (
                     <Card className="bg-[#120d22] border border-[#2d2342]">
                       <CardContent className="py-12 text-center">
                         <Users className="h-12 w-12 mx-auto text-white/20 mb-4" />
                         <p className="text-lg font-medium text-white">No applications yet</p>
+                        <p className="text-sm text-white/40 mt-2">Applications submitted via the public form will appear here.</p>
                       </CardContent>
                     </Card>
                   ) : (
                     <div className="space-y-4">
+                      <p className="text-sm text-white/40">{selectedJobApplications.length} application{selectedJobApplications.length !== 1 ? 's' : ''} received</p>
                       {selectedJobApplications.map((app) => (
                         <Card key={app.id} className="bg-[#120d22] border border-[#2d2342]">
-                          <CardHeader>
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <CardTitle className="text-white">{app.applicant_name}</CardTitle>
-                                <CardDescription className="text-white/50">{app.email}</CardDescription>
+                          <CardHeader className="pb-3">
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="flex-1 min-w-0">
+                                <CardTitle className="text-white text-lg">{app.applicant_name}</CardTitle>
+                                <div className="flex flex-wrap gap-3 mt-1 text-sm text-white/50">
+                                  <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{app.email}</span>
+                                  {app.phone && <span className="flex items-center gap-1">📞 {app.phone}</span>}
+                                  {app.current_location && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{app.current_location}</span>}
+                                </div>
                               </div>
-                              <Badge className={getStatusColor(app.status)}>{app.status}</Badge>
+                              <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+                                <Badge className={getStatusColor(app.status)}>{app.status}</Badge>
+                                {app.ai_analysed ? (
+                                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">AI Analysed</Badge>
+                                ) : (
+                                  <Badge className="bg-white/5 text-white/30 border-white/10 text-xs">Pending AI</Badge>
+                                )}
+                                <span className="text-xs text-white/30">{app.applied_at ? new Date(app.applied_at).toLocaleDateString() : ''}</span>
+                              </div>
                             </div>
                           </CardHeader>
-                          <CardContent>
-                            <div className="space-y-2">
-                              {app.cover_letter && (
-                                <p className="text-sm text-white/70">{app.cover_letter}</p>
+                          <CardContent className="space-y-3 pt-0">
+
+                            {/* Professional info */}
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+                              {app.education && (
+                                <div className="bg-white/[0.03] rounded-lg p-2 border border-white/[0.06]">
+                                  <p className="text-white/40 text-xs mb-0.5">Education</p>
+                                  <p className="text-white/80">{app.education}</p>
+                                </div>
                               )}
-                              {app.resume_path && (
-                                <a
-                                  href={getResumeUrl(app.resume_path)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 hover:underline"
-                                >
-                                  <Download className="h-4 w-4" />
-                                  Download Resume
-                                </a>
+                              {app.previous_company && (
+                                <div className="bg-white/[0.03] rounded-lg p-2 border border-white/[0.06]">
+                                  <p className="text-white/40 text-xs mb-0.5">Previous Company</p>
+                                  <p className="text-white/80">{app.previous_company}</p>
+                                </div>
                               )}
-                              <div className="flex gap-2 pt-2 flex-wrap">
-                                {['pending', 'reviewing', 'interview', 'accepted', 'rejected'].map((status) => (
-                                  <Button
-                                    key={status}
-                                    size="sm"
-                                    onClick={() => handleUpdateStatus(app.id, status)}
-                                    disabled={app.status === status}
-                                    className={`capitalize ${app.status === status ? 'bg-violet-600 text-white' : 'border-white/20 text-white/60 hover:text-white hover:bg-white/10 bg-transparent border'}`}
-                                  >
-                                    {status}
-                                  </Button>
-                                ))}
+                              {app.previous_salary && (
+                                <div className="bg-white/[0.03] rounded-lg p-2 border border-white/[0.06]">
+                                  <p className="text-white/40 text-xs mb-0.5">Previous Salary</p>
+                                  <p className="text-white/80">{app.previous_salary}</p>
+                                </div>
+                              )}
+                              {app.salary_expectation && (
+                                <div className="bg-white/[0.03] rounded-lg p-2 border border-white/[0.06]">
+                                  <p className="text-white/40 text-xs mb-0.5">Expected Salary</p>
+                                  <p className="text-white/80">{app.salary_expectation}</p>
+                                </div>
+                              )}
+                              {app.linkedin_url && (
+                                <div className="bg-white/[0.03] rounded-lg p-2 border border-white/[0.06]">
+                                  <p className="text-white/40 text-xs mb-0.5">LinkedIn</p>
+                                  <a href={app.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:underline text-xs truncate block">{app.linkedin_url}</a>
+                                </div>
+                              )}
+                              {app.github_url && (
+                                <div className="bg-white/[0.03] rounded-lg p-2 border border-white/[0.06]">
+                                  <p className="text-white/40 text-xs mb-0.5">GitHub</p>
+                                  <a href={app.github_url} target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:underline text-xs truncate block">{app.github_url}</a>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Cover letter */}
+                            {app.cover_letter && (
+                              <div className="bg-white/[0.03] rounded-lg p-3 border border-white/[0.06]">
+                                <p className="text-white/40 text-xs mb-1">Cover Letter</p>
+                                <p className="text-sm text-white/70 leading-relaxed line-clamp-3">{app.cover_letter}</p>
                               </div>
+                            )}
+
+                            {/* CV download */}
+                            {app.cv_url && (
+                              <a
+                                href={app.cv_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 hover:underline"
+                              >
+                                <Download className="h-4 w-4" />
+                                Download CV {app.cv_file_name ? `(${app.cv_file_name})` : ''}
+                              </a>
+                            )}
+
+                            {/* Status buttons */}
+                            <div className="flex gap-2 pt-1 flex-wrap border-t border-white/[0.06] items-center">
+                              <span className="text-xs text-white/30 self-center mr-1">Move to:</span>
+                              {['pending', 'reviewed', 'shortlisted', 'rejected'].map((s) => (
+                                <Button
+                                  key={s}
+                                  size="sm"
+                                  onClick={() => handleUpdateStatus(app.id, s)}
+                                  disabled={app.status === s}
+                                  className={`capitalize text-xs ${app.status === s ? 'bg-violet-600 text-white' : 'border-white/20 text-white/60 hover:text-white hover:bg-white/10 bg-transparent border'}`}
+                                >
+                                  {s}
+                                </Button>
+                              ))}
+                              {app.ai_analysed && app.cv_record_id && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="ml-auto border-violet-500/30 text-violet-400 hover:text-violet-300 hover:bg-violet-500/10 text-xs"
+                                  onClick={() => navigate(`/recruitment/candidates/${app.cv_record_id}`)}
+                                >
+                                  <BrainCircuit className="h-3.5 w-3.5 mr-1" />
+                                  View AI Report
+                                </Button>
+                              )}
                             </div>
                           </CardContent>
                         </Card>
@@ -2074,41 +2264,44 @@ const CompanyDashboardPage = () => {
             <DialogHeader>
               <DialogTitle>Post New Job</DialogTitle>
             </DialogHeader>
-            <form onSubmit={handleCreateJob} className="space-y-4">
+            <div className="space-y-4 pt-2">
+
+              {/* Title */}
               <div className="space-y-2">
-                <Label htmlFor="title">Job Title *</Label>
+                <Label htmlFor="jf-title">Job Title <span className="text-red-500">*</span></Label>
                 <Input
-                  id="title"
+                  id="jf-title"
                   value={jobForm.title}
                   onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })}
-                  required
                   placeholder="e.g. Senior Software Engineer"
                 />
               </div>
+
+              {/* Location + Department */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="location">Location *</Label>
+                  <Label htmlFor="jf-location">Location <span className="text-red-500">*</span></Label>
                   <Input
-                    id="location"
+                    id="jf-location"
                     value={jobForm.location}
                     onChange={(e) => setJobForm({ ...jobForm, location: e.target.value })}
-                    required
                     placeholder="e.g. New York, NY"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="department">Department *</Label>
+                  <Label htmlFor="jf-department">Department <span className="text-red-500">*</span></Label>
                   <Input
-                    id="department"
+                    id="jf-department"
                     value={jobForm.department}
                     onChange={(e) => setJobForm({ ...jobForm, department: e.target.value })}
-                    required
                     placeholder="e.g. Engineering"
                   />
                 </div>
               </div>
+
+              {/* Job Type */}
               <div className="space-y-2">
-                <Label htmlFor="type">Job Type *</Label>
+                <Label>Job Type</Label>
                 <Select value={jobForm.type} onValueChange={(value) => setJobForm({ ...jobForm, type: value })}>
                   <SelectTrigger>
                     <SelectValue />
@@ -2121,36 +2314,73 @@ const CompanyDashboardPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Job Description *</Label>
-                <Textarea
-                  id="description"
-                  value={jobForm.description}
-                  onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
-                  required
-                  className="min-h-[100px]"
-                  placeholder="Describe the job role, responsibilities, and what you're looking for..."
+
+              {/* Active toggle */}
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="jf-active">Active / Visible</Label>
+                  <p className="text-sm text-muted-foreground">Active jobs appear on the public careers page</p>
+                </div>
+                <Switch
+                  id="jf-active"
+                  checked={jobForm.is_active}
+                  onCheckedChange={(checked) => setJobForm({ ...jobForm, is_active: checked })}
                 />
               </div>
+
+              {/* Application dates */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Applications Open Date <span className="text-red-500">*</span></Label>
+                  <DatePicker
+                    date={jobForm.application_open_date ? new Date(jobForm.application_open_date + 'T00:00:00') : null}
+                    setDate={(date) => setJobForm({ ...jobForm, application_open_date: date ? toLocaleDateStr(date) : '' })}
+                    placeholder="Select open date"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Applications Close Date <span className="text-red-500">*</span></Label>
+                  <DatePicker
+                    date={jobForm.application_close_date ? new Date(jobForm.application_close_date + 'T00:00:00') : null}
+                    setDate={(date) => setJobForm({ ...jobForm, application_close_date: date ? toLocaleDateStr(date) : '' })}
+                    placeholder="Select close date"
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
               <div className="space-y-2">
-                <Label htmlFor="requirements">Requirements</Label>
+                <Label htmlFor="jf-description">Job Description <span className="text-red-500">*</span></Label>
                 <Textarea
-                  id="requirements"
+                  id="jf-description"
+                  value={jobForm.description}
+                  onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
+                  className="min-h-[120px]"
+                  placeholder="Describe the role, responsibilities, and what you're looking for..."
+                />
+              </div>
+
+              {/* Requirements */}
+              <div className="space-y-2">
+                <Label htmlFor="jf-requirements">Requirements</Label>
+                <Textarea
+                  id="jf-requirements"
                   value={jobForm.requirements}
                   onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })}
                   className="min-h-[100px]"
-                  placeholder="List the required skills, qualifications, and experience..."
+                  placeholder="List required skills, qualifications, and experience..."
                 />
               </div>
-              <div className="flex gap-2 pt-4">
-                <Button type="submit" className="flex-1" disabled={jobSubmitting}>
-                  {jobSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Posting...</> : 'Post Job'}
+
+              <div className="flex gap-2 pt-2">
+                <Button className="flex-1" disabled={jobSubmitting} onClick={handleCreateJob}>
+                  {jobSubmitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Posting…</> : 'Post Job'}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setShowCreateJobModal(false)}>
+                <Button variant="outline" onClick={() => setShowCreateJobModal(false)} disabled={jobSubmitting}>
                   Cancel
                 </Button>
               </div>
-            </form>
+            </div>
           </DialogContent>
         </Dialog>
         
@@ -2592,6 +2822,17 @@ const CompanyDashboardPage = () => {
             </form>
           </DialogContent>
         </Dialog>
+
+        <ConfirmDialog
+          open={confirm.open}
+          onOpenChange={(o) => !o && closeConfirm()}
+          title={confirm.title}
+          description={confirm.description}
+          confirmLabel={confirm.confirmLabel}
+          variant={confirm.variant}
+          loading={confirm.loading}
+          onConfirm={confirm.onConfirm}
+        />
       </div>
     </>
   );
