@@ -14,7 +14,6 @@ def clean_agent(agent):
     if count:
         keys.delete()
         print(f"  Deleted {count} managed key(s).")
-        
     reqs = KeyRequest.objects.filter(agent_name=agent)
     req_count = reqs.count()
     print(f"  Requests found: {req_count}")
