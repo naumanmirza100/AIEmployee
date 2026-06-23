@@ -229,9 +229,17 @@ export const deleteQAChat = async (chatId) => {
 /**
  * Get all job descriptions for the company user
  */
-export const getJobDescriptions = async () => {
+export const getJobDescriptions = async (params = {}) => {
   try {
-    const response = await companyApi.get('/recruitment/job-descriptions');
+    const query = new URLSearchParams();
+    if (params.search)     query.set('search',     params.search);
+    if (params.status)     query.set('status',     params.status);
+    if (params.type)       query.set('type',       params.type);
+    if (params.department) query.set('department', params.department);
+    if (params.page)       query.set('page',       params.page);
+    if (params.page_size)  query.set('page_size',  params.page_size);
+    const qs = query.toString();
+    const response = await companyApi.get(`/recruitment/job-descriptions${qs ? `?${qs}` : ''}`);
     return response;
   } catch (error) {
     console.error('Get job descriptions error:', error);
@@ -598,6 +606,16 @@ export const getCVRecordDetail = async (recordId) => {
   }
 };
 
+export const getCVRecordDecisionHistory = async (recordId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/cv-records/${recordId}/decision-history`);
+    return response;
+  } catch (error) {
+    console.error('Get decision history error:', error);
+    throw error;
+  }
+};
+
 /**
  * Submit or update post-interview feedback
  */
@@ -707,6 +725,16 @@ export const isPromptOnDashboard = (prompt) => {
   if (!prompt || !prompt.tags) return false;
   const tags = Array.isArray(prompt.tags) ? prompt.tags : [];
   return tags.includes('dashboard');
+};
+
+export const getJobApplicationsByJob = async (jobDescriptionId) => {
+  try {
+    const response = await companyApi.get(`/recruitment/job-descriptions/${jobDescriptionId}/applications`);
+    return response;
+  } catch (error) {
+    console.error('Get job applications error:', error);
+    throw error;
+  }
 };
 
 export default {

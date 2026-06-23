@@ -381,8 +381,8 @@
                 </div>
             </div>
 
-            <h1 class="title">Interview Confirmed!</h1>
-            <p class="subtitle">Your interview has been successfully scheduled. We look forward to meeting you.</p>
+            <h1 class="title">{% if already_confirmed %}Interview Already Confirmed{% else %}Interview Confirmed!{% endif %}</h1>
+            <p class="subtitle">{% if already_confirmed %}Your interview was already confirmed. Here are your details.{% else %}Your interview has been successfully scheduled. We look forward to meeting you.{% endif %}</p>
 
             <!-- Interview Details Card -->
             <div class="card">

@@ -49,6 +49,7 @@ import SequenceManagementPage from '@/components/marketing/SequenceManagementPag
 import EmailSendingStatusPage from '@/components/marketing/EmailSendingStatusPage';
 import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
 import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
+import CandidateDetailPage from '@/pages/CandidateDetailPage';
 import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
 import HRAgentPage from '@/pages/HRAgentPage';
@@ -150,6 +151,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/recruitment/ai-interview-questions" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/saved-prompts" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/job-descriptions" element={<RecruitmentAgentPage />} />
+            <Route path="/recruitment/candidates/:id" element={<CandidateDetailPage />} />
             <Route path="/recruitment/candidates" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/interviews" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/settings" element={<Navigate to="/recruitment/settings/email" replace />} />

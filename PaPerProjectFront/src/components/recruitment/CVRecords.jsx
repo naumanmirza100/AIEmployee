@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,12 +14,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, FileText, Calendar, ChevronLeft, ChevronRight,
@@ -26,13 +21,23 @@ import {
   GraduationCap, Building2, Link2, Phone, ExternalLink,
   User, Star, CheckCircle2, Clock,
 } from 'lucide-react';
-import { getCVRecords, getJobDescriptions, bulkUpdateCVRecords, getCVRecordDetail } from '@/services/recruitmentAgentService';
+import { getCVRecords, getJobDescriptions, bulkUpdateCVRecords } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
 const PAGE_SIZES = [10, 25, 50];
 
+export const getDecisionBadge = (decision) => {
+  switch (decision) {
+    case 'INTERVIEW': return <Badge className="bg-green-500">INTERVIEW</Badge>;
+    case 'HOLD': return <Badge className="bg-yellow-500">HOLD</Badge>;
+    case 'REJECT': return <Badge className="bg-red-500">REJECT</Badge>;
+    default: return <Badge variant="outline">{decision || 'N/A'}</Badge>;
+  }
+};
+
 const CVRecords = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -42,11 +47,7 @@ const CVRecords = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [selectedRecord, setSelectedRecord] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
   const [bulkUpdating, setBulkUpdating] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detail, setDetail] = useState(null);
 
   useEffect(() => {
     fetchJobs();
@@ -88,14 +89,6 @@ const CVRecords = () => {
     }
   };
 
-  const getDecisionBadge = (decision) => {
-    switch (decision) {
-      case 'INTERVIEW': return <Badge className="bg-green-500">INTERVIEW</Badge>;
-      case 'HOLD': return <Badge className="bg-yellow-500">HOLD</Badge>;
-      case 'REJECT': return <Badge className="bg-red-500">REJECT</Badge>;
-      default: return <Badge variant="outline">{decision || 'N/A'}</Badge>;
-    }
-  };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const canPrev = page > 1;
@@ -124,25 +117,8 @@ const CVRecords = () => {
     });
   };
 
-  const handleRowClick = async (record) => {
-    setSelectedRecord(record);
-    setDetail(null);
-    setModalOpen(true);
-    setDetailLoading(true);
-    try {
-      const res = await getCVRecordDetail(record.id);
-      if (res.status === 'success') setDetail(res.data);
-    } catch (e) {
-      console.error('Error loading candidate detail:', e);
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
-  const handleCloseModal = () => {
-    setModalOpen(false);
-    setSelectedRecord(null);
-    setDetail(null);
+  const handleRowClick = (record) => {
+    navigate(`/recruitment/candidates/${record.id}`);
   };
 
   const handleBulkChangeDecision = async (decision) => {
@@ -172,7 +148,10 @@ const CVRecords = () => {
       const p = record.parsed || {};
       const decision = record.qualification_decision || '—';
       const score = (record.qualification_confidence ?? record.role_fit_score) != null ? `${Math.round(record.qualification_confidence ?? record.role_fit_score)}%` : '—';
-      return `<tr><td>${p.name || record.file_name || '—'}</td><td>${p.email || '—'}</td><td>${p.phone || '—'}</td><td>${record.job_description_title || '—'}</td><td>${score}</td><td>${decision}</td><td>${record.created_at ? new Date(record.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td></tr>`;
+      const displayN = record.application_name || p.name || record.file_name || '—';
+      const displayE = record.application_email || p.email || '—';
+      const displayPh = record.application_phone || p.phone || '—';
+      return `<tr><td>${displayN}</td><td>${displayE}</td><td>${displayPh}</td><td>${record.job_description_title || '—'}</td><td>${score}</td><td>${decision}</td><td>${record.created_at ? new Date(record.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td></tr>`;
     }).join('');
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Candidates Report</title><style>body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:24px}h1{font-size:20px;margin-bottom:4px}.meta{color:#555;font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:#1a0a2e;color:#fff;padding:8px 10px;text-align:left;font-size:11px}td{padding:7px 10px;border-bottom:1px solid #e5e7eb;vertical-align:top}tr:nth-child(even) td{background:#f9f7ff}</style></head><body><h1>Candidates Report</h1><div class="meta">Job: ${selectedJob?.title || 'All Jobs'} | Decision: ${decisionLabel} | Total: ${total} | Printed: ${new Date().toLocaleString()}</div><table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Job</th><th>Score</th><th>Decision</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
     const win = window.open('', '_blank');
@@ -272,26 +251,28 @@ const CVRecords = () => {
             </div>
             {records.map((record) => {
               const parsed = record.parsed || {};
+              const displayName = record.application_name || parsed.name || record.file_name || '—';
+              const displayEmail = record.application_email || parsed.email || '';
               const isSelected = selectedIds.has(record.id);
               return (
                 <Card key={record.id} className={`cursor-pointer transition-colors border-white/10 backdrop-blur-sm ${isSelected ? 'border-primary bg-primary/10' : 'bg-black/20 hover:bg-black/30'}`} onClick={() => handleRowClick(record)}>
                   <CardContent className="p-3 sm:p-4">
                     <div className="flex items-start gap-3">
                       <div onClick={(e) => e.stopPropagation()} className="pt-1">
-                        <Checkbox checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${parsed.name || record.file_name}`} />
+                        <Checkbox checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               {record.rank != null && <Badge variant="outline" className="text-xs shrink-0">#{record.rank}</Badge>}
-                              <h3 className="font-semibold text-sm truncate">{parsed.name || record.file_name || '—'}</h3>
+                              <h3 className="font-semibold text-sm truncate">{displayName}</h3>
                             </div>
                           </div>
                           <div className="shrink-0">{getDecisionBadge(record.qualification_decision)}</div>
                         </div>
                         <div className="space-y-1.5 text-xs text-muted-foreground">
-                          {parsed.email && <div className="flex items-center gap-1.5"><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{parsed.email}</span></div>}
+                          {displayEmail && <div className="flex items-center gap-1.5"><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{displayEmail}</span></div>}
                           {record.job_description_title && <div className="flex items-center gap-1.5"><Briefcase className="h-3 w-3 shrink-0" /><span className="truncate">{record.job_description_title}</span></div>}
                           <div className="flex items-center justify-between pt-1">
                             <div className="flex items-center gap-1.5"><Calendar className="h-3 w-3 shrink-0" /><span>{record.created_at ? new Date(record.created_at).toLocaleDateString() : '—'}</span></div>
@@ -327,15 +308,17 @@ const CVRecords = () => {
                 <TableBody>
                   {records.map((record) => {
                     const parsed = record.parsed || {};
+                    const displayName = record.application_name || parsed.name || record.file_name || '—';
+                    const displayEmail = record.application_email || parsed.email || '—';
                     const isSelected = selectedIds.has(record.id);
                     return (
                       <TableRow key={record.id} className="cursor-pointer hover:bg-muted/70 data-[state=selected]:bg-muted/70" data-state={isSelected ? 'selected' : undefined} onClick={() => handleRowClick(record)}>
                         <TableCell className="w-12 pr-0" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${parsed.name || record.file_name}`} className="translate-y-0.5" />
+                          <Checkbox checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} className="translate-y-0.5" />
                         </TableCell>
                         <TableCell className="font-medium">{record.rank != null ? record.rank : '—'}</TableCell>
-                        <TableCell>{parsed.name || record.file_name || '—'}</TableCell>
-                        <TableCell className="text-muted-foreground">{parsed.email || '—'}</TableCell>
+                        <TableCell>{displayName}</TableCell>
+                        <TableCell className="text-muted-foreground">{displayEmail}</TableCell>
                         <TableCell className="max-w-[180px] truncate" title={record.job_description_title}>{record.job_description_title || '—'}</TableCell>
                         <TableCell>{getDecisionBadge(record.qualification_decision)}</TableCell>
                         <TableCell className="text-right">{record.qualification_confidence != null ? `${record.qualification_confidence}%` : '—'}</TableCell>
@@ -374,31 +357,13 @@ const CVRecords = () => {
         </>
       )}
 
-      {/* Candidate Profile Modal */}
-      <Dialog open={modalOpen} onOpenChange={(open) => !open && handleCloseModal()}>
-        <DialogContent className="w-[95vw] max-w-3xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Candidate Profile</DialogTitle>
-          </DialogHeader>
-          {detailLoading ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
-              <p className="text-sm text-white/50">Loading profile...</p>
-            </div>
-          ) : detail ? (
-            <CandidateProfile detail={detail} getDecisionBadge={getDecisionBadge} />
-          ) : selectedRecord ? (
-            <LegacyCandidateDetail record={selectedRecord} getDecisionBadge={getDecisionBadge} />
-          ) : null}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
 
 /* ───────────────────────────── Full Profile ───────────────────────────── */
 
-function CandidateProfile({ detail, getDecisionBadge }) {
+export function CandidateProfile({ detail, getDecisionBadge }) {
   const [activeTab, setActiveTab] = useState('overview');
   const parsed = detail.parsed || {};
   const qualified = detail.qualified || {};
@@ -409,6 +374,13 @@ function CandidateProfile({ detail, getDecisionBadge }) {
   const skills = parsed.skills || [];
   const experience = parsed.experience || parsed.work_experience || [];
   const education = parsed.education || [];
+
+  // Prefer real application data over AI-parsed text
+  const displayName = application
+    ? `${application.first_name} ${application.last_name}`.trim()
+    : (parsed.name || detail.file_name || 'Unknown Candidate');
+  const displayEmail = application?.email || parsed.email || '';
+  const displayPhone = application?.phone || parsed.phone || '';
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -427,10 +399,10 @@ function CandidateProfile({ detail, getDecisionBadge }) {
             {getDecisionBadge(detail.qualification_decision)}
             {detail.qualification_priority && <Badge variant="secondary" className="text-xs">{detail.qualification_priority}</Badge>}
           </div>
-          <h2 className="text-lg sm:text-xl font-bold text-white">{parsed.name || detail.file_name || 'Unknown Candidate'}</h2>
+          <h2 className="text-lg sm:text-xl font-bold text-white">{displayName}</h2>
           <div className="mt-1 space-y-0.5 text-sm text-white/60">
-            {parsed.email && <div className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{parsed.email}</div>}
-            {parsed.phone && <div className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{parsed.phone}</div>}
+            {displayEmail && <div className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{displayEmail}</div>}
+            {displayPhone && <div className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{displayPhone}</div>}
             {detail.job_description_title && <div className="flex items-center gap-1.5 text-violet-300"><Briefcase className="h-3.5 w-3.5 shrink-0" />{detail.job_description_title}</div>}
           </div>
         </div>
@@ -728,8 +700,14 @@ function InfoRow({ icon, label, value }) {
 function LegacyCandidateDetail({ record, getDecisionBadge }) {
   const parsed = record.parsed || {};
   const qualified = record.qualified || {};
+  const app = record.application || null;
   const summary = record.insights?.summary || record.summary?.summary;
   const skills = parsed.skills || [];
+  const displayName = app
+    ? `${app.first_name} ${app.last_name}`.trim()
+    : (parsed.name || record.file_name || 'Unknown');
+  const displayEmail = record.application_email || app?.email || parsed.email || '';
+  const displayPhone = record.application_phone || app?.phone || parsed.phone || '';
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 pb-4 border-b">
@@ -739,10 +717,10 @@ function LegacyCandidateDetail({ record, getDecisionBadge }) {
             {getDecisionBadge(record.qualification_decision)}
             {record.qualification_priority && <Badge variant="secondary" className="text-xs">{record.qualification_priority}</Badge>}
           </div>
-          <h3 className="text-base sm:text-lg font-semibold break-words">{parsed.name || record.file_name || 'Unknown'}</h3>
+          <h3 className="text-base sm:text-lg font-semibold break-words">{displayName}</h3>
           <div className="text-xs sm:text-sm text-muted-foreground mt-1 space-y-0.5">
-            {parsed.email && <p className="break-all">{parsed.email}</p>}
-            {parsed.phone && <p>{parsed.phone}</p>}
+            {displayEmail && <p className="break-all">{displayEmail}</p>}
+            {displayPhone && <p>{displayPhone}</p>}
             {record.job_description_title && <p className="mt-1">Job: {record.job_description_title}</p>}
           </div>
         </div>

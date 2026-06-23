@@ -270,11 +270,12 @@ const RecruitmentAnalytics = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6 w-full max-w-full overflow-x-hidden">
-      {/* Job Filter: All Jobs = analytics for all; specific job = analytics for that job only */}
+      {/* Filters */}
       <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
-        <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6">
+        <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 space-y-3">
+          {/* Row 1: Job filter */}
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
-            <label className="text-sm font-medium shrink-0 text-white">Filter by Job:</label>
+            <label className="text-sm font-medium shrink-0 text-white">Job:</label>
             <SearchableSelect
               value={selectedJobId ? String(selectedJobId) : 'all'}
               onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}
@@ -288,7 +289,7 @@ const RecruitmentAnalytics = () => {
                 <span className="truncate">Showing: {selectedJob.title}</span>
               </Badge>
             ) : (
-              <span className="text-sm text-muted-foreground">Showing analytics for all jobs</span>
+              <span className="text-sm text-muted-foreground">All jobs</span>
             )}
             <div className="flex gap-2 sm:ml-auto flex-wrap">
               <button
@@ -310,6 +311,33 @@ const RecruitmentAnalytics = () => {
                 Export Interviews
               </button>
             </div>
+          </div>
+
+          {/* Row 2: Time range presets */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-white shrink-0">Period:</span>
+            {[
+              { label: '7 days',   days: 7,   months: 1  },
+              { label: '30 days',  days: 30,  months: 1  },
+              { label: '90 days',  days: 90,  months: 3  },
+              { label: '6 months', days: 180, months: 6  },
+              { label: '12 months',days: 365, months: 12 },
+            ].map((preset) => {
+              const active = timeRange.days === preset.days && timeRange.months === preset.months;
+              return (
+                <button
+                  key={preset.label}
+                  onClick={() => setTimeRange({ days: preset.days, months: preset.months })}
+                  className="text-xs px-3 py-1.5 rounded-lg border font-medium transition-all"
+                  style={active
+                    ? { background: 'rgba(167,139,250,0.18)', borderColor: 'rgba(167,139,250,0.5)', color: '#c4b5fd' }
+                    : { background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.45)' }
+                  }
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
