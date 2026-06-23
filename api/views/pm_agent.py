@@ -319,7 +319,8 @@ def _build_available_users(project_id=None, project=None, company_user=None):
     """
     Return users created by this company_user (from UserProfile).
     Falls back to team members if no company_user provided.
-    Never include superusers.
+    Never include superusers, and never include deactivated (is_active=False)
+    users — they shouldn't appear in task Assign-To dropdowns.
     """
     available_users = []
 
@@ -327,7 +328,8 @@ def _build_available_users(project_id=None, project=None, company_user=None):
     if company_user:
         from core.models import UserProfile
         created_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user
+            created_by_company_user=company_user,
+            user__is_active=True,
         ).select_related('user')
         for profile in created_profiles:
             user = profile.user
@@ -343,7 +345,10 @@ def _build_available_users(project_id=None, project=None, company_user=None):
 
     # Fallback: team members for a specific project
     if project_id and project is not None:
-        team_members = TeamMember.objects.filter(project_id=project_id).select_related("user")
+        team_members = TeamMember.objects.filter(
+            project_id=project_id,
+            user__is_active=True,
+        ).select_related("user")
         for member in team_members:
             if getattr(member.user, "is_superuser", False):
                 continue
@@ -357,7 +362,7 @@ def _build_available_users(project_id=None, project=None, company_user=None):
             )
     else:
         User = get_user_model()
-        users = User.objects.filter(is_superuser=False)[:50]
+        users = User.objects.filter(is_superuser=False, is_active=True)[:50]
         for u in users:
             available_users.append(
                 {"id": u.id, "username": u.username, "name": u.get_full_name() or u.username}
@@ -2957,6 +2962,49 @@ def create_project_manual(request):
             'status': 'error',
             'message': 'Failed to create project',
             'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_project_manual(request, project_id):
+    """Delete a project owned by the calling company user.
+
+    Hard-deletes the Project row; cascade rules on Task / TeamMember / etc.
+    take care of related data. Only the company user who created the project
+    (or another user in the same company) can delete it — we never let one
+    company touch another company's data.
+    """
+    company_user = request.user
+    company = company_user.company
+    try:
+        try:
+            project = Project.objects.get(pk=project_id, company=company)
+        except Project.DoesNotExist:
+            return Response(
+                {'status': 'error', 'message': 'Project not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        project_name = project.name
+        project.delete()
+        _audit_log(company_user, 'project_deleted', 'Project', project_id, project_name)
+
+        return Response({
+            'status': 'success',
+            'message': 'Project deleted successfully',
+            'data': {'id': project_id, 'name': project_name},
+        }, status=status.HTTP_200_OK)
+
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.exception("delete_project_manual failed")
+        return Response({
+            'status': 'error',
+            'message': 'Failed to delete project',
+            'error': str(e),
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

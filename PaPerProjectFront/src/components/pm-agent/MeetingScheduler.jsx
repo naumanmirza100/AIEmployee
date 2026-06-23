@@ -582,6 +582,16 @@ export default function MeetingScheduler() {
                 {meetings.map((m) => {
                   const sc = STATUS_CONFIG[m.status] || STATUS_CONFIG.pending;
                   const StatusIcon = sc.icon;
+                  // Who made the most recent counter-proposal? When the *organizer*
+                  // (the current user looking at this dashboard) is the one who
+                  // proposed the new time, they should NOT see an "Accept Proposed
+                  // Time" button for their own proposal — only the other party
+                  // accepts. Find the latest counter_proposed response and check
+                  // its `responded_by`.
+                  const lastCounter = [...(m.responses || [])]
+                    .reverse()
+                    .find((r) => r.action === 'counter_proposed');
+                  const counterIsFromInvitee = lastCounter?.responded_by === 'invitee';
                   return (
                     <div key={m.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
                       <div className="flex items-start justify-between">
@@ -674,12 +684,22 @@ export default function MeetingScheduler() {
                             </div>
                           ) : (
                             <>
-                              {/* Accept button — shown when invitee counter-proposed a new time */}
-                              {m.status === 'counter_proposed' && (
+                              {/* Accept button — shown only when the *invitee* counter-proposed.
+                                  If the organizer (us) counter-proposed, the invitee is the
+                                  one who needs to accept; hiding this button stops the
+                                  organizer from accepting their own proposal. */}
+                              {m.status === 'counter_proposed' && counterIsFromInvitee && (
                                 <Button size="sm" onClick={() => handleRespond(m.id, 'accepted')} disabled={respondLoading}
                                   className="bg-emerald-600 hover:bg-emerald-700 text-xs h-7">
                                   <CheckCircle className="h-3 w-3 mr-1" /> Accept Proposed Time
                                 </Button>
+                              )}
+                              {/* When the organizer counter-proposed, show a status hint
+                                  instead of a misleading Accept button. */}
+                              {m.status === 'counter_proposed' && !counterIsFromInvitee && (
+                                <span className="text-xs text-amber-400 self-center flex items-center gap-1">
+                                  <Clock className="h-3 w-3" /> Waiting for {m.invitee_name || 'invitee'} to accept your proposed time
+                                </span>
                               )}
                               <Button size="sm" onClick={() => handleRespond(m.id, 'withdrawn')} variant="outline" className="text-xs h-7 border-red-500/30 text-red-400 hover:bg-red-500/10">
                                 <Trash2 className="h-3 w-3 mr-1" /> Withdraw

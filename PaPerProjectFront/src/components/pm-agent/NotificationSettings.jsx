@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import pmAgentService from '@/services/pmAgentService';
 import { Loader2, Trash2, Send, Plus } from 'lucide-react';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const CHANNEL_TYPES = [
   { value: 'slack', label: 'Slack (webhook)' },
@@ -42,6 +43,13 @@ export default function NotificationSettings() {
     notification_type: 'overdue_task', name: '', title_template: '', message_template: '', default_severity: 'info', is_active: true,
   });
   const [savingTemplate, setSavingTemplate] = useState(false);
+
+  // Generic confirmation state — replaces window.confirm() throughout this file.
+  // Caller sets the meta + onConfirm; dialog closes on cancel/confirm.
+  const [confirm, setConfirm] = useState({
+    open: false, title: '', description: '', confirmLabel: 'Delete', onConfirm: null, loading: false,
+  });
+  const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
 
   useEffect(() => {
     refreshChannels();
@@ -99,14 +107,25 @@ export default function NotificationSettings() {
     }
   };
 
-  const removeChannel = async (id) => {
-    if (!window.confirm('Delete this channel?')) return;
-    try {
-      await pmAgentService.deleteNotificationChannel(id);
-      refreshChannels();
-    } catch (e) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
-    }
+  const removeChannel = (id) => {
+    setConfirm({
+      open: true,
+      title: 'Delete this channel?',
+      description: 'Notifications will stop going out through this channel. This cannot be undone.',
+      confirmLabel: 'Delete channel',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          await pmAgentService.deleteNotificationChannel(id);
+          refreshChannels();
+          closeConfirm();
+        } catch (e) {
+          toast({ title: 'Error', description: e.message, variant: 'destructive' });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const testChannel = async (id) => {
@@ -150,14 +169,25 @@ export default function NotificationSettings() {
     }
   };
 
-  const removeTemplate = async (id) => {
-    if (!window.confirm('Delete this template?')) return;
-    try {
-      await pmAgentService.deleteNotificationTemplate(id);
-      refreshTemplates();
-    } catch (e) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
-    }
+  const removeTemplate = (id) => {
+    setConfirm({
+      open: true,
+      title: 'Delete this template?',
+      description: 'Notifications of this type will fall back to the default template.',
+      confirmLabel: 'Delete template',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          await pmAgentService.deleteNotificationTemplate(id);
+          refreshTemplates();
+          closeConfirm();
+        } catch (e) {
+          toast({ title: 'Error', description: e.message, variant: 'destructive' });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   return (
@@ -314,6 +344,17 @@ export default function NotificationSettings() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirm.open}
+        onOpenChange={(o) => !o && closeConfirm()}
+        title={confirm.title}
+        description={confirm.description}
+        confirmLabel={confirm.confirmLabel}
+        variant="danger"
+        loading={confirm.loading}
+        onConfirm={confirm.onConfirm}
+      />
     </div>
   );
 }
