@@ -223,6 +223,7 @@ urlpatterns = [
     
     # Manual Project and Task Creation endpoints (Company User)
     re_path(r'^project-manager/projects/create/?$', pm_agent.create_project_manual, name='pm_create_project_manual'),
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/delete/?$', pm_agent.delete_project_manual, name='pm_delete_project_manual'),
     re_path(r'^project-manager/tasks/create/?$', pm_agent.create_task_manual, name='pm_create_task_manual'),
     re_path(r'^project-manager/users/?$', pm_agent.get_available_users, name='pm_get_available_users'),
     # New PM Agent endpoints

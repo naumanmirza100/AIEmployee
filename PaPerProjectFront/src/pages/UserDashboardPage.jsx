@@ -130,6 +130,8 @@ const UserDashboardPage = () => {
     status: 'planning',
     priority: 'medium',
     project_type: 'web_app',
+    start_date: '',
+    deadline: '',
   });
   const [taskForm, setTaskForm] = useState({
     project_id: '',
@@ -138,6 +140,7 @@ const UserDashboardPage = () => {
     priority: 'medium',
     status: 'todo',
     assignee_id: 'none',
+    due_date: '',
   });
 
   useEffect(() => {
@@ -509,6 +512,8 @@ const UserDashboardPage = () => {
           status: 'planning',
           priority: 'medium',
           project_type: 'web_app',
+          start_date: '',
+          deadline: '',
         });
         fetchPmProjects();
         fetchAllProjectTasks();
@@ -552,6 +557,7 @@ const UserDashboardPage = () => {
           priority: 'medium',
           status: 'todo',
           assignee_id: 'none',
+          due_date: '',
         });
         fetchAllProjectTasks();
         fetchTasks();
@@ -567,12 +573,16 @@ const UserDashboardPage = () => {
 
   const handleEditProject = (project) => {
     setEditingProject(project);
+    const toIsoDate = (val) => (val ? String(val).slice(0, 10) : '');
     setProjectForm({
       name: project.name || '',
       description: project.description || '',
       status: project.status || 'planning',
       priority: project.priority || 'medium',
       project_type: project.project_type || 'web_app',
+      start_date: toIsoDate(project.start_date),
+      // Tolerate stale records that only have end_date populated
+      deadline: toIsoDate(project.deadline || project.end_date),
     });
     setShowEditProjectModal(true);
   };
@@ -612,6 +622,7 @@ const UserDashboardPage = () => {
       priority: task.priority || 'medium',
       status: task.status || 'todo',
       assignee_id: assigneeId,
+      due_date: task.due_date ? String(task.due_date).slice(0, 10) : '',
     });
     setShowEditTaskModal(true);
   };
@@ -1638,6 +1649,26 @@ const UserDashboardPage = () => {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="project-start-date">Start Date</Label>
+                        <Input
+                          id="project-start-date"
+                          type="date"
+                          value={projectForm.start_date}
+                          onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="project-deadline">Deadline</Label>
+                        <Input
+                          id="project-deadline"
+                          type="date"
+                          value={projectForm.deadline}
+                          onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
+                        />
+                      </div>
+                    </div>
                     <Button type="submit" className="w-full">
                       Create Project
                     </Button>
@@ -1748,6 +1779,15 @@ const UserDashboardPage = () => {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="task-due-date">Due Date</Label>
+                      <Input
+                        id="task-due-date"
+                        type="date"
+                        value={taskForm.due_date}
+                        onChange={(e) => setTaskForm({ ...taskForm, due_date: e.target.value })}
+                      />
+                    </div>
                     <Button type="submit" className="w-full">
                       Create Task
                     </Button>
@@ -1770,6 +1810,8 @@ const UserDashboardPage = () => {
                 status: 'planning',
                 priority: 'medium',
                 project_type: 'web_app',
+                start_date: '',
+                deadline: '',
               });
             }
           }}>
@@ -1862,6 +1904,26 @@ const UserDashboardPage = () => {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-project-start-date">Start Date</Label>
+                    <Input
+                      id="edit-project-start-date"
+                      type="date"
+                      value={projectForm.start_date}
+                      onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-project-deadline">Deadline</Label>
+                    <Input
+                      id="edit-project-deadline"
+                      type="date"
+                      value={projectForm.deadline}
+                      onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
+                    />
+                  </div>
+                </div>
                 <div className="flex justify-end gap-2 pt-4">
                   <Button
                     type="button"
@@ -1895,6 +1957,7 @@ const UserDashboardPage = () => {
                 priority: 'medium',
                 status: 'todo',
                 assignee_id: 'none',
+                due_date: '',
               });
             }
           }}>
@@ -1978,6 +2041,15 @@ const UserDashboardPage = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-task-due-date">Due Date</Label>
+                  <Input
+                    id="edit-task-due-date"
+                    type="date"
+                    value={taskForm.due_date}
+                    onChange={(e) => setTaskForm({ ...taskForm, due_date: e.target.value })}
+                  />
                 </div>
                 <div className="flex justify-end gap-2 pt-4">
                   <Button

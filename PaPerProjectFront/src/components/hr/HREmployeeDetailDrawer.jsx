@@ -36,7 +36,7 @@ const STATUS_BADGE = {
   pending: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
   approved: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
   rejected: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
-  cancelled: 'bg-slate-500/10 text-slate-300 border-slate-400/30',
+  cancelled: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
 };
 
 
@@ -408,7 +408,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                       <Pencil className="h-3 w-3 mr-1" /> Edit
                     </Button>
                     <Button size="sm" variant="outline"
-                      className="h-7 px-2 text-xs text-sky-300 hover:text-sky-200 border-sky-400/30"
+                      className="h-7 px-2 text-xs text-violet-300 hover:text-violet-200 border-violet-400/30"
                       onClick={handleGdprExport}
                       title="Download a ZIP of all data we hold about this employee (GDPR Article 15)">
                       <Download className="h-3 w-3 mr-1" /> Export data
@@ -593,7 +593,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                           <Badge variant="outline" className={`text-[10px] ${
                             g.status === 'met' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
                             : g.status === 'missed' || g.status === 'dropped' ? 'bg-rose-500/10 text-rose-300 border-rose-400/30'
-                            : g.status === 'in_progress' ? 'bg-sky-500/10 text-sky-300 border-sky-400/30'
+                            : g.status === 'in_progress' ? 'bg-violet-500/10 text-violet-300 border-violet-400/30'
                             : 'bg-amber-500/10 text-amber-300 border-amber-400/30'
                           }`}>
                             {g.status.replace(/_/g, ' ')}

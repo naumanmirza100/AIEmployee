@@ -38,22 +38,22 @@ function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
   const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-violet-300">$1</strong>');
-  const italic = (s) => s.replace(/\*(.+?)\*/g, '<em class="text-gray-400">$1</em>');
+  const italic = (s) => s.replace(/\*(.+?)\*/g, '<em class="text-white/55">$1</em>');
   const lines = markdown.split('\n');
   const out = [];
   for (const line of lines) {
     const t = line.trim();
     if (!t) { out.push('<br/>'); continue; }
     if (t.startsWith('## ')) { out.push(`<h3 class="text-base font-semibold text-violet-300 mt-2 mb-1">${bold(escape(t.slice(3)))}</h3>`); continue; }
-    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-gray-200 text-sm">${italic(bold(escape(t.replace(/^[-*]\s+/, ''))))}</span></div>`); continue; }
-    out.push(`<p class="text-gray-300 my-0.5 text-sm">${italic(bold(escape(t)))}</p>`);
+    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-white/80 text-sm">${italic(bold(escape(t.replace(/^[-*]\s+/, ''))))}</span></div>`); continue; }
+    out.push(`<p class="text-white/65 my-0.5 text-sm">${italic(bold(escape(t)))}</p>`);
   }
   return out.join('\n');
 }
 
 const STATUS_BADGE = {
   scheduled: { color: 'text-emerald-400', bg: 'bg-emerald-500/15', border: 'border-emerald-400/30' },
-  completed: { color: 'text-sky-400', bg: 'bg-sky-500/15', border: 'border-sky-400/30' },
+  completed: { color: 'text-violet-400', bg: 'bg-violet-500/15', border: 'border-violet-400/30' },
   cancelled: { color: 'text-rose-400', bg: 'bg-rose-500/15', border: 'border-rose-400/30' },
   rescheduled: { color: 'text-amber-400', bg: 'bg-amber-500/15', border: 'border-amber-400/30' },
 };

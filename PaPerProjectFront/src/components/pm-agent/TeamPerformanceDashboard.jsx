@@ -19,9 +19,9 @@ function markdownToHtml(markdown) {
     if (t.startsWith('# ')) { out.push(`<h2 class="text-lg font-bold text-violet-300 mt-3 mb-1">${bold(escape(t.slice(2)))}</h2>`); continue; }
     if (t.startsWith('## ')) { out.push(`<h3 class="text-base font-semibold text-violet-300 mt-2 mb-1">${bold(escape(t.slice(3)))}</h3>`); continue; }
     if (t.startsWith('### ')) { out.push(`<h4 class="text-sm font-semibold text-violet-400 mt-2 mb-1">${bold(escape(t.slice(4)))}</h4>`); continue; }
-    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-gray-200">${bold(escape(t.replace(/^[-*]\s+/, '')))}</span></div>`); continue; }
-    if (/^\d+\.\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 font-medium">${t.match(/^\d+/)[0]}.</span><span class="text-gray-200">${bold(escape(t.replace(/^\d+\.\s+/, '')))}</span></div>`); continue; }
-    out.push(`<p class="text-gray-300 my-1">${bold(escape(t))}</p>`);
+    if (/^[-*]\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 mt-0.5">•</span><span class="text-white/80">${bold(escape(t.replace(/^[-*]\s+/, '')))}</span></div>`); continue; }
+    if (/^\d+\.\s/.test(t)) { out.push(`<div class="flex items-start gap-2 ml-2"><span class="text-violet-400 font-medium">${t.match(/^\d+/)[0]}.</span><span class="text-white/80">${bold(escape(t.replace(/^\d+\.\s+/, '')))}</span></div>`); continue; }
+    out.push(`<p class="text-white/65 my-1">${bold(escape(t))}</p>`);
   }
   return out.join('\n');
 }
@@ -65,7 +65,7 @@ export default function TeamPerformanceDashboard() {
   return (
     <div className="space-y-6">
       {/* Controls */}
-      <Card className="bg-gray-900/50 border-gray-700">
+      <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg text-violet-300 flex items-center gap-2">
             <Users className="w-5 h-5" /> Team Performance Analytics
@@ -74,10 +74,10 @@ export default function TeamPerformanceDashboard() {
         <CardContent>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Select value={selectedProject || ''} onValueChange={(v) => setSelectedProject(v || null)}>
-              <SelectTrigger className="flex-1 h-10 bg-gray-800 border-gray-600 text-white">
+              <SelectTrigger className="flex-1 h-10 bg-white/[0.02] border-white/[0.08] text-white">
                 <SelectValue placeholder="Select a Project" />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-600 z-50">
+              <SelectContent className="bg-white/[0.02] border-white/[0.08] z-50">
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                 ))}
@@ -94,7 +94,7 @@ export default function TeamPerformanceDashboard() {
       {loading && (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
-          <span className="ml-3 text-gray-400">Analyzing team performance...</span>
+          <span className="ml-3 text-white/55">Analyzing team performance...</span>
         </div>
       )}
 
@@ -103,28 +103,28 @@ export default function TeamPerformanceDashboard() {
         <div className="space-y-4">
           {/* Summary Stats Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Card className="bg-gray-800/60 border-gray-700">
+            <Card className="bg-white/[0.03] border-white/[0.06]">
               <CardContent className="p-3 text-center">
                 <div className="text-2xl font-bold text-violet-300">{performance.total_members || 0}</div>
-                <div className="text-xs text-gray-400">Team Members</div>
+                <div className="text-xs text-white/55">Team Members</div>
               </CardContent>
             </Card>
-            <Card className="bg-gray-800/60 border-gray-700">
+            <Card className="bg-white/[0.03] border-white/[0.06]">
               <CardContent className="p-3 text-center">
-                <div className="text-2xl font-bold text-blue-300">{performance.total_tasks || 0}</div>
-                <div className="text-xs text-gray-400">Total Tasks</div>
+                <div className="text-2xl font-bold text-violet-300">{performance.total_tasks || 0}</div>
+                <div className="text-xs text-white/55">Total Tasks</div>
               </CardContent>
             </Card>
-            <Card className="bg-gray-800/60 border-gray-700">
+            <Card className="bg-white/[0.03] border-white/[0.06]">
               <CardContent className="p-3 text-center">
-                <div className="text-2xl font-bold text-green-400">{performance.overall_completion_rate || 0}%</div>
-                <div className="text-xs text-gray-400">Completion Rate</div>
+                <div className="text-2xl font-bold text-emerald-400">{performance.overall_completion_rate || 0}%</div>
+                <div className="text-xs text-white/55">Completion Rate</div>
               </CardContent>
             </Card>
-            <Card className="bg-gray-800/60 border-gray-700">
+            <Card className="bg-white/[0.03] border-white/[0.06]">
               <CardContent className="p-3 text-center">
-                <div className="text-2xl font-bold text-yellow-400">{performance.unassigned_tasks || 0}</div>
-                <div className="text-xs text-gray-400">Unassigned</div>
+                <div className="text-2xl font-bold text-amber-400">{performance.unassigned_tasks || 0}</div>
+                <div className="text-xs text-white/55">Unassigned</div>
               </CardContent>
             </Card>
           </div>
@@ -134,10 +134,10 @@ export default function TeamPerformanceDashboard() {
             <div className="space-y-3">
               {performance.members.map((member, i) => {
                 const workloadColor = member.workload === 'Overloaded' ? 'text-red-400 bg-red-500/10' :
-                                      member.workload === 'Underloaded' ? 'text-yellow-400 bg-yellow-500/10' :
-                                      'text-green-400 bg-green-500/10';
+                                      member.workload === 'Underloaded' ? 'text-amber-400 bg-amber-500/10' :
+                                      'text-emerald-400 bg-emerald-500/10';
                 return (
-                  <Card key={i} className="bg-gray-800 border-gray-700">
+                  <Card key={i} className="bg-white/[0.02] border-white/[0.06]">
                     <CardContent className="pt-4">
                       {/* Header: Avatar, Name, Score, Workload Badge */}
                       <div className="flex items-center justify-between mb-3">
@@ -153,50 +153,50 @@ export default function TeamPerformanceDashboard() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className={`text-2xl font-bold ${member.score >= 80 ? 'text-green-400' : member.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                          <div className={`text-2xl font-bold ${member.score >= 80 ? 'text-emerald-400' : member.score >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
                             {member.score ?? 0}
                           </div>
-                          <div className="text-[10px] text-gray-500">SCORE</div>
+                          <div className="text-[10px] text-white/40">SCORE</div>
                         </div>
                       </div>
 
                       {/* Stats Grid */}
                       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-xs mb-3">
-                        <div className="bg-gray-900 rounded p-2 text-center">
+                        <div className="bg-black/30 rounded p-2 text-center">
                           <div className="text-white font-bold">{member.total_tasks || 0}</div>
-                          <div className="text-gray-500">Total</div>
+                          <div className="text-white/40">Total</div>
                         </div>
-                        <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-green-400 font-bold">{member.tasks_completed || 0}</div>
-                          <div className="text-gray-500">Done</div>
+                        <div className="bg-black/30 rounded p-2 text-center">
+                          <div className="text-emerald-400 font-bold">{member.tasks_completed || 0}</div>
+                          <div className="text-white/40">Done</div>
                         </div>
-                        <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-blue-400 font-bold">{member.tasks_in_progress || 0}</div>
-                          <div className="text-gray-500">In Progress</div>
+                        <div className="bg-black/30 rounded p-2 text-center">
+                          <div className="text-violet-400 font-bold">{member.tasks_in_progress || 0}</div>
+                          <div className="text-white/40">In Progress</div>
                         </div>
-                        <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-gray-300 font-bold">{member.tasks_todo || 0}</div>
-                          <div className="text-gray-500">To Do</div>
+                        <div className="bg-black/30 rounded p-2 text-center">
+                          <div className="text-white/65 font-bold">{member.tasks_todo || 0}</div>
+                          <div className="text-white/40">To Do</div>
                         </div>
-                        <div className="bg-gray-900 rounded p-2 text-center">
+                        <div className="bg-black/30 rounded p-2 text-center">
                           <div className="text-red-400 font-bold">{member.overdue || 0}</div>
-                          <div className="text-gray-500">Overdue</div>
+                          <div className="text-white/40">Overdue</div>
                         </div>
-                        <div className="bg-gray-900 rounded p-2 text-center">
-                          <div className="text-orange-400 font-bold">{member.blocked || 0}</div>
-                          <div className="text-gray-500">Blocked</div>
+                        <div className="bg-black/30 rounded p-2 text-center">
+                          <div className="text-amber-400 font-bold">{member.blocked || 0}</div>
+                          <div className="text-white/40">Blocked</div>
                         </div>
                       </div>
 
                       {/* Completion Progress Bar */}
                       <div className="mb-2">
-                        <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                        <div className="flex justify-between text-[10px] text-white/55 mb-1">
                           <span>Completion</span>
                           <span>{member.completion_rate || 0}%</span>
                         </div>
-                        <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                        <div className="w-full h-1.5 bg-white/[0.05] rounded-full overflow-hidden">
                           <div
-                            className={`h-full rounded-full transition-all ${member.completion_rate >= 80 ? 'bg-green-500' : member.completion_rate >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            className={`h-full rounded-full transition-all ${member.completion_rate >= 80 ? 'bg-emerald-500' : member.completion_rate >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
                             style={{ width: `${member.completion_rate || 0}%` }}
                           />
                         </div>
@@ -204,11 +204,11 @@ export default function TeamPerformanceDashboard() {
 
                       {/* Task Titles */}
                       {member.task_titles?.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-gray-700/50">
-                          <div className="text-[10px] text-gray-500 mb-1">Assigned Tasks:</div>
+                        <div className="mt-2 pt-2 border-t border-white/[0.04]">
+                          <div className="text-[10px] text-white/40 mb-1">Assigned Tasks:</div>
                           <div className="flex flex-wrap gap-1">
                             {member.task_titles.map((title, ti) => (
-                              <span key={ti} className="text-[10px] px-2 py-0.5 bg-gray-900 text-gray-300 rounded">
+                              <span key={ti} className="text-[10px] px-2 py-0.5 bg-black/30 text-white/65 rounded">
                                 {title.length > 30 ? title.slice(0, 30) + '...' : title}
                               </span>
                             ))}
@@ -224,7 +224,7 @@ export default function TeamPerformanceDashboard() {
 
           {/* Insights */}
           {performance.insights?.length > 0 && (
-            <Card className="bg-gray-800 border-gray-700">
+            <Card className="bg-white/[0.02] border-white/[0.06]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm text-violet-300 flex items-center gap-1">
                   <TrendingUp className="w-4 h-4" /> Insights
@@ -233,7 +233,7 @@ export default function TeamPerformanceDashboard() {
               <CardContent>
                 <div className="space-y-1.5">
                   {performance.insights.map((insight, i) => (
-                    <div key={i} className="text-sm text-gray-300 flex items-start gap-2">
+                    <div key={i} className="text-sm text-white/65 flex items-start gap-2">
                       <span className="text-violet-400 mt-0.5">•</span>
                       <span>{typeof insight === 'string' ? insight : insight.text || JSON.stringify(insight)}</span>
                     </div>
@@ -245,16 +245,16 @@ export default function TeamPerformanceDashboard() {
 
           {/* Recommendations */}
           {performance.recommendations?.length > 0 && (
-            <Card className="bg-gray-800 border-gray-700">
+            <Card className="bg-white/[0.02] border-white/[0.06]">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-green-400 flex items-center gap-1">
+                <CardTitle className="text-sm text-emerald-400 flex items-center gap-1">
                   <Trophy className="w-4 h-4" /> Recommendations
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1.5">
                 {performance.recommendations.map((rec, i) => (
-                  <div key={i} className="text-sm text-gray-300 flex items-start gap-2">
-                    <span className="text-green-400 mt-0.5">•</span>
+                  <div key={i} className="text-sm text-white/65 flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">•</span>
                     <span>{typeof rec === 'string' ? rec : rec.text || rec.recommendation || JSON.stringify(rec)}</span>
                   </div>
                 ))}
@@ -266,8 +266,8 @@ export default function TeamPerformanceDashboard() {
 
       {/* Empty State */}
       {!loading && !performance && (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-          <Users className="w-12 h-12 mb-3 text-gray-600" />
+        <div className="flex flex-col items-center justify-center py-20 text-white/40">
+          <Users className="w-12 h-12 mb-3 text-white/35" />
           <p className="text-sm text-center">Select a project and click Analyze Team to view performance metrics.</p>
         </div>
       )}

@@ -77,9 +77,22 @@ class Project(models.Model):
     
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return self.name
+
+    @property
+    def effective_deadline(self):
+        """
+        Canonical end / due date for the project.
+
+        The model historically carried both `end_date` and `deadline`. They have
+        been collapsed into a single user-facing field (`deadline`). New writes
+        mirror the value into both columns, but legacy rows may still have only
+        one of them populated. Always read through this property to tolerate
+        both shapes.
+        """
+        return self.deadline or self.end_date
 
 
 class Task(models.Model):

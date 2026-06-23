@@ -381,7 +381,21 @@ def update_user(request, userId):
                     'message': 'Email already taken by another user'
                 }, status=status.HTTP_400_BAD_REQUEST)
             user.email = data['email']
-        
+
+        if 'username' in data:
+            new_username = (data.get('username') or '').strip()
+            if not new_username:
+                return Response({
+                    'status': 'error',
+                    'message': 'Username cannot be empty.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if User.objects.filter(username=new_username).exclude(id=user.id).exists():
+                return Response({
+                    'status': 'error',
+                    'message': 'Username already taken by another user.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+            user.username = new_username
+
         if 'fullName' in data or 'full_name' in data:
             full_name = data.get('fullName') or data.get('full_name', '')
             name_parts = full_name.split(maxsplit=1) if full_name else []

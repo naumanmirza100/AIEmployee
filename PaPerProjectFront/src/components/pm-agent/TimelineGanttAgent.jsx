@@ -718,7 +718,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                                     >
                                       <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-red-500 rounded-full border border-white"></div>
                                       {/* Tooltip */}
-                                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-20">
+                                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black/30 dark:bg-white/[0.02] text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-20">
                                         <div className="font-medium">Deadline</div>
                                         <div>{dueDate.toLocaleString('en-US', { 
                                           month: 'short', 
@@ -740,15 +740,15 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                                   const completionPosition = Math.max(0, Math.min(100, (completionMinutes / totalMinutes) * 100));
                                   return (
                                     <div
-                                      className="absolute top-0 w-0.5 h-full bg-green-500 z-10 cursor-pointer group"
+                                      className="absolute top-0 w-0.5 h-full bg-emerald-500 z-10 cursor-pointer group"
                                       style={{
                                         left: `${completionPosition}%`,
                                         transform: 'translateX(-50%)'
                                       }}
                                     >
-                                      <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-green-500 rounded-full border border-white"></div>
+                                      <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-emerald-500 rounded-full border border-white"></div>
                                       {/* Tooltip */}
-                                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-20">
+                                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black/30 dark:bg-white/[0.02] text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-20">
                                         <div className="font-medium">Completed</div>
                                         <div>{completedDate.toLocaleString('en-US', { 
                                           month: 'short', 
@@ -822,17 +822,17 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                                   >
                                     {/* Tooltip - Shows on hover of the marker */}
                                     <div 
-                                      className={`absolute left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg transition-opacity whitespace-nowrap ${
+                                      className={`absolute left-1/2 transform -translate-x-1/2 px-2 py-1 bg-black/30 dark:bg-white/[0.02] text-white text-xs rounded shadow-lg transition-opacity whitespace-nowrap ${
                                         isHovered ? 'opacity-100' : 'opacity-0'
                                       } ${labelPosition === 'bottom-full' ? 'top-0' : 'bottom-0'}`}
                                     >
                                       <div className="font-medium mb-1">Status Changed</div>
                                       <div className="mb-1">
-                                        <span className="text-purple-300">{marker.from || 'Created'}</span>
+                                        <span className="text-violet-300">{marker.from || 'Created'}</span>
                                         <span className="mx-1">→</span>
-                                        <span className="text-purple-200">{marker.to}</span>
+                                        <span className="text-violet-200">{marker.to}</span>
                                       </div>
-                                      <div className="text-gray-300 text-[10px]">
+                                      <div className="text-white/65 text-[10px]">
                                         {marker.date.toLocaleString('en-US', { 
                                           year: 'numeric', 
                                           month: '2-digit', 
@@ -844,7 +844,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                                         })}
                                       </div>
                                       {marker.changed_by && (
-                                        <div className="text-gray-300 text-[10px] mt-1">By: {marker.changed_by}</div>
+                                        <div className="text-white/65 text-[10px] mt-1">By: {marker.changed_by}</div>
                                       )}
                                       {/* Arrow */}
                                       <div className={`absolute left-1/2 transform -translate-x-1/2 w-0 h-0 ${
@@ -900,11 +900,11 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                     <p className="text-xs font-medium mb-2">Legend:</p>
                     <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                       <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-green-500"></div>
+                        <div className="w-4 h-4 rounded bg-emerald-500"></div>
                         <span>Completed (Done)</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-blue-500"></div>
+                        <div className="w-4 h-4 rounded bg-violet-500"></div>
                         <span>In Progress</span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -916,11 +916,11 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                         <span>Blocked</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-yellow-500"></div>
+                        <div className="w-4 h-4 rounded bg-amber-500"></div>
                         <span>Planned/To Do</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-violet-500"></div>
                         <span>Status Change</span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -928,7 +928,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                         <span>Deadline</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
                         <span>Completion</span>
                       </div>
                     </div>
@@ -1065,7 +1065,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                             
                             {/* Completion Date Range for Completed Tasks */}
                             {task.date_range.type === 'completed' && task.date_range.completed_from && task.date_range.completed_to && (
-                              <div className="ml-52 text-xs text-green-600 dark:text-green-400">
+                              <div className="ml-52 text-xs text-emerald-600 dark:text-emerald-400">
                                 ✓ Completed from {new Date(task.date_range.completed_from).toLocaleDateString()} to {new Date(task.date_range.completed_to).toLocaleDateString()}
                               </div>
                             )}
@@ -1079,7 +1079,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                             
                             {/* In Progress Since */}
                             {task.date_range.type === 'in_progress' && task.date_range.current_status_since && (
-                              <div className="ml-52 text-xs text-blue-600 dark:text-blue-400">
+                              <div className="ml-52 text-xs text-violet-600 dark:text-violet-400">
                                 🔄 In progress since {new Date(task.date_range.current_status_since).toLocaleDateString()}
                               </div>
                             )}
@@ -1108,12 +1108,12 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                         <div className="text-2xl font-bold text-red-400">{result.data.summary.overdue_count || 0}</div>
                         <div className="text-sm text-muted-foreground">Overdue</div>
                       </div>
-                      <div className="p-3 border rounded-lg bg-white/[0.03] border-yellow-500/30">
-                        <div className="text-2xl font-bold text-yellow-400">{result.data.summary.upcoming_count || 0}</div>
+                      <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                        <div className="text-2xl font-bold text-amber-400">{result.data.summary.upcoming_count || 0}</div>
                         <div className="text-sm text-muted-foreground">Upcoming</div>
                       </div>
-                      <div className="p-3 border rounded-lg bg-white/[0.03] border-orange-500/30">
-                        <div className="text-2xl font-bold text-orange-400">{result.data.summary.critical_count || 0}</div>
+                      <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                        <div className="text-2xl font-bold text-amber-400">{result.data.summary.critical_count || 0}</div>
                         <div className="text-sm text-muted-foreground">Critical</div>
                       </div>
                     </div>
@@ -1126,8 +1126,8 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                           alert.urgency === 'critical' 
                             ? 'border-red-500/30'
                             : alert.urgency === 'high'
-                            ? 'border-orange-500/30'
-                            : 'border-yellow-500/30'
+                            ? 'border-amber-500/30'
+                            : 'border-amber-500/30'
                         }`}
                       >
                         <p className="font-medium text-foreground">
@@ -1155,8 +1155,8 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       </div>
                     ))
                   ) : (
-                    <div className="p-4 bg-white/[0.03] border border-green-500/30 rounded-lg">
-                      <p className="text-sm text-green-400">
+                    <div className="p-4 bg-white/[0.03] border border-emerald-500/30 rounded-lg">
+                      <p className="text-sm text-emerald-400">
                         ✓ No deadline alerts found. All tasks are on track!
                       </p>
                     </div>
@@ -1174,9 +1174,9 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   {result.data.deadline_warnings.map((warning, index) => (
                     <div
                       key={index}
-                      className="p-3 border border-yellow-500/30 rounded-lg bg-white/[0.03]"
+                      className="p-3 border border-amber-500/30 rounded-lg bg-white/[0.03]"
                     >
-                      <p className="font-medium text-yellow-400">
+                      <p className="font-medium text-amber-400">
                         {warning.task_title || 'Task'}
                       </p>
                       <p className="text-sm text-muted-foreground mt-1">
@@ -1202,11 +1202,11 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                         <div className="text-sm text-muted-foreground">High Priority</div>
                       </div>
                       <div className="p-3 border rounded-lg">
-                        <div className="text-2xl font-bold text-yellow-600">{result.data.summary.medium_priority}</div>
+                        <div className="text-2xl font-bold text-amber-600">{result.data.summary.medium_priority}</div>
                         <div className="text-sm text-muted-foreground">Medium Priority</div>
                       </div>
                       <div className="p-3 border rounded-lg">
-                        <div className="text-2xl font-bold text-green-600">{result.data.summary.low_priority}</div>
+                        <div className="text-2xl font-bold text-emerald-600">{result.data.summary.low_priority}</div>
                         <div className="text-sm text-muted-foreground">Low Priority</div>
                       </div>
                     </div>
@@ -1216,8 +1216,8 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       key={index}
                       className={`p-3 border rounded-lg bg-white/[0.03] ${
                         suggestion.priority === 'high' ? 'border-red-200' : 
-                        suggestion.priority === 'medium' ? 'border-yellow-200' : 
-                        'border-green-200'
+                        suggestion.priority === 'medium' ? 'border-amber-200/40' : 
+                        'border-emerald-200/40'
                       }`}
                     >
                       <div className="flex items-start justify-between">
@@ -1298,11 +1298,11 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       <div className="text-sm text-muted-foreground">Expected Working Days</div>
                     </div>
                     <div className="p-3 border rounded-lg bg-white/[0.03]">
-                      <div className="text-2xl font-bold text-green-400">{result.data.estimates.working_days?.optimistic?.toFixed(1) || 'N/A'}</div>
+                      <div className="text-2xl font-bold text-emerald-400">{result.data.estimates.working_days?.optimistic?.toFixed(1) || 'N/A'}</div>
                       <div className="text-sm text-muted-foreground">Optimistic</div>
                     </div>
                     <div className="p-3 border rounded-lg bg-white/[0.03]">
-                      <div className="text-2xl font-bold text-blue-400">{result.data.estimates.working_days?.realistic?.toFixed(1) || 'N/A'}</div>
+                      <div className="text-2xl font-bold text-violet-400">{result.data.estimates.working_days?.realistic?.toFixed(1) || 'N/A'}</div>
                       <div className="text-sm text-muted-foreground">Realistic</div>
                     </div>
                     <div className="p-3 border rounded-lg bg-white/[0.03]">
@@ -1417,8 +1417,8 @@ const TimelineGanttAgent = ({ projects = [] }) => {
 
               {/* Duration (legacy format) */}
               {result.data?.duration && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-950 dark:border-blue-800">
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                <div className="p-4 bg-violet-50 border border-violet-200/40 rounded-lg dark:bg-violet-950 dark:border-violet-800">
+                  <p className="text-sm font-medium text-violet-800 dark:text-violet-200">
                     Estimated Duration: {result.data.duration}
                   </p>
                 </div>
@@ -1439,11 +1439,11 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {result.data.phases.map((phase, index) => {
                       const phaseStyles = {
-                        todo: { border: 'border-l-slate-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-slate-600 text-slate-100 dark:bg-slate-700 dark:text-slate-200', icon: '○' },
-                        in_progress: { border: 'border-l-blue-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-blue-600 text-blue-100 dark:bg-blue-800/80 dark:text-blue-200', icon: '◐' },
-                        review: { border: 'border-l-amber-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-amber-700 text-amber-100 dark:bg-amber-800/80 dark:text-amber-200', icon: '◇' },
-                        done: { border: 'border-l-emerald-500', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-emerald-700 text-emerald-100 dark:bg-emerald-800/80 dark:text-emerald-200', icon: '✓' },
-                        blocked: { border: 'border-l-red-400', bg: 'bg-muted/60 dark:bg-slate-800/70', badge: 'bg-red-600 text-red-100 dark:bg-red-800/80 dark:text-red-200', icon: '!' },
+                        todo: { border: 'border-l-slate-500', bg: 'bg-muted/60 dark:bg-black/30', badge: 'bg-white/[0.07] text-white/85 dark:bg-white/[0.05] dark:text-white/80', icon: '○' },
+                        in_progress: { border: 'border-l-blue-500', bg: 'bg-muted/60 dark:bg-black/30', badge: 'bg-violet-600 text-violet-100 dark:bg-violet-800/80 dark:text-violet-200', icon: '◐' },
+                        review: { border: 'border-l-amber-500', bg: 'bg-muted/60 dark:bg-black/30', badge: 'bg-amber-700 text-amber-100 dark:bg-amber-800/80 dark:text-amber-200', icon: '◇' },
+                        done: { border: 'border-l-emerald-500', bg: 'bg-muted/60 dark:bg-black/30', badge: 'bg-emerald-700 text-emerald-100 dark:bg-emerald-800/80 dark:text-emerald-200', icon: '✓' },
+                        blocked: { border: 'border-l-red-400', bg: 'bg-muted/60 dark:bg-black/30', badge: 'bg-red-600 text-red-100 dark:bg-red-800/80 dark:text-red-200', icon: '!' },
                       };
                       const style = phaseStyles[phase.status] || phaseStyles.todo;
                       return (

@@ -20,8 +20,10 @@ import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
+import pmAgentService from '@/services/pmAgentService';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { API_BASE_URL } from '@/config/apiConfig';
 import {
   Building2, Plus, Briefcase, Users, Eye,
@@ -43,6 +45,12 @@ const CompanyDashboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('dashboard'); // 'dashboard', 'project-manager'
   const [activeTab, setActiveTab] = useState('jobs');
+  // Generic confirmation state — replaces window.confirm() for user (de)activation
+  // and any other destructive action on this page.
+  const [confirm, setConfirm] = useState({
+    open: false, title: '', description: '', confirmLabel: 'Confirm', variant: 'default', onConfirm: null, loading: false,
+  });
+  const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedJobApplications, setSelectedJobApplications] = useState([]);
@@ -391,7 +399,7 @@ const CompanyDashboardPage = () => {
   const handleUpdateProject = async (e) => {
     e.preventDefault();
     if (!editingProject) return;
-    
+
     try {
       const response = await companyProjectsTasksService.updateProject(editingProject.id, projectForm);
       if (response.status === 'success') {
@@ -410,6 +418,38 @@ const CompanyDashboardPage = () => {
         variant: 'destructive',
       });
     }
+  };
+
+  const handleDeleteProject = (project) => {
+    setConfirm({
+      open: true,
+      title: `Delete project "${project.name}"?`,
+      description:
+        'This permanently deletes the project, all its tasks, subtasks, and team assignments. This cannot be undone.',
+      confirmLabel: 'Delete project',
+      variant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await pmAgentService.deleteProjectManual(project.id);
+          if (response.status === 'success') {
+            toast({ title: 'Project deleted', description: `"${project.name}" was removed.` });
+            fetchProjects();
+            closeConfirm();
+          } else {
+            throw new Error(response.message || 'Failed to delete project');
+          }
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to delete project',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const handleEditTask = (task) => {
@@ -775,50 +815,63 @@ const CompanyDashboardPage = () => {
     }
   };
   
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to deactivate this user?')) {
-      return;
-    }
-    
-    try {
-      const response = await companyUserManagementService.deleteUser(userId);
-      if (response.status === 'success') {
-        toast({
-          title: 'Success!',
-          description: 'User deactivated successfully',
-        });
-        fetchUsers();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to deactivate user',
-        variant: 'destructive',
-      });
-    }
+  const handleDeleteUser = (userId) => {
+    setConfirm({
+      open: true,
+      title: 'Deactivate this user?',
+      description:
+        'They will no longer be able to log in or appear in task assignment dropdowns. You can reactivate them later.',
+      confirmLabel: 'Deactivate user',
+      variant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await companyUserManagementService.deleteUser(userId);
+          if (response.status === 'success') {
+            toast({ title: 'Success!', description: 'User deactivated successfully' });
+            fetchUsers();
+          }
+          closeConfirm();
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to deactivate user',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
-  const handleReactivateUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to reactivate this user?')) {
-      return;
-    }
-
-    try {
-      const response = await companyUserManagementService.reactivateUser(userId);
-      if (response.status === 'success') {
-        toast({
-          title: 'Success!',
-          description: 'User reactivated successfully',
-        });
-        fetchUsers();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to reactivate user',
-        variant: 'destructive',
-      });
-    }
+  const handleReactivateUser = (userId) => {
+    setConfirm({
+      open: true,
+      title: 'Reactivate this user?',
+      description: 'They will be able to log in again and show up in task assignment dropdowns.',
+      confirmLabel: 'Reactivate user',
+      variant: 'default',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await companyUserManagementService.reactivateUser(userId);
+          if (response.status === 'success') {
+            toast({ title: 'Success!', description: 'User reactivated successfully' });
+            fetchUsers();
+          }
+          closeConfirm();
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to reactivate user',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const toggleProject = (projectId) => {
@@ -1100,17 +1153,32 @@ const CompanyDashboardPage = () => {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between gap-2">
                                   <CardTitle className="text-lg text-white">{project.name}</CardTitle>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleEditProject(project);
-                                    }}
-                                    className="h-8 w-8 p-0"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditProject(project);
+                                      }}
+                                      className="h-8 w-8 p-0"
+                                      title="Edit project"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteProject(project);
+                                      }}
+                                      className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                      title="Delete project"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </div>
                                 <div className="mt-2 flex items-center gap-3 flex-wrap">
                                   <Badge className={project.status === 'active' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-white/10 text-white/50 border border-white/10'}>
@@ -2592,6 +2660,17 @@ const CompanyDashboardPage = () => {
             </form>
           </DialogContent>
         </Dialog>
+
+        <ConfirmDialog
+          open={confirm.open}
+          onOpenChange={(o) => !o && closeConfirm()}
+          title={confirm.title}
+          description={confirm.description}
+          confirmLabel={confirm.confirmLabel}
+          variant={confirm.variant}
+          loading={confirm.loading}
+          onConfirm={confirm.onConfirm}
+        />
       </div>
     </>
   );

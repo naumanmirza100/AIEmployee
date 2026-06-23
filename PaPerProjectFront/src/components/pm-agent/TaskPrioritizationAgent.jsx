@@ -238,12 +238,12 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                             </Badge>
                           )}
                           {task.parallel_group && (
-                            <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/30">
+                            <Badge variant="outline" className="text-xs bg-violet-500/10 text-violet-400 border-violet-500/30">
                               Parallel Group: {task.parallel_group}
                             </Badge>
                           )}
                           {task.milestone_phase && (
-                            <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                            <Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
                               {task.milestone_phase}
                             </Badge>
                           )}
@@ -311,8 +311,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 
                 {/* Strategic Benefits */}
                 {result.data.combined_analysis.strategic_benefits && result.data.combined_analysis.strategic_benefits.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-yellow-500/30">
-                    <p className="text-sm font-medium mb-2 text-yellow-400">Strategic Benefits:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                    <p className="text-sm font-medium mb-2 text-amber-400">Strategic Benefits:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.combined_analysis.strategic_benefits.map((benefit, idx) => (
                         <li key={idx}>{benefit}</li>
@@ -323,8 +323,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 
                 {/* Efficiency Benefits */}
                 {result.data.combined_analysis.efficiency_benefits && result.data.combined_analysis.efficiency_benefits.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-orange-500/30">
-                    <p className="text-sm font-medium mb-2 text-orange-400">Efficiency Benefits:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                    <p className="text-sm font-medium mb-2 text-amber-400">Efficiency Benefits:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.combined_analysis.efficiency_benefits.map((benefit, idx) => (
                         <li key={idx}>{benefit}</li>
@@ -335,8 +335,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 
                 {/* Synergistic Benefits */}
                 {result.data.combined_analysis.synergistic_benefits && result.data.combined_analysis.synergistic_benefits.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-purple-500/30">
-                    <p className="text-sm font-medium mb-2 text-purple-400">Integrated Benefits:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                    <p className="text-sm font-medium mb-2 text-violet-400">Integrated Benefits:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.combined_analysis.synergistic_benefits.map((benefit, idx) => (
                         <li key={idx}>{benefit}</li>
@@ -347,8 +347,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 
                 {/* Strategic Insights */}
                 {result.data.combined_analysis.key_strategic_insights && result.data.combined_analysis.key_strategic_insights.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                    <p className="text-sm font-medium mb-2 text-blue-400">Key Strategic Insights:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                    <p className="text-sm font-medium mb-2 text-violet-400">Key Strategic Insights:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.combined_analysis.key_strategic_insights.map((insight, idx) => (
                         <li key={idx}>{insight}</li>
@@ -359,8 +359,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 
                 {/* Execution Recommendations */}
                 {result.data.combined_analysis.execution_recommendations && result.data.combined_analysis.execution_recommendations.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                    <p className="text-sm font-medium mb-2 text-green-400">Execution Recommendations:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                    <p className="text-sm font-medium mb-2 text-emerald-400">Execution Recommendations:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.combined_analysis.execution_recommendations.map((rec, idx) => (
                         <li key={idx}>{rec}</li>
@@ -382,8 +382,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                     </div>
                     
                     {result.data.prioritization.summary.key_insights && result.data.prioritization.summary.key_insights.length > 0 && (
-                      <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                        <p className="text-sm font-medium mb-2 text-blue-400">Prioritization Insights:</p>
+                      <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                        <p className="text-sm font-medium mb-2 text-violet-400">Prioritization Insights:</p>
                         <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                           {result.data.prioritization.summary.key_insights.map((insight, idx) => (
                             <li key={idx}>{insight}</li>
@@ -404,12 +404,12 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                       <div className="text-2xl font-bold text-red-400">{result.data.prioritization.statistics.high_priority || 0}</div>
                       <div className="text-sm text-muted-foreground">High Priority</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-yellow-500/30">
-                      <div className="text-2xl font-bold text-yellow-400">{result.data.prioritization.statistics.medium_priority || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                      <div className="text-2xl font-bold text-amber-400">{result.data.prioritization.statistics.medium_priority || 0}</div>
                       <div className="text-sm text-muted-foreground">Medium Priority</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-green-500/30">
-                      <div className="text-2xl font-bold text-green-400">{result.data.prioritization.statistics.low_priority || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                      <div className="text-2xl font-bold text-emerald-400">{result.data.prioritization.statistics.low_priority || 0}</div>
                       <div className="text-sm text-muted-foreground">Low Priority</div>
                     </div>
                   </div>
@@ -430,11 +430,11 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Optimized Duration</p>
-                        <p className="text-lg font-bold text-green-400">{result.data.ordering.summary.optimized_duration_days || 0} days</p>
+                        <p className="text-lg font-bold text-emerald-400">{result.data.ordering.summary.optimized_duration_days || 0} days</p>
                       </div>
                     </div>
                     {result.data.ordering.summary.parallel_execution_saves_days > 0 && (
-                      <p className="text-sm text-green-400 mt-2">
+                      <p className="text-sm text-emerald-400 mt-2">
                         Saves {result.data.ordering.summary.parallel_execution_saves_days} days through parallelization
                       </p>
                     )}
@@ -448,8 +448,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 )}
                 
                 {result.data.ordering.parallel_groups && result.data.ordering.parallel_groups.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                    <p className="text-sm font-medium mb-2 text-blue-400">Parallel Execution Groups:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                    <p className="text-sm font-medium mb-2 text-violet-400">Parallel Execution Groups:</p>
                     {result.data.ordering.parallel_groups.map((group, idx) => (
                       <div key={idx} className="mt-3 p-3 bg-muted rounded-lg">
                         <p className="text-sm font-medium">Group {group.group_id}</p>
@@ -460,8 +460,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 )}
                 
                 {result.data.ordering.milestones && result.data.ordering.milestones.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                    <p className="text-sm font-medium mb-2 text-green-400">Project Milestones:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                    <p className="text-sm font-medium mb-2 text-emerald-400">Project Milestones:</p>
                     {result.data.ordering.milestones.map((milestone, idx) => (
                       <div key={idx} className="mt-3 p-3 bg-muted rounded-lg">
                         <p className="text-sm font-medium">{milestone.phase}</p>
@@ -485,15 +485,15 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 </div>
                 
                 {result.data.summary.overall_reasoning && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                    <p className="text-sm font-medium mb-2 text-blue-400">Overall Reasoning - Why This Prioritization is Better:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                    <p className="text-sm font-medium mb-2 text-violet-400">Overall Reasoning - Why This Prioritization is Better:</p>
                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{result.data.summary.overall_reasoning}</p>
                   </div>
                 )}
                 
                 {result.data.summary.key_insights && result.data.summary.key_insights.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                    <p className="text-sm font-medium mb-2 text-blue-400">Key Insights:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                    <p className="text-sm font-medium mb-2 text-violet-400">Key Insights:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.summary.key_insights.map((insight, idx) => (
                         <li key={idx}>{insight}</li>
@@ -503,8 +503,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 )}
                 
                 {result.data.summary.top_recommendations && result.data.summary.top_recommendations.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                    <p className="text-sm font-medium mb-2 text-green-400">Top Recommendations:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                    <p className="text-sm font-medium mb-2 text-emerald-400">Top Recommendations:</p>
                     <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                       {result.data.summary.top_recommendations.map((rec, idx) => (
                         <li key={idx}>{rec}</li>
@@ -525,8 +525,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 )}
                 
                 {result.data.summary.workload_concerns && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-orange-500/30">
-                    <p className="text-sm font-medium mb-2 text-orange-400">Workload Concerns:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                    <p className="text-sm font-medium mb-2 text-amber-400">Workload Concerns:</p>
                     <p className="text-sm text-muted-foreground">{result.data.summary.workload_concerns}</p>
                   </div>
                 )}
@@ -541,12 +541,12 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                       <div className="text-2xl font-bold text-red-400">{result.data.statistics.high_priority || 0}</div>
                       <div className="text-sm text-muted-foreground">High Priority</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-yellow-500/30">
-                      <div className="text-2xl font-bold text-yellow-400">{result.data.statistics.medium_priority || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                      <div className="text-2xl font-bold text-amber-400">{result.data.statistics.medium_priority || 0}</div>
                       <div className="text-sm text-muted-foreground">Medium Priority</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-green-500/30">
-                      <div className="text-2xl font-bold text-green-400">{result.data.statistics.low_priority || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                      <div className="text-2xl font-bold text-emerald-400">{result.data.statistics.low_priority || 0}</div>
                       <div className="text-sm text-muted-foreground">Low Priority</div>
                     </div>
                   </div>
@@ -557,8 +557,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
             {/* Order Action - Parallel Groups and Milestones */}
             {action === 'order' && result.data?.parallel_groups && result.data.parallel_groups.length > 0 && (
               <div className="space-y-4 mb-6">
-                <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                  <p className="text-sm font-medium mb-2 text-blue-400">Parallel Execution Groups:</p>
+                <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                  <p className="text-sm font-medium mb-2 text-violet-400">Parallel Execution Groups:</p>
                   {result.data.parallel_groups.map((group, idx) => (
                     <div key={idx} className="mt-3 p-3 bg-muted rounded-lg">
                       <p className="text-sm font-medium">Group {group.group_id}</p>
@@ -568,8 +568,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                 </div>
                 
                 {result.data.milestones && result.data.milestones.length > 0 && (
-                  <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                    <p className="text-sm font-medium mb-2 text-green-400">Project Milestones:</p>
+                  <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                    <p className="text-sm font-medium mb-2 text-emerald-400">Project Milestones:</p>
                     {result.data.milestones.map((milestone, idx) => (
                       <div key={idx} className="mt-3 p-3 bg-muted rounded-lg">
                         <p className="text-sm font-medium">{milestone.phase}</p>
@@ -593,26 +593,26 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Optimized Duration</p>
-                          <p className="text-lg font-bold text-green-400">{result.data.summary.optimized_duration_days || 0} days</p>
+                          <p className="text-lg font-bold text-emerald-400">{result.data.summary.optimized_duration_days || 0} days</p>
                         </div>
                       </div>
                       {result.data.summary.parallel_execution_saves_days > 0 && (
-                        <p className="text-sm text-green-400 mt-2">
+                        <p className="text-sm text-emerald-400 mt-2">
                           Saves {result.data.summary.parallel_execution_saves_days} days through parallelization
                         </p>
                       )}
                     </div>
                     
                     {result.data.summary.overall_reasoning && (
-                      <div className="p-4 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                        <p className="text-sm font-medium mb-2 text-blue-400">Overall Reasoning - Why This Order is Better:</p>
+                      <div className="p-4 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                        <p className="text-sm font-medium mb-2 text-violet-400">Overall Reasoning - Why This Order is Better:</p>
                         <p className="text-sm text-muted-foreground whitespace-pre-wrap">{result.data.summary.overall_reasoning}</p>
                       </div>
                     )}
                     
                     {result.data.summary.optimization_benefits && result.data.summary.optimization_benefits.length > 0 && (
-                      <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                        <p className="text-sm font-medium mb-2 text-green-400">Optimization Benefits:</p>
+                      <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                        <p className="text-sm font-medium mb-2 text-emerald-400">Optimization Benefits:</p>
                         <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                           {result.data.summary.optimization_benefits.map((benefit, idx) => (
                             <li key={idx}>{benefit}</li>
@@ -638,12 +638,12 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                       <div className="text-2xl font-bold text-red-400">{result.data.summary.critical_count || 0}</div>
                       <div className="text-sm text-muted-foreground">Critical</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-orange-500/30">
-                      <div className="text-2xl font-bold text-orange-400">{result.data.summary.high_count || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                      <div className="text-2xl font-bold text-amber-400">{result.data.summary.high_count || 0}</div>
                       <div className="text-sm text-muted-foreground">High</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-yellow-500/30">
-                      <div className="text-2xl font-bold text-yellow-400">
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                      <div className="text-2xl font-bold text-amber-400">
                         {result.data.summary.estimated_project_delay_days || 0}
                       </div>
                       <div className="text-sm text-muted-foreground">Days Delay</div>
@@ -658,9 +658,9 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                       bottleneck.severity === 'critical'
                         ? 'border-red-500/30'
                         : bottleneck.severity === 'high'
-                        ? 'border-orange-500/30'
+                        ? 'border-amber-500/30'
                         : bottleneck.severity === 'medium'
-                        ? 'border-yellow-500/30'
+                        ? 'border-amber-500/30'
                         : 'border-white/[0.08]'
                     }`}
                   >
@@ -700,7 +700,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                     
                     {bottleneck.resolution_strategy && bottleneck.resolution_strategy.length > 0 && (
                       <div className="mt-3">
-                        <p className="text-sm font-medium mb-1 text-green-400">Resolution Strategy:</p>
+                        <p className="text-sm font-medium mb-1 text-emerald-400">Resolution Strategy:</p>
                         <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                           {bottleneck.resolution_strategy.map((step, idx) => (
                             <li key={idx}>{step}</li>
@@ -711,7 +711,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                     
                     {bottleneck.preventive_measures && bottleneck.preventive_measures.length > 0 && (
                       <div className="mt-3">
-                        <p className="text-sm font-medium mb-1 text-blue-400">Preventive Measures:</p>
+                        <p className="text-sm font-medium mb-1 text-violet-400">Preventive Measures:</p>
                         <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                           {bottleneck.preventive_measures.map((measure, idx) => (
                             <li key={idx}>{measure}</li>
@@ -759,8 +759,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                     )}
                     
                     {result.data.workload_heatmap.underutilized_members && result.data.workload_heatmap.underutilized_members.length > 0 && (
-                      <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                        <p className="text-sm font-medium mb-2 text-green-400">Underutilized Members:</p>
+                      <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                        <p className="text-sm font-medium mb-2 text-emerald-400">Underutilized Members:</p>
                         {result.data.workload_heatmap.underutilized_members.map((member, idx) => (
                           <div key={idx} className="mt-2 p-2 bg-muted rounded">
                             <p className="text-sm font-medium">{member.member}</p>
@@ -793,16 +793,16 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                       <div className="text-2xl font-bold">{result.data.summary.total_suggestions || 0}</div>
                       <div className="text-sm text-muted-foreground">Total Suggestions</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-blue-500/30">
-                      <div className="text-2xl font-bold text-blue-400">{result.data.summary.new_assignments || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-violet-500/30">
+                      <div className="text-2xl font-bold text-violet-400">{result.data.summary.new_assignments || 0}</div>
                       <div className="text-sm text-muted-foreground">New Assignments</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-orange-500/30">
-                      <div className="text-2xl font-bold text-orange-400">{result.data.summary.reassignments || 0}</div>
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                      <div className="text-2xl font-bold text-amber-400">{result.data.summary.reassignments || 0}</div>
                       <div className="text-sm text-muted-foreground">Reassignments</div>
                     </div>
-                    <div className="p-3 border rounded-lg bg-white/[0.03] border-green-500/30">
-                      <div className="text-2xl font-bold text-green-400">
+                    <div className="p-3 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                      <div className="text-2xl font-bold text-emerald-400">
                         {result.data.summary.workload_balance_improvement || 'N/A'}
                       </div>
                       <div className="text-sm text-muted-foreground">Balance Improvement</div>
@@ -862,8 +862,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                     <p className="text-sm font-medium">Workload Analysis:</p>
                     
                     {result.data.workload_analysis.before_delegation && (
-                      <div className="p-4 border rounded-lg bg-white/[0.03] border-yellow-500/30">
-                        <p className="text-sm font-medium mb-2 text-yellow-400">Before Delegation:</p>
+                      <div className="p-4 border rounded-lg bg-white/[0.03] border-amber-500/30">
+                        <p className="text-sm font-medium mb-2 text-amber-400">Before Delegation:</p>
                         {result.data.workload_analysis.before_delegation.overloaded_members && (
                           <p className="text-sm text-muted-foreground">
                             Overloaded: {result.data.workload_analysis.before_delegation.overloaded_members.join(', ')}
@@ -878,8 +878,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
                     )}
                     
                     {result.data.workload_analysis.after_delegation && (
-                      <div className="p-4 border rounded-lg bg-white/[0.03] border-green-500/30">
-                        <p className="text-sm font-medium mb-2 text-green-400">After Delegation:</p>
+                      <div className="p-4 border rounded-lg bg-white/[0.03] border-emerald-500/30">
+                        <p className="text-sm font-medium mb-2 text-emerald-400">After Delegation:</p>
                         <p className="text-sm text-muted-foreground">
                           {result.data.workload_analysis.after_delegation.improvement || 'Workload balanced'}
                         </p>
@@ -892,12 +892,12 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
 
             {/* Subtask Generation Results */}
             {result.data?.saved_count !== undefined && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg dark:bg-green-950 dark:border-green-800">
-                <p className="text-sm font-medium text-green-800 dark:text-green-200">
+              <div className="p-4 bg-emerald-50 border border-emerald-200/40 rounded-lg dark:bg-emerald-950 dark:border-emerald-800">
+                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
                   Generated {result.data.saved_count} subtasks successfully
                 </p>
                 {result.data.reasoning_updated_count > 0 && (
-                  <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
                     Updated reasoning for {result.data.reasoning_updated_count} tasks
                   </p>
                 )}
