@@ -31,6 +31,7 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
     """
     try:
         from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
 
         client_id     = getattr(settings, 'GOOGLE_CLIENT_ID', '')
@@ -49,6 +50,9 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
             token_uri='https://oauth2.googleapis.com/token',
             scopes=['https://www.googleapis.com/auth/calendar'],
         )
+
+        # Explicitly refresh to get a valid access token before making API calls
+        creds.refresh(Request())
 
         service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
 
@@ -91,6 +95,8 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
         return None
     except Exception as exc:
         logger.error(f"Failed to create Google Meet link for interview {interview.id}: {exc}")
+        print(f"❌ Google Meet link creation failed: {exc}")
+        print("   → Run 'python scripts/refresh_google_token.py' to regenerate the refresh token in .env")
         return None
 
 

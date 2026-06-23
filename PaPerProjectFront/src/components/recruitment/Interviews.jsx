@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2 } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send } from 'lucide-react';
 import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
 
@@ -33,6 +33,7 @@ const Interviews = ({ onUpdate }) => {
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
   const [feedbackModal, setFeedbackModal] = useState(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [meetingLinkEdit, setMeetingLinkEdit] = useState({}); // { [interviewId]: { open, value, saving } }
 
   useEffect(() => {
     fetchInterviews();
@@ -186,6 +187,31 @@ const Interviews = ({ onUpdate }) => {
     }
   };
 
+  const openMeetingLinkEdit = (interview) => {
+    setMeetingLinkEdit(prev => ({
+      ...prev,
+      [interview.id]: { open: true, value: interview.meeting_link || '', saving: false },
+    }));
+  };
+
+  const saveMeetingLink = async (interview) => {
+    const state = meetingLinkEdit[interview.id];
+    if (!state) return;
+    setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { ...prev[interview.id], saving: true } }));
+    try {
+      await updateInterview(interview.id, {
+        meeting_link: state.value,
+        resend_confirmation: true,
+      });
+      toast({ title: 'Meeting link saved', description: 'Confirmation email resent to candidate with the meeting link.' });
+      setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { open: false, value: '', saving: false } }));
+      fetchInterviews();
+    } catch (err) {
+      toast({ title: 'Error', description: err?.message || 'Failed to save meeting link', variant: 'destructive' });
+      setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { ...prev[interview.id], saving: false } }));
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -310,6 +336,56 @@ const Interviews = ({ onUpdate }) => {
                     </div>
                   )}
                 </div>
+
+                {/* Meeting link row — shown for SCHEDULED interviews */}
+                {interview.status === 'SCHEDULED' && (() => {
+                  const mlState = meetingLinkEdit[interview.id];
+                  return (
+                    <div className="flex flex-col gap-1.5">
+                      {interview.meeting_link && !mlState?.open ? (
+                        <div className="flex items-center gap-2 text-xs flex-wrap">
+                          <Link2 className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                          <a href={interview.meeting_link} target="_blank" rel="noopener noreferrer"
+                            className="text-blue-400 hover:text-blue-300 underline truncate max-w-[260px]">
+                            {interview.meeting_link}
+                          </a>
+                          <button onClick={() => openMeetingLinkEdit(interview)}
+                            className="ml-1 text-white/40 hover:text-white/70 transition-colors">
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ) : !mlState?.open ? (
+                        <button onClick={() => openMeetingLinkEdit(interview)}
+                          className="flex items-center gap-1.5 text-xs text-white/40 hover:text-blue-400 transition-colors w-fit">
+                          <Link2 className="h-3.5 w-3.5" />
+                          Add meeting link (Zoom / Teams / Meet)
+                        </button>
+                      ) : null}
+
+                      {mlState?.open && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Input
+                            type="url"
+                            placeholder="https://zoom.us/j/... or meet.google.com/..."
+                            value={mlState.value}
+                            onChange={e => setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { ...prev[interview.id], value: e.target.value } }))}
+                            className="h-8 text-xs flex-1 min-w-[200px] border-white/20 bg-white/5"
+                            disabled={mlState.saving}
+                          />
+                          <button onClick={() => saveMeetingLink(interview)} disabled={mlState.saving}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-3 py-1 text-xs font-medium text-white transition-colors whitespace-nowrap">
+                            {mlState.saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                            Save & Resend Email
+                          </button>
+                          <button onClick={() => setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { open: false, value: '', saving: false } }))}
+                            className="text-xs text-white/40 hover:text-white/60 transition-colors">
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Actions — feedback/reschedule LEFT, status selects RIGHT */}
                 <div className="flex flex-wrap items-center gap-3 pt-3 sm:pt-4 border-t border-white/10">

@@ -1131,6 +1131,8 @@ def update_interview(request, interview_id):
 
         new_status = request.data.get('status')
         new_outcome = request.data.get('outcome')
+        new_meeting_link = request.data.get('meeting_link')
+        resend_confirmation = request.data.get('resend_confirmation', False)
 
         if new_status is not None:
             new_status = (new_status or '').strip().upper()
@@ -1153,7 +1155,19 @@ def update_interview(request, interview_id):
                 outcome_updated = True
             interview.outcome = new_outcome if new_outcome else None
 
+        if new_meeting_link is not None:
+            interview.meeting_link = new_meeting_link.strip() or None
+
         interview.save()
+
+        # Resend confirmation email with the updated meeting link
+        if resend_confirmation and interview.candidate_email:
+            try:
+                agents = get_agents()
+                interview_agent = agents['interview_agent']
+                interview_agent.send_confirmation_email(interview)
+            except Exception as mail_err:
+                logger.warning(f"Failed to resend confirmation email: {mail_err}")
 
         # Send simple outcome email to candidate when decision is changed
         if outcome_updated and interview.outcome and interview.candidate_email:
@@ -1202,6 +1216,7 @@ def update_interview(request, interview_id):
                 'outcome': interview.outcome or '',
                 'candidate_name': interview.candidate_name,
                 'job_title': job_title,
+                'meeting_link': interview.meeting_link or '',
             }
         })
     except KeyServiceError:
