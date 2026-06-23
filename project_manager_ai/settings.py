@@ -300,6 +300,7 @@ INSTALLED_APPS = [
     'api',  # API app
     'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
     'crm_sync_agent.apps.CRMSyncAgentConfig',  # CRM & System Sync Agent
+    'meeting_agent.apps.MeetingAgentConfig',   # AI Executive Meeting Assistant
     'whitenoise.runserver_nostatic',
 ]
 
