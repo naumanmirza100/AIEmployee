@@ -6,8 +6,10 @@ has been approved for interview by the screening and scoring system.
 """
 
 import json
+import logging
 import re
 import secrets
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from django.utils import timezone
@@ -18,6 +20,84 @@ from django.template.loader import render_to_string
 
 from recruitment_agent.log_service import LogService
 from recruitment_agent.models import Interview
+
+logger = logging.getLogger(__name__)
+
+
+def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60) -> Optional[str]:
+    """
+    Create a Google Calendar event with a Meet link for the interview.
+    Returns the Google Meet URL or None if unavailable.
+    """
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+
+        client_id     = getattr(settings, 'GOOGLE_CLIENT_ID', '')
+        client_secret = getattr(settings, 'GOOGLE_CLIENT_SECRET', '')
+        refresh_token = getattr(settings, 'GOOGLE_REFRESH_TOKEN', '')
+
+        if not all([client_id, client_secret, refresh_token]):
+            logger.warning("Google Meet not configured — skipping Meet link creation.")
+            return None
+
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_uri='https://oauth2.googleapis.com/token',
+            scopes=['https://www.googleapis.com/auth/calendar'],
+        )
+
+        # Explicitly refresh to get a valid access token before making API calls
+        creds.refresh(Request())
+
+        service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
+
+        start_dt = interview.scheduled_datetime
+        end_dt   = start_dt + timedelta(minutes=duration_minutes)
+
+        job_title = getattr(interview, 'job_role', '') or getattr(interview, 'job_title', '') or 'Interview'
+
+        event = {
+            'summary': f"Interview – {interview.candidate_name} for {job_title}",
+            'description': (
+                f"Interview with {interview.candidate_name}\n"
+                f"Position: {job_title}\n"
+                f"Candidate email: {interview.candidate_email}"
+            ),
+            'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'UTC'},
+            'end':   {'dateTime': end_dt.isoformat(),   'timeZone': 'UTC'},
+            'attendees': [{'email': interview.candidate_email}],
+            'conferenceData': {
+                'createRequest': {
+                    'requestId': str(uuid.uuid4()),
+                    'conferenceSolutionKey': {'type': 'hangoutsMeet'},
+                }
+            },
+        }
+
+        created  = service.events().insert(
+            calendarId='primary',
+            body=event,
+            conferenceDataVersion=1,
+            sendUpdates='none',
+        ).execute()
+
+        meet_url = created.get('hangoutLink') or ''
+        logger.info(f"Google Meet link created for interview {interview.id}: {meet_url}")
+        return meet_url or None
+
+    except ImportError:
+        logger.warning("google-auth / google-api-python-client not installed — skipping Meet link.")
+        return None
+    except Exception as exc:
+        logger.error(f"Failed to create Google Meet link for interview {interview.id}: {exc}")
+        print(f"❌ Google Meet link creation failed: {exc}")
+        print("   → Run 'python scripts/refresh_google_token.py' to regenerate the refresh token in .env")
+        return None
 
 
 class InterviewSchedulingAgent:
@@ -702,7 +782,13 @@ class InterviewSchedulingAgent:
                 interview.scheduled_datetime = selected_datetime
                 interview.selected_slot = selected_slot_display
                 interview.save()
-            
+
+            # Generate Google Meet link and persist it
+            meet_link = _create_google_meet_link(interview)
+            if meet_link:
+                interview.meeting_link = meet_link
+                interview.save(update_fields=['meeting_link'])
+
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
             
@@ -999,6 +1085,7 @@ class InterviewSchedulingAgent:
                 'interview_type': interview.interview_type,
                 'scheduled_datetime': interview.scheduled_datetime,
                 'selected_slot': interview.selected_slot,
+                'meeting_link': interview.meeting_link or '',
             }
             
             try:
@@ -1061,6 +1148,7 @@ class InterviewSchedulingAgent:
                     'job_title': job_title,
                     'interview_type': interview.interview_type,
                     'scheduled_datetime': interview.scheduled_datetime,
+                    'meeting_link': interview.meeting_link or '',
                 }
                 
                 # Use job title for recruiter subject

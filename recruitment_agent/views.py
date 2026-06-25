@@ -1271,9 +1271,15 @@ def get_available_slots_for_interview(request, token):
     try:
         interview = Interview.objects.select_related(
             'cv_record__job_description', 'company_user', 'recruiter'
-        ).get(confirmation_token=token, status='PENDING')
+        ).get(confirmation_token=token)
     except Interview.DoesNotExist:
         return JsonResponse({"error": "Invalid or expired interview link"}, status=404)
+
+    if interview.status == 'SCHEDULED':
+        return JsonResponse({"error": "already_confirmed", "selected_slot": interview.selected_slot}, status=409)
+
+    if interview.status in ('COMPLETED', 'CANCELLED'):
+        return JsonResponse({"error": f"Interview is {interview.status.lower()}"}, status=410)
 
     # Check if job's scheduling date range has expired
     if interview.is_job_schedule_expired():
@@ -1424,10 +1430,25 @@ def candidate_select_slot(request, token):
     from recruitment_agent.models import Interview
     
     try:
-        interview = Interview.objects.get(confirmation_token=token, status='PENDING')
+        interview = Interview.objects.get(confirmation_token=token)
     except Interview.DoesNotExist:
         return render(request, 'recruitment_agent/candidate_slot_selection.html', {
             'error': 'Invalid or expired interview link. Please contact the recruiter.',
+            'invalid_token': True,
+        })
+
+    # If already confirmed/scheduled, show the confirmed details instead of slot picker
+    if interview.status == 'SCHEDULED':
+        return render(request, 'recruitment_agent/candidate_slot_confirmed.html', {
+            'interview': interview,
+            'scheduled_datetime': interview.scheduled_datetime,
+            'selected_slot': interview.selected_slot,
+            'already_confirmed': True,
+        })
+
+    if interview.status in ('COMPLETED', 'CANCELLED'):
+        return render(request, 'recruitment_agent/candidate_slot_selection.html', {
+            'error': f'This interview has been {interview.status.lower()}. Please contact the recruiter.',
             'invalid_token': True,
         })
 

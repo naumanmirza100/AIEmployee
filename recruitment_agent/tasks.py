@@ -33,6 +33,9 @@ def check_and_send_followup_emails():
     This should be called periodically (e.g., every hour via cron or celery).
     """
     try:
+        # Close stale MSSQL connections before starting any DB work
+        close_old_connections()
+
         agent = get_interview_agent()
         now = timezone.now()
         stats = {
@@ -40,16 +43,17 @@ def check_and_send_followup_emails():
             'reminders_sent': 0,
             'errors': 0,
         }
-        
+
         logger.info(f"Starting follow-up email check at {now}")
-        
+
         # 1. Check PENDING interviews for follow-up emails
-        pending_interviews = Interview.objects.filter(
+        # Materialise with list() so the cursor is released before iteration begins
+        pending_interviews = list(Interview.objects.filter(
             status='PENDING',
             invitation_sent_at__isnull=False
         ).exclude(
             status__in=['COMPLETED', 'CANCELLED']
-        )
+        ).select_related('cv_record__job_description', 'company_user', 'recruiter'))
         
         logger.info(f"Found {pending_interviews.count()} PENDING interviews to check")
         
@@ -105,12 +109,12 @@ def check_and_send_followup_emails():
                 logger.error(f"Error processing interview #{interview.id}: {str(e)}", exc_info=True)
         
         # 2. Check SCHEDULED interviews for pre-interview reminders
-        scheduled_interviews = Interview.objects.filter(
+        scheduled_interviews = list(Interview.objects.filter(
             status='SCHEDULED',
             scheduled_datetime__isnull=False,
             scheduled_datetime__gt=now,  # Only future interviews
             pre_interview_reminder_sent_at__isnull=True  # Haven't sent reminder yet
-        )
+        ).select_related('cv_record__job_description', 'company_user', 'recruiter'))
         
         for interview in scheduled_interviews:
             try:

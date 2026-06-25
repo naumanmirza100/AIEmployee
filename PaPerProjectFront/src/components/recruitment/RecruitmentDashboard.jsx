@@ -37,14 +37,13 @@ import { FlaskConical, HelpCircle, Sparkles } from 'lucide-react';
 const TAB_ITEMS = [
   { value: 'dashboard', label: 'Dashboard', icon: FileText },
   { value: 'analytics', label: 'Analytics', icon: BarChart3 },
-  // { value: 'ai-graphs', label: 'AI Graphs', icon: Sparkles },
-  { value: 'cv-processing', label: 'CV Processing', icon: Upload },
-  { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
-  { value: 'ai-interview-questions', label: 'AI Questions', icon: HelpCircle },
-  { value: 'saved-prompts', label: 'Saved Prompts', icon: Star },
   { value: 'jobs', label: 'Job Descriptions', icon: Briefcase },
+  { value: 'cv-processing', label: 'CV Processing', icon: Upload },
+  { value: 'ai-interview-questions', label: 'AI Questions', icon: HelpCircle },
   { value: 'candidates', label: 'Candidates', icon: Users },
   { value: 'interviews', label: 'Interviews', icon: Calendar },
+  { value: 'saved-prompts', label: 'Saved Prompts', icon: Star },
+  { value: 'api-tester', label: 'API Tester', icon: FlaskConical },
   { value: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -504,7 +503,10 @@ const RecruitmentDashboard = () => {
         {/* AI Graphs tab removed - graphs now render inline on dashboard */}
 
         <TabsContent value="cv-processing">
-          <CVProcessing onProcessComplete={fetchStats} />
+          <CVProcessing
+                onProcessComplete={fetchStats}
+                onGoToSettings={(jobId) => { setPendingSettingsJobId(jobId || null); navigate('/recruitment/settings/interview'); }}
+              />
         </TabsContent>
 
         <TabsContent value="api-tester">

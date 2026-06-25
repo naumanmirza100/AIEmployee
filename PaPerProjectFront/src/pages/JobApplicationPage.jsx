@@ -12,6 +12,8 @@ const JobApplicationPage = () => {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [alreadyApplied, setAlreadyApplied] = useState(false);
+  const [duplicateFields, setDuplicateFields] = useState([]);
   const fileInputRef = useRef(null);
 
   const [form, setForm] = useState({
@@ -43,14 +45,17 @@ const JobApplicationPage = () => {
       .finally(() => setJobLoading(false));
   }, [jobId]);
 
-  const validate = () => {
+  const validate = (data = form) => {
     const e = {};
-    if (!form.first_name.trim()) e.first_name = 'Required';
-    if (!form.last_name.trim()) e.last_name = 'Required';
-    if (!form.email.trim()) e.email = 'Required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Invalid email';
-    if (!form.phone.trim()) e.phone = 'Required';
-    if (!form.education.trim()) e.education = 'Required';
+    if (!data.first_name.trim()) e.first_name = 'Required';
+    if (!data.last_name.trim()) e.last_name = 'Required';
+    if (!data.email.trim()) e.email = 'Required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) e.email = 'Invalid email';
+    if (!data.phone.trim()) e.phone = 'Required';
+    if (!data.education.trim()) e.education = 'Required';
+    if (!data.salary_expectation.trim()) e.salary_expectation = 'Required';
+    if (!data.previous_company.trim()) e.previous_company = 'Required';
+    if (!data.previous_salary.trim()) e.previous_salary = 'Required';
     if (!cvFile) e.cv_file = 'Please upload your CV';
     return e;
   };
@@ -72,11 +77,28 @@ const JobApplicationPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitError('');
-    const errs = validate();
+    setAlreadyApplied(false);
+    setDuplicateFields([]);
+
+    // Sync React state with actual DOM values so browser autofill is captured
+    const domForm = e.target;
+    const textFields = [
+      'first_name','last_name','email','phone','current_location',
+      'salary_expectation','education','previous_company','previous_salary',
+      'linkedin_url','github_url','other_links','cover_letter',
+    ];
+    const syncedForm = { ...form };
+    textFields.forEach((field) => {
+      const el = domForm.elements[field];
+      if (el) syncedForm[field] = el.value;
+    });
+    setForm(syncedForm);
+
+    const errs = validate(syncedForm);
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
     const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => fd.append(k, v));
+    Object.entries(syncedForm).forEach(([k, v]) => fd.append(k, v));
     if (cvFile) fd.append('cv_file', cvFile);
 
     setSubmitting(true);
@@ -88,6 +110,9 @@ const JobApplicationPage = () => {
       const data = await res.json();
       if (data.status === 'success') {
         setSubmitted(true);
+      } else if (data.code === 'ALREADY_APPLIED') {
+        setAlreadyApplied(true);
+        setDuplicateFields(data.duplicate_fields || []);
       } else {
         setSubmitError(data.message || 'Submission failed. Please try again.');
       }
@@ -228,6 +253,26 @@ const JobApplicationPage = () => {
         >
           <h2 className="text-lg font-bold text-white mb-5">Apply for this Position</h2>
 
+          {alreadyApplied && (
+            <div className="mb-4 rounded-lg px-4 py-4 text-sm" style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)' }}>
+              <p className="font-semibold text-amber-300 flex items-center gap-2">
+                ⚠️{' '}
+                {duplicateFields.includes('email') && duplicateFields.includes('phone')
+                  ? 'This email and phone are both already registered for this position.'
+                  : duplicateFields.includes('email')
+                  ? 'This email address is already registered for this position.'
+                  : 'This phone number is already registered for this position.'}
+              </p>
+              <p className="text-amber-300/70 text-xs mt-1">
+                {duplicateFields.includes('email') && duplicateFields.includes('phone')
+                  ? 'To apply as a different person, use a different email address and phone number.'
+                  : duplicateFields.includes('email')
+                  ? 'To apply as a different person, use a different email address.'
+                  : 'To apply as a different person, use a different phone number.'}
+              </p>
+            </div>
+          )}
+
           {submitError && (
             <div className="mb-4 rounded-lg px-4 py-3 text-sm text-red-300" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>
               {submitError}
@@ -270,8 +315,9 @@ const JobApplicationPage = () => {
                 <input name="current_location" value={form.current_location} onChange={handleChange} placeholder="City, Country" className={inputCls('current_location')} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-white/60 mb-1.5">Salary Expectation</label>
+                <label className="block text-xs font-medium text-white/60 mb-1.5">Salary Expectation <span className="text-red-400">*</span></label>
                 <input name="salary_expectation" value={form.salary_expectation} onChange={handleChange} placeholder="e.g. $2,000/month" className={inputCls('salary_expectation')} />
+                {errors.salary_expectation && <p className="mt-1 text-xs text-red-400">{errors.salary_expectation}</p>}
               </div>
             </div>
 
@@ -292,12 +338,14 @@ const JobApplicationPage = () => {
             {/* Previous company + salary */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Company <span className="text-white/30 font-normal">(optional)</span></label>
+                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Company <span className="text-red-400">*</span></label>
                 <input name="previous_company" value={form.previous_company} onChange={handleChange} placeholder="e.g. Google" className={inputCls('previous_company')} />
+                {errors.previous_company && <p className="mt-1 text-xs text-red-400">{errors.previous_company}</p>}
               </div>
               <div>
-                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Salary <span className="text-white/30 font-normal">(optional)</span></label>
+                <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Salary <span className="text-red-400">*</span></label>
                 <input name="previous_salary" value={form.previous_salary} onChange={handleChange} placeholder="e.g. $3,000/month" className={inputCls('previous_salary')} />
+                {errors.previous_salary && <p className="mt-1 text-xs text-red-400">{errors.previous_salary}</p>}
               </div>
             </div>
 
