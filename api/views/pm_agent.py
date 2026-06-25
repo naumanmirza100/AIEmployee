@@ -3350,9 +3350,31 @@ def project_pilot_from_file(request):
                 {"status": "error", "message": "No text could be extracted from the file"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Use the extracted text as the question for project pilot
-        question = extracted_text
+
+        # Combine the user's typed instruction with the document text. Sending
+        # just the raw file contents as the question used to confuse the agent
+        # ("could you clarify what you'd like to convert?") because the agent
+        # had no signal of intent — only walls of PDF text. The frontend now
+        # sends a `prompt` field; we wrap the document content in a clear
+        # delimiter so the agent can tell instruction from attachment.
+        user_prompt = (request.POST.get("prompt") or "").strip()
+        if user_prompt:
+            question = (
+                f"{user_prompt}\n\n"
+                f"--- Attached document: {uploaded_file.name} ---\n"
+                f"{extracted_text}\n"
+                f"--- end of document ---"
+            )
+        else:
+            # No instruction provided — fall back to old behaviour but still
+            # tag the content so the agent treats it as an attachment.
+            question = (
+                f"The user attached a document named '{uploaded_file.name}' "
+                f"without an explicit instruction. Read its contents and ask what "
+                f"they'd like to do with it (e.g. convert to project, summarise, "
+                f"extract tasks).\n\n"
+                f"--- Attached document ---\n{extracted_text}\n--- end of document ---"
+            )
         project_id = request.POST.get("project_id")
         
         # Reuse the same logic as project_pilot function
@@ -4231,11 +4253,22 @@ def scan_notifications(request):
 
         project_id = request.data.get("project_id")
 
-        # Get projects to scan
+        # Get projects to scan. Scope by COMPANY rather than the specific
+        # company user who created the project — otherwise a colleague running
+        # the scan sees "0 projects" even though their company has many
+        # (which was the bug reported on the smart-notifications page).
+        # If the caller asked for one specific project, still gate by company.
+        company = getattr(company_user, 'company', None)
         if project_id:
-            projects = Project.objects.filter(id=project_id, created_by_company_user=company_user)
+            base_qs = Project.objects.filter(id=project_id)
         else:
-            projects = Project.objects.filter(created_by_company_user=company_user)
+            base_qs = Project.objects.all()
+        if company is not None:
+            projects = base_qs.filter(company=company)
+        else:
+            # Defensive — never expose another company's projects if the
+            # user record somehow has no company link.
+            projects = base_qs.filter(created_by_company_user=company_user)
 
         all_notifications = []
         agent = AgentRegistry.get_agent("smart_notifications")
@@ -4411,7 +4444,23 @@ def team_performance(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def time_estimation(request):
-    """Estimate task durations for a project."""
+    """Estimate task durations for a project.
+
+    Two bugs were merged here so the response actually reaches the UI:
+
+      (a) Field-name mismatch — the agent returned `estimates` /
+          `total_estimated_hours` / `total_estimated_days`, but the React view
+          reads `task_estimates` / `total_hours` / `total_days`. We now alias
+          both shapes in the response so the existing UI lights up without a
+          frontend change AND callers using the old keys keep working.
+
+      (b) Timeline anchored to "today" — the agent was given the project name
+          and status, nothing else. We now pass `project.start_date` and the
+          project deadline so estimates land on the project's real timeline,
+          and we add a per-task `estimated_start_date` / `estimated_end_date`
+          computed cumulatively from the project start. That replaces the
+          implicit "starts today" behaviour the user reported.
+    """
     try:
         company_user = request.user
         if not company_user.can_access_project_manager_features():
@@ -4449,7 +4498,17 @@ def time_estimation(request):
             "priority": t.priority,
         } for t in completed[:10]]
 
-        project_info = {"name": project.name, "status": project.status}
+        # Pass real project dates so the agent can reason about the available
+        # window AND we can anchor each task's schedule below.
+        project_start_iso = project.start_date.isoformat() if project.start_date else None
+        project_end_iso = project.deadline.isoformat() if getattr(project, 'deadline', None) else None
+        project_info = {
+            "name": project.name,
+            "status": project.status,
+            "start_date": project_start_iso,
+            "end_date": project_end_iso,
+            "deadline": project_end_iso,
+        }
         available_users = _build_available_users(company_user=company_user)
 
         agent = AgentRegistry.get_agent("time_estimation")
@@ -4462,6 +4521,62 @@ def time_estimation(request):
             team_members=available_users,
             completed_tasks=completed_data,
         )
+
+        # ── Normalisation ─────────────────────────────────────────────
+        # Frontend (TimeEstimationView.jsx) expects:
+        #   estimation.task_estimates[]
+        #     each having {task | title | name, hours | estimated_hours, days,
+        #                  complexity, confidence, risk_factors, assignee,
+        #                  estimated_start_date, estimated_end_date}
+        #   estimation.total_hours / total_days
+        # The agent currently emits `estimates`, `total_estimated_hours`,
+        # `total_estimated_days`. Add the aliases the UI wants without
+        # dropping the originals.
+        from datetime import datetime as _dt, timedelta as _td
+
+        estimates = result.get('estimates') or result.get('task_estimates') or []
+        # Walk each task and cumulate estimated_days from project.start_date
+        # so the timeline anchors to the project, not "today".
+        cursor = project.start_date or timezone.now().date()
+        if isinstance(cursor, _dt):
+            cursor = cursor.date()
+        normalised: list = []
+        for e in estimates:
+            if not isinstance(e, dict):
+                continue
+            days_val = e.get('estimated_days') or e.get('days') or 0
+            try:
+                days_int = max(0, int(round(float(days_val))))
+            except (TypeError, ValueError):
+                days_int = 0
+            est_start = cursor
+            est_end = cursor + _td(days=max(days_int - 1, 0))
+            normalised.append({
+                **e,
+                # UI aliases
+                'task': e.get('task') or e.get('task_title') or e.get('title') or e.get('name'),
+                'title': e.get('title') or e.get('task_title') or e.get('task') or e.get('name'),
+                'hours': e.get('hours') or e.get('estimated_hours'),
+                'days': e.get('days') or e.get('estimated_days'),
+                'estimated_start_date': est_start.isoformat(),
+                'estimated_end_date': est_end.isoformat(),
+            })
+            # Advance the cursor past this task. We add at least 1 calendar
+            # day even for sub-day tasks so two tiny tasks don't collapse to
+            # the same start date in the UI.
+            cursor = cursor + _td(days=max(days_int, 1))
+
+        result['task_estimates'] = normalised
+        result['estimates'] = normalised   # keep both keys populated
+        if 'total_estimated_hours' in result and 'total_hours' not in result:
+            result['total_hours'] = result['total_estimated_hours']
+        if 'total_estimated_days' in result and 'total_days' not in result:
+            result['total_days'] = result['total_estimated_days']
+        # Echo back the anchor so the UI / callers know where the timeline started.
+        if project_start_iso:
+            result['project_start_date'] = project_start_iso
+        if project_end_iso:
+            result['project_end_date'] = project_end_iso
 
         return Response({
             "status": "success",
@@ -4849,9 +4964,19 @@ def meeting_schedule(request):
             _audit_log(company_user, 'meeting_scheduled', 'ScheduledMeeting', meeting.id, meeting.title,
                       {'invitees': [u.username for u in invitee_users], 'time': time_display})
 
-            # Create participants for each invitee
+            # Create participants for each invitee. Use get_or_create so a
+            # caller that passed the same user twice (e.g. NLP agent that
+            # matched on both "fatima noor" and "noor fatima" before the
+            # token-dedupe fix) doesn't blow up the whole request on the
+            # unique_together (meeting, user) constraint.
+            seen_user_ids = set()
             for u in invitee_users:
-                MeetingParticipant.objects.create(meeting=meeting, user=u, status='pending')
+                if u.id in seen_user_ids:
+                    continue
+                seen_user_ids.add(u.id)
+                MeetingParticipant.objects.get_or_create(
+                    meeting=meeting, user=u, defaults={'status': 'pending'},
+                )
 
             # Create initial response record
             MeetingResponse.objects.create(
@@ -4900,6 +5025,11 @@ def meeting_schedule(request):
                 )
                 if u.email:
                     participants_str = ", ".join(invitee_names)
+                    # Signed email-action links — let the invitee accept/reject
+                    # directly from the email without logging in.
+                    from api.views.notification import build_meeting_email_action_url
+                    accept_url = build_meeting_email_action_url(meeting.id, u.id, 'accepted')
+                    reject_url = build_meeting_email_action_url(meeting.id, u.id, 'rejected')
                     _send_meeting_email(
                         recipient_email=u.email,
                         subject=f"Meeting Request: {meeting.title}",
@@ -4914,7 +5044,11 @@ def meeting_schedule(request):
                             <tr><td style="padding:4px 12px; font-weight:bold;">Description:</td><td style="padding:4px 12px;">{meeting.description or 'N/A'}</td></tr>
                         </table>
                         {'<h3>Agenda:</h3><ul>' + ''.join(f'<li>{a["item"]}</li>' for a in (meeting.agenda or [])) + '</ul>' if meeting.agenda else ''}
-                        <p>Please log in to your dashboard to accept or reject this meeting.</p>
+                        <div style="margin:24px 0;">
+                            <a href="{accept_url}" style="background:#10b981; color:#fff; text-decoration:none; padding:10px 20px; border-radius:6px; font-weight:600; display:inline-block; margin-right:8px;">✓ Accept</a>
+                            <a href="{reject_url}" style="background:#ef4444; color:#fff; text-decoration:none; padding:10px 20px; border-radius:6px; font-weight:600; display:inline-block;">✕ Reject</a>
+                        </div>
+                        <p style="color:#666; font-size:13px;">Or log in to your dashboard to propose a different time.</p>
                         <p style="color:#666; font-size:12px;">A calendar invite (.ics) is attached — open it to add this meeting to your calendar.</p>
                         """,
                         ics_content=ics_content,

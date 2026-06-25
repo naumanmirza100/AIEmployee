@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus } from 'lucide-react';
 import { companyApi } from '@/services/companyAuthService';
+import { DateTimePicker } from '@/components/common/DatePicker';
 
 const ManualTaskCreation = ({ onTaskCreated }) => {
   const { toast } = useToast();
@@ -269,15 +270,15 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
               </Select>
             </div>
 
-            {/* Deadline */}
+            {/* Deadline — popover calendar + time picker (drop-in replacement for native datetime-local) */}
             <div>
               <Label htmlFor="due_date">Deadline</Label>
-              <Input
+              <DateTimePicker
                 id="due_date"
-                type="datetime-local"
-                min={nowDatetimeLocal()}
                 value={formData.due_date}
-                onChange={(e) => handleChange('due_date', e.target.value)}
+                onChange={(v) => handleChange('due_date', v)}
+                minValue={nowDatetimeLocal()}
+                placeholder="Pick a deadline"
               />
             </div>
 

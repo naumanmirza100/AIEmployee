@@ -332,3 +332,197 @@ def meeting_list_for_user(request):
         logger.exception('meeting_list_for_user failed')
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ==================== EMAIL-LINK MEETING ACCEPT / REJECT ====================
+#
+# Lets invitees accept or reject a meeting straight from the invitation email
+# WITHOUT logging in. We sign a `<meeting_id>:<user_id>` payload using
+# `TimestampSigner` (HMAC over SECRET_KEY + a salt) so the link can't be
+# forged or replayed past its TTL.
+#
+# Token lifetime: 14 days — long enough to cover a typical meeting window
+# but short enough to not leave indefinitely-valid action URLs floating
+# around in mailboxes.
+
+EMAIL_TOKEN_MAX_AGE_SECONDS = 14 * 24 * 3600
+EMAIL_TOKEN_SALT = 'pm.meeting.email-action.v1'
+
+
+def _make_meeting_email_token(meeting_id: int, user_id: int) -> str:
+    """Sign a `meeting_id:user_id` payload for use in a meeting invitation email."""
+    from django.core.signing import TimestampSigner
+    signer = TimestampSigner(salt=EMAIL_TOKEN_SALT)
+    return signer.sign(f'{int(meeting_id)}:{int(user_id)}')
+
+
+def _verify_meeting_email_token(token: str):
+    """Verify a signed token. Returns (meeting_id, user_id) tuple or None."""
+    from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
+    signer = TimestampSigner(salt=EMAIL_TOKEN_SALT)
+    try:
+        raw = signer.unsign(token, max_age=EMAIL_TOKEN_MAX_AGE_SECONDS)
+    except (BadSignature, SignatureExpired):
+        return None
+    try:
+        meeting_id_str, user_id_str = raw.split(':')
+        return int(meeting_id_str), int(user_id_str)
+    except (ValueError, AttributeError):
+        return None
+
+
+def build_meeting_email_action_url(meeting_id: int, user_id: int, action: str) -> str:
+    """Build the absolute URL for an email accept/reject link.
+
+    `action` is one of 'accepted', 'rejected'. Imported by the meeting-create
+    code in pm_agent.py to embed in the invitation HTML.
+    """
+    from django.conf import settings as django_settings
+    if action not in ('accepted', 'rejected'):
+        raise ValueError(f"Unsupported action: {action}")
+    backend_base = (getattr(django_settings, 'BACKEND_PUBLIC_URL', None)
+                    or getattr(django_settings, 'PUBLIC_BACKEND_URL', None)
+                    or 'http://localhost:8000')
+    backend_base = backend_base.rstrip('/')
+    token = _make_meeting_email_token(meeting_id, user_id)
+    return f"{backend_base}/api/meetings/email-action/{action}/{token}/"
+
+
+def _render_email_action_page(title: str, message: str, color: str = '#10b981'):
+    """Tiny HTML confirmation page shown after the invitee clicks the email link."""
+    from django.http import HttpResponse
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%);
+            color: #fff; padding: 24px; }}
+    .card {{ max-width: 460px; width:100%; background: rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08);
+             border-radius: 16px; padding: 32px; text-align:center; }}
+    .icon {{ font-size: 48px; line-height:1; margin-bottom: 16px; color: {color}; }}
+    h1 {{ font-size: 20px; margin: 0 0 12px; }}
+    p {{ color: rgba(255,255,255,0.7); line-height: 1.5; margin: 0; }}
+    .hint {{ margin-top: 24px; font-size: 12px; color: rgba(255,255,255,0.4); }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">●</div>
+    <h1>{title}</h1>
+    <p>{message}</p>
+    <p class="hint">You can close this window.</p>
+  </div>
+</body>
+</html>"""
+    return HttpResponse(html, content_type='text/html')
+
+
+def meeting_email_action(request, action, token):
+    """Public endpoint hit from the accept/reject buttons in the invitation
+    email. No auth required — the signed token IS the auth.
+
+    URL: GET /api/meetings/email-action/<action>/<token>/
+    Returns a small HTML confirmation page (the invitee opened this from
+    their mail client; we render directly instead of a JSON API response).
+    """
+    from project_manager_agent.models import (
+        ScheduledMeeting, MeetingParticipant, MeetingResponse, PMNotification,
+    )
+
+    if action not in ('accepted', 'rejected'):
+        return _render_email_action_page(
+            'Invalid action',
+            'The link you opened is malformed. Please open the invitation email again.',
+            color='#ef4444',
+        )
+
+    payload = _verify_meeting_email_token(token)
+    if not payload:
+        return _render_email_action_page(
+            'Link expired or invalid',
+            'This invitation link is no longer valid. Please log in to your dashboard to respond.',
+            color='#ef4444',
+        )
+    meeting_id, user_id = payload
+
+    try:
+        meeting = ScheduledMeeting.objects.select_related('organizer', 'invitee').get(id=meeting_id)
+    except ScheduledMeeting.DoesNotExist:
+        return _render_email_action_page(
+            'Meeting not found',
+            'This meeting no longer exists. It may have been cancelled.',
+            color='#ef4444',
+        )
+
+    if meeting.status == 'withdrawn':
+        return _render_email_action_page(
+            'Meeting withdrawn',
+            f'The organizer has withdrawn the meeting "{meeting.title}". No action is required.',
+            color='#9ca3af',
+        )
+
+    participant, _created = MeetingParticipant.objects.get_or_create(
+        meeting=meeting, user_id=user_id, defaults={'status': 'pending'},
+    )
+
+    # Idempotency — if the invitee already pressed the same button, show the
+    # same confirmation page instead of writing a duplicate response row.
+    if participant.status == action:
+        verb = 'accepted' if action == 'accepted' else 'rejected'
+        return _render_email_action_page(
+            f'Already {verb}',
+            f'You have already {verb} the meeting "{meeting.title}". No further action is needed.',
+            color='#10b981' if action == 'accepted' else '#9ca3af',
+        )
+
+    participant.status = action
+    participant.responded_at = timezone.now()
+    participant.save(update_fields=['status', 'responded_at'])
+
+    MeetingResponse.objects.create(
+        meeting=meeting, responded_by='invitee', action=action, reason='',
+    )
+    meeting.update_overall_status()
+
+    # Notify the organizer (in-app). Email-to-organizer follow-up isn't
+    # essential here — they'll see status update next time they refresh.
+    try:
+        invitee_name = participant.user.get_full_name() or participant.user.username
+        time_display = meeting.proposed_time.strftime('%A, %B %d, %Y at %I:%M %p') if meeting.proposed_time else 'TBD'
+        if action == 'accepted':
+            PMNotification.objects.create(
+                company_user=meeting.organizer,
+                notification_type='custom',
+                severity='info',
+                title=f'Meeting Accepted: {meeting.title}',
+                message=f'{invitee_name} accepted via email — "{meeting.title}" scheduled for {time_display}.',
+                data={'meeting_id': meeting.id, 'via': 'email_link'},
+            )
+        else:
+            PMNotification.objects.create(
+                company_user=meeting.organizer,
+                notification_type='custom',
+                severity='warning',
+                title=f'Meeting Rejected: {meeting.title}',
+                message=f'{invitee_name} rejected "{meeting.title}" via email.',
+                data={'meeting_id': meeting.id, 'via': 'email_link'},
+            )
+    except Exception:
+        logger.exception('Failed to create organizer notification for email-link action')
+
+    if action == 'accepted':
+        return _render_email_action_page(
+            'Meeting accepted',
+            f'Thanks — you have accepted "{meeting.title}". The organizer has been notified.',
+            color='#10b981',
+        )
+    return _render_email_action_page(
+        'Meeting rejected',
+        f'You have rejected "{meeting.title}". The organizer has been notified.',
+        color='#9ca3af',
+    )
+

@@ -175,10 +175,21 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
     }
     const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
     const projectTitle = getProjectTitle(projectId);
+    // Capture whatever the user typed in the chat box at upload time. Without
+    // this the agent only sees the file's raw text and has no idea what to
+    // do with it (the symptom was the chat replying "could you clarify what
+    // you'd like to convert into a project?"). We send it as a separate
+    // `prompt` field so the backend can prepend it as an instruction.
+    const userPrompt = (question || '').trim();
 
     try {
       setFileLoading(true);
-      const response = await pmAgentService.projectPilotFromFile(selectedFile, projectId, currentMessages);
+      const response = await pmAgentService.projectPilotFromFile(
+        selectedFile,
+        projectId,
+        currentMessages,
+        userPrompt || null,
+      );
       if (response.status === 'success') {
         const data = response.data || response;
         const answerText = data.answer || '';
@@ -186,12 +197,15 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
         const cannotDo = data.cannot_do;
         const userMsg = {
           role: 'user',
-          content: `Uploaded file: ${selectedFile.name}`,
+          content: userPrompt
+            ? `${userPrompt}\n\n📎 Attached: ${selectedFile.name}`
+            : `Uploaded file: ${selectedFile.name}`,
           responseData: {
             from_file: true,
             file_name: selectedFile.name,
             project_id: projectId,
             project_title: projectTitle,
+            user_prompt: userPrompt || null,
           },
         };
         const assistantMsg = {
