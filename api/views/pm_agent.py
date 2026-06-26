@@ -2218,9 +2218,31 @@ def knowledge_qa(request):
 
 
 def _pm_build_analytics_data(company_user, project_id=None):
-    """Build controlled aggregate data for graph generation (no sensitive free-text)."""
-    projects_qs = Project.objects.filter(created_by_company_user=company_user)
-    tasks_qs = Task.objects.filter(project__created_by_company_user=company_user)
+    """Build controlled aggregate data for graph generation (no sensitive free-text).
+
+    Two bugs were merged here so the "team members of this project" graph
+    actually has data to plot:
+
+      (a) Scope filter was `created_by_company_user=company_user`, which hid
+          every project a colleague at the same company had created. We now
+          scope by **company** so the graph reflects the whole company's
+          state, gated by company so no other tenant's data leaks in.
+
+      (b) The data summary previously had ZERO team-member fields, so a
+          prompt like "team members of this project" or "tasks per assignee"
+          had nothing to chart and the LLM returned an empty graph. We now
+          add `tasks_by_assignee_obj` and `assignees_active_obj` and surface
+          them in the data summary downstream.
+    """
+    company = getattr(company_user, 'company', None)
+    if company is not None:
+        projects_qs = Project.objects.filter(company=company)
+        tasks_qs = Task.objects.filter(project__company=company)
+    else:
+        # Defensive — never expose another tenant's data if the user
+        # somehow has no company link.
+        projects_qs = Project.objects.filter(created_by_company_user=company_user)
+        tasks_qs = Task.objects.filter(project__created_by_company_user=company_user)
     if project_id:
         projects_qs = projects_qs.filter(id=project_id)
         tasks_qs = tasks_qs.filter(project_id=project_id)
@@ -2254,6 +2276,42 @@ def _pm_build_analytics_data(company_user, project_id=None):
         if name:
             tasks_by_project[str(name)[:40]] = item['count']
 
+    # Team-member breakdown — what was missing for the "team members" graph.
+    # `tasks_by_assignee_obj` is the canonical chart-ready dict (assignee
+    # display name -> total tasks), `assignees_active_obj` only counts
+    # not-yet-done tasks so an "active workload" chart can use it. Tasks
+    # with no assignee are bucketed under "Unassigned" so the graph
+    # surfaces that gap explicitly instead of silently hiding it.
+    tasks_by_assignee = {}
+    assignees_active = {}
+    assignee_rows = tasks_qs.values(
+        'assignee__id', 'assignee__first_name', 'assignee__last_name', 'assignee__username',
+    ).annotate(count=Count('id'))
+    for row in assignee_rows:
+        first = (row.get('assignee__first_name') or '').strip()
+        last = (row.get('assignee__last_name') or '').strip()
+        username = (row.get('assignee__username') or '').strip()
+        if row.get('assignee__id') is None:
+            label = 'Unassigned'
+        else:
+            label = (f"{first} {last}".strip() or username or f"User #{row['assignee__id']}")[:40]
+        tasks_by_assignee[label] = tasks_by_assignee.get(label, 0) + (row.get('count') or 0)
+
+    active_rows = (
+        tasks_qs.exclude(status__in=['done', 'completed'])
+        .values('assignee__id', 'assignee__first_name', 'assignee__last_name', 'assignee__username')
+        .annotate(count=Count('id'))
+    )
+    for row in active_rows:
+        first = (row.get('assignee__first_name') or '').strip()
+        last = (row.get('assignee__last_name') or '').strip()
+        username = (row.get('assignee__username') or '').strip()
+        if row.get('assignee__id') is None:
+            label = 'Unassigned'
+        else:
+            label = (f"{first} {last}".strip() or username or f"User #{row['assignee__id']}")[:40]
+        assignees_active[label] = assignees_active.get(label, 0) + (row.get('count') or 0)
+
     now = timezone.now()
     overdue_tasks_count = tasks_qs.filter(due_date__isnull=False, due_date__lt=now).exclude(status__in=['done', 'completed']).count()
 
@@ -2266,6 +2324,8 @@ def _pm_build_analytics_data(company_user, project_id=None):
         'tasks_by_status_obj': tasks_by_status,
         'tasks_by_priority_obj': tasks_by_priority,
         'tasks_by_project_obj': tasks_by_project,
+        'tasks_by_assignee_obj': tasks_by_assignee,
+        'assignees_active_obj': assignees_active,
     }
 
 
@@ -2301,6 +2361,8 @@ Projects by priority (use projects_by_priority_obj for bar/pie): {json.dumps(ana
 Tasks by status (use tasks_by_status_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_status_obj', {}))}
 Tasks by priority (use tasks_by_priority_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_priority_obj', {}))}
 Tasks by project (use tasks_by_project_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_project_obj', {}))}
+Tasks by assignee / team member (use tasks_by_assignee_obj for bar/pie): {json.dumps(analytics_data.get('tasks_by_assignee_obj', {}))}
+Active tasks per assignee / team member (use assignees_active_obj for bar/pie): {json.dumps(analytics_data.get('assignees_active_obj', {}))}
 """
 
     system = """You are an AI that generates chart configurations for a project management dashboard.
@@ -2338,6 +2400,10 @@ Other rules:
 - For "tasks by status" use tasks_by_status_obj.
 - For "tasks by priority" use tasks_by_priority_obj.
 - For "tasks by project" use tasks_by_project_obj.
+- For "team members", "tasks by assignee", "tasks per person", "workload by member",
+  or "who has what" use tasks_by_assignee_obj.
+- For "active workload", "current workload by team member", "open tasks by assignee"
+  use assignees_active_obj.
 - If user asks "top N", limit to N items (sorted by value descending).
 - Sort bar/pie by value descending unless chronological/alphabetical order is requested.
 - Use "vertical" orientation when user asks for column chart, vertical bars, histogram, or columns.

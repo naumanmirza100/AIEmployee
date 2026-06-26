@@ -109,16 +109,23 @@ def update_company_task(request, task_id):
     """
     try:
         company_user = request.user
-        
-        # Get task and verify it belongs to a project created by this company user
-        task = get_object_or_404(
-            Task,
-            id=task_id,
-            project__created_by_company_user=company_user
-        )
-        
+        company = getattr(company_user, 'company', None)
+
+        # Get task and verify it belongs to a project at the SAME company.
+        # Previously this filtered by `project__created_by_company_user=company_user`,
+        # which 404'd whenever a colleague at the same company had created the
+        # project the task lives in. Scoping by company keeps the security
+        # boundary (other tenants are still locked out) but lets every
+        # CompanyUser in a company edit their colleagues' tasks.
+        task_qs_kwargs = {'id': task_id}
+        if company is not None:
+            task_qs_kwargs['project__company'] = company
+        else:
+            task_qs_kwargs['project__created_by_company_user'] = company_user
+        task = get_object_or_404(Task, **task_qs_kwargs)
+
         data = request.data.copy()
-        
+
         # Update allowed fields
         if 'title' in data:
             task.title = data['title']
@@ -135,26 +142,52 @@ def update_company_task(request, task_id):
             if data['status'] in valid_statuses:
                 task.status = data['status']
         if 'assignee_id' in data:
-            # Update assignee - must be a user created by this company user
+            # Update assignee — same widening: any UserProfile inside the same
+            # company is OK, not just users this specific CompanyUser created.
+            # Also require the user to be active (deactivated users shouldn't
+            # be assignable; we already filter them out of the dropdown).
             assignee_id = data.get('assignee_id')
             if assignee_id:
                 try:
-                    # Verify the assignee is a user created by this company user
-                    assignee_profile = UserProfile.objects.get(
-                        user_id=assignee_id,
-                        created_by_company_user=company_user
+                    profile_qs = UserProfile.objects.filter(
+                        user_id=assignee_id, user__is_active=True,
                     )
+                    if company is not None:
+                        profile_qs = profile_qs.filter(
+                            created_by_company_user__company=company,
+                        )
+                    else:
+                        profile_qs = profile_qs.filter(
+                            created_by_company_user=company_user,
+                        )
+                    assignee_profile = profile_qs.get()
                     task.assignee = assignee_profile.user
                 except UserProfile.DoesNotExist:
                     return Response({
                         'status': 'error',
-                        'message': 'Invalid assignee. User must be created by your company.'
+                        'message': 'Invalid assignee. User must belong to your company and be active.'
                     }, status=status.HTTP_400_BAD_REQUEST)
             else:
                 task.assignee = None
         if 'due_date' in data:
-            task.due_date = data['due_date'] if data['due_date'] else None
-        
+            # Parse explicitly so an unparseable string (e.g. "07/02/2026 05:00 AM")
+            # returns a clear 400 instead of bubbling into a generic 500.
+            raw_due = data['due_date']
+            if not raw_due:
+                task.due_date = None
+            else:
+                from django.utils.dateparse import parse_datetime, parse_date
+                parsed = parse_datetime(raw_due) or parse_date(raw_due)
+                if parsed is None:
+                    return Response({
+                        'status': 'error',
+                        'message': (
+                            'Invalid due date format. Send an ISO 8601 datetime '
+                            '(e.g. "2026-07-02T05:00:00Z") or a date (YYYY-MM-DD).'
+                        ),
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                task.due_date = parsed
+
         task.save()
         
         return Response({
@@ -197,12 +230,22 @@ def get_company_users_for_assignment(request):
     """
     try:
         company_user = request.user
-        
-        # Get all users created by this company user
-        user_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user
-        ).select_related('user')
-        
+        company = getattr(company_user, 'company', None)
+
+        # Get all ACTIVE users in the same company (not just users this
+        # specific CompanyUser created). Previously this filtered by
+        # `created_by_company_user=company_user`, so the Assign-To dropdown
+        # was missing colleagues' users — and an attempt to assign them
+        # then failed in `update_company_task` with "Invalid assignee".
+        # Same security boundary: only users from this company, never
+        # another tenant's.
+        profile_qs = UserProfile.objects.filter(user__is_active=True)
+        if company is not None:
+            profile_qs = profile_qs.filter(created_by_company_user__company=company)
+        else:
+            profile_qs = profile_qs.filter(created_by_company_user=company_user)
+        user_profiles = profile_qs.select_related('user')
+
         users_data = []
         for profile in user_profiles:
             users_data.append({

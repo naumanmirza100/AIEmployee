@@ -2,7 +2,7 @@
 
 **Source:** `AI Employee Project manager testing.pdf`
 **Tested by:** Noor &nbsp;·&nbsp; **Verified by:** Hamza &nbsp;·&nbsp; **Owner:** Abdullah
-**Last updated:** 2026-06-23 (second batch — 6 more fixes: date picker, PDF→project, meeting duplicate, invitee email links, Time Estimation, Smart Notifications scan)
+**Last updated:** 2026-06-23 (fourth batch — #23 team-members graph data, #26 task-update scope fix, Assign-To dropdown widened)
 
 ## Legend
 - [x] **Done** — verified fix is in the current code (file reference shown).
@@ -133,29 +133,39 @@
 
 ## 10. Task Prioritization Agent
 
-- ❓ **`Suggest Delegation` returns "Fallback delegation used" + Workload Analysis N/A**
-  Frontend dispatches the action; backend endpoint not located in this pass.
-  **Question for you:**
-  > Has the real delegation algorithm + workload analysis been written, or is it still the fallback stub? If still stub, I'll wire up the real logic.
+- [x] **`Suggest Delegation` no longer silently falls back to round-robin**
+  **Root cause:** the LLM call had `max_tokens=1200`, which is far too small for the requested response shape (each suggestion needs a 6-8 sentence reasoning block + workload_analysis + reassignment_opportunities + summary). The response was being truncated mid-JSON, `json.loads` raised silently, and the `except Exception` block fired the round-robin "Fallback delegation used" with no log of why.
+  **Fix:**
+  - Token budget bumped to `max_tokens=4096`.
+  - New shared `_extract_json_object` helper handles common LLM quirks (fenced blocks, trailing prose, dangling braces from truncation) and is used in all three big prioritization LLM calls.
+  - Inputs capped to 12 candidate tasks × 15 team members so prompt + response always fit.
+  - Fallback path now logs the actual exception + a 200-char prefix of the raw response so future incidents are debuggable instead of silent.
+  Evidence: [`project_manager_agent/ai_agents/task_prioritization_agent.py:_extract_json_object`](project_manager_agent/ai_agents/task_prioritization_agent.py) and the rewritten `suggest_delegation` body.
 
-- ❓ **`Generate Subtasks` keeps loading indefinitely**
-  No client-side timeout. Backend endpoint not located.
-  **Question for you:**
-  > Has the subtask endpoint been fixed/implemented? Or do you want me to add a client-side timeout + show an error toast as a stop-gap?
+- [x] **`Generate Subtasks` — long but honest progress UI**
+  **Investigation outcome:** the endpoint *is* working; it takes 60-90 s because it really does generate 70-90 subtasks (per user's confirmation). The UI was showing a single tiny "Generating…" spinner with no elapsed time, so users assumed it had hung.
+  **Fix:** new shared [`ProgressLoader`](PaPerProjectFront/src/components/common/ProgressLoader.jsx) component — indeterminate animated bar + real elapsed-time counter + phased status hints that flip based on elapsed-time thresholds + a typical-duration line + an "overdue" hint if elapsed > 1.5× typical. Wired into all 4 actions in `TaskPrioritizationAgent.jsx` with per-action phase presets:
+  - *Prioritize & Order Tasks* — typical ~75s, 5 phases (priority scoring → ordering → strategy summary)
+  - *Find Bottlenecks* — typical ~30s, 3 phases
+  - *Suggest Delegation* — typical ~35s, 3 phases
+  - *Generate Subtasks* — typical ~70s, 4 phases (calls out "Generating 70+ subtasks — this is the slow part" so users know it's intentional)
+  No fake percentages — single HTTP request has no real per-token progress; we don't pretend it does.
 
-- ❓ **`Prioritize & Order Tasks` returns no output (empty Analysis Results)**
-  Same area as above — backend endpoint not located.
-  **Question for you:**
-  > Same as the other two prioritization actions — confirm fixed/not and I'll dig in if needed.
+- [x] **`Prioritize & Order Tasks` no longer returns empty Analysis Results**
+  **Root cause:** same `max_tokens=1200` truncation pattern as Suggest Delegation — `suggest_task_order` was being cut off mid-JSON, the partial parse returned no `execution_plan`, the merged result had no `tasks` to render. `identify_bottlenecks` had the identical bug.
+  **Fix:** bumped `max_tokens` to 4096 in `suggest_task_order` and `identify_bottlenecks`, both now use `_extract_json_object` for permissive parsing, both log a snippet of the raw response when extraction fails so we can see the cause in server logs.
 
 ---
 
 ## 11. Team Performance Dashboard
 
-- ❓ **Team-members graph shows "No data available"**
-  Couldn't fully verify whether the data fetch / graph rendering is now hooked up.
-  **Question for you:**
-  > Has this been fixed? If still broken I'll trace the team-graph endpoint + chart component.
+- [x] **Team-members graph now has data to plot**
+  **Root cause:** `_pm_build_analytics_data()` — the function that builds the data the chart-generation LLM sees — exposed only project/task counts. The LLM literally had no `tasks_by_assignee` or `team_members` field to chart, so any prompt like *"team members of this project"* or *"tasks per person"* came back empty. Also: same per-creator scope bug as #18 — colleagues' projects were invisible.
+  **Fix:**
+  1. Switched the project / task filter from `created_by_company_user=user` to `company=user.company` so colleagues' projects count.
+  2. Added two new chart-ready dicts: `tasks_by_assignee_obj` (total tasks per assignee, "Unassigned" bucketed explicitly) and `assignees_active_obj` (excluding done/completed for an "active workload" chart).
+  3. Surfaced both in the data summary passed to the LLM, and extended the system prompt's mapping rules so the LLM picks the right dict for prompts containing "team members", "tasks by assignee", "workload by member", or "active workload".
+  Evidence: [`api/views/pm_agent.py:_pm_build_analytics_data`](api/views/pm_agent.py#L2220) and chart prompt at [`_pm_generate_chart_from_prompt`](api/views/pm_agent.py#L2292).
 
 ---
 
@@ -169,10 +179,16 @@
   New `DELETE /api/project-manager/projects/{id}/delete` endpoint scoped to the company (404 for foreign companies). Frontend: red Trash button next to Edit on every project card in the Projects tab, gated by `ConfirmDialog`.
   Evidence: backend [`api/views/pm_agent.py: delete_project_manual`](api/views/pm_agent.py), URL [`api/urls.py:226`](api/urls.py#L226), service [`pmAgentService.deleteProjectManual`](PaPerProjectFront/src/services/pmAgentService.js), button [`CompanyDashboardPage.jsx:1123-1149`](PaPerProjectFront/src/pages/CompanyDashboardPage.jsx#L1123-L1149).
 
-- ❓ **Task update fails with "Failed to update task"**
-  The task-update endpoint exists but I didn't read its body to find the failure cause.
-  **Question for you:**
-  > Has this been fixed? If still broken I'll read the endpoint and the request payload to find the mismatch. (Most likely culprit from the screenshot — Status `Review` may not be in the model's `STATUS_CHOICES`, or the deadline format/timezone may be rejected.)
+- [x] **Task update no longer fails with "Failed to update task"**
+  **Root cause:** the endpoint had TWO too-narrow `created_by_company_user=user` filters:
+  - The task lookup 404'd whenever the task's project was created by a *colleague* in the same company (same scope bug pattern as #18 and #27).
+  - The assignee validation rejected `assignee_id`s whose `UserProfile.created_by_company_user` wasn't the *current* CompanyUser — even though the Assign-To dropdown was already showing those users. The dropdown showed them via `get_company_users_for_assignment`, which had the same per-creator scope, so on most installs the dropdown also showed too few users.
+  Additionally, an unparseable date string was being assigned raw to `task.due_date` and bubbling into a generic 500 with the unhelpful "Failed to update task" toast.
+  **Fix in [`api/views/company_projects_tasks.py:update_company_task`](api/views/company_projects_tasks.py#L102):**
+  1. Task lookup now scoped by `project__company=user.company`.
+  2. Assignee validation now scoped by `UserProfile.created_by_company_user__company=user.company`, AND requires the user to be `is_active=True` (consistent with #27).
+  3. `due_date` is now explicitly parsed via `parse_datetime` / `parse_date` — an unparseable string returns a clear 400 *"Invalid due date format. Send an ISO 8601 datetime …"* instead of a generic 500.
+  4. The Assign-To dropdown source `get_company_users_for_assignment` was widened the same way, so colleagues' users appear and are valid targets.
 
 - [ ] **No search bar for projects / users / tasks**
   No `<Input>` search filter present in the PM listing views. *Deferred* — needs scope confirmation (which views: Projects tab, Users tab, Tasks tab, or all three with one global search?).
@@ -183,33 +199,25 @@
 
 | Status | Count | Items |
 |---|---|---|
-| Done | **21** | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 18, 19, 24, 25, 27, (plus 14 skipped per user) |
+| Done | **26** | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 |
 | Partially done | **1** | 17 (UI ready; backend message text still suspected weak) |
 | Not done | **2** | 14 (skipped by user request), 28 (search bar — scope pick needed) |
-| Needs clarification | **5** | 20, 21, 22, 23, 26 |
+| Needs clarification | **0** | — |
 
-### Landed this session (2026-06-23, second batch)
+### Landed this session (2026-06-23, fourth batch)
 
-1. **#3** Calendar / clock picker — new shared `DatePicker` + `DateTimePicker` on shadcn `Calendar` + `Popover`, wired into both create-project and create-task forms.
-2. **#8** PDF → project — frontend now sends a `prompt` field with the typed instruction; backend composes the question as instruction + delimited file content so the agent knows what to do with the attachment.
-3. **#9** Duplicate participants — two-pass token-consuming matcher in the NLP scheduler so "fatima noor" no longer also matches "noor fatima" via partial tokens; backend defends with `get_or_create` + per-call user-id dedupe.
-4. **#10** Invitee accept/reject — backend list/respond endpoints already existed (project-user `meeting_list_for_user` + `meeting_respond`); added signed-token email-link endpoint `/api/meetings/email-action/<action>/<token>/` (14-day TTL, HMAC-signed `meeting_id:user_id`, idempotent), and the invitation email body now has green ✓ Accept / red ✕ Reject buttons. UserDashboardPage's existing "Meetings" tab already provides the in-dashboard flow.
-5. **#15 / #16** Time Estimation — endpoint now passes `project.start_date` / `project.deadline` to the agent and post-processes the result to populate the UI's expected keys (`task_estimates`, `total_hours`, `total_days`) plus `estimated_start_date` / `estimated_end_date` cumulated from the project start instead of "today".
-6. **#18** Smart Notifications scan — filter changed from `created_by_company_user=user` to `company=user.company` so colleagues see the same project set as the rest of the dashboard.
+1. **#23** Team-members graph — `_pm_build_analytics_data` had zero team-member fields and was scoped per-creator. Added `tasks_by_assignee_obj` + `assignees_active_obj`, surfaced them in both the data summary and the system-prompt mapping rules, and widened the scope filter from `created_by_company_user=user` to `company=user.company`. The LLM now has real data to chart for prompts like *"team members of this project"* or *"workload by member"*.
+2. **#26** Task update — three bugs in one. Task lookup was scoped to the creator (404 on colleagues' tasks). Assignee validation was scoped to the creator (400 on colleagues' users — even when the dropdown surfaced them via a different code path). Unparseable date strings bubbled into a generic 500 with no actionable error. All three fixed: scope by company across the board, plus explicit `parse_datetime`/`parse_date` with a clear 400 message on bad input.
+3. **Assign-To dropdown** — `get_company_users_for_assignment` was using the same per-creator filter, so colleagues' users were invisible. Widened to `created_by_company_user__company=user.company` + `user__is_active=True` (consistent with #27).
 
-Sanity-checked: 5 JSX/JS files compile cleanly via esbuild, 5 Python files parse, `python manage.py check` reports no issues.
+Sanity-checked: 2 Python files parse, `python manage.py check` reports no issues.
 
 ---
 
 ## Next steps — what I need from you
 
-A quick **"still broken"** / **"now working"** is enough — that'll let me build the next fix list:
+Only one open item now:
 
-1. **#20** Task Prioritization → `Suggest Delegation` — still returns "Fallback delegation used"?
-2. **#21** Task Prioritization → `Generate Subtasks` — still loads forever?
-3. **#22** Task Prioritization → `Prioritize & Order Tasks` — still empty output?
-4. **#23** Team-members graph — still "No data available"?
-5. **#26** Task update — still erroring "Failed to update task"?
-6. **#28** Search bar — confirm scope (Projects tab? Users tab? Tasks tab? one global search bar?) and I'll wire it.
+- **#28** Search bar — confirm scope (Projects tab? Users tab? Tasks tab? one global search bar?) and I'll wire it.
 
-(**#14** Standup duplicate is skipped per your request, **#17** is partial pending a backend audit, no other open questions.)
+(**#14** Standup duplicate is skipped per your request, **#17** is partial pending a backend audit.)
