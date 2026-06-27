@@ -56,9 +56,23 @@ Be conservative in estimates - it's better to overestimate than underestimate.""
             if t.get('assignee_name'):
                 tasks_str += f"  Assignee: {t.get('assignee_name')}\n"
 
+        # Build a project-window line — anchors the LLM's reasoning to the
+        # real start/end of the project instead of implicit "starts today".
+        window_str = ""
+        if project_info:
+            start = project_info.get('start_date')
+            end = project_info.get('end_date') or project_info.get('deadline')
+            if start or end:
+                bits = []
+                if start:
+                    bits.append(f"starts {start}")
+                if end:
+                    bits.append(f"deadline {end}")
+                window_str = " (" + ", ".join(bits) + ")"
+
         prompt = f"""Estimate the duration for each of the following tasks.
 
-PROJECT: {project_info.get('name', 'Unknown') if project_info else 'Unknown'}
+PROJECT: {project_info.get('name', 'Unknown') if project_info else 'Unknown'}{window_str}
 {historical_str}
 
 TASKS TO ESTIMATE:

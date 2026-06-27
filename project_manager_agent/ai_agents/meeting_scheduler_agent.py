@@ -129,32 +129,65 @@ You MUST validate that mentioned users exist in the company before scheduling.""
         """
         Find ALL company users mentioned in the message. Returns a list of matched user dicts.
         Used for multi-participant meetings like "schedule with hamza, sarah, and developer1".
+
+        Two-pass algorithm to avoid the "fatima noor" → also matches "noor fatima"
+        false-positive bug:
+
+          Pass 1 — collect users whose **full name**, **email**, or **email prefix**
+                   appears verbatim in the message. These are unambiguous.
+          Pass 2 — for users not already matched in pass 1, allow a partial
+                   name-part match ONLY using a token that has NOT been
+                   "consumed" by a pass-1 match.
+
+        Example:
+          message      = "schedule a meeting with fatima noor at 10pm"
+          User A       = "fatima noor"  (full-name hit in pass 1 → consumes "fatima" + "noor")
+          User B       = "noor fatima"  (name parts ["noor", "fatima"] are both already
+                                          consumed → no pass-2 match → correctly excluded)
         """
         msg_lower = message.lower()
-        found_users = []
-        found_ids = set()
+        found_users: List[Dict] = []
+        found_ids: set = set()
+        # Tokens that have been "claimed" by an unambiguous pass-1 match. A
+        # subsequent partial match cannot fire on these tokens — otherwise we
+        # double-match users whose names are anagrams or share tokens.
+        consumed_tokens: set = set()
 
+        def _name_tokens(full_name: str) -> List[str]:
+            return [p for p in full_name.lower().split() if len(p) >= 3]
+
+        # ── Pass 1: unambiguous full-name / email / email-prefix matches ──
         for u in company_users:
             full_name = u["full_name"].lower()
             email = u["email"].lower()
             email_prefix = email.split("@")[0] if "@" in email else email
-            name_parts = [p for p in full_name.split() if len(p) >= 3]
 
-            matched = False
-            # Full name match
+            strong_match = False
             if re.search(r'\b' + re.escape(full_name) + r'\b', msg_lower):
-                matched = True
-            # Email match
-            elif email in msg_lower:
-                matched = True
-            # Email prefix match
+                strong_match = True
+            elif email and email in msg_lower:
+                strong_match = True
             elif len(email_prefix) >= 3 and re.search(r'\b' + re.escape(email_prefix) + r'\b', msg_lower):
-                matched = True
-            # Name part match (first/last name)
-            elif any(re.search(r'\b' + re.escape(part) + r'\b', msg_lower) for part in name_parts):
-                matched = True
+                strong_match = True
 
-            if matched and u["id"] not in found_ids:
+            if strong_match and u["id"] not in found_ids:
+                found_users.append(u)
+                found_ids.add(u["id"])
+                consumed_tokens.update(_name_tokens(full_name))
+
+        # ── Pass 2: partial name-token match for users not yet matched ──
+        # Skipped entirely for users whose tokens were already consumed.
+        for u in company_users:
+            if u["id"] in found_ids:
+                continue
+            name_parts = _name_tokens(u["full_name"])
+            # A partial match counts only if at least one of this user's name
+            # tokens appears in the message AND is NOT a token already claimed
+            # by a pass-1 match for somebody else.
+            uniquely_useful = [p for p in name_parts if p not in consumed_tokens]
+            if not uniquely_useful:
+                continue
+            if any(re.search(r'\b' + re.escape(part) + r'\b', msg_lower) for part in uniquely_useful):
                 found_users.append(u)
                 found_ids.add(u["id"])
 

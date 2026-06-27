@@ -192,8 +192,10 @@ export const generateSubtasks = async (projectId) => {
  * @param {File} file - File to upload (txt, pdf, or docx)
  * @param {number|null} projectId - Optional project ID
  * @param {Array<{role: string, content: string}>} chatHistory - Optional conversation history for this chat
+ * @param {string|null} prompt - Optional instruction (e.g. "convert this to a project"). Without it the
+ *                               agent only sees the file's raw content and won't know what to do with it.
  */
-export const projectPilotFromFile = async (file, projectId = null, chatHistory = null) => {
+export const projectPilotFromFile = async (file, projectId = null, chatHistory = null, prompt = null) => {
   try {
     const token = localStorage.getItem('company_auth_token');
 
@@ -204,6 +206,9 @@ export const projectPilotFromFile = async (file, projectId = null, chatHistory =
     }
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
       formData.append('chat_history', JSON.stringify(chatHistory.map((m) => ({ role: m.role, content: m.content || '' }))));
+    }
+    if (prompt && String(prompt).trim()) {
+      formData.append('prompt', String(prompt).trim());
     }
 
     const response = await fetch(`${API_BASE_URL}/project-manager/ai/project-pilot/upload-file`, {

@@ -9,6 +9,66 @@ from .enhancements.chart_generation import ChartGenerator
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import json
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_json_object(raw: str):
+    """Permissively extract a JSON object from an LLM response.
+
+    Handles common LLM quirks that previously caused silent fallback paths:
+      - response wrapped in ```json ... ``` or ``` ... ``` fences
+      - leading/trailing prose before/after the JSON
+      - **truncated JSON** (response cut off mid-array because max_tokens
+        was hit) — we close dangling braces/brackets so the parser still
+        succeeds and we get whatever the LLM finished emitting
+
+    Returns the parsed dict, or None if no JSON could be salvaged.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+
+    text = raw.strip()
+
+    # Strip ```json ... ``` / ``` ... ``` fences if present.
+    if '```' in text:
+        # Prefer the body of the first fenced block.
+        m = re.search(r'```(?:json)?\s*([\s\S]+?)```', text)
+        if m:
+            text = m.group(1).strip()
+        else:
+            # Unclosed fence — drop the leading ```json marker.
+            text = re.sub(r'^```(?:json)?\s*', '', text).strip()
+
+    # Locate the outermost JSON object by greedy brace match.
+    start = text.find('{')
+    if start == -1:
+        return None
+    candidate = text[start:]
+
+    # First try as-is.
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Second pass — close any dangling braces/brackets. LLMs truncated by
+    # max_tokens usually leave open `{`/`[` without the closing partner.
+    open_braces = candidate.count('{') - candidate.count('}')
+    open_brackets = candidate.count('[') - candidate.count(']')
+    repaired = candidate
+    # Strip trailing comma before closing, plus any half-written key/value pair.
+    repaired = re.sub(r',\s*$', '', repaired)
+    repaired = re.sub(r',\s*"[^"]*"\s*:\s*"?[^"}\]]*$', '', repaired)
+    repaired = repaired + (']' * max(open_brackets, 0)) + ('}' * max(open_braces, 0))
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError as exc:
+        logger.warning("_extract_json_object: could not salvage JSON (%s). Preview: %r",
+                       exc, raw[:300])
+        return None
 
 
 class TaskPrioritizationAgent(BaseAgent):
@@ -547,20 +607,19 @@ Return JSON:
 }}"""
         
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
-            
-            # Extract JSON
-            if "```json" in response:
-                json_start = response.find("```json") + 7
-                json_end = response.find("```", json_start)
-                response = response[json_start:json_end].strip()
-            elif "```" in response:
-                json_start = response.find("```") + 3
-                json_end = response.find("```", json_start)
-                if json_end > json_start:
-                    response = response[json_start:json_end].strip()
-            
-            order_analysis = json.loads(response)
+            # max_tokens was 1200 — too small for an execution plan with
+            # reasoning across many tasks. The truncated JSON parsed as
+            # an empty/partial dict and the user saw "empty Analysis Results".
+            # Bump to 4096 to match suggest_delegation.
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=4096)
+
+            order_analysis = _extract_json_object(response)
+            if order_analysis is None:
+                logger.warning(
+                    "suggest_task_order: unparseable LLM response (len=%d, prefix=%r)",
+                    len(response or ''), (response or '')[:200],
+                )
+                order_analysis = {}
             execution_plan = order_analysis.get('execution_plan', [])
             order_map = {str(item['id']): item for item in execution_plan}
             
@@ -1055,21 +1114,15 @@ Return JSON:
 }}"""
         
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
-            
-            # Extract JSON
-            if "```json" in response:
-                json_start = response.find("```json") + 7
-                json_end = response.find("```", json_start)
-                response = response[json_start:json_end].strip()
-            elif "```" in response:
-                json_start = response.find("```") + 3
-                json_end = response.find("```", json_start)
-                if json_end > json_start:
-                    response = response[json_start:json_end].strip()
-            
-            analysis = json.loads(response)
-            
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=4096)
+            analysis = _extract_json_object(response)
+            if analysis is None:
+                logger.warning(
+                    "identify_bottlenecks: unparseable LLM response (len=%d, prefix=%r)",
+                    len(response or ''), (response or '')[:200],
+                )
+                analysis = {}
+
             # Add computed data
             analysis['overloaded_members'] = overloaded
             analysis['blocking_tasks_count'] = len(blocking_tasks)
@@ -1200,6 +1253,13 @@ Return JSON:
                 },
                 "reassignment_opportunities": []
             }
+
+        # Cap inputs so the prompt + response fit in the token budget.
+        # 12 candidates × ~6 sentences of reasoning each is roughly 3-4k
+        # output tokens — paired with 4096 max_tokens this leaves headroom
+        # for `workload_analysis`, `reassignment_opportunities`, `summary`.
+        all_tasks_to_delegate = all_tasks_to_delegate[:12]
+        team_members = team_members[:15]
 
         # Prepare team member data with workload
         team_data = []
@@ -1345,21 +1405,23 @@ Return JSON:
 }}"""
         
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
-            
-            # Extract JSON
-            if "```json" in response:
-                json_start = response.find("```json") + 7
-                json_end = response.find("```", json_start)
-                response = response[json_start:json_end].strip()
-            elif "```" in response:
-                json_start = response.find("```") + 3
-                json_end = response.find("```", json_start)
-                if json_end > json_start:
-                    response = response[json_start:json_end].strip()
-            
-            suggestions = json.loads(response)
-            
+            # max_tokens was 1200 — way too small for the requested response
+            # shape (each suggestion needs a 6-8 sentence reasoning block +
+            # workload analysis + reassignment opportunities + summary). The
+            # LLM was being cut off mid-JSON, parse failed silently, and the
+            # round-robin fallback fired. Bump to 4096 so a typical 8–12 task
+            # delegation analysis fits in one shot.
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=4096)
+
+            suggestions = _extract_json_object(response)
+            if suggestions is None:
+                # Salvage was impossible — fall through to the fallback below
+                # but with full diagnostics so we can see WHY in the logs.
+                raise ValueError(
+                    f"LLM returned unparseable JSON (len={len(response or '')}, "
+                    f"prefix={(response or '')[:200]!r})"
+                )
+
             # Add computed workload analysis if not in response
             if 'workload_analysis' not in suggestions:
                 suggestions['workload_analysis'] = {
@@ -1368,13 +1430,19 @@ Return JSON:
                         'underutilized_members': [m.get('name') for m in team_data if m.get('current_total_hours', 0) < 10]
                     }
                 }
-            
+
             return suggestions
-            
+
         except Exception as e:
             from core.api_key_service import KeyServiceError
             if isinstance(e, KeyServiceError):
                 raise
+            # Log the actual failure cause so future "Fallback delegation used"
+            # incidents are debuggable instead of silent.
+            logger.warning(
+                "suggest_delegation falling back to round-robin: %s",
+                e, exc_info=True,
+            )
             self.log_action("Error suggesting delegation", {"error": str(e)})
             # Fallback: round-robin assignment
             suggestions = []
@@ -1388,7 +1456,7 @@ Return JSON:
                     "delegation_type": "new_assignment",
                     "skill_match_score": 50,
                     "workload_impact": "medium",
-                    "reasoning": "Round-robin assignment (AI analysis unavailable)",
+                    "reasoning": "Round-robin assignment (AI analysis unavailable — see server logs).",
                     "priority": task.get('priority', 'medium')
                 })
             return {

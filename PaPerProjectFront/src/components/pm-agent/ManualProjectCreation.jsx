@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, X } from 'lucide-react';
 import { companyApi } from '@/services/companyAuthService';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { DatePicker } from '@/components/common/DatePicker';
 
 const ManualProjectCreation = ({ onProjectCreated }) => {
   const { toast } = useToast();
@@ -305,27 +306,27 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
               />
             </div>
 
-            {/* Start Date */}
+            {/* Start Date — popover calendar (drop-in replacement for native date input) */}
             <div>
               <Label htmlFor="start_date">Start Date</Label>
-              <Input
+              <DatePicker
                 id="start_date"
-                type="date"
-                min={todayIso()}
                 value={formData.start_date}
-                onChange={(e) => handleChange('start_date', e.target.value)}
+                onChange={(v) => handleChange('start_date', v)}
+                minDate={todayIso()}
+                placeholder="Pick a start date"
               />
             </div>
 
             {/* Deadline (the project's end / due date — single field) */}
             <div>
               <Label htmlFor="deadline">Deadline</Label>
-              <Input
+              <DatePicker
                 id="deadline"
-                type="date"
-                min={formData.start_date || todayIso()}
                 value={formData.deadline}
-                onChange={(e) => handleChange('deadline', e.target.value)}
+                onChange={(v) => handleChange('deadline', v)}
+                minDate={formData.start_date || todayIso()}
+                placeholder="Pick a deadline"
               />
             </div>
           </div>

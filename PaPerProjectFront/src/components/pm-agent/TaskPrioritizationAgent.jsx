@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Target, ListChecks, AlertTriangle, Users } from 'lucide-react';
+import ProgressLoader from '@/components/common/ProgressLoader';
 import {
   PieChart,
   Pie,
@@ -21,13 +22,62 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
+// Per-action progress configuration. The LLM call is opaque so we can't show
+// real percent-done — instead we show phase-based status hints that flip on
+// real elapsed-time thresholds, calibrated to what each action actually does.
+const PROGRESS_PRESETS = {
+  prioritize_and_order: {
+    title: 'Prioritising & ordering tasks',
+    typicalSeconds: 75,
+    phases: [
+      { at: 0,  label: 'Reading project tasks…' },
+      { at: 5,  label: 'Scoring task priorities…' },
+      { at: 25, label: 'Computing execution order & parallel groups…' },
+      { at: 50, label: 'Building strategy summary…' },
+      { at: 70, label: 'Almost done — finalising…' },
+    ],
+  },
+  bottlenecks: {
+    title: 'Finding bottlenecks',
+    typicalSeconds: 30,
+    phases: [
+      { at: 0,  label: 'Reading workload + dependencies…' },
+      { at: 5,  label: 'AI analysing risk + resource overload…' },
+      { at: 20, label: 'Drafting resolution strategies…' },
+    ],
+  },
+  delegation: {
+    title: 'Suggesting delegation',
+    typicalSeconds: 35,
+    phases: [
+      { at: 0,  label: 'Reading team workload + skills…' },
+      { at: 5,  label: 'Matching tasks to best-fit owners…' },
+      { at: 20, label: 'Calculating workload rebalance…' },
+    ],
+  },
+  generate_subtasks: {
+    title: 'Generating subtasks',
+    typicalSeconds: 70,
+    phases: [
+      { at: 0,  label: 'Reading project tasks…' },
+      { at: 5,  label: 'AI breaking down each task into subtasks…' },
+      { at: 30, label: 'Generating 70+ subtasks — this is the slow part…' },
+      { at: 60, label: 'Saving subtasks to the project…' },
+    ],
+  },
+};
+
 const TaskPrioritizationAgent = ({ projects = [] }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [action, setAction] = useState('prioritize');
   const [loading, setLoading] = useState(false);
+  // Which action is currently running — drives the phase preset shown in the
+  // ProgressLoader. Distinct from `action` (the user's last *clicked* action)
+  // so the loader doesn't flicker labels if the user clicks while one runs.
+  const [runningAction, setRunningAction] = useState(null);
   const [result, setResult] = useState(null);
   const { toast } = useToast();
-  
+
   // Ensure projects is always an array
   const safeProjects = Array.isArray(projects) ? projects : [];
 
@@ -51,6 +101,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       setLoading(true);
       setResult(null);
       setAction(selectedAction);
+      setRunningAction(selectedAction);
 
       const response = await pmAgentService.taskPrioritization(
         selectedAction,
@@ -75,6 +126,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       toast(toastForError(error, 'Failed to analyze tasks'));
     } finally {
       setLoading(false);
+      setRunningAction(null);
     }
   };
 
@@ -91,6 +143,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
     try {
       setLoading(true);
       setResult(null);
+      setRunningAction('generate_subtasks');
 
       const response = await pmAgentService.generateSubtasks(selectedProjectId);
 
@@ -116,6 +169,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       });
     } finally {
       setLoading(false);
+      setRunningAction(null);
     }
   };
 
@@ -178,7 +232,7 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
             disabled={loading || !selectedProjectId}
             className="w-full"
           >
-            {loading ? (
+            {loading && runningAction === 'generate_subtasks' ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Generating...
@@ -192,6 +246,17 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Long-running LLM call indicator. The underlying request is a single
+          HTTP call — no real progress data — but we show elapsed time +
+          phase-based status hints so the user knows the AI is still working
+          (these actions normally take 30-90s and previously felt frozen). */}
+      <ProgressLoader
+        active={loading && !!runningAction}
+        title={(PROGRESS_PRESETS[runningAction] || {}).title || 'Working…'}
+        phases={(PROGRESS_PRESETS[runningAction] || {}).phases}
+        typicalSeconds={(PROGRESS_PRESETS[runningAction] || {}).typicalSeconds || 60}
+      />
 
       {result && (
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">

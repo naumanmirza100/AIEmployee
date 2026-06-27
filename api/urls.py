@@ -150,6 +150,10 @@ urlpatterns = [
     # Meeting endpoints for project users (Django Users)
     re_path(r'^meetings/?$', notification.meeting_list_for_user, name='user_meeting_list'),
     re_path(r'^meetings/(?P<meeting_id>\d+)/respond/?$', notification.meeting_respond, name='user_meeting_respond'),
+    # Public signed-token meeting accept/reject — clicked straight from the
+    # invitation email, no auth required (token IS the auth).
+    re_path(r'^meetings/email-action/(?P<action>accepted|rejected)/(?P<token>[^/]+)/?$',
+            notification.meeting_email_action, name='user_meeting_email_action'),
     
     # Company endpoints
     re_path(r'^companies/?$', company.list_companies, name='list_companies'),  # GET
