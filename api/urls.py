@@ -99,6 +99,7 @@ urlpatterns = [
     re_path(r'^industries/(?P<slug>[\w-]+)/?$', industry.get_industry_by_slug, name='get_industry_by_slug'),
     re_path(r'^industries/(?P<slug>[\w-]+)/challenges/?$', industry.get_industry_challenges, name='get_industry_challenges'),
     
+
     # Blog endpoints
     re_path(r'^blog/posts/?$', blog.list_blog_posts, name='list_blog_posts'),
     re_path(r'^blog/posts/(?P<slug>[\w-]+)/?$', blog.get_blog_post_by_slug, name='get_blog_post_by_slug'),

@@ -1853,6 +1853,7 @@ AGENT_CHOICES = [
     ('reply_draft_agent', 'Reply Draft Agent'),
     ('hr_agent', 'HR Support Agent'),
     ('ai_sdr_agent', 'AI SDR Agent'),
+    ('exec_meeting_agent', 'AI Executive Meeting Assistant'),
 ]
 
 PROVIDER_CHOICES = [
@@ -2242,4 +2243,5 @@ AGENT_DEFAULT_PROVIDER = {
     'reply_draft_agent': 'groq',
     'hr_agent': 'groq',
     'ai_sdr_agent': 'groq',
+    'exec_meeting_agent': 'groq',
 }
