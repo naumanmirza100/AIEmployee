@@ -480,11 +480,13 @@ const ExecMeetingDashboard = () => {
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
 
-  // AI gen
+  // AI Documents
   const [aiDocLoading, setAiDocLoading] = useState(false);
-  const [aiDoc, setAiDoc] = useState('');
   const [aiDocType, setAiDocType] = useState('agenda');
   const [aiDocInput, setAiDocInput] = useState('');
+  const [savedDocs, setSavedDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [viewDoc, setViewDoc] = useState(null);   // { id, title, doc_type, content, created_at }
 
   useEffect(() => { loadStats(); }, []);
 
@@ -493,6 +495,7 @@ const ExecMeetingDashboard = () => {
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
     if (activeTab === 'overview' && !digest) loadDigest();
+    if (activeTab === 'documents') loadDocuments();
   }, [activeTab]);
 
   const loadStats = async () => {
@@ -557,6 +560,89 @@ const ExecMeetingDashboard = () => {
     }
   };
 
+  const loadDocuments = async () => {
+    setDocsLoading(true);
+    try {
+      const data = await execMeetingService.listDocuments();
+      setSavedDocs(data.documents || []);
+    } catch {
+      setSavedDocs([]);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const generateAiDoc = async () => {
+    if (!aiDocInput.trim()) {
+      toast({ title: 'Enter a meeting title or topic first', variant: 'destructive' });
+      return;
+    }
+    setAiDocLoading(true);
+    try {
+      const res = await execMeetingService.generateDocument({
+        action: aiDocType,
+        title: aiDocInput,
+        topics: [],
+        duration_minutes: 60,
+      });
+      toast({ title: 'Document generated and saved!' });
+      // Reload list so new doc appears
+      loadDocuments();
+      // Auto-open viewer
+      if (res.document_id) {
+        setViewDoc({
+          id: res.document_id,
+          title: `${aiDocType.charAt(0).toUpperCase() + aiDocType.slice(1)} — ${aiDocInput}`,
+          doc_type: aiDocType,
+          content: res.content || '',
+          created_at: new Date().toISOString(),
+        });
+      }
+      setAiDocInput('');
+    } catch (err) {
+      toast({ title: 'AI generation failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setAiDocLoading(false);
+    }
+  };
+
+  const deleteDoc = async (id) => {
+    try {
+      await execMeetingService.deleteDocument(id);
+      setSavedDocs(prev => prev.filter(d => d.id !== id));
+      if (viewDoc?.id === id) setViewDoc(null);
+      toast({ title: 'Document deleted' });
+    } catch {
+      toast({ title: 'Failed to delete document', variant: 'destructive' });
+    }
+  };
+
+  const downloadDocPdf = (doc) => {
+    // Build a printable HTML page and trigger browser print-to-PDF
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>${doc.title}</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 780px; margin: 40px auto; color: #111; line-height: 1.7; }
+  h1,h2,h3 { color: #1a1a2e; } pre { white-space: pre-wrap; }
+  @media print { body { margin: 20mm; } }
+</style>
+</head>
+<body>
+<h1>${doc.title}</h1>
+<p style="color:#666;font-size:0.85em">Generated: ${new Date(doc.created_at).toLocaleString()}</p>
+<hr/>
+<div style="white-space:pre-wrap;font-family:inherit">${doc.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+</body>
+</html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url  = URL.createObjectURL(blob);
+    const win  = window.open(url, '_blank');
+    if (win) { win.onload = () => { win.print(); }; }
+  };
+
   const markNotifRead = async (id) => {
     try {
       await execMeetingService.markNotificationRead(id);
@@ -573,28 +659,6 @@ const ExecMeetingDashboard = () => {
       toast({ title: 'Task deleted' });
     } catch {
       toast({ title: 'Failed to delete task', variant: 'destructive' });
-    }
-  };
-
-  const generateAiDoc = async () => {
-    if (!aiDocInput.trim()) {
-      toast({ title: 'Enter meeting title / topic first', variant: 'destructive' });
-      return;
-    }
-    setAiDocLoading(true);
-    setAiDoc('');
-    try {
-      const res = await execMeetingService.generateDocument({
-        action: aiDocType,
-        title: aiDocInput,
-        topics: [],
-        duration_minutes: 60,
-      });
-      setAiDoc(res.document || res.content || '');
-    } catch (err) {
-      toast({ title: 'AI generation failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setAiDocLoading(false);
     }
   };
 
@@ -793,13 +857,26 @@ const ExecMeetingDashboard = () => {
     </div>
   );
 
+  const DOC_TYPE_LABELS = { agenda: 'Agenda', minutes: 'Minutes', briefing: 'Briefing', report: 'Report', other: 'Other' };
+  const DOC_TYPE_COLORS = {
+    agenda:   'bg-violet-500/20 text-violet-300 border-violet-500/30',
+    minutes:  'bg-sky-500/20 text-sky-300 border-sky-500/30',
+    briefing: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    report:   'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    other:    'bg-white/10 text-white/50 border-white/10',
+  };
+
   const documentsPanel = () => (
-    <div className="space-y-4">
-      <h3 className="text-white font-semibold">AI Document Authoring</h3>
+    <div className="space-y-5">
+      {/* Generator card */}
       <div className="rounded-2xl p-5 space-y-4" style={CARD_STYLE}>
+        <h3 className="text-white font-semibold flex items-center gap-2">
+          <FileText className="h-4 w-4 text-violet-400" />
+          Generate Document with AI
+        </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
-            <Label className="text-white/70">Document Type</Label>
+            <Label className="text-white/70 text-xs">Document Type</Label>
             <Select value={aiDocType} onValueChange={setAiDocType}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue />
@@ -813,23 +890,100 @@ const ExecMeetingDashboard = () => {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label className="text-white/70">Meeting / Topic</Label>
+            <Label className="text-white/70 text-xs">Meeting / Topic</Label>
             <Input
               value={aiDocInput}
               onChange={e => setAiDocInput(e.target.value)}
               placeholder="e.g. Q3 Strategy Review"
               className="bg-white/5 border-white/10 text-white"
+              onKeyDown={e => e.key === 'Enter' && generateAiDoc()}
             />
           </div>
         </div>
         <Button onClick={generateAiDoc} disabled={aiDocLoading}>
           {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-          Generate with AI
+          {aiDocLoading ? 'Generating…' : 'Generate & Save'}
         </Button>
-        {aiDoc && (
-          <div className="mt-4 rounded-xl p-4 bg-white/5 border border-white/10 max-h-96 overflow-y-auto">
-            <pre className="text-white/80 text-xs whitespace-pre-wrap font-mono">{aiDoc}</pre>
+      </div>
+
+      {/* Document viewer (shown when a doc is open) */}
+      {viewDoc && (
+        <div className="rounded-2xl overflow-hidden" style={{ ...CARD_STYLE, border: '1px solid rgba(167,139,250,0.3)' }}>
+          {/* Viewer toolbar */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${DOC_TYPE_COLORS[viewDoc.doc_type] || DOC_TYPE_COLORS.other}`}>
+                {DOC_TYPE_LABELS[viewDoc.doc_type] || viewDoc.doc_type}
+              </span>
+              <h4 className="text-white font-medium text-sm truncate">{viewDoc.title}</h4>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button size="sm" variant="ghost" onClick={() => downloadDocPdf(viewDoc)}
+                className="text-white/60 hover:text-white gap-1.5 text-xs">
+                <span>⬇</span> PDF
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setViewDoc(null)}
+                className="text-white/40 hover:text-white text-xs">
+                ✕ Close
+              </Button>
+            </div>
           </div>
+          {/* Content */}
+          <div className="p-5 max-h-[520px] overflow-y-auto">
+            <pre className="text-white/80 text-sm whitespace-pre-wrap font-mono leading-relaxed">{viewDoc.content}</pre>
+          </div>
+        </div>
+      )}
+
+      {/* Saved documents list */}
+      <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+          <h3 className="text-white font-semibold text-sm">Saved Documents</h3>
+          <Button size="sm" variant="ghost" onClick={loadDocuments} disabled={docsLoading} className="text-white/40 hover:text-white">
+            <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+
+        {docsLoading ? (
+          <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
+        ) : !Array.isArray(savedDocs) || savedDocs.length === 0 ? (
+          <EmptyState icon={FileText} label="No documents yet — generate one above" />
+        ) : (
+          savedDocs.map(doc => (
+            <div key={doc.id} className="flex items-center gap-4 px-5 py-3 hover:bg-white/[0.03] transition-colors" style={ROW_STYLE}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border ${DOC_TYPE_COLORS[doc.doc_type] || DOC_TYPE_COLORS.other}`}>
+                    {DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}
+                  </span>
+                  <p className="text-white text-sm font-medium truncate">{doc.title}</p>
+                </div>
+                <p className="text-white/30 text-xs">{new Date(doc.created_at).toLocaleString()}</p>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <Button size="sm" variant="ghost" onClick={() => setViewDoc(doc)}
+                  className="text-violet-400 hover:text-violet-300 text-xs gap-1">
+                  <FileText className="h-3.5 w-3.5" /> Open
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => downloadDocPdf(doc)}
+                  className="text-sky-400 hover:text-sky-300 text-xs">
+                  ⬇ PDF
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-white/30 hover:text-white">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem className="text-red-400" onClick={() => deleteDoc(doc.id)}>
+                      <Trash2 className="h-4 w-4 mr-2" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>

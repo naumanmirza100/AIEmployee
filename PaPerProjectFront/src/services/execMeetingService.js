@@ -66,11 +66,19 @@ const execMeetingService = {
   planWeek:       ()        => companyApi.post(`${BASE}/calendar/plan-week`, {}),
   getFreeSlots:   (payload) => companyApi.get(`${BASE}/calendar/free-slots`, { params: payload }),
 
-  // Documents — backend wants doc_type, frontend sends action
+  // Documents
   generateDocument: (payload) => {
     const { action, ...rest } = payload;
     return companyApi.post(`${BASE}/documents/draft`, { doc_type: action, ...rest });
   },
+  listDocuments:   (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.doc_type) q.set('doc_type', params.doc_type);
+    const qs = q.toString();
+    return companyApi.get(`${BASE}/documents${qs ? `?${qs}` : ''}`);
+  },
+  getDocument:    (id) => companyApi.get(`${BASE}/documents/${id}`),
+  deleteDocument: (id) => companyApi.delete(`${BASE}/documents/${id}`),
 
   // Notifications — returns raw response; callers do res.notifications || []
   getNotifications: (params = {}) => {

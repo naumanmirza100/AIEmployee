@@ -610,11 +610,19 @@ def calendar_plan_week(request):
     company_user = request.user
     week_start = request.data.get('week_start', timezone.now().strftime('%Y-%m-%d'))
 
-    meetings = list(ExecutiveMeeting.objects.filter(
-        organizer=company_user,
-        scheduled_at__date__gte=week_start,
-        status__in=['scheduled', 'in_progress'],
-    ).values('id', 'title', 'scheduled_at', 'duration_minutes', 'status')[:30])
+    meetings = [
+        {
+            'id': m.id, 'title': m.title,
+            'scheduled_at': m.scheduled_at.isoformat(),
+            'duration_minutes': m.duration_minutes,
+            'status': m.status,
+        }
+        for m in ExecutiveMeeting.objects.filter(
+            organizer=company_user,
+            scheduled_at__date__gte=week_start,
+            status__in=['scheduled', 'in_progress'],
+        )[:30]
+    ]
 
     tasks = [_serialize_task(t) for t in ExecutiveTask.objects.filter(
         company_user=company_user, status__in=['todo', 'in_progress']
@@ -733,16 +741,27 @@ def document_draft(request):
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}
 
+        # Always auto-save as standalone document
+        from meeting_agent.models import ExecStandaloneDocument
+        doc_title = request.data.get('title', '') or (meeting.title if meeting else 'Untitled')
+        standalone = ExecStandaloneDocument.objects.create(
+            company_user=company_user,
+            doc_type=doc_type,
+            title=f"{doc_type.capitalize()} — {doc_title}",
+            content=content,
+            ai_generated=True,
+        )
+        result['document_id'] = standalone.id
+
         if save and meeting:
-            doc = MeetingDocument.objects.create(
+            MeetingDocument.objects.create(
                 meeting=meeting,
                 created_by=company_user,
                 doc_type=doc_type,
-                title=request.data.get('title', f"{doc_type.capitalize()} — {meeting.title}"),
+                title=doc_title,
                 content=content,
                 ai_generated=True,
             )
-            result['document_id'] = doc.id
 
         return Response(result)
     except KeyServiceError:
@@ -766,6 +785,51 @@ def meeting_documents(request, meeting_id):
          'content': d.content, 'created_at': d.created_at.isoformat()}
         for d in docs
     ]})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def standalone_document_list(request):
+    """List all AI-generated standalone documents for the company user."""
+    from meeting_agent.models import ExecStandaloneDocument
+    company_user = request.user
+    doc_type = request.query_params.get('doc_type')
+    qs = ExecStandaloneDocument.objects.filter(company_user=company_user)
+    if doc_type:
+        qs = qs.filter(doc_type=doc_type)
+    docs = [
+        {
+            'id': d.id, 'doc_type': d.doc_type, 'title': d.title,
+            'content': d.content, 'ai_generated': d.ai_generated,
+            'created_at': d.created_at.isoformat(),
+        }
+        for d in qs[:100]
+    ]
+    return Response({'status': 'success', 'documents': docs, 'count': len(docs)})
+
+
+@api_view(['GET', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def standalone_document_detail(request, doc_id):
+    """Get or delete a standalone document."""
+    from meeting_agent.models import ExecStandaloneDocument
+    company_user = request.user
+    doc = get_object_or_404(ExecStandaloneDocument, id=doc_id, company_user=company_user)
+    if request.method == 'DELETE':
+        doc.delete()
+        return Response({'status': 'success', 'message': 'Document deleted.'})
+    return Response({
+        'status': 'success',
+        'document': {
+            'id': doc.id, 'doc_type': doc.doc_type, 'title': doc.title,
+            'content': doc.content, 'ai_generated': doc.ai_generated,
+            'created_at': doc.created_at.isoformat(),
+        },
+    })
 
 
 # ===========================================================================

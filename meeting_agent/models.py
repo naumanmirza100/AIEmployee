@@ -255,6 +255,39 @@ class MeetingDocument(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Standalone AI Documents (not tied to a specific meeting)
+# ---------------------------------------------------------------------------
+
+class ExecStandaloneDocument(models.Model):
+    DOC_TYPE_CHOICES = [
+        ('agenda', 'Agenda'),
+        ('minutes', 'Minutes'),
+        ('briefing', 'Briefing'),
+        ('report', 'Report'),
+        ('other', 'Other'),
+    ]
+
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='exec_standalone_documents',
+    )
+    doc_type = models.CharField(max_length=20, choices=DOC_TYPE_CHOICES, default='other')
+    title = models.CharField(max_length=255)
+    content = models.TextField(help_text='Document body (markdown)')
+    ai_generated = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'meeting_agent'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_doc_type_display()}: {self.title}"
+
+
+# ---------------------------------------------------------------------------
 # Notifications
 # ---------------------------------------------------------------------------
 
