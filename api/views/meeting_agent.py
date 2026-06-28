@@ -128,7 +128,7 @@ def _serialize_task(task):
         'description': task.description,
         'status': task.status,
         'priority': task.priority,
-        'due_date': task.due_date.isoformat() if task.due_date else None,
+        'due_date': task.due_date if isinstance(task.due_date, str) else (task.due_date.isoformat() if task.due_date else None),
         'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
         'ai_reasoning': task.ai_reasoning,
         'linked_meeting_id': task.linked_meeting_id,

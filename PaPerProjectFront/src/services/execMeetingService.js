@@ -1,0 +1,86 @@
+import { companyApi } from './companyAuthService';
+
+const BASE = '/exec-meeting';
+
+// Backend response shapes:
+//   GET /meetings       → { status, meetings: [...], count }
+//   GET /tasks          → { status, tasks: [...], count }
+//   GET /notifications  → { status, notifications: [...] }
+
+const execMeetingService = {
+  // Stats — derive from list endpoints
+  getStats: async () => {
+    try {
+      const [mRes, tRes, nRes] = await Promise.all([
+        companyApi.get(`${BASE}/meetings`),
+        companyApi.get(`${BASE}/tasks`),
+        companyApi.get(`${BASE}/notifications`),
+      ]);
+      const meetings = mRes.meetings || [];
+      const tasks    = tRes.tasks    || [];
+      const notifs   = nRes.notifications || [];
+      const now = new Date();
+      return {
+        upcoming_meetings:    meetings.filter(m => m.status === 'scheduled' && new Date(m.scheduled_at) > now).length,
+        total_tasks:          tasks.length,
+        overdue_tasks:        tasks.filter(t => t.due_date && new Date(t.due_date) < now && !['done','completed'].includes(t.status)).length,
+        pending_action_items: tasks.filter(t => t.status !== 'done').length,
+        unread_notifications: notifs.filter(n => !n.is_read).length,
+      };
+    } catch {
+      return { upcoming_meetings: 0, total_tasks: 0, overdue_tasks: 0, pending_action_items: 0, unread_notifications: 0 };
+    }
+  },
+
+  getDailyDigest: () => companyApi.post(`${BASE}/notifications/daily-digest`, {}),
+
+  // Meetings — returns raw response; callers do res.meetings || []
+  getMeetings: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set('status', params.status);
+    const qs = q.toString();
+    return companyApi.get(`${BASE}/meetings${qs ? `?${qs}` : ''}`);
+  },
+  getMeeting:    (id)          => companyApi.get(`${BASE}/meetings/${id}`),
+  createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, payload),
+  updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, payload),
+  deleteMeeting: (id)          => companyApi.delete(`${BASE}/meetings/${id}`),
+
+  getMeetingNotes: (meetingId)          => companyApi.get(`${BASE}/meetings/${meetingId}/notes`),
+  generateNotes:   (meetingId, payload) => companyApi.post(`${BASE}/meetings/${meetingId}/notes`, payload),
+
+  // Tasks — returns raw response; callers do res.tasks || []
+  getTasks: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.status)   q.set('status', params.status);
+    if (params.priority) q.set('priority', params.priority);
+    const qs = q.toString();
+    return companyApi.get(`${BASE}/tasks${qs ? `?${qs}` : ''}`);
+  },
+  createTask:     (payload)     => companyApi.post(`${BASE}/tasks`, payload),
+  updateTask:     (id, payload) => companyApi.patch(`${BASE}/tasks/${id}`, payload),
+  deleteTask:     (id)          => companyApi.delete(`${BASE}/tasks/${id}`),
+  prioritizeTasks: ()           => companyApi.post(`${BASE}/tasks/ai/prioritize`, {}),
+
+  // Calendar
+  planWeek:       ()        => companyApi.post(`${BASE}/calendar/plan-week`, {}),
+  getFreeSlots:   (payload) => companyApi.get(`${BASE}/calendar/free-slots`, { params: payload }),
+
+  // Documents — backend wants doc_type, frontend sends action
+  generateDocument: (payload) => {
+    const { action, ...rest } = payload;
+    return companyApi.post(`${BASE}/documents/draft`, { doc_type: action, ...rest });
+  },
+
+  // Notifications — returns raw response; callers do res.notifications || []
+  getNotifications: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.unread_only) q.set('unread', 'true');
+    const qs = q.toString();
+    return companyApi.get(`${BASE}/notifications${qs ? `?${qs}` : ''}`);
+  },
+  markNotificationRead: (id) => companyApi.patch(`${BASE}/notifications/${id}/read`, {}),
+  markAllRead:          ()   => companyApi.patch(`${BASE}/notifications/mark-all-read`, {}),
+};
+
+export default execMeetingService;

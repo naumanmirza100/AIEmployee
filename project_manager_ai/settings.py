@@ -1084,6 +1084,9 @@ REST_FRAMEWORK = {
         'hr_llm': '500/hour',
         'hr_upload': '200/hour',
         'hr_crud': '1000/hour',
+        # AI Executive Meeting Assistant throttles
+        'exec_llm': '30/hour',
+        'exec_crud': '200/hour',
         # Company auth endpoints
         'company_auth': '200/hour',
     },
