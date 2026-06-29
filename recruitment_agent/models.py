@@ -1,5 +1,7 @@
 import re as _re
 
+from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import User
@@ -141,7 +143,8 @@ class RecruiterInterviewSettings(models.Model):
     # Interview time gap
     interview_time_gap = models.IntegerField(
         default=30,
-        help_text="Time gap between interview slots in minutes (e.g., 30 for 30 minutes)"
+        validators=[MinValueValidator(15), MaxValueValidator(480)],
+        help_text="Time gap between interview slots in minutes (15–480)"
     )
     
     # Default interview type for this job (candidates get this in invitation email)
@@ -171,7 +174,22 @@ class RecruiterInterviewSettings(models.Model):
             models.UniqueConstraint(fields=['company_user'], name='unique_company_user_no_job_settings', condition=models.Q(job__isnull=True)),
             models.UniqueConstraint(fields=['recruiter', 'job'], name='unique_recruiter_job_settings', condition=models.Q(job__isnull=False)),
         ]
-    
+        indexes = [
+            models.Index(fields=['company_user', 'job']),
+            models.Index(fields=['recruiter', 'job']),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.schedule_from_date and self.schedule_to_date:
+            if self.schedule_from_date > self.schedule_to_date:
+                errors['schedule_to_date'] = 'End date must be after start date.'
+        if self.start_time and self.end_time:
+            if self.start_time >= self.end_time:
+                errors['end_time'] = 'End time must be after start time.'
+        if errors:
+            raise ValidationError(errors)
+
     def __str__(self):
         if self.job:
             return f"Interview Settings for {self.job.title}"
@@ -241,7 +259,7 @@ class CVRecord(models.Model):
     qualification_priority = models.CharField(max_length=16, null=True, blank=True, help_text="HIGH/MEDIUM/LOW")
     
     # Link to job description (optional)
-    job_description = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='cv_records')
+    job_description = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='cv_records', db_index=True)
 
     # Link to the public JobApplication this CV came from (null for manually uploaded CVs)
     job_application = models.OneToOneField(
@@ -259,6 +277,10 @@ class CVRecord(models.Model):
         ordering = ['-created_at']
         verbose_name = 'CV Record'
         verbose_name_plural = 'CV Records'
+        indexes = [
+            models.Index(fields=['qualification_decision', '-created_at']),
+            models.Index(fields=['job_description', '-created_at']),
+        ]
     
     def __str__(self):
         return f"{self.file_name} (ID: {self.id})"
@@ -397,7 +419,9 @@ class Interview(models.Model):
         verbose_name_plural = 'Interviews'
         indexes = [
             models.Index(fields=['status', 'scheduled_datetime']),
-            models.Index(fields=['candidate_email']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['candidate_email', 'status']),
+            models.Index(fields=['company_user', 'status']),
         ]
     
     def __str__(self):

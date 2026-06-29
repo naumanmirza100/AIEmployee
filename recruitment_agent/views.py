@@ -1369,6 +1369,7 @@ def get_available_slots_for_interview(request, token):
     
     # Mark which slots are taken
     available_slots = []
+    now_aware = now  # already timezone-aware from timezone.now()
     for slot in time_slots:
         slot_datetime = slot.get('datetime', '')
         # Normalize slot datetime for comparison (remove seconds if present)
@@ -1379,15 +1380,29 @@ def get_available_slots_for_interview(request, token):
             if ':' in time_part:
                 time_hour_min = ':'.join(time_part.split(':')[:2])  # Get only HH:MM
                 slot_datetime_normalized = f"{date_part}T{time_hour_min}"
-        
+
+        # Skip slots that are in the past
+        try:
+            from django.utils.dateparse import parse_datetime
+            slot_dt_parsed = parse_datetime(slot_datetime)
+            if slot_dt_parsed is None:
+                # Try naive parse and make aware
+                slot_dt_naive = datetime.strptime(slot_datetime_normalized, '%Y-%m-%dT%H:%M')
+                import pytz
+                slot_dt_parsed = timezone.make_aware(slot_dt_naive)
+            if slot_dt_parsed < now_aware:
+                continue  # Past slot — skip entirely
+        except Exception:
+            pass  # If we can't parse, include the slot
+
         # Check if slot is taken - check both database and scheduled flag in time_slots_json
         is_scheduled_in_json = slot.get('scheduled', False)  # Check scheduled flag in JSON
-        is_taken_in_db = (slot_datetime in taken_slot_datetimes or 
+        is_taken_in_db = (slot_datetime in taken_slot_datetimes or
                          slot_datetime_normalized in taken_slot_datetimes)
-        
+
         # Slot is taken if either scheduled in JSON or found in database
         is_taken = is_scheduled_in_json or is_taken_in_db
-        
+
         available_slots.append({
             'date': slot.get('date'),
             'time': slot.get('time'),
@@ -1467,7 +1482,24 @@ def candidate_select_slot(request, token):
                 'interview': interview,
                 'token': token,
             })
-        
+
+        # Reject past dates
+        from django.utils import timezone as tz
+        from django.utils.dateparse import parse_datetime
+        from datetime import datetime as _dt
+        try:
+            slot_dt = parse_datetime(selected_slot_datetime)
+            if slot_dt is None:
+                slot_dt = tz.make_aware(_dt.fromisoformat(selected_slot_datetime))
+            if slot_dt < tz.now():
+                messages.error(request, 'You cannot select a past date/time. Please choose a future slot.')
+                return render(request, 'recruitment_agent/candidate_slot_selection.html', {
+                    'interview': interview,
+                    'token': token,
+                })
+        except Exception:
+            pass  # If parsing fails, let confirm_slot handle it
+
         # Confirm the slot
         agents = get_agents()
         interview_agent = agents['interview_agent']

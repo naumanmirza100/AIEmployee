@@ -495,16 +495,32 @@ class InterviewSchedulingAgent:
             print(f"✓ Job Role: {interview.job_role}")
             print(f"✓ Interview Type: {interview.interview_type}")
             
-            # Render email template
+            # Validate candidate email format before attempting to send
+            from django.core.validators import validate_email as _validate_email
+            from django.core.exceptions import ValidationError as _ValidationError
+            try:
+                _validate_email(interview.candidate_email)
+            except _ValidationError:
+                logger.error(f"Invalid candidate email '{interview.candidate_email}' for interview {interview.id}")
+                return False
+
+            # Render email template with plain-text fallback if template is missing/broken
             print("\n📝 Rendering email templates...")
             try:
                 message = render_to_string('recruitment_agent/emails/interview_invitation.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_invitation.html', context)
                 print("✓ Templates rendered successfully")
             except Exception as template_error:
-                print(f"❌ ERROR: Template rendering failed: {template_error}")
-                raise
-            
+                print(f"⚠ Template rendering failed ({template_error}), using plain-text fallback")
+                logger.warning(f"Invitation template error for interview {interview.id}: {template_error}")
+                message = (
+                    f"Dear {interview.candidate_name},\n\n"
+                    f"You have been invited for an interview for the position: {job_title}.\n"
+                    f"Please select your preferred slot here: {slot_selection_url or '(link unavailable)'}\n\n"
+                    f"Best regards,\nRecruitment Team"
+                )
+                html_message = None
+
             # Get from email and clean all email addresses
             from_email_raw = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
             from_email = self._clean_email_header(from_email_raw)
@@ -788,6 +804,11 @@ class InterviewSchedulingAgent:
             if meet_link:
                 interview.meeting_link = meet_link
                 interview.save(update_fields=['meeting_link'])
+            else:
+                logger.warning(
+                    f"Google Meet link was not generated for interview {interview.id}. "
+                    "Recruiter should add the meeting link manually from the dashboard."
+                )
 
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
@@ -1088,13 +1109,31 @@ class InterviewSchedulingAgent:
                 'meeting_link': interview.meeting_link or '',
             }
             
+            # Validate candidate email format
+            from django.core.validators import validate_email as _validate_email
+            from django.core.exceptions import ValidationError as _ValidationError
+            try:
+                _validate_email(interview.candidate_email)
+            except _ValidationError:
+                logger.error(f"Invalid candidate email '{interview.candidate_email}' — skipping confirmation for interview {interview.id}")
+                return False
+
             try:
                 candidate_message = render_to_string('recruitment_agent/emails/interview_confirmation.txt', candidate_context)
                 candidate_html = render_to_string('recruitment_agent/emails/interview_confirmation.html', candidate_context)
                 print("✓ Candidate email templates rendered")
             except Exception as template_error:
-                print(f"❌ ERROR: Candidate template rendering failed: {template_error}")
-                raise
+                print(f"⚠ Confirmation template failed ({template_error}), using plain-text fallback")
+                logger.warning(f"Confirmation template error for interview {interview.id}: {template_error}")
+                slot_str = interview.selected_slot or (interview.scheduled_datetime.strftime('%A, %B %d, %Y at %I:%M %p') if interview.scheduled_datetime else 'TBD')
+                candidate_message = (
+                    f"Dear {interview.candidate_name},\n\n"
+                    f"Your interview for {job_title} has been confirmed.\n"
+                    f"Scheduled: {slot_str}\n"
+                    + (f"Meeting Link: {interview.meeting_link}\n" if interview.meeting_link else "")
+                    + "\nBest regards,\nRecruitment Team"
+                )
+                candidate_html = None
             
             to_email = self._clean_email_header(interview.candidate_email)
             

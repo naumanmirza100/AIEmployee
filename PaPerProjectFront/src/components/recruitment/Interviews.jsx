@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { format, startOfDay } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,9 +12,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
+import InterviewKanban from './InterviewKanban';
 
 const Interviews = ({ onUpdate }) => {
   const { toast } = useToast();
@@ -33,7 +39,18 @@ const Interviews = ({ onUpdate }) => {
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
   const [feedbackModal, setFeedbackModal] = useState(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [meetingLinkEdit, setMeetingLinkEdit] = useState({}); // { [interviewId]: { open, value, saving } }
+  const [meetingLinkEdit, setMeetingLinkEdit] = useState({});
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL-persisted — survives reload, back/forward, and tab restore
+  const viewMode      = searchParams.get('view')    || 'list';
+  const kanbanGroupBy = searchParams.get('groupBy') || 'status';
+
+  const setViewMode = (v) =>
+    setSearchParams((prev) => { const p = new URLSearchParams(prev); p.set('view', v); return p; }, { replace: true });
+
+  const setKanbanGroupBy = (v) =>
+    setSearchParams((prev) => { const p = new URLSearchParams(prev); p.set('groupBy', v); return p; }, { replace: true });
 
   useEffect(() => {
     fetchInterviews();
@@ -84,8 +101,12 @@ const Interviews = ({ onUpdate }) => {
   const STATUS_LABELS  = { PENDING: 'Pending', SCHEDULED: 'Scheduled', COMPLETED: 'Completed', CANCELLED: 'Cancelled', RESCHEDULED: 'Rescheduled' };
   const OUTCOME_LABELS = { ONSITE_INTERVIEW: 'Onsite Interview', HIRED: 'Hired', PASSED: 'Passed', REJECTED: 'Rejected', '': 'None' };
 
-  const handleStatusChange  = (interview, v) => setPendingChange({ interview, type: 'status',  value: v, label: STATUS_LABELS[v]  || v });
-  const handleOutcomeChange = (interview, v) => setPendingChange({ interview, type: 'outcome', value: v, label: OUTCOME_LABELS[v] || v || 'None' });
+  const handleStatusChange = (interview, v) =>
+    setPendingChange({ interview, type: 'status', value: v, label: STATUS_LABELS[v] || v });
+
+  // Decision change → skip confirm modal, open feedback form directly (mandatory reason)
+  const handleOutcomeChange = (interview, v) =>
+    openFeedbackModal(interview, { outcome: v, label: OUTCOME_LABELS[v] || v || 'None' });
 
   const handleConfirmChange = async () => {
     if (!pendingChange) return;
@@ -151,37 +172,52 @@ const Interviews = ({ onUpdate }) => {
     }
   };
 
-  const openFeedbackModal = (interview) => {
+  // pendingDecision = { outcome, label } when opened from decision change, else null
+  const openFeedbackModal = (interview, pendingDecision = null) => {
     setFeedbackModal({
       interview,
       rating: interview.feedback_rating || 0,
       notes: interview.feedback_notes || '',
       strengths: interview.feedback_strengths || '',
       improvements: interview.feedback_improvements || '',
+      pendingDecision,
     });
   };
 
   const handleFeedbackSubmit = async () => {
     if (!feedbackModal) return;
     if (!feedbackModal.rating) {
-      toast({ title: 'Rating required', description: 'Please select a star rating.', variant: 'destructive' });
+      toast({ title: 'Rating required', description: 'Please select a star rating before saving.', variant: 'destructive' });
       return;
     }
     try {
       setFeedbackSubmitting(true);
-      const response = await submitInterviewFeedback(feedbackModal.interview.id, {
+      // 1. Save feedback
+      const fbRes = await submitInterviewFeedback(feedbackModal.interview.id, {
         feedback_rating: feedbackModal.rating,
         feedback_notes: feedbackModal.notes,
         feedback_strengths: feedbackModal.strengths,
         feedback_improvements: feedbackModal.improvements,
       });
-      if (response.status === 'success') {
-        toast({ title: 'Feedback saved', description: 'Interview feedback recorded successfully.' });
+      // 2. If triggered by decision change, save decision too
+      if (feedbackModal.pendingDecision) {
+        await updateInterview(feedbackModal.interview.id, {
+          outcome: feedbackModal.pendingDecision.outcome,
+        });
+      }
+      if (fbRes.status === 'success') {
+        toast({
+          title: 'Saved',
+          description: feedbackModal.pendingDecision
+            ? `Decision set to "${feedbackModal.pendingDecision.label}" and feedback saved.`
+            : 'Interview feedback recorded successfully.',
+        });
         setFeedbackModal(null);
         fetchInterviews();
+        if (onUpdate) onUpdate();
       }
     } catch (error) {
-      toast({ title: 'Error', description: error?.message || 'Failed to save feedback', variant: 'destructive' });
+      toast({ title: 'Error', description: error?.message || 'Failed to save', variant: 'destructive' });
     } finally {
       setFeedbackSubmitting(false);
     }
@@ -232,7 +268,31 @@ const Interviews = ({ onUpdate }) => {
           <h2 className="text-xl sm:text-2xl py-3 sm:py-5 font-bold text-white">Interviews</h2>
           <p className="text-xs sm:text-sm text-white/60">Manage interview scheduling and tracking</p>
         </div>
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap gap-2 justify-end items-center">
+          {/* List / Kanban toggle */}
+          <div className="flex rounded-lg border border-white/15 overflow-hidden">
+            <button
+              onClick={() => setViewMode('list')}
+              title="List view"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+                viewMode === 'list' ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70 hover:bg-white/5'
+              }`}
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+              List
+            </button>
+            <button
+              onClick={() => setViewMode('kanban')}
+              title="Kanban view"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-l border-white/15 transition-colors ${
+                viewMode === 'kanban' ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70 hover:bg-white/5'
+              }`}
+            >
+              <Columns className="h-3.5 w-3.5" />
+              Kanban
+            </button>
+          </div>
+
           <SearchableSelect
             value={statusFilter || 'all'}
             onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}
@@ -278,6 +338,16 @@ const Interviews = ({ onUpdate }) => {
             <p className="text-xs sm:text-sm text-white/60 px-4">Interviews appear here when scheduled from Candidates.</p>
           </CardContent>
         </Card>
+      ) : viewMode === 'kanban' ? (
+        <InterviewKanban
+          interviews={filteredInterviews}
+          groupBy={kanbanGroupBy}
+          onGroupByChange={setKanbanGroupBy}
+          onStatusChange={(interview, value) => setPendingChange({ interview, type: 'status', value, label: STATUS_LABELS[value] || value })}
+          onOutcomeChange={handleOutcomeChange}
+          onReschedule={openRescheduleModal}
+          onFeedback={openFeedbackModal}
+        />
       ) : (
         <div className="space-y-3 sm:space-y-4">
           {filteredInterviews.map((interview) => (
@@ -387,100 +457,134 @@ const Interviews = ({ onUpdate }) => {
                   );
                 })()}
 
-                {/* Actions — feedback/reschedule LEFT, status selects RIGHT */}
-                <div className="flex flex-wrap items-center gap-3 pt-3 sm:pt-4 border-t border-white/10">
+                {/* Actions row */}
+                <div className="flex items-center gap-2 pt-3 sm:pt-4 border-t border-white/10">
 
-                  {/* LEFT: Reschedule */}
+                  {/* Reschedule quick button */}
                   {(interview.status === 'PENDING' || interview.status === 'SCHEDULED') && (
                     <button
                       type="button"
                       onClick={() => openRescheduleModal(interview)}
-                      className="inline-flex items-center justify-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs sm:text-sm font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 hover:border-amber-300 focus:outline-none dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50 dark:hover:border-amber-700"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-amber-800 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-900/50 transition-colors"
                     >
-                      <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-600 dark:text-amber-400" />
+                      <CalendarClock className="h-3.5 w-3.5 text-amber-400" />
                       Reschedule
                     </button>
                   )}
 
-                  {/* LEFT: Feedback */}
+                  {/* Feedback quick button */}
                   {interview.status === 'COMPLETED' && (
                     interview.feedback_submitted_at ? (
-                      <button
-                        type="button"
-                        onClick={() => openFeedbackModal(interview)}
-                        className="inline-flex items-center justify-center gap-2 rounded-full border border-green-800 bg-green-950/40 px-3 py-1.5 text-xs sm:text-sm font-medium text-green-300 hover:bg-green-900/50 transition-colors"
-                      >
+                      <button type="button" onClick={() => openFeedbackModal(interview)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-green-800 bg-green-950/40 px-3 py-1.5 text-xs font-medium text-green-300 hover:bg-green-900/50 transition-colors">
                         <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
                         View Feedback
-                        {interview.feedback_rating && (
-                          <span className="flex gap-0.5 ml-1">
+                        {interview.feedback_rating > 0 && (
+                          <span className="flex gap-0.5 ml-0.5">
                             {[1,2,3,4,5].map(s => (
-                              <Star key={s} className={`h-2.5 w-2.5 ${s <= interview.feedback_rating ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`} />
+                              <Star key={s} className={`h-2 w-2 ${s <= interview.feedback_rating ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`} />
                             ))}
                           </span>
                         )}
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => openFeedbackModal(interview)}
-                        className="inline-flex items-center justify-center gap-2 rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1.5 text-xs sm:text-sm font-medium text-blue-300 hover:bg-blue-900/50 transition-colors"
-                      >
+                      <button type="button" onClick={() => openFeedbackModal(interview)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-900/50 transition-colors">
                         <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
                         Add Feedback
                       </button>
                     )
                   )}
 
-                  {/* Spacer pushes selects to the right */}
                   <div className="flex-1" />
 
-                  {/* RIGHT: Status select */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Status</Label>
-                    <Select
-                      value={interview.status}
-                      onValueChange={(v) => handleStatusChange(interview, v)}
-                      disabled={updatingId === interview.id}
-                    >
-                      <SelectTrigger className="w-[120px] sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="PENDING">Pending</SelectItem>
-                        <SelectItem value="SCHEDULED">Scheduled</SelectItem>
-                        <SelectItem value="COMPLETED">Completed</SelectItem>
-                        <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        <SelectItem value="RESCHEDULED">Rescheduled</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {updatingId === interview.id && (
-                      <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin text-muted-foreground shrink-0" />
-                    )}
-                  </div>
-
-                  {/* RIGHT: Decision select */}
-                  {(interview.status === 'COMPLETED' || interview.outcome) && (
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs sm:text-sm font-medium text-muted-foreground whitespace-nowrap shrink-0">Decision</Label>
-                      <Select
-                        value={interview.outcome || 'none'}
-                        onValueChange={(v) => handleOutcomeChange(interview, v === 'none' ? '' : v)}
-                        disabled={updatingId === interview.id}
-                      >
-                        <SelectTrigger className="w-[140px] sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm border-white/20">
-                          <SelectValue placeholder="Set outcome" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Not set</SelectItem>
-                          <SelectItem value="ONSITE_INTERVIEW">Onsite Interview</SelectItem>
-                          <SelectItem value="HIRED">Hired</SelectItem>
-                          <SelectItem value="PASSED">Passed</SelectItem>
-                          <SelectItem value="REJECTED">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  {updatingId === interview.id && (
+                    <Loader2 className="h-4 w-4 animate-spin text-white/40" />
                   )}
+
+                  {/* Three-dots menu */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="p-1.5 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors focus:outline-none">
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-52 bg-[#0d0d1a] border-white/15 text-white z-50" align="end">
+
+                      {/* Change Status */}
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
+                          <RefreshCw className="h-3.5 w-3.5 text-white/50" />
+                          <span className="text-sm">Change Status</span>
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="bg-[#0d0d1a] border-white/15 text-white w-44">
+                          {[
+                            { v: 'PENDING',     label: 'Pending'     },
+                            { v: 'SCHEDULED',   label: 'Scheduled'   },
+                            { v: 'COMPLETED',   label: 'Completed'   },
+                            { v: 'CANCELLED',   label: 'Cancelled'   },
+                            { v: 'RESCHEDULED', label: 'Rescheduled' },
+                          ].map(({ v, label }) => {
+                            const active = interview.status === v;
+                            return (
+                              <DropdownMenuItem key={v}
+                                className={`gap-2 cursor-pointer focus:bg-white/10 ${active ? 'text-white' : 'text-white/60'}`}
+                                onClick={() => !active && handleStatusChange(interview, v)}>
+                                <span className={`h-2 w-2 rounded-full shrink-0 ${
+                                  v === 'PENDING' ? 'bg-yellow-400' : v === 'SCHEDULED' ? 'bg-green-400' :
+                                  v === 'COMPLETED' ? 'bg-blue-400' : v === 'CANCELLED' ? 'bg-red-400' : 'bg-purple-400'
+                                }`} />
+                                <span className="text-sm">{label}</span>
+                                {active && <span className="ml-auto text-[10px] text-violet-400">current</span>}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+
+                      {/* Change Decision */}
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
+                          <Award className="h-3.5 w-3.5 text-white/50" />
+                          <span className="text-sm">Change Decision</span>
+                          {interview.status !== 'COMPLETED' && <Lock className="h-3 w-3 text-white/30 ml-auto" />}
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="bg-[#0d0d1a] border-white/15 text-white w-52">
+                          {interview.status !== 'COMPLETED' ? (
+                            <div className="px-3 py-2.5 space-y-1">
+                              <div className="flex items-center gap-1.5 text-amber-400/80">
+                                <Lock className="h-3.5 w-3.5 shrink-0" />
+                                <span className="text-xs font-medium">Decision Locked</span>
+                              </div>
+                              <p className="text-[11px] text-white/40 leading-snug">
+                                Decision can only be set after interview status is <span className="text-white/60 font-medium">Completed</span>.
+                              </p>
+                            </div>
+                          ) : (
+                            [
+                              { v: '',                 label: 'Not Set',          icon: '—'  },
+                              { v: 'ONSITE_INTERVIEW', label: 'Onsite Interview', icon: '🏢' },
+                              { v: 'PASSED',           label: 'Passed',           icon: '👍' },
+                              { v: 'HIRED',            label: 'Hired',            icon: '🏆' },
+                              { v: 'REJECTED',         label: 'Rejected',         icon: '✗'  },
+                            ].map(({ v, label, icon }) => {
+                              const active = (interview.outcome || '') === v;
+                              return (
+                                <DropdownMenuItem key={v || 'none'}
+                                  className={`gap-2 cursor-pointer focus:bg-white/10 ${active ? 'text-white' : 'text-white/60'}`}
+                                  onClick={() => !active && handleOutcomeChange(interview, v)}>
+                                  <span className="text-sm w-4 text-center shrink-0">{icon}</span>
+                                  <span className="text-sm">{label}</span>
+                                  {active && <span className="ml-auto text-[10px] text-violet-400">current</span>}
+                                </DropdownMenuItem>
+                              );
+                            })
+                          )}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardContent>
             </Card>
@@ -558,6 +662,22 @@ const Interviews = ({ onUpdate }) => {
               <h3 className="text-base font-bold text-white">Interview Feedback</h3>
               <p className="text-sm text-white/50 mt-0.5">{feedbackModal.interview.candidate_name} – {feedbackModal.interview.job_title || feedbackModal.interview.job_role}</p>
             </div>
+
+            {/* Decision banner — shown when opened from decision change */}
+            {feedbackModal.pendingDecision && (
+              <div className="flex items-start gap-2.5 rounded-lg px-3 py-2.5"
+                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(167,139,250,0.3)' }}>
+                <Award className="h-4 w-4 text-violet-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-violet-300">
+                    Decision will be set to: <span className="text-white">{feedbackModal.pendingDecision.label}</span>
+                  </p>
+                  <p className="text-[11px] text-white/40 mt-0.5">
+                    Feedback is required to confirm this decision.
+                  </p>
+                </div>
+              </div>
+            )}
             <div>
               <Label className="text-xs text-white/60 mb-2 block">Overall Rating *</Label>
               <div className="flex gap-1">
